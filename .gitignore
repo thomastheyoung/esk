@@ -1,0 +1,20 @@
+# Build
+/target/
+/dist/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets (never commit the key)
+.secrets.key
+
+# Test fixtures with real values
+tests/fixtures/*.key
