@@ -10,20 +10,22 @@ use super::StoragePlugin;
 
 pub struct CloudFilePlugin {
     name: String,
+    project: String,
     plugin_config: CloudFilePluginConfig,
 }
 
 impl CloudFilePlugin {
-    pub fn new(name: String, plugin_config: CloudFilePluginConfig) -> Self {
+    pub fn new(name: String, project: String, plugin_config: CloudFilePluginConfig) -> Self {
         Self {
             name,
+            project,
             plugin_config,
         }
     }
 
-    /// Expand tilde in path to home directory.
+    /// Expand `{project}` and tilde in path.
     fn expand_path(&self) -> Result<PathBuf> {
-        let path = &self.plugin_config.path;
+        let path = self.plugin_config.path.replace("{project}", &self.project);
         if let Some(rest) = path.strip_prefix("~/") {
             let home = std::env::var("HOME").context("HOME environment variable not set")?;
             Ok(PathBuf::from(home).join(rest))
@@ -152,6 +154,7 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let plugin = CloudFilePlugin::new(
             "dropbox".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
@@ -164,6 +167,7 @@ mod tests {
     fn cloud_file_preflight_missing_dir() {
         let plugin = CloudFilePlugin::new(
             "dropbox".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: "/nonexistent/path/that/does/not/exist".to_string(),
                 format: CloudFileFormat::Cleartext,
@@ -182,6 +186,7 @@ mod tests {
 
         let plugin = CloudFilePlugin::new(
             "test_cloud".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
@@ -211,6 +216,7 @@ mod tests {
 
         let plugin = CloudFilePlugin::new(
             "test_enc".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Encrypted,
@@ -235,6 +241,7 @@ mod tests {
 
         let plugin = CloudFilePlugin::new(
             "test".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
@@ -252,6 +259,7 @@ mod tests {
 
         let plugin = CloudFilePlugin::new(
             "test".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Encrypted,
@@ -270,6 +278,7 @@ mod tests {
 
         let plugin = CloudFilePlugin::new(
             "test".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: nested.to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
@@ -285,6 +294,7 @@ mod tests {
     fn tilde_expansion() {
         let plugin = CloudFilePlugin::new(
             "test".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: "~/test/path".to_string(),
                 format: CloudFileFormat::Cleartext,
@@ -300,6 +310,7 @@ mod tests {
     fn no_tilde_expansion_for_absolute() {
         let plugin = CloudFilePlugin::new(
             "test".to_string(),
+            "testapp".to_string(),
             CloudFilePluginConfig {
                 path: "/absolute/path".to_string(),
                 format: CloudFileFormat::Cleartext,
@@ -308,5 +319,37 @@ mod tests {
 
         let expanded = plugin.expand_path().unwrap();
         assert_eq!(expanded, PathBuf::from("/absolute/path"));
+    }
+
+    #[test]
+    fn project_interpolation() {
+        let plugin = CloudFilePlugin::new(
+            "test".to_string(),
+            "myapp".to_string(),
+            CloudFilePluginConfig {
+                path: "/cloud/lockbox/{project}".to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+
+        let expanded = plugin.expand_path().unwrap();
+        assert_eq!(expanded, PathBuf::from("/cloud/lockbox/myapp"));
+    }
+
+    #[test]
+    fn project_interpolation_with_tilde() {
+        let plugin = CloudFilePlugin::new(
+            "test".to_string(),
+            "myapp".to_string(),
+            CloudFilePluginConfig {
+                path: "~/Dropbox/lockbox/{project}".to_string(),
+                format: CloudFileFormat::Encrypted,
+            },
+        );
+
+        let expanded = plugin.expand_path().unwrap();
+        assert!(!expanded.to_string_lossy().contains('~'));
+        assert!(!expanded.to_string_lossy().contains("{project}"));
+        assert!(expanded.to_string_lossy().ends_with("/Dropbox/lockbox/myapp"));
     }
 }

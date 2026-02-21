@@ -413,6 +413,7 @@ fn cloud_file_push_pull_cleartext() {
 
     let plugin = CloudFilePlugin::new(
         "test_cloud".to_string(),
+        "testapp".to_string(),
         CloudFilePluginConfig {
             path: cloud_dir.path().to_string_lossy().to_string(),
             format: CloudFileFormat::Cleartext,
@@ -447,6 +448,7 @@ fn cloud_file_push_pull_encrypted() {
 
     let plugin = CloudFilePlugin::new(
         "test_enc".to_string(),
+        "testapp".to_string(),
         CloudFilePluginConfig {
             path: cloud_dir.path().to_string_lossy().to_string(),
             format: CloudFileFormat::Encrypted,

@@ -45,7 +45,11 @@ pub fn build_plugins<'a>(
     }
 
     for (name, cf_config) in config.cloud_file_plugin_configs() {
-        candidates.push(Box::new(cloud_file::CloudFilePlugin::new(name, cf_config)));
+        candidates.push(Box::new(cloud_file::CloudFilePlugin::new(
+            name,
+            config.project.clone(),
+            cf_config,
+        )));
     }
 
     for plugin in candidates {
