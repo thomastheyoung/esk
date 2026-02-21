@@ -10,7 +10,10 @@ pub mod sync;
 use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
-#[command(name = "lockbox", about = "Encrypted secrets management with multi-target sync")]
+#[command(
+    name = "lockbox",
+    about = "Encrypted secrets management with multi-target sync"
+)]
 pub struct Cli {
     #[command(subcommand)]
     pub command: Commands,

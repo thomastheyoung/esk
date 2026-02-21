@@ -69,7 +69,9 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     if !uncategorized.is_empty() {
         println!(
             "\n  {}",
-            style("Uncategorized (not in lockbox.yaml)").bold().underlined()
+            style("Uncategorized (not in lockbox.yaml)")
+                .bold()
+                .underlined()
         );
         for (key, composite) in &uncategorized {
             println!("    {} {}", key, style(&composite).dim());

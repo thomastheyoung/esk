@@ -35,8 +35,7 @@ secrets:
     #   targets:
     #     env: [web:dev, web:prod]
 "#;
-        std::fs::write(&config_path, scaffold)
-            .context("failed to write lockbox.yaml")?;
+        std::fs::write(&config_path, scaffold).context("failed to write lockbox.yaml")?;
         println!("  {} {}", style("created").green(), config_path.display());
     } else {
         println!("  {} {}", style("exists").dim(), config_path.display());
@@ -60,7 +59,11 @@ secrets:
     if !sync_index_path.is_file() {
         let index = SyncIndex::new(&sync_index_path);
         index.save()?;
-        println!("  {} {}", style("created").green(), sync_index_path.display());
+        println!(
+            "  {} {}",
+            style("created").green(),
+            sync_index_path.display()
+        );
     } else {
         println!("  {} {}", style("exists").dim(), sync_index_path.display());
     }
@@ -78,6 +81,9 @@ secrets:
         }
     }
 
-    println!("\n  {} run `lockbox set <KEY> --env <ENV>` to add secrets", style("next:").cyan());
+    println!(
+        "\n  {} run `lockbox set <KEY> --env <ENV>` to add secrets",
+        style("next:").cyan()
+    );
     Ok(())
 }

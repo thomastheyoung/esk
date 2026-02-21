@@ -52,7 +52,10 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
                 }
             };
 
-            println!("  {}:{} → {}  {}", secret.key, target.environment, target, status_str);
+            println!(
+                "  {}:{} → {}  {}",
+                secret.key, target.environment, target, status_str
+            );
             has_output = true;
         }
     }

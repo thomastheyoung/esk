@@ -5,7 +5,10 @@ use crate::store::SecretStore;
 
 pub fn run(config: &Config, key: &str, env: &str) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
-        bail!("unknown environment '{env}'. Valid: {}", config.environments.join(", "));
+        bail!(
+            "unknown environment '{env}'. Valid: {}",
+            config.environments.join(", ")
+        );
     }
 
     let store = SecretStore::open(&config.root)?;
