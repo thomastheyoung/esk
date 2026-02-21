@@ -14,6 +14,7 @@ pub struct StorePayload {
     pub version: u64,
 }
 
+#[derive(Debug)]
 pub struct SecretStore {
     key: Vec<u8>,
     store_path: PathBuf,
@@ -184,7 +185,10 @@ impl SecretStore {
         let tag_bytes = hex::decode(parts[2]).context("invalid tag hex")?;
 
         if nonce_bytes.len() != 12 {
-            bail!("invalid nonce length: expected 12, got {}", nonce_bytes.len());
+            bail!(
+                "invalid nonce length: expected 12, got {}",
+                nonce_bytes.len()
+            );
         }
 
         let cipher = Aes256Gcm::new_from_slice(&self.key)
@@ -228,5 +232,371 @@ impl SecretStore {
         tmp.persist(path)
             .with_context(|| format!("failed to persist key to {}", path.display()))?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn tmp_root() -> tempfile::TempDir {
+        tempfile::tempdir().unwrap()
+    }
+
+    #[test]
+    fn load_or_create_fresh() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        assert!(dir.path().join(".secrets.key").is_file());
+        assert!(dir.path().join(".secrets.enc").is_file());
+        let payload = store.payload().unwrap();
+        assert!(payload.secrets.is_empty());
+        assert_eq!(payload.version, 0);
+    }
+
+    #[test]
+    fn load_or_create_existing() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap();
+        let key_before = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+
+        let store2 = SecretStore::load_or_create(dir.path()).unwrap();
+        let key_after = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+        assert_eq!(key_before, key_after);
+        assert_eq!(store2.get("KEY", "dev").unwrap(), Some("val".to_string()));
+    }
+
+    #[test]
+    fn load_or_create_key_exists_no_store() {
+        let dir = tmp_root();
+        // Create key only
+        SecretStore::load_or_create(dir.path()).unwrap();
+        std::fs::remove_file(dir.path().join(".secrets.enc")).unwrap();
+
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        assert!(dir.path().join(".secrets.enc").is_file());
+        let payload = store.payload().unwrap();
+        assert_eq!(payload.version, 0);
+    }
+
+    #[test]
+    fn open_missing_key() {
+        let dir = tmp_root();
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("encryption key not found"));
+    }
+
+    #[test]
+    fn open_missing_store() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        std::fs::remove_file(dir.path().join(".secrets.enc")).unwrap();
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("encrypted store not found"));
+    }
+
+    #[test]
+    fn open_both_exist() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        SecretStore::open(dir.path()).unwrap();
+    }
+
+    #[test]
+    fn set_and_get_roundtrip() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("API_KEY", "dev", "sk_test_123").unwrap();
+        assert_eq!(
+            store.get("API_KEY", "dev").unwrap(),
+            Some("sk_test_123".to_string())
+        );
+    }
+
+    #[test]
+    fn get_nonexistent_key() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        assert_eq!(store.get("NOPE", "dev").unwrap(), None);
+    }
+
+    #[test]
+    fn get_wrong_env() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap();
+        assert_eq!(store.get("KEY", "prod").unwrap(), None);
+    }
+
+    #[test]
+    fn set_increments_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let p1 = store.set("A", "dev", "1").unwrap();
+        let p2 = store.set("B", "dev", "2").unwrap();
+        let p3 = store.set("C", "dev", "3").unwrap();
+        assert_eq!(p1.version, 1);
+        assert_eq!(p2.version, 2);
+        assert_eq!(p3.version, 3);
+    }
+
+    #[test]
+    fn set_overwrites_existing() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "old").unwrap();
+        store.set("KEY", "dev", "new").unwrap();
+        assert_eq!(store.get("KEY", "dev").unwrap(), Some("new".to_string()));
+    }
+
+    #[test]
+    fn list_empty_store() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        assert!(store.list().unwrap().is_empty());
+    }
+
+    #[test]
+    fn list_multiple_secrets() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("A", "dev", "1").unwrap();
+        store.set("B", "prod", "2").unwrap();
+        let list = store.list().unwrap();
+        assert_eq!(list.len(), 2);
+        assert!(list.contains_key("A:dev"));
+        assert!(list.contains_key("B:prod"));
+    }
+
+    #[test]
+    fn payload_empty_file() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        // Overwrite the enc file with empty content
+        std::fs::write(dir.path().join(".secrets.enc"), "").unwrap();
+        let payload = store.payload().unwrap();
+        assert_eq!(payload.version, 0);
+        assert!(payload.secrets.is_empty());
+    }
+
+    #[test]
+    fn encrypt_decrypt_roundtrip() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let plaintext = r#"{"secrets":{"KEY:dev":"val"},"version":1}"#;
+        let encrypted = store.encrypt(plaintext).unwrap();
+        let decrypted = store.decrypt(&encrypted).unwrap();
+        assert_eq!(decrypted.secrets.get("KEY:dev").unwrap(), "val");
+        assert_eq!(decrypted.version, 1);
+    }
+
+    #[test]
+    fn decrypt_wrong_key() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let encrypted = store.encrypt(r#"{"secrets":{},"version":0}"#).unwrap();
+
+        // Create a different key
+        let dir2 = tmp_root();
+        let store2 = SecretStore::load_or_create(dir2.path()).unwrap();
+        let err = store2.decrypt(&encrypted).unwrap_err();
+        assert!(err.to_string().contains("wrong key or corrupted"));
+    }
+
+    #[test]
+    fn decrypt_invalid_format_no_colons() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.decrypt("nocolonshere").unwrap_err();
+        assert!(err.to_string().contains("invalid store format"));
+    }
+
+    #[test]
+    fn decrypt_invalid_format_two_parts() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.decrypt("aa:bb").unwrap_err();
+        assert!(err.to_string().contains("invalid store format"));
+    }
+
+    #[test]
+    fn decrypt_invalid_format_four_parts() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.decrypt("aa:bb:cc:dd").unwrap_err();
+        assert!(err.to_string().contains("invalid store format"));
+    }
+
+    #[test]
+    fn decrypt_invalid_nonce_hex() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.decrypt("zzzz:aabb:ccdd").unwrap_err();
+        assert!(err.to_string().contains("invalid nonce hex"));
+    }
+
+    #[test]
+    fn decrypt_invalid_ciphertext_hex() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.decrypt("aabb:zzzz:ccdd").unwrap_err();
+        assert!(err.to_string().contains("invalid ciphertext hex"));
+    }
+
+    #[test]
+    fn decrypt_invalid_tag_hex() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.decrypt("aabb:ccdd:zzzz").unwrap_err();
+        assert!(err.to_string().contains("invalid tag hex"));
+    }
+
+    #[test]
+    fn decrypt_wrong_nonce_length() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        // 8 bytes instead of 12
+        let nonce = hex::encode([0u8; 8]);
+        let ct = hex::encode([0u8; 16]);
+        let tag = hex::encode([0u8; 16]);
+        let err = store.decrypt(&format!("{nonce}:{ct}:{tag}")).unwrap_err();
+        assert!(err.to_string().contains("invalid nonce length"));
+    }
+
+    #[test]
+    fn decrypt_tampered_ciphertext() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let encrypted = store.encrypt(r#"{"secrets":{},"version":0}"#).unwrap();
+        let parts: Vec<&str> = encrypted.split(':').collect();
+        let mut ct_bytes = hex::decode(parts[1]).unwrap();
+        if !ct_bytes.is_empty() {
+            ct_bytes[0] ^= 0xFF;
+        }
+        let tampered = format!("{}:{}:{}", parts[0], hex::encode(&ct_bytes), parts[2]);
+        assert!(store.decrypt(&tampered).is_err());
+    }
+
+    #[test]
+    fn decrypt_tampered_tag() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let encrypted = store.encrypt(r#"{"secrets":{},"version":0}"#).unwrap();
+        let parts: Vec<&str> = encrypted.split(':').collect();
+        let mut tag_bytes = hex::decode(parts[2]).unwrap();
+        tag_bytes[0] ^= 0xFF;
+        let tampered = format!("{}:{}:{}", parts[0], parts[1], hex::encode(&tag_bytes));
+        assert!(store.decrypt(&tampered).is_err());
+    }
+
+    #[test]
+    fn decrypt_tampered_nonce() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let encrypted = store.encrypt(r#"{"secrets":{},"version":0}"#).unwrap();
+        let parts: Vec<&str> = encrypted.split(':').collect();
+        let mut nonce_bytes = hex::decode(parts[0]).unwrap();
+        nonce_bytes[0] ^= 0xFF;
+        let tampered = format!("{}:{}:{}", hex::encode(&nonce_bytes), parts[1], parts[2]);
+        assert!(store.decrypt(&tampered).is_err());
+    }
+
+    #[test]
+    fn decrypt_truncated_ciphertext() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let encrypted = store.encrypt(r#"{"secrets":{},"version":0}"#).unwrap();
+        let parts: Vec<&str> = encrypted.split(':').collect();
+        let ct_bytes = hex::decode(parts[1]).unwrap();
+        let truncated = &ct_bytes[..ct_bytes.len().saturating_sub(4).max(1)];
+        let tampered = format!("{}:{}:{}", parts[0], hex::encode(truncated), parts[2]);
+        assert!(store.decrypt(&tampered).is_err());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn key_file_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        let metadata = std::fs::metadata(dir.path().join(".secrets.key")).unwrap();
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    #[test]
+    fn key_is_32_bytes() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        let hex_str = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+        let key_bytes = hex::decode(hex_str.trim()).unwrap();
+        assert_eq!(key_bytes.len(), 32);
+    }
+
+    #[test]
+    fn key_hex_roundtrip() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        let hex_str = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+        let key_bytes = hex::decode(hex_str.trim()).unwrap();
+        assert_eq!(hex::encode(&key_bytes), hex_str.trim());
+    }
+
+    #[test]
+    fn write_payload_atomic() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap();
+        assert!(dir.path().join(".secrets.enc").is_file());
+        // No temp files left behind
+        let entries: Vec<_> = std::fs::read_dir(dir.path())
+            .unwrap()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_name().to_string_lossy().starts_with(".tmp"))
+            .collect();
+        assert!(entries.is_empty());
+    }
+
+    #[test]
+    fn multiple_encryptions_differ() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let plaintext = r#"{"secrets":{},"version":0}"#;
+        let enc1 = store.encrypt(plaintext).unwrap();
+        let enc2 = store.encrypt(plaintext).unwrap();
+        assert_ne!(enc1, enc2); // Random nonce each time
+    }
+
+    #[test]
+    fn invalid_key_hex_in_file() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        std::fs::write(dir.path().join(".secrets.key"), "not_valid_hex_zzz").unwrap();
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("invalid key hex"));
+    }
+
+    #[test]
+    fn empty_key_file() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        std::fs::write(dir.path().join(".secrets.key"), "").unwrap();
+        let store = SecretStore::open(dir.path()).unwrap();
+        let err = store.encrypt("test").unwrap_err();
+        assert!(err.to_string().contains("failed to create cipher"));
+    }
+
+    #[test]
+    fn store_unicode_values() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("EMOJI", "dev", "🔐🔑✨").unwrap();
+        store.set("CJK", "dev", "秘密鍵").unwrap();
+        assert_eq!(
+            store.get("EMOJI", "dev").unwrap(),
+            Some("🔐🔑✨".to_string())
+        );
+        assert_eq!(store.get("CJK", "dev").unwrap(), Some("秘密鍵".to_string()));
     }
 }

@@ -51,7 +51,10 @@ impl SyncIndex {
 
     pub fn save(&self) -> Result<()> {
         let json = serde_json::to_string_pretty(&self)?;
-        let dir = self.path.parent().context("sync index path has no parent")?;
+        let dir = self
+            .path
+            .parent()
+            .context("sync index path has no parent")?;
         let tmp = NamedTempFile::new_in(dir)?;
         std::fs::write(tmp.path(), json)?;
         tmp.persist(&self.path)
@@ -117,5 +120,207 @@ impl SyncIndex {
         let mut hasher = Sha256::new();
         hasher.update(value.as_bytes());
         hex::encode(hasher.finalize())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_empty() {
+        let index = SyncIndex::new(Path::new("/tmp/test.json"));
+        assert!(index.records.is_empty());
+    }
+
+    #[test]
+    fn load_nonexistent_returns_empty() {
+        let index = SyncIndex::load(Path::new("/nonexistent/path/test.json")).unwrap();
+        assert!(index.records.is_empty());
+    }
+
+    #[test]
+    fn load_existing_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.json");
+        let mut index = SyncIndex::new(&path);
+        index.record_success(
+            "KEY:env:web:dev".to_string(),
+            "env:web:dev".to_string(),
+            "abc".to_string(),
+        );
+        index.save().unwrap();
+
+        let loaded = SyncIndex::load(&path).unwrap();
+        assert_eq!(loaded.records.len(), 1);
+        assert!(loaded.records.contains_key("KEY:env:web:dev"));
+    }
+
+    #[test]
+    fn load_invalid_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.json");
+        std::fs::write(&path, "not valid json").unwrap();
+        assert!(SyncIndex::load(&path).is_err());
+    }
+
+    #[test]
+    fn save_and_reload() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.json");
+        let mut index = SyncIndex::new(&path);
+        index.record_success(
+            "A:env:web:dev".to_string(),
+            "env:web:dev".to_string(),
+            "hash1".to_string(),
+        );
+        index.record_failure(
+            "B:cf:prod".to_string(),
+            "cf:prod".to_string(),
+            "hash2".to_string(),
+            "err".to_string(),
+        );
+        index.save().unwrap();
+
+        let loaded = SyncIndex::load(&path).unwrap();
+        assert_eq!(loaded.records.len(), 2);
+        assert_eq!(
+            loaded.records["A:env:web:dev"].last_sync_status,
+            SyncStatus::Success
+        );
+        assert_eq!(
+            loaded.records["B:cf:prod"].last_sync_status,
+            SyncStatus::Failed
+        );
+    }
+
+    #[test]
+    fn save_atomic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.json");
+        let index = SyncIndex::new(&path);
+        index.save().unwrap();
+        assert!(path.is_file());
+    }
+
+    #[test]
+    fn tracker_key_with_app() {
+        let key = SyncIndex::tracker_key("SECRET", "env", Some("web"), "dev");
+        assert_eq!(key, "SECRET:env:web:dev");
+    }
+
+    #[test]
+    fn tracker_key_without_app() {
+        let key = SyncIndex::tracker_key("SECRET", "cloudflare", None, "prod");
+        assert_eq!(key, "SECRET:cloudflare:prod");
+    }
+
+    #[test]
+    fn should_sync_force_true() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("K".to_string(), "t".to_string(), "hash".to_string());
+        assert!(index.should_sync("K", "hash", true));
+    }
+
+    #[test]
+    fn should_sync_no_record() {
+        let index = SyncIndex::new(Path::new("/tmp/test.json"));
+        assert!(index.should_sync("K", "hash", false));
+    }
+
+    #[test]
+    fn should_sync_hash_match_success() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("K".to_string(), "t".to_string(), "hash".to_string());
+        assert!(!index.should_sync("K", "hash", false));
+    }
+
+    #[test]
+    fn should_sync_hash_mismatch() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("K".to_string(), "t".to_string(), "old_hash".to_string());
+        assert!(index.should_sync("K", "new_hash", false));
+    }
+
+    #[test]
+    fn should_sync_previous_failure() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_failure(
+            "K".to_string(),
+            "t".to_string(),
+            "hash".to_string(),
+            "err".to_string(),
+        );
+        assert!(index.should_sync("K", "hash", false));
+    }
+
+    #[test]
+    fn record_success_sets_fields() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success(
+            "K".to_string(),
+            "env:web:dev".to_string(),
+            "abc".to_string(),
+        );
+        let record = &index.records["K"];
+        assert_eq!(record.target, "env:web:dev");
+        assert_eq!(record.value_hash, "abc");
+        assert_eq!(record.last_sync_status, SyncStatus::Success);
+        assert!(record.last_error.is_none());
+    }
+
+    #[test]
+    fn record_failure_sets_fields() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_failure(
+            "K".to_string(),
+            "cf:prod".to_string(),
+            "abc".to_string(),
+            "timeout".to_string(),
+        );
+        let record = &index.records["K"];
+        assert_eq!(record.target, "cf:prod");
+        assert_eq!(record.value_hash, "abc");
+        assert_eq!(record.last_sync_status, SyncStatus::Failed);
+        assert_eq!(record.last_error.as_deref(), Some("timeout"));
+    }
+
+    #[test]
+    fn record_overwrites_previous() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_failure(
+            "K".to_string(),
+            "t".to_string(),
+            "h1".to_string(),
+            "err".to_string(),
+        );
+        index.record_success("K".to_string(), "t".to_string(), "h2".to_string());
+        let record = &index.records["K"];
+        assert_eq!(record.last_sync_status, SyncStatus::Success);
+        assert_eq!(record.value_hash, "h2");
+    }
+
+    #[test]
+    fn hash_value_deterministic() {
+        let h1 = SyncIndex::hash_value("hello");
+        let h2 = SyncIndex::hash_value("hello");
+        assert_eq!(h1, h2);
+    }
+
+    #[test]
+    fn hash_value_different_inputs() {
+        let h1 = SyncIndex::hash_value("hello");
+        let h2 = SyncIndex::hash_value("world");
+        assert_ne!(h1, h2);
+    }
+
+    #[test]
+    fn hash_value_empty_string() {
+        let hash = SyncIndex::hash_value("");
+        // SHA-256 of empty string is well-known
+        assert_eq!(
+            hash,
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        );
     }
 }

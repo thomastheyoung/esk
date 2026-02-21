@@ -97,7 +97,10 @@ impl Config {
                 return Ok(candidate);
             }
             if !dir.pop() {
-                bail!("lockbox.yaml not found (searched from {} upward)", start.display());
+                bail!(
+                    "lockbox.yaml not found (searched from {} upward)",
+                    start.display()
+                );
             }
         }
     }
@@ -149,7 +152,10 @@ impl Config {
     fn validate_target_string(&self, adapter: &str, target: &str) -> Result<()> {
         let resolved = self.parse_target(adapter, target)?;
         if !self.environments.contains(&resolved.environment) {
-            bail!("unknown environment '{}' in target '{target}'", resolved.environment);
+            bail!(
+                "unknown environment '{}' in target '{target}'",
+                resolved.environment
+            );
         }
         if let Some(app) = &resolved.app {
             if !self.apps.contains_key(app) {
@@ -263,5 +269,560 @@ impl std::fmt::Display for ResolvedTarget {
             write!(f, ":{app}")?;
         }
         write!(f, ":{}", self.environment)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn write_yaml(dir: &Path, content: &str) -> PathBuf {
+        let path = dir.join("lockbox.yaml");
+        std::fs::write(&path, content).unwrap();
+        path
+    }
+
+    #[test]
+    fn find_in_current_dir() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("lockbox.yaml"),
+            "project: x\nenvironments: [dev]",
+        )
+        .unwrap();
+        let found = Config::find(dir.path()).unwrap();
+        assert_eq!(found, dir.path().join("lockbox.yaml"));
+    }
+
+    #[test]
+    fn find_walks_up() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join("lockbox.yaml"),
+            "project: x\nenvironments: [dev]",
+        )
+        .unwrap();
+        let child = dir.path().join("sub");
+        std::fs::create_dir(&child).unwrap();
+        let found = Config::find(&child).unwrap();
+        assert_eq!(found, dir.path().join("lockbox.yaml"));
+    }
+
+    #[test]
+    fn find_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let err = Config::find(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("lockbox.yaml not found"));
+    }
+
+    #[test]
+    fn load_minimal_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: testapp\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.project, "testapp");
+        assert_eq!(config.environments, vec!["dev"]);
+        assert!(config.apps.is_empty());
+        assert!(config.secrets.is_empty());
+    }
+
+    #[test]
+    fn load_full_config() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}"
+    env_suffix:
+      dev: ""
+      prod: ".production"
+  cloudflare:
+    env_flags:
+      prod: "--env production"
+  convex:
+    path: apps/api
+  onepassword:
+    vault: Eng
+    item_pattern: "{project} - {Environment}"
+secrets:
+  Stripe:
+    KEY:
+      targets:
+        env: [web:dev, web:prod]
+        cloudflare: [web:prod]
+        convex: [dev]
+        onepassword: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.project, "myapp");
+        assert_eq!(config.environments.len(), 2);
+        assert!(config.adapters.env.is_some());
+        assert!(config.adapters.cloudflare.is_some());
+        assert!(config.adapters.convex.is_some());
+        assert!(config.adapters.onepassword.is_some());
+    }
+
+    #[test]
+    fn load_sets_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.root, dir.path());
+    }
+
+    #[test]
+    fn load_nonexistent_file() {
+        let err = Config::load(Path::new("/nonexistent/lockbox.yaml")).unwrap_err();
+        assert!(err.to_string().contains("failed to read"));
+    }
+
+    #[test]
+    fn load_invalid_yaml() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "not: [valid: yaml: {{}}");
+        assert!(Config::load(&path).is_err());
+    }
+
+    #[test]
+    fn validate_empty_environments() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: []");
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("at least one environment"));
+    }
+
+    #[test]
+    fn validate_unknown_adapter_reference() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+adapters:
+  env:
+    pattern: "test"
+secrets:
+  G:
+    KEY:
+      targets:
+        cloudflare: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let chain = format!("{err:?}");
+        assert!(chain.contains("adapter 'cloudflare' is not configured"));
+    }
+
+    #[test]
+    fn validate_adapter_known_but_unconfigured() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  G:
+    KEY:
+      targets:
+        env: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let chain = format!("{err:?}");
+        assert!(chain.contains("adapter 'env' is not configured"));
+    }
+
+    #[test]
+    fn validate_unknown_environment_in_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "test"
+secrets:
+  G:
+    KEY:
+      targets:
+        env: [web:staging]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let chain = format!("{err:?}");
+        assert!(chain.contains("unknown environment 'staging'"));
+    }
+
+    #[test]
+    fn validate_unknown_app_in_target() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "test"
+secrets:
+  G:
+    KEY:
+      targets:
+        env: [api:dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let chain = format!("{err:?}");
+        assert!(chain.contains("unknown app 'api'"));
+    }
+
+    #[test]
+    fn validate_all_four_adapter_types() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "test"
+  cloudflare: {}
+  convex:
+    path: apps/api
+  onepassword:
+    vault: V
+    item_pattern: test
+secrets:
+  G:
+    A:
+      targets:
+        env: [web:dev]
+        cloudflare: [web:dev]
+        convex: [dev]
+        onepassword: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        Config::load(&path).unwrap(); // Should not error
+    }
+
+    #[test]
+    fn parse_target_with_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        let target = config.parse_target("env", "web:dev").unwrap();
+        assert_eq!(target.adapter, "env");
+        assert_eq!(target.app, Some("web".to_string()));
+        assert_eq!(target.environment, "dev");
+    }
+
+    #[test]
+    fn parse_target_without_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        let target = config.parse_target("cloudflare", "prod").unwrap();
+        assert_eq!(target.adapter, "cloudflare");
+        assert_eq!(target.app, None);
+        assert_eq!(target.environment, "prod");
+    }
+
+    #[test]
+    fn parse_target_multiple_colons() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        let target = config.parse_target("env", "a:b:c").unwrap();
+        assert_eq!(target.app, Some("a".to_string()));
+        assert_eq!(target.environment, "b:c"); // split_once on first colon
+    }
+
+    #[test]
+    fn resolve_secrets_flat_list() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "test"
+secrets:
+  Stripe:
+    KEY_A:
+      targets:
+        env: [web:dev, web:prod]
+    KEY_B:
+      targets:
+        env: [web:dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        assert_eq!(resolved.len(), 2);
+        // KEY_A has 2 targets, KEY_B has 1
+        let key_a = resolved.iter().find(|s| s.key == "KEY_A").unwrap();
+        assert_eq!(key_a.targets.len(), 2);
+        assert_eq!(key_a.vendor, "Stripe");
+    }
+
+    #[test]
+    fn resolve_secrets_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        assert!(resolved.is_empty());
+    }
+
+    #[test]
+    fn resolve_secrets_multi_vendor() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: w
+adapters:
+  env:
+    pattern: "t"
+secrets:
+  Stripe:
+    SK:
+      targets:
+        env: [web:dev]
+  Convex:
+    URL:
+      targets:
+        env: [web:dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let vendors: Vec<&str> = resolved.iter().map(|s| s.vendor.as_str()).collect();
+        assert!(vendors.contains(&"Stripe"));
+        assert!(vendors.contains(&"Convex"));
+    }
+
+    #[test]
+    fn find_secret_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+adapters:
+  env:
+    pattern: "t"
+apps:
+  web:
+    path: w
+secrets:
+  Stripe:
+    API_KEY:
+      description: test
+      targets:
+        env: [web:dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (vendor, def) = config.find_secret("API_KEY").unwrap();
+        assert_eq!(vendor, "Stripe");
+        assert_eq!(def.description.as_deref(), Some("test"));
+    }
+
+    #[test]
+    fn find_secret_not_found() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        assert!(config.find_secret("NOPE").is_none());
+    }
+
+    #[test]
+    fn find_secret_first_vendor_wins() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: w
+adapters:
+  env:
+    pattern: "t"
+secrets:
+  Alpha:
+    DUP:
+      targets:
+        env: [web:dev]
+  Beta:
+    DUP:
+      targets:
+        env: [web:dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (vendor, _) = config.find_secret("DUP").unwrap();
+        // BTreeMap iteration is alphabetical — Alpha comes first
+        assert_eq!(vendor, "Alpha");
+    }
+
+    #[test]
+    fn resolve_env_path_with_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix:
+      dev: ""
+      prod: ".production"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let env_path = config.resolve_env_path("web", "prod").unwrap();
+        assert_eq!(env_path, dir.path().join("apps/web/.env.production.local"));
+    }
+
+    #[test]
+    fn resolve_env_path_empty_suffix() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let env_path = config.resolve_env_path("web", "dev").unwrap();
+        assert_eq!(env_path, dir.path().join("apps/web/.env.local"));
+    }
+
+    #[test]
+    fn resolve_env_path_no_env_adapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        let err = config.resolve_env_path("web", "dev").unwrap_err();
+        assert!(err.to_string().contains("env adapter not configured"));
+    }
+
+    #[test]
+    fn resolve_env_path_unknown_app() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+adapters:
+  env:
+    pattern: "test"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let err = config.resolve_env_path("nope", "dev").unwrap_err();
+        assert!(err.to_string().contains("unknown app 'nope'"));
+    }
+
+    #[test]
+    fn onepassword_item_name_substitution() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+adapters:
+  onepassword:
+    vault: V
+    item_pattern: "{project} - {Environment}"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.onepassword_item_name("dev").unwrap(), "myapp - Dev");
+    }
+
+    #[test]
+    fn onepassword_item_name_lowercase() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+adapters:
+  onepassword:
+    vault: V
+    item_pattern: "{environment}"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.onepassword_item_name("dev").unwrap(), "dev");
+    }
+
+    #[test]
+    fn onepassword_item_name_empty_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+adapters:
+  onepassword:
+    vault: V
+    item_pattern: "{project} - {Environment}"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let name = config.onepassword_item_name("").unwrap();
+        assert_eq!(name, "myapp - ");
+    }
+
+    #[test]
+    fn onepassword_item_name_no_adapter() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        let err = config.onepassword_item_name("dev").unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("onepassword adapter not configured"));
+    }
+
+    #[test]
+    fn resolved_target_display_with_app() {
+        let t = ResolvedTarget {
+            adapter: "env".to_string(),
+            app: Some("web".to_string()),
+            environment: "dev".to_string(),
+        };
+        assert_eq!(t.to_string(), "env:web:dev");
+    }
+
+    #[test]
+    fn resolved_target_display_without_app() {
+        let t = ResolvedTarget {
+            adapter: "cloudflare".to_string(),
+            app: None,
+            environment: "prod".to_string(),
+        };
+        assert_eq!(t.to_string(), "cloudflare:prod");
     }
 }
