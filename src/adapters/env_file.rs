@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use tempfile::NamedTempFile;
 
-use crate::adapters::{SecretValue, SyncAdapter, SyncResult};
+use crate::adapters::{SecretValue, SyncAdapter, SyncMode, SyncResult};
 use crate::config::{Config, ResolvedTarget};
 
 pub struct EnvFileAdapter<'a> {
@@ -12,6 +12,10 @@ pub struct EnvFileAdapter<'a> {
 impl<'a> SyncAdapter for EnvFileAdapter<'a> {
     fn name(&self) -> &str {
         "env"
+    }
+
+    fn sync_mode(&self) -> SyncMode {
+        SyncMode::Batch
     }
 
     fn sync_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {

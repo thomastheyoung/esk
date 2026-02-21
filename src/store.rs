@@ -148,6 +148,11 @@ impl SecretStore {
         Ok(())
     }
 
+    /// Decrypt raw ciphertext (nonce:ciphertext:tag hex format) into a StorePayload.
+    pub fn decrypt_raw(&self, encoded: &str) -> Result<StorePayload> {
+        self.decrypt(encoded)
+    }
+
     fn encrypt(&self, plaintext: &str) -> Result<String> {
         let cipher = Aes256Gcm::new_from_slice(&self.key)
             .map_err(|e| anyhow::anyhow!("failed to create cipher: {e}"))?;

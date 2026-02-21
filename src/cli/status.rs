@@ -12,6 +12,9 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let index = SyncIndex::load(&index_path)?;
     let resolved = config.resolve_secrets()?;
 
+    // Build the set of configured adapter names to filter against
+    let adapter_names: Vec<&str> = config.adapter_names();
+
     let mut has_output = false;
 
     for secret in &resolved {
@@ -22,8 +25,8 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
                 }
             }
 
-            // Skip 1Password targets (handled via push/pull)
-            if target.adapter == "onepassword" {
+            // Skip targets whose adapter isn't a sync adapter (e.g. plugin-only targets)
+            if !adapter_names.contains(&target.adapter.as_str()) {
                 continue;
             }
 

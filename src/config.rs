@@ -12,6 +12,8 @@ pub struct Config {
     #[serde(default)]
     pub adapters: AdaptersConfig,
     #[serde(default)]
+    pub plugins: BTreeMap<String, serde_yaml::Value>,
+    #[serde(default)]
     pub secrets: BTreeMap<String, BTreeMap<String, SecretDef>>,
     /// Root directory containing lockbox.yaml
     #[serde(skip)]
@@ -31,8 +33,6 @@ pub struct AdaptersConfig {
     pub cloudflare: Option<CloudflareAdapterConfig>,
     #[serde(default)]
     pub convex: Option<ConvexAdapterConfig>,
-    #[serde(default)]
-    pub onepassword: Option<OnePasswordAdapterConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -57,10 +57,30 @@ pub struct ConvexAdapterConfig {
     pub env_flags: BTreeMap<String, String>,
 }
 
+// --- Plugin config types ---
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OnePasswordAdapterConfig {
+pub struct OnePasswordPluginConfig {
     pub vault: String,
     pub item_pattern: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CloudFilePluginConfig {
+    pub path: String,
+    #[serde(default = "default_cloud_file_format")]
+    pub format: CloudFileFormat,
+}
+
+fn default_cloud_file_format() -> CloudFileFormat {
+    CloudFileFormat::Encrypted
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum CloudFileFormat {
+    Encrypted,
+    Cleartext,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -123,6 +143,7 @@ impl Config {
         if self.environments.is_empty() {
             bail!("at least one environment must be defined");
         }
+        self.validate_plugins()?;
         // Validate secret targets reference known adapters, apps, and environments
         for (vendor, secrets) in &self.secrets {
             for (key, def) in secrets {
@@ -144,9 +165,43 @@ impl Config {
             "env" if self.adapters.env.is_some() => Ok(()),
             "cloudflare" if self.adapters.cloudflare.is_some() => Ok(()),
             "convex" if self.adapters.convex.is_some() => Ok(()),
-            "onepassword" if self.adapters.onepassword.is_some() => Ok(()),
+            "onepassword" => bail!(
+                "'onepassword' should be configured under 'plugins:', not 'adapters:'. \
+                 Move your onepassword config from adapters to plugins in lockbox.yaml."
+            ),
             _ => bail!("adapter '{adapter}' is not configured"),
         }
+    }
+
+    fn validate_plugins(&self) -> Result<()> {
+        for (name, value) in &self.plugins {
+            match name.as_str() {
+                "onepassword" => {
+                    let _: OnePasswordPluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid onepassword plugin config")?;
+                }
+                _ => {
+                    // Check for type field to identify cloud_file plugins
+                    if let Some(type_val) = value.get("type") {
+                        let type_str = type_val
+                            .as_str()
+                            .context("plugin 'type' must be a string")?;
+                        match type_str {
+                            "cloud_file" => {
+                                let _: CloudFilePluginConfig =
+                                    serde_yaml::from_value(value.clone()).with_context(|| {
+                                        format!("invalid cloud_file plugin config for '{name}'")
+                                    })?;
+                            }
+                            other => bail!("unknown plugin type '{other}' for '{name}'"),
+                        }
+                    } else {
+                        bail!("unknown plugin '{name}' (missing 'type' field)");
+                    }
+                }
+            }
+        }
+        Ok(())
     }
 
     fn validate_target_string(&self, adapter: &str, target: &str) -> Result<()> {
@@ -237,28 +292,44 @@ impl Config {
         Ok(self.root.join(path))
     }
 
-    /// Get the 1Password item name for an environment.
-    pub fn onepassword_item_name(&self, env: &str) -> Result<String> {
-        let op_config = self
-            .adapters
-            .onepassword
-            .as_ref()
-            .context("onepassword adapter not configured")?;
+    /// Get the parsed 1Password plugin config, if configured.
+    pub fn onepassword_plugin_config(&self) -> Option<OnePasswordPluginConfig> {
+        self.plugins
+            .get("onepassword")
+            .and_then(|v| serde_yaml::from_value(v.clone()).ok())
+    }
 
-        // Capitalize first letter of env for pattern
-        let env_capitalized = {
-            let mut chars = env.chars();
-            match chars.next() {
-                Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
-                None => String::new(),
-            }
-        };
+    /// Get all cloud_file plugin configs: (name, config) pairs.
+    pub fn cloud_file_plugin_configs(&self) -> Vec<(String, CloudFilePluginConfig)> {
+        self.plugins
+            .iter()
+            .filter_map(|(name, value)| {
+                if name == "onepassword" {
+                    return None;
+                }
+                let type_val = value.get("type")?.as_str()?;
+                if type_val != "cloud_file" {
+                    return None;
+                }
+                let cfg: CloudFilePluginConfig = serde_yaml::from_value(value.clone()).ok()?;
+                Some((name.clone(), cfg))
+            })
+            .collect()
+    }
 
-        Ok(op_config
-            .item_pattern
-            .replace("{project}", &self.project)
-            .replace("{Environment}", &env_capitalized)
-            .replace("{environment}", env))
+    /// Get the set of configured adapter names.
+    pub fn adapter_names(&self) -> Vec<&str> {
+        let mut names = Vec::new();
+        if self.adapters.env.is_some() {
+            names.push("env");
+        }
+        if self.adapters.cloudflare.is_some() {
+            names.push("cloudflare");
+        }
+        if self.adapters.convex.is_some() {
+            names.push("convex");
+        }
+        names
     }
 }
 
@@ -346,6 +417,7 @@ adapters:
       prod: "--env production"
   convex:
     path: apps/api
+plugins:
   onepassword:
     vault: Eng
     item_pattern: "{project} - {Environment}"
@@ -356,7 +428,6 @@ secrets:
         env: [web:dev, web:prod]
         cloudflare: [web:prod]
         convex: [dev]
-        onepassword: [dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
@@ -365,7 +436,7 @@ secrets:
         assert!(config.adapters.env.is_some());
         assert!(config.adapters.cloudflare.is_some());
         assert!(config.adapters.convex.is_some());
-        assert!(config.adapters.onepassword.is_some());
+        assert!(config.onepassword_plugin_config().is_some());
     }
 
     #[test]
@@ -485,7 +556,7 @@ secrets:
     }
 
     #[test]
-    fn validate_all_four_adapter_types() {
+    fn validate_all_three_adapter_types() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -499,9 +570,6 @@ adapters:
   cloudflare: {}
   convex:
     path: apps/api
-  onepassword:
-    vault: V
-    item_pattern: test
 secrets:
   G:
     A:
@@ -509,10 +577,97 @@ secrets:
         env: [web:dev]
         cloudflare: [web:dev]
         convex: [dev]
-        onepassword: [dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         Config::load(&path).unwrap(); // Should not error
+    }
+
+    #[test]
+    fn validate_onepassword_under_adapters_gives_helpful_error() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  G:
+    KEY:
+      targets:
+        onepassword: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let chain = format!("{err:?}");
+        assert!(chain.contains("plugins:"));
+    }
+
+    #[test]
+    fn validate_plugins_onepassword() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let op = config.onepassword_plugin_config().unwrap();
+        assert_eq!(op.vault, "V");
+        assert_eq!(op.item_pattern, "test");
+    }
+
+    #[test]
+    fn validate_plugins_cloud_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+plugins:
+  dropbox:
+    type: cloud_file
+    path: ~/Dropbox/secrets
+    format: encrypted
+  gdrive:
+    type: cloud_file
+    path: "~/Google Drive/secrets"
+    format: cleartext
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let cfs = config.cloud_file_plugin_configs();
+        assert_eq!(cfs.len(), 2);
+    }
+
+    #[test]
+    fn validate_plugins_unknown_type_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+plugins:
+  foo:
+    type: unknown_thing
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("unknown plugin type"));
+    }
+
+    #[test]
+    fn validate_plugins_unknown_name_no_type_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+plugins:
+  foo:
+    bar: baz
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("unknown plugin 'foo'"));
     }
 
     #[test]
@@ -747,63 +902,22 @@ adapters:
     }
 
     #[test]
-    fn onepassword_item_name_substitution() {
+    fn adapter_names_returns_configured() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
-project: myapp
+project: x
 environments: [dev]
 adapters:
-  onepassword:
-    vault: V
-    item_pattern: "{project} - {Environment}"
+  env:
+    pattern: "test"
+  cloudflare: {}
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        assert_eq!(config.onepassword_item_name("dev").unwrap(), "myapp - Dev");
-    }
-
-    #[test]
-    fn onepassword_item_name_lowercase() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
-project: myapp
-environments: [dev]
-adapters:
-  onepassword:
-    vault: V
-    item_pattern: "{environment}"
-"#;
-        let path = write_yaml(dir.path(), yaml);
-        let config = Config::load(&path).unwrap();
-        assert_eq!(config.onepassword_item_name("dev").unwrap(), "dev");
-    }
-
-    #[test]
-    fn onepassword_item_name_empty_env() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
-project: myapp
-environments: [dev]
-adapters:
-  onepassword:
-    vault: V
-    item_pattern: "{project} - {Environment}"
-"#;
-        let path = write_yaml(dir.path(), yaml);
-        let config = Config::load(&path).unwrap();
-        let name = config.onepassword_item_name("").unwrap();
-        assert_eq!(name, "myapp - ");
-    }
-
-    #[test]
-    fn onepassword_item_name_no_adapter() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
-        let config = Config::load(&path).unwrap();
-        let err = config.onepassword_item_name("dev").unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("onepassword adapter not configured"));
+        let names = config.adapter_names();
+        assert!(names.contains(&"env"));
+        assert!(names.contains(&"cloudflare"));
+        assert!(!names.contains(&"convex"));
     }
 
     #[test]

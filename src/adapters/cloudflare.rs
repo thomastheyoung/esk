@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{CommandOpts, CommandRunner, SyncAdapter};
+use crate::adapters::{CommandOpts, CommandRunner, SyncAdapter, SyncMode};
 use crate::config::{CloudflareAdapterConfig, Config, ResolvedTarget};
 
 pub struct CloudflareAdapter<'a> {
@@ -12,6 +12,10 @@ pub struct CloudflareAdapter<'a> {
 impl<'a> SyncAdapter for CloudflareAdapter<'a> {
     fn name(&self) -> &str {
         "cloudflare"
+    }
+
+    fn sync_mode(&self) -> SyncMode {
+        SyncMode::Individual
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {

@@ -1,12 +1,11 @@
 pub mod cloudflare;
 pub mod convex;
 pub mod env_file;
-pub mod onepassword;
 
 use anyhow::Result;
 use std::path::PathBuf;
 
-use crate::config::ResolvedTarget;
+use crate::config::{Config, ResolvedTarget};
 
 pub struct SyncResult {
     pub key: String,
@@ -17,10 +16,20 @@ pub struct SyncResult {
 }
 
 /// Secret with its key and value, ready for syncing.
+#[derive(Clone)]
 pub struct SecretValue {
     pub key: String,
     pub value: String,
     pub vendor: String,
+}
+
+/// Whether an adapter syncs secrets individually or as a batch per target group.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SyncMode {
+    /// Sync each secret individually (e.g. cloudflare, convex).
+    Individual,
+    /// Regenerate the entire target in one batch (e.g. env files).
+    Batch,
 }
 
 /// Options for running an external command.
@@ -84,8 +93,10 @@ impl CommandRunner for RealCommandRunner {
 }
 
 pub trait SyncAdapter {
-    #[allow(dead_code)]
     fn name(&self) -> &str;
+
+    /// Whether this adapter syncs individually or in batches.
+    fn sync_mode(&self) -> SyncMode;
 
     /// Sync a single secret to a target.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
@@ -112,6 +123,36 @@ pub trait SyncAdapter {
     }
 }
 
+/// Build all configured sync adapters from the config.
+pub fn build_sync_adapters<'a>(
+    config: &'a Config,
+    runner: &'a dyn CommandRunner,
+) -> Vec<Box<dyn SyncAdapter + 'a>> {
+    let mut adapters: Vec<Box<dyn SyncAdapter + 'a>> = Vec::new();
+
+    if config.adapters.env.is_some() {
+        adapters.push(Box::new(env_file::EnvFileAdapter { config }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.cloudflare {
+        adapters.push(Box::new(cloudflare::CloudflareAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.convex {
+        adapters.push(Box::new(convex::ConvexAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    adapters
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -124,6 +165,11 @@ mod tests {
         fn name(&self) -> &str {
             "test"
         }
+
+        fn sync_mode(&self) -> SyncMode {
+            SyncMode::Individual
+        }
+
         fn sync_secret(&self, key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
             if self.fail_keys.contains(&key.to_string()) {
                 anyhow::bail!("sync failed for {key}");

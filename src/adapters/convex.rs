@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{CommandOpts, CommandRunner, SyncAdapter};
+use crate::adapters::{CommandOpts, CommandRunner, SyncAdapter, SyncMode};
 use crate::config::{Config, ConvexAdapterConfig, ResolvedTarget};
 
 pub struct ConvexAdapter<'a> {
@@ -12,6 +12,10 @@ pub struct ConvexAdapter<'a> {
 impl<'a> SyncAdapter for ConvexAdapter<'a> {
     fn name(&self) -> &str {
         "convex"
+    }
+
+    fn sync_mode(&self) -> SyncMode {
+        SyncMode::Individual
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {

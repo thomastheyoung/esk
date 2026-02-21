@@ -1,13 +1,12 @@
-use anyhow::{bail, Context, Result};
+use anyhow::{bail, Result};
 use console::style;
-use std::collections::BTreeMap;
 
-use crate::adapters::onepassword::OnePasswordAdapter;
 use crate::adapters::RealCommandRunner;
 use crate::config::Config;
+use crate::plugins;
 use crate::store::SecretStore;
 
-pub fn run(config: &Config, env: &str) -> Result<()> {
+pub fn run(config: &Config, env: &str, only: Option<&str>) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
         bail!(
             "unknown environment '{env}'. Valid: {}",
@@ -15,54 +14,66 @@ pub fn run(config: &Config, env: &str) -> Result<()> {
         );
     }
 
-    let op_config = config
-        .adapters
-        .onepassword
-        .as_ref()
-        .context("onepassword adapter not configured in lockbox.yaml")?;
+    if config.plugins.is_empty() {
+        bail!("no plugins configured in lockbox.yaml");
+    }
 
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
 
-    // Collect secrets for this environment (bare keys, not composite)
-    let suffix = format!(":{env}");
-    let env_secrets: BTreeMap<String, String> = payload
-        .secrets
-        .iter()
-        .filter_map(|(k, v)| {
-            k.strip_suffix(&suffix)
-                .map(|bare| (bare.to_string(), v.clone()))
-        })
-        .collect();
+    let runner = RealCommandRunner;
+    let all_plugins = plugins::build_plugins(config, &runner);
 
-    if env_secrets.is_empty() {
-        println!("  No secrets for environment '{env}'.");
-        return Ok(());
+    if all_plugins.is_empty() {
+        bail!("no plugins configured in lockbox.yaml");
     }
 
-    let runner = RealCommandRunner;
-    let adapter = OnePasswordAdapter {
-        config,
-        adapter_config: op_config,
-        runner: &runner,
+    // Filter by --only if provided
+    let target_plugins: Vec<_> = if let Some(name) = only {
+        let filtered: Vec<_> = all_plugins
+            .into_iter()
+            .filter(|p| p.name() == name)
+            .collect();
+        if filtered.is_empty() {
+            bail!("unknown plugin '{name}'");
+        }
+        filtered
+    } else {
+        all_plugins
     };
 
-    let item_name = config.onepassword_item_name(env)?;
+    let mut success_count = 0u32;
+    let mut fail_count = 0u32;
+
+    for plugin in &target_plugins {
+        print!("  {} → {}...", style("pushing").cyan(), plugin.name());
+
+        match plugin.push(&payload, config, env) {
+            Ok(()) => {
+                println!(" {}", style("done").green());
+                success_count += 1;
+            }
+            Err(e) => {
+                println!(" {}", style("failed").red());
+                eprintln!("  {e}");
+                fail_count += 1;
+            }
+        }
+    }
+
     println!(
-        "  {} {} secrets → {} (v{})",
-        style("pushing").cyan(),
-        env_secrets.len(),
-        item_name,
+        "\n  {} (v{})",
+        if fail_count == 0 {
+            format!("{} plugin(s) pushed", success_count)
+        } else {
+            format!("{} pushed, {} failed", success_count, fail_count)
+        },
         payload.version
     );
 
-    adapter.push_item(env, &env_secrets, payload.version)?;
-
-    println!(
-        "  {} {} secrets pushed to 1Password",
-        style("done").green(),
-        env_secrets.len()
-    );
+    if fail_count > 0 {
+        bail!("{fail_count} plugin push(es) failed");
+    }
 
     Ok(())
 }

@@ -52,7 +52,7 @@ project: testapp
 environments: [dev]
 "#;
 
-/// Full config with all adapter types, apps, vendors.
+/// Full config with all adapter types, apps, vendors, and plugins.
 pub const FULL_CONFIG: &str = r#"
 project: myapp
 environments: [dev, prod]
@@ -77,6 +77,8 @@ adapters:
     deployment_source: apps/api/.env.local
     env_flags:
       prod: "--prod"
+
+plugins:
   onepassword:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
@@ -100,7 +102,6 @@ secrets:
     API_SECRET:
       targets:
         env: [api:dev, api:prod]
-        onepassword: [dev, prod]
 "#;
 
 /// Config with only env adapter.
@@ -127,6 +128,17 @@ secrets:
     OTHER_SECRET:
       targets:
         env: [web:dev]
+"#;
+
+/// Config with cloud_file plugins for testing.
+pub const PLUGIN_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+plugins:
+  onepassword:
+    vault: Test
+    item_pattern: "{project} - {Environment}"
 "#;
 
 /// Records calls made to a mock command runner.

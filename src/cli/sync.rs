@@ -1,12 +1,9 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use console::style;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
-use crate::adapters::cloudflare::CloudflareAdapter;
-use crate::adapters::convex::ConvexAdapter;
-use crate::adapters::env_file::EnvFileAdapter;
-use crate::adapters::{RealCommandRunner, SecretValue, SyncAdapter};
-use crate::config::{Config, ResolvedTarget};
+use crate::adapters::{build_sync_adapters, RealCommandRunner, SecretValue, SyncMode};
+use crate::config::Config;
 use crate::store::SecretStore;
 use crate::tracker::SyncIndex;
 
@@ -24,10 +21,20 @@ pub fn run(
 
     let resolved = config.resolve_secrets()?;
 
-    // Collect all (secret, target) pairs that need syncing
-    // For env adapter: if ANY secret changed for an (app, env) pair, resync ALL secrets for that pair
-    let mut env_dirty_pairs: BTreeSet<(String, String)> = BTreeSet::new(); // (app, env)
-    let mut non_env_work: Vec<(String, String, ResolvedTarget)> = Vec::new(); // (key, value, target)
+    let runner = RealCommandRunner;
+    let adapters = build_sync_adapters(config, &runner);
+
+    // Build a lookup map: adapter_name -> (index, sync_mode)
+    let adapter_map: HashMap<&str, (usize, SyncMode)> = adapters
+        .iter()
+        .enumerate()
+        .map(|(i, a)| (a.name(), (i, a.sync_mode())))
+        .collect();
+
+    // Track batch-mode dirty target groups: (adapter_name, app, env)
+    let mut batch_dirty: BTreeSet<(String, Option<String>, String)> = BTreeSet::new();
+    // Individual-mode work items: (key, value, target)
+    let mut individual_work: Vec<(String, String, crate::config::ResolvedTarget)> = Vec::new();
 
     let mut sync_count = 0u32;
     let mut skip_count = 0u32;
@@ -41,6 +48,12 @@ pub fn run(
                     continue;
                 }
             }
+
+            // Skip targets whose adapter isn't in the sync adapter map (e.g. plugins)
+            let (_, sync_mode) = match adapter_map.get(target.adapter.as_str()) {
+                Some(entry) => *entry,
+                None => continue,
+            };
 
             let composite = format!("{}:{}", secret.key, target.environment);
             let value = match payload.secrets.get(&composite) {
@@ -66,133 +79,127 @@ pub fn run(
                 &target.environment,
             );
 
-            if target.adapter == "env" {
-                // For env adapter, mark the (app, env) pair as dirty if any secret changed
-                if index.should_sync(&tracker_key, &value_hash, force) {
-                    if let Some(app) = &target.app {
-                        env_dirty_pairs.insert((app.clone(), target.environment.clone()));
+            match sync_mode {
+                SyncMode::Batch => {
+                    if index.should_sync(&tracker_key, &value_hash, force) {
+                        batch_dirty.insert((
+                            target.adapter.clone(),
+                            target.app.clone(),
+                            target.environment.clone(),
+                        ));
                     }
                 }
-            } else if target.adapter != "onepassword" {
-                // 1Password is handled via push/pull, not sync
-                if index.should_sync(&tracker_key, &value_hash, force) {
-                    non_env_work.push((secret.key.clone(), value.clone(), target.clone()));
-                } else {
-                    skip_count += 1;
-                    if verbose {
-                        println!(
-                            "  {} {}:{} → {}",
-                            style("skip").dim(),
-                            secret.key,
-                            target.environment,
-                            target.adapter
-                        );
-                    }
-                }
-            }
-        }
-    }
-
-    // Handle env adapter: for each dirty (app, env), gather ALL secrets and regenerate
-    if !env_dirty_pairs.is_empty() {
-        let env_adapter = EnvFileAdapter { config };
-
-        for (app, target_env) in &env_dirty_pairs {
-            // Gather all secrets that target this (app, env) via the env adapter
-            let mut secrets_for_file: Vec<SecretValue> = Vec::new();
-
-            for secret in &resolved {
-                for target in &secret.targets {
-                    if target.adapter == "env"
-                        && target.app.as_deref() == Some(app.as_str())
-                        && target.environment == *target_env
-                    {
-                        let composite = format!("{}:{}", secret.key, target_env);
-                        if let Some(value) = payload.secrets.get(&composite) {
-                            secrets_for_file.push(SecretValue {
-                                key: secret.key.clone(),
-                                value: value.clone(),
-                                vendor: secret.vendor.clone(),
-                            });
+                SyncMode::Individual => {
+                    if index.should_sync(&tracker_key, &value_hash, force) {
+                        individual_work.push((secret.key.clone(), value.clone(), target.clone()));
+                    } else {
+                        skip_count += 1;
+                        if verbose {
+                            println!(
+                                "  {} {}:{} → {}",
+                                style("skip").dim(),
+                                secret.key,
+                                target.environment,
+                                target.adapter
+                            );
                         }
                     }
                 }
             }
+        }
+    }
 
-            if secrets_for_file.is_empty() {
-                continue;
-            }
+    // Handle batch adapters: for each dirty target group, gather ALL secrets and sync
+    for (adapter_name, app, target_env) in &batch_dirty {
+        let (adapter_idx, _) = adapter_map[adapter_name.as_str()];
+        let adapter = &adapters[adapter_idx];
 
-            let target = ResolvedTarget {
-                adapter: "env".to_string(),
-                app: Some(app.clone()),
-                environment: target_env.clone(),
-            };
-
-            if dry_run {
-                let path = config.resolve_env_path(app, target_env)?;
-                println!(
-                    "  {} {} ({} secrets) → {}",
-                    style("would sync").cyan(),
-                    style("env").bold(),
-                    secrets_for_file.len(),
-                    path.display()
-                );
-                sync_count += secrets_for_file.len() as u32;
-                continue;
-            }
-
-            if verbose {
-                let path = config.resolve_env_path(app, target_env)?;
-                println!(
-                    "  {} {} ({} secrets) → {}",
-                    style("syncing").cyan(),
-                    style("env").bold(),
-                    secrets_for_file.len(),
-                    path.display()
-                );
-            }
-
-            let results = env_adapter.sync_batch(&secrets_for_file, &target);
-
-            // Update tracker for ALL secrets in the regenerated file
-            for result in &results {
-                let tracker_key =
-                    SyncIndex::tracker_key(&result.key, "env", Some(app.as_str()), target_env);
-                let composite = format!("{}:{}", result.key, target_env);
-                let value = payload
-                    .secrets
-                    .get(&composite)
-                    .map(|v| v.as_str())
-                    .unwrap_or("");
-                let value_hash = SyncIndex::hash_value(value);
-
-                if result.success {
-                    index.record_success(tracker_key, target.to_string(), value_hash);
-                    sync_count += 1;
-                } else {
-                    let error = result.error.clone().unwrap_or_default();
-                    index.record_failure(
-                        tracker_key,
-                        target.to_string(),
-                        value_hash,
-                        error.clone(),
-                    );
-                    fail_count += 1;
-                    eprintln!(
-                        "  {} {}:{} → env: {}",
-                        style("fail").red(),
-                        result.key,
-                        target_env,
-                        error
-                    );
+        // Gather all secrets that target this (adapter, app, env)
+        let mut secrets_for_batch: Vec<SecretValue> = Vec::new();
+        for secret in &resolved {
+            for target in &secret.targets {
+                if target.adapter == *adapter_name
+                    && target.app.as_ref() == app.as_ref()
+                    && target.environment == *target_env
+                {
+                    let composite = format!("{}:{}", secret.key, target_env);
+                    if let Some(value) = payload.secrets.get(&composite) {
+                        secrets_for_batch.push(SecretValue {
+                            key: secret.key.clone(),
+                            value: value.clone(),
+                            vendor: secret.vendor.clone(),
+                        });
+                    }
                 }
+            }
+        }
+
+        if secrets_for_batch.is_empty() {
+            continue;
+        }
+
+        let target = crate::config::ResolvedTarget {
+            adapter: adapter_name.clone(),
+            app: app.clone(),
+            environment: target_env.clone(),
+        };
+
+        if dry_run {
+            println!(
+                "  {} {} ({} secrets) → {}",
+                style("would sync").cyan(),
+                style(adapter_name).bold(),
+                secrets_for_batch.len(),
+                target
+            );
+            sync_count += secrets_for_batch.len() as u32;
+            continue;
+        }
+
+        if verbose {
+            println!(
+                "  {} {} ({} secrets) → {}",
+                style("syncing").cyan(),
+                style(adapter_name).bold(),
+                secrets_for_batch.len(),
+                target
+            );
+        }
+
+        let results = adapter.sync_batch(&secrets_for_batch, &target);
+
+        for result in &results {
+            let tracker_key =
+                SyncIndex::tracker_key(&result.key, adapter_name, app.as_deref(), target_env);
+            let composite = format!("{}:{}", result.key, target_env);
+            let value = payload
+                .secrets
+                .get(&composite)
+                .map(|v| v.as_str())
+                .unwrap_or("");
+            let value_hash = SyncIndex::hash_value(value);
+
+            if result.success {
+                index.record_success(tracker_key, target.to_string(), value_hash);
+                sync_count += 1;
+            } else {
+                let error = result.error.clone().unwrap_or_default();
+                index.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
+                fail_count += 1;
+                eprintln!(
+                    "  {} {}:{} → {}: {}",
+                    style("fail").red(),
+                    result.key,
+                    target_env,
+                    adapter_name,
+                    error
+                );
             }
         }
     }
 
-    // Handle non-env adapters (cloudflare, convex)
-    for (key, value, target) in &non_env_work {
+    // Handle individual adapters
+    for (key, value, target) in &individual_work {
         if dry_run {
             println!(
                 "  {} {}:{} → {}",
@@ -215,39 +222,9 @@ pub fn run(
             );
         }
 
-        let result = match target.adapter.as_str() {
-            "cloudflare" => {
-                let adapter_config = config
-                    .adapters
-                    .cloudflare
-                    .as_ref()
-                    .context("cloudflare adapter not configured")?;
-                let runner = RealCommandRunner;
-                let adapter = CloudflareAdapter {
-                    config,
-                    adapter_config,
-                    runner: &runner,
-                };
-                adapter.sync_secret(key, value, target)
-            }
-            "convex" => {
-                let adapter_config = config
-                    .adapters
-                    .convex
-                    .as_ref()
-                    .context("convex adapter not configured")?;
-                let runner = RealCommandRunner;
-                let adapter = ConvexAdapter {
-                    config,
-                    adapter_config,
-                    runner: &runner,
-                };
-                adapter.sync_secret(key, value, target)
-            }
-            other => {
-                anyhow::bail!("unknown adapter '{other}' during sync");
-            }
-        };
+        let (adapter_idx, _) = adapter_map[target.adapter.as_str()];
+        let adapter = &adapters[adapter_idx];
+        let result = adapter.sync_secret(key, value, target);
 
         let tracker_key = SyncIndex::tracker_key(
             key,
@@ -284,19 +261,21 @@ pub fn run(
         }
     }
 
-    // Also count skipped env secrets
+    // Count skipped batch secrets (those in non-dirty batch target groups)
     for secret in &resolved {
         for target in &secret.targets {
-            if target.adapter != "env" {
-                continue;
-            }
-            if let Some(filter_env) = env {
-                if target.environment != filter_env {
-                    continue;
+            if let Some((_, SyncMode::Batch)) = adapter_map.get(target.adapter.as_str()) {
+                if let Some(filter_env) = env {
+                    if target.environment != filter_env {
+                        continue;
+                    }
                 }
-            }
-            if let Some(app) = &target.app {
-                if !env_dirty_pairs.contains(&(app.clone(), target.environment.clone())) {
+                let group = (
+                    target.adapter.clone(),
+                    target.app.clone(),
+                    target.environment.clone(),
+                );
+                if !batch_dirty.contains(&group) {
                     let composite = format!("{}:{}", secret.key, target.environment);
                     if payload.secrets.contains_key(&composite) {
                         skip_count += 1;

@@ -72,17 +72,23 @@ pub enum Commands {
         #[arg(long)]
         env: Option<String>,
     },
-    /// Push secrets to 1Password
+    /// Push secrets to storage plugins
     Push {
         /// Environment to push
         #[arg(long)]
         env: String,
+        /// Push to a specific plugin only
+        #[arg(long)]
+        only: Option<String>,
     },
-    /// Pull secrets from 1Password
+    /// Pull secrets from storage plugins
     Pull {
         /// Environment to pull
         #[arg(long)]
         env: String,
+        /// Pull from a specific plugin only
+        #[arg(long)]
+        only: Option<String>,
         /// Auto-sync after pulling
         #[arg(long)]
         sync: bool,

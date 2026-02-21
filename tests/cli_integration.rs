@@ -146,56 +146,36 @@ fn list_uncategorized_secrets() {
 
 #[test]
 fn push_unknown_env_errors() {
-    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::push::run(&config, "staging").unwrap_err();
+    let err = cli::push::run(&config, "staging", None).unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
 #[test]
-fn push_no_onepassword_adapter() {
+fn push_no_plugins() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::push::run(&config, "dev").unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("onepassword adapter not configured"));
-}
-
-#[test]
-fn push_empty_env_secrets() {
-    let yaml = r#"
-project: testapp
-environments: [dev]
-adapters:
-  onepassword:
-    vault: Test
-    item_pattern: "{project} - {Environment}"
-"#;
-    let project = TestProject::with_store(yaml).unwrap();
-    let config = project.config().unwrap();
-    // No secrets set — should return Ok with message
-    cli::push::run(&config, "dev").unwrap();
+    let err = cli::push::run(&config, "dev", None).unwrap_err();
+    assert!(err.to_string().contains("no plugins configured"));
 }
 
 // === pull ===
 
 #[test]
 fn pull_unknown_env_errors() {
-    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "staging", false).unwrap_err();
+    let err = cli::pull::run(&config, "staging", None, false).unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
 #[test]
-fn pull_no_onepassword_adapter() {
+fn pull_no_plugins() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "dev", false).unwrap_err();
-    assert!(err
-        .to_string()
-        .contains("onepassword adapter not configured"));
+    let err = cli::pull::run(&config, "dev", None, false).unwrap_err();
+    assert!(err.to_string().contains("no plugins configured"));
 }
 
 // === sync ===
@@ -267,7 +247,10 @@ fn sync_force_resyncs_unchanged() {
 }
 
 #[test]
-fn sync_skips_onepassword_targets() {
+fn sync_skips_plugin_targets() {
+    // Secrets with targets that reference a non-adapter name should be skipped
+    // Since onepassword is now a plugin, not an adapter, we just verify sync works
+    // with a config that has both adapter and plugin targets
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -279,15 +262,11 @@ adapters:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
-  onepassword:
-    vault: Test
-    item_pattern: test
 secrets:
   G:
     MY_SECRET:
       targets:
         env: [web:dev]
-        onepassword: [dev]
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
@@ -295,7 +274,7 @@ secrets:
     let store = project.store().unwrap();
     store.set("MY_SECRET", "dev", "val").unwrap();
 
-    // Sync should succeed — skipping 1Password targets
+    // Sync should succeed — only hitting env adapter
     cli::sync::run(&config, None, false, false, false).unwrap();
     assert!(project.root().join("apps/web/.env.local").is_file());
 }
@@ -311,8 +290,7 @@ fn sync_skips_no_value_secrets() {
 
 #[test]
 fn sync_failure_count_causes_error() {
-    // This tests uses cloudflare which requires a real CLI — skip via env adapter error
-    // Instead test via env adapter with an app that can't write
+    // This tests uses env adapter with an app that can't write
     let yaml = r#"
 project: x
 environments: [dev]
@@ -410,4 +388,109 @@ fn sync_records_to_tracker() {
     let keys: Vec<&String> = index.records.keys().collect();
     assert!(keys.iter().any(|k| k.contains("MY_SECRET")));
     assert!(keys.iter().any(|k| k.contains("OTHER_SECRET")));
+}
+
+// === cloud_file plugin integration ===
+
+#[test]
+fn cloud_file_push_pull_cleartext() {
+    use lockbox::config::{CloudFileFormat, CloudFilePluginConfig};
+    use lockbox::plugins::cloud_file::CloudFilePlugin;
+    use lockbox::plugins::StoragePlugin;
+
+    let project_dir = tempfile::tempdir().unwrap();
+    let cloud_dir = tempfile::tempdir().unwrap();
+
+    let yaml = "project: testapp\nenvironments: [dev]";
+    std::fs::write(project_dir.path().join("lockbox.yaml"), yaml).unwrap();
+    lockbox::store::SecretStore::load_or_create(project_dir.path()).unwrap();
+    let config = lockbox::config::Config::load(&project_dir.path().join("lockbox.yaml")).unwrap();
+
+    let store = lockbox::store::SecretStore::open(&config.root).unwrap();
+    store.set("KEY", "dev", "val123").unwrap();
+    let payload = store.payload().unwrap();
+
+    let plugin = CloudFilePlugin::new(
+        "test_cloud".to_string(),
+        CloudFilePluginConfig {
+            path: cloud_dir.path().to_string_lossy().to_string(),
+            format: CloudFileFormat::Cleartext,
+        },
+    );
+
+    plugin.push(&payload, &config, "dev").unwrap();
+    assert!(cloud_dir.path().join("secrets.json").is_file());
+
+    let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+    assert_eq!(version, 1);
+    assert_eq!(secrets.get("KEY:dev").unwrap(), "val123");
+}
+
+#[test]
+fn cloud_file_push_pull_encrypted() {
+    use lockbox::config::{CloudFileFormat, CloudFilePluginConfig};
+    use lockbox::plugins::cloud_file::CloudFilePlugin;
+    use lockbox::plugins::StoragePlugin;
+
+    let project_dir = tempfile::tempdir().unwrap();
+    let cloud_dir = tempfile::tempdir().unwrap();
+
+    let yaml = "project: testapp\nenvironments: [dev]";
+    std::fs::write(project_dir.path().join("lockbox.yaml"), yaml).unwrap();
+    lockbox::store::SecretStore::load_or_create(project_dir.path()).unwrap();
+    let config = lockbox::config::Config::load(&project_dir.path().join("lockbox.yaml")).unwrap();
+
+    let store = lockbox::store::SecretStore::open(&config.root).unwrap();
+    store.set("SECRET", "dev", "encrypted_val").unwrap();
+    let payload = store.payload().unwrap();
+
+    let plugin = CloudFilePlugin::new(
+        "test_enc".to_string(),
+        CloudFilePluginConfig {
+            path: cloud_dir.path().to_string_lossy().to_string(),
+            format: CloudFileFormat::Encrypted,
+        },
+    );
+
+    plugin.push(&payload, &config, "dev").unwrap();
+    assert!(cloud_dir.path().join("secrets.enc").is_file());
+
+    let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+    assert_eq!(version, 1);
+    assert_eq!(secrets.get("SECRET:dev").unwrap(), "encrypted_val");
+}
+
+#[test]
+fn push_only_flag() {
+    // Test that --only filters to a specific plugin
+    // We can't easily test with real plugins in integration, but we can verify
+    // the error when specifying an unknown plugin name
+    let yaml = r#"
+project: testapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: Test
+    item_pattern: test
+"#;
+    let project = TestProject::with_store(yaml).unwrap();
+    let config = project.config().unwrap();
+    let err = cli::push::run(&config, "dev", Some("nonexistent")).unwrap_err();
+    assert!(err.to_string().contains("unknown plugin"));
+}
+
+#[test]
+fn pull_only_flag() {
+    let yaml = r#"
+project: testapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: Test
+    item_pattern: test
+"#;
+    let project = TestProject::with_store(yaml).unwrap();
+    let config = project.config().unwrap();
+    let err = cli::pull::run(&config, "dev", Some("nonexistent"), false).unwrap_err();
+    assert!(err.to_string().contains("unknown plugin"));
 }

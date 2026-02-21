@@ -122,6 +122,94 @@ pub fn extract_env_secrets(
         .collect()
 }
 
+/// Result of multi-source reconciliation.
+#[derive(Debug)]
+pub struct MultiReconcileResult {
+    /// The merged payload to write locally.
+    pub merged_payload: StorePayload,
+    /// Names of sources that need updating (their version was behind the merged result).
+    pub sources_to_update: Vec<String>,
+    /// Whether anything changed compared to local.
+    pub local_changed: bool,
+}
+
+/// Reconcile local store against N remote sources.
+///
+/// Finds the highest version, starts with that as base, merges in
+/// unique secrets from other sources. Sets version to max+1 if merges occurred.
+pub fn reconcile_multi(
+    local: &StorePayload,
+    remotes: &[(&str, &BTreeMap<String, String>, u64)], // (name, composite_secrets, version)
+) -> MultiReconcileResult {
+    // Find the max version across local and all remotes
+    let mut max_version = local.version;
+    for (_, _, version) in remotes {
+        if *version > max_version {
+            max_version = *version;
+        }
+    }
+
+    // Start with local secrets as the base
+    let mut merged = local.secrets.clone();
+    let mut had_merge = false;
+    let mut sources_to_update = Vec::new();
+
+    // If local is behind, pull in secrets from the highest-version remote first
+    if local.version < max_version {
+        // Find all remotes at max_version and merge their secrets
+        for (_name, secrets, version) in remotes {
+            if *version == max_version {
+                for (key, value) in *secrets {
+                    let existing = merged.get(key);
+                    if existing.map(|v| v.as_str()) != Some(value.as_str()) {
+                        merged.insert(key.clone(), value.clone());
+                        had_merge = true;
+                    }
+                }
+            }
+        }
+    }
+
+    // Merge unique secrets from lower-version sources
+    for (_name, secrets, version) in remotes {
+        if *version < max_version {
+            for (key, value) in *secrets {
+                if !merged.contains_key(key) {
+                    merged.insert(key.clone(), value.clone());
+                    had_merge = true;
+                }
+            }
+        }
+    }
+
+    // Also check local-only secrets if local version is lower
+    // (they're already in merged since we started with local)
+
+    let final_version = if had_merge {
+        max_version + 1
+    } else {
+        max_version
+    };
+
+    // Determine which sources need updating
+    for (name, _, version) in remotes {
+        if *version < final_version {
+            sources_to_update.push(name.to_string());
+        }
+    }
+
+    let local_changed = local.version != final_version || merged != local.secrets;
+
+    MultiReconcileResult {
+        merged_payload: StorePayload {
+            secrets: merged,
+            version: final_version,
+        },
+        sources_to_update,
+        local_changed,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -308,5 +396,88 @@ mod tests {
         let result = reconcile(&local, &remote, 1, "dev");
         assert!(matches!(result.action, ReconcileAction::PullRemote));
         assert_eq!(result.pulled, vec!["A"]);
+    }
+
+    // --- reconcile_multi tests ---
+
+    fn make_composite(secrets: &[(&str, &str)]) -> BTreeMap<String, String> {
+        secrets
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn multi_local_highest_no_change() {
+        let local = make_payload(&[("A:dev", "a")], 5);
+        let remote = make_composite(&[("A:dev", "a")]);
+        let result = reconcile_multi(&local, &[("op", &remote, 3)]);
+        assert!(!result.local_changed);
+        assert_eq!(result.merged_payload.version, 5);
+        assert!(result.sources_to_update.contains(&"op".to_string()));
+    }
+
+    #[test]
+    fn multi_remote_highest_pulls() {
+        let local = make_payload(&[("A:dev", "old")], 3);
+        let remote = make_composite(&[("A:dev", "new")]);
+        let result = reconcile_multi(&local, &[("op", &remote, 5)]);
+        assert!(result.local_changed);
+        assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "new");
+    }
+
+    #[test]
+    fn multi_two_remotes_highest_wins() {
+        let local = make_payload(&[("A:dev", "local")], 1);
+        let remote1 = make_composite(&[("A:dev", "r1")]);
+        let remote2 = make_composite(&[("A:dev", "r2")]);
+        let result = reconcile_multi(&local, &[("r1", &remote1, 3), ("r2", &remote2, 5)]);
+        assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "r2");
+        assert!(result.sources_to_update.contains(&"r1".to_string()));
+    }
+
+    #[test]
+    fn multi_merges_unique_secrets() {
+        let local = make_payload(&[("A:dev", "a")], 3);
+        let remote = make_composite(&[("B:dev", "b")]);
+        let result = reconcile_multi(&local, &[("op", &remote, 5)]);
+        // Remote is higher, so B:dev pulled in. A:dev preserved from local.
+        assert!(result.merged_payload.secrets.contains_key("A:dev"));
+        assert!(result.merged_payload.secrets.contains_key("B:dev"));
+        // Had merge so version is max+1
+        assert_eq!(result.merged_payload.version, 6);
+    }
+
+    #[test]
+    fn multi_all_same_version_no_change() {
+        let local = make_payload(&[("A:dev", "a")], 5);
+        let remote = make_composite(&[("A:dev", "a")]);
+        let result = reconcile_multi(&local, &[("op", &remote, 5)]);
+        assert!(!result.local_changed);
+        assert_eq!(result.merged_payload.version, 5);
+        assert!(result.sources_to_update.is_empty());
+    }
+
+    #[test]
+    fn multi_empty_remotes() {
+        let local = make_payload(&[("A:dev", "a")], 5);
+        let result = reconcile_multi(&local, &[]);
+        assert!(!result.local_changed);
+        assert_eq!(result.merged_payload.version, 5);
+    }
+
+    #[test]
+    fn multi_three_sources() {
+        let local = make_payload(&[("L:dev", "l")], 1);
+        let r1 = make_composite(&[("R1:dev", "r1")]);
+        let r2 = make_composite(&[("R2:dev", "r2")]);
+        let result = reconcile_multi(&local, &[("r1", &r1, 3), ("r2", &r2, 2)]);
+        // r1 at v3 is highest, so R1:dev is base. R2:dev merged as unique from lower version.
+        // L:dev preserved from local.
+        assert!(result.merged_payload.secrets.contains_key("L:dev"));
+        assert!(result.merged_payload.secrets.contains_key("R1:dev"));
+        assert!(result.merged_payload.secrets.contains_key("R2:dev"));
+        // Had merges so version is max(3)+1 = 4
+        assert_eq!(result.merged_payload.version, 4);
     }
 }

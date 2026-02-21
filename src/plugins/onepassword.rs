@@ -2,35 +2,53 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::adapters::{CommandOpts, CommandRunner, SyncAdapter};
-use crate::config::{Config, OnePasswordAdapterConfig, ResolvedTarget};
+use crate::adapters::{CommandOpts, CommandRunner};
+use crate::config::{Config, OnePasswordPluginConfig};
+use crate::store::StorePayload;
 
-pub struct OnePasswordAdapter<'a> {
-    pub config: &'a Config,
-    pub adapter_config: &'a OnePasswordAdapterConfig,
-    pub runner: &'a dyn CommandRunner,
+use super::StoragePlugin;
+
+pub struct OnePasswordPlugin<'a> {
+    config: &'a Config,
+    plugin_config: OnePasswordPluginConfig,
+    runner: &'a dyn CommandRunner,
 }
 
-impl<'a> SyncAdapter for OnePasswordAdapter<'a> {
-    fn name(&self) -> &str {
-        "onepassword"
+impl<'a> OnePasswordPlugin<'a> {
+    pub fn new(
+        config: &'a Config,
+        plugin_config: OnePasswordPluginConfig,
+        runner: &'a dyn CommandRunner,
+    ) -> Self {
+        Self {
+            config,
+            plugin_config,
+            runner,
+        }
     }
 
-    fn sync_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
-        // 1Password sync is done via push/pull, not per-secret sync
-        Ok(())
-    }
-}
+    /// Resolve the 1Password item name for an environment.
+    pub fn item_name(&self, env: &str) -> String {
+        // Capitalize first letter of env for {Environment} pattern
+        let env_capitalized = {
+            let mut chars = env.chars();
+            match chars.next() {
+                Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+                None => String::new(),
+            }
+        };
 
-impl<'a> OnePasswordAdapter<'a> {
-    fn item_name(&self, env: &str) -> Result<String> {
-        self.config.onepassword_item_name(env)
+        self.plugin_config
+            .item_pattern
+            .replace("{project}", &self.config.project)
+            .replace("{Environment}", &env_capitalized)
+            .replace("{environment}", env)
     }
 
     /// Get a 1Password item, returning None if it doesn't exist.
     pub fn get_item(&self, env: &str) -> Result<Option<OpItem>> {
-        let item_name = self.item_name(env)?;
-        let vault = &self.adapter_config.vault;
+        let item_name = self.item_name(env);
+        let vault = &self.plugin_config.vault;
 
         let output = self
             .runner
@@ -65,8 +83,8 @@ impl<'a> OnePasswordAdapter<'a> {
         secrets: &BTreeMap<String, String>,
         version: u64,
     ) -> Result<()> {
-        let item_name = self.item_name(env)?;
-        let vault = &self.adapter_config.vault;
+        let item_name = self.item_name(env);
+        let vault = &self.plugin_config.vault;
 
         let existing = self.get_item(env)?;
 
@@ -153,6 +171,45 @@ impl<'a> OnePasswordAdapter<'a> {
             None => return Ok(None),
         };
         Ok(Some((item.secrets, item.version)))
+    }
+}
+
+impl<'a> StoragePlugin for OnePasswordPlugin<'a> {
+    fn name(&self) -> &str {
+        "onepassword"
+    }
+
+    fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
+        // Extract bare keys for this environment
+        let suffix = format!(":{env}");
+        let env_secrets: BTreeMap<String, String> = payload
+            .secrets
+            .iter()
+            .filter_map(|(k, v)| {
+                k.strip_suffix(&suffix)
+                    .map(|bare| (bare.to_string(), v.clone()))
+            })
+            .collect();
+
+        if env_secrets.is_empty() {
+            return Ok(());
+        }
+
+        self.push_item(env, &env_secrets, payload.version)
+    }
+
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+        // Pull returns bare keys — convert to composite for consistency
+        match self.pull_item(env)? {
+            Some((bare_secrets, version)) => {
+                let composite: BTreeMap<String, String> = bare_secrets
+                    .into_iter()
+                    .map(|(k, v)| (format!("{k}:{env}"), v))
+                    .collect();
+                Ok(Some((composite, version)))
+            }
+            None => Ok(None),
+        }
     }
 }
 
@@ -298,5 +355,101 @@ mod tests {
         });
         let item = OpItem::from_json(&json).unwrap();
         assert_eq!(item.secrets.get("KEY").unwrap(), "");
+    }
+
+    #[test]
+    fn item_name_substitution() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: "{project} - {Environment}"
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        struct DummyRunner;
+        impl CommandRunner for DummyRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+        let runner = DummyRunner;
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        assert_eq!(plugin.item_name("dev"), "myapp - Dev");
+    }
+
+    #[test]
+    fn item_name_lowercase() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: "{environment}"
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        struct DummyRunner;
+        impl CommandRunner for DummyRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+        let runner = DummyRunner;
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        assert_eq!(plugin.item_name("dev"), "dev");
+    }
+
+    #[test]
+    fn item_name_empty_env() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: "{project} - {Environment}"
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        struct DummyRunner;
+        impl CommandRunner for DummyRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+        let runner = DummyRunner;
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        assert_eq!(plugin.item_name(""), "myapp - ");
     }
 }

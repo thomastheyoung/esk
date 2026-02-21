@@ -2,9 +2,9 @@ use anyhow::{bail, Result};
 use console::style;
 use dialoguer::Password;
 
-use crate::adapters::onepassword::OnePasswordAdapter;
 use crate::adapters::RealCommandRunner;
 use crate::config::Config;
+use crate::plugins;
 use crate::store::SecretStore;
 
 pub fn run(
@@ -51,32 +51,18 @@ pub fn run(
         return Ok(());
     }
 
-    // Auto-push to 1Password if configured
-    if let Some(op_config) = &config.adapters.onepassword {
+    // Auto-push to all configured plugins
+    if !config.plugins.is_empty() {
         let runner = RealCommandRunner;
-        let adapter = OnePasswordAdapter {
-            config,
-            adapter_config: op_config,
-            runner: &runner,
-        };
-
-        let suffix = format!(":{env}");
-        let env_secrets = payload
-            .secrets
-            .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
-            })
-            .collect();
-
-        let item_name = config.onepassword_item_name(env)?;
-        print!("  {} 1Password ({})...", style("pushing").cyan(), item_name);
-        match adapter.push_item(env, &env_secrets, payload.version) {
-            Ok(()) => println!(" {}", style("done").green()),
-            Err(e) => {
-                println!(" {}", style("failed").red());
-                eprintln!("  {e}");
+        let all_plugins = plugins::build_plugins(config, &runner);
+        for plugin in &all_plugins {
+            print!("  {} {}...", style("pushing").cyan(), plugin.name());
+            match plugin.push(&payload, config, env) {
+                Ok(()) => println!(" {}", style("done").green()),
+                Err(e) => {
+                    println!(" {}", style("failed").red());
+                    eprintln!("  {e}");
+                }
             }
         }
     }

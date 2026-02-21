@@ -1,6 +1,7 @@
 mod adapters;
 mod cli;
 mod config;
+mod plugins;
 mod reconcile;
 mod store;
 mod tracker;
@@ -58,17 +59,17 @@ fn main() -> Result<()> {
             let config = Config::load(&config_path)?;
             cli::status::run(&config, env.as_deref())?;
         }
-        Commands::Push { env } => {
+        Commands::Push { env, only } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::push::run(&config, env)?;
+            cli::push::run(&config, env, only.as_deref())?;
         }
-        Commands::Pull { env, sync } => {
+        Commands::Pull { env, only, sync } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::pull::run(&config, env, *sync)?;
+            cli::pull::run(&config, env, only.as_deref(), *sync)?;
         }
     }
 
