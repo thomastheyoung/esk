@@ -383,7 +383,7 @@ fn sync_records_to_tracker() {
 
     cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path()).unwrap();
+    let index = SyncIndex::load(&project.sync_index_path());
     assert!(!index.records.is_empty());
     // Should have records for each synced secret
     let keys: Vec<&String> = index.records.keys().collect();
@@ -558,7 +558,7 @@ fn sync_cloudflare_records_tracker() {
 
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path()).unwrap();
+    let index = SyncIndex::load(&project.sync_index_path());
     assert!(!index.records.is_empty());
     assert!(index.records.keys().any(|k| k.contains("STRIPE_KEY") && k.contains("cloudflare")));
 }
@@ -579,7 +579,7 @@ fn sync_cloudflare_failure_tracked() {
         cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path()).unwrap();
+    let index = SyncIndex::load(&project.sync_index_path());
     let record = index
         .records
         .values()
@@ -724,7 +724,7 @@ fn sync_convex_failure_tracked() {
         cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path()).unwrap();
+    let index = SyncIndex::load(&project.sync_index_path());
     let record = index
         .records
         .values()

@@ -37,16 +37,27 @@ impl SyncIndex {
         }
     }
 
-    pub fn load(path: &Path) -> Result<Self> {
+    pub fn load(path: &Path) -> Self {
         if !path.is_file() {
-            return Ok(Self::new(path));
+            return Self::new(path);
         }
-        let contents = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read {}", path.display()))?;
-        let mut index: SyncIndex = serde_json::from_str(&contents)
-            .with_context(|| format!("failed to parse {}", path.display()))?;
-        index.path = path.to_path_buf();
-        Ok(index)
+        let contents = match std::fs::read_to_string(path) {
+            Ok(c) => c,
+            Err(e) => {
+                eprintln!("Warning: could not read sync index ({}), starting fresh", e);
+                return Self::new(path);
+            }
+        };
+        match serde_json::from_str::<SyncIndex>(&contents) {
+            Ok(mut index) => {
+                index.path = path.to_path_buf();
+                index
+            }
+            Err(e) => {
+                eprintln!("Warning: sync index corrupted ({}), starting fresh", e);
+                Self::new(path)
+            }
+        }
     }
 
     pub fn save(&self) -> Result<()> {
@@ -135,7 +146,7 @@ mod tests {
 
     #[test]
     fn load_nonexistent_returns_empty() {
-        let index = SyncIndex::load(Path::new("/nonexistent/path/test.json")).unwrap();
+        let index = SyncIndex::load(Path::new("/nonexistent/path/test.json"));
         assert!(index.records.is_empty());
     }
 
@@ -151,17 +162,18 @@ mod tests {
         );
         index.save().unwrap();
 
-        let loaded = SyncIndex::load(&path).unwrap();
+        let loaded = SyncIndex::load(&path);
         assert_eq!(loaded.records.len(), 1);
         assert!(loaded.records.contains_key("KEY:env:web:dev"));
     }
 
     #[test]
-    fn load_invalid_json() {
+    fn load_corrupted_returns_empty() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.json");
         std::fs::write(&path, "not valid json").unwrap();
-        assert!(SyncIndex::load(&path).is_err());
+        let index = SyncIndex::load(&path);
+        assert!(index.records.is_empty());
     }
 
     #[test]
@@ -182,7 +194,7 @@ mod tests {
         );
         index.save().unwrap();
 
-        let loaded = SyncIndex::load(&path).unwrap();
+        let loaded = SyncIndex::load(&path);
         assert_eq!(loaded.records.len(), 2);
         assert_eq!(
             loaded.records["A:env:web:dev"].last_sync_status,
