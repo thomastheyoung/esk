@@ -53,10 +53,10 @@ Lockbox distinguishes between two extension types:
 
 Project-level config defines everything: environments, apps, adapter settings, plugin settings, and secrets. No hardcoded paths or project-specific assumptions in the binary.
 
-### Encrypted store (`.secrets.enc`)
+### Encrypted store (`.lockbox/store.enc`)
 
 - AES-256-GCM (authenticated encryption — replaces CBC from the TS version)
-- Random 32-byte key in `.secrets.key` (gitignored)
+- Random 32-byte key in `.lockbox/store.key` (gitignored)
 - Per-encryption 12-byte nonce
 - Storage format: `nonce:ciphertext:tag` (hex-encoded)
 - JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N }`
@@ -97,7 +97,7 @@ pub trait CommandRunner: Send + Sync {
 }
 ```
 
-### Change tracking (`.sync-index.json`)
+### Change tracking (`.lockbox/sync-index.json`)
 
 SHA-256 hash per (secret, target) pair. Skip sync when hash matches.
 Atomic writes via temp file + rename.

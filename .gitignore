@@ -14,7 +14,7 @@
 Thumbs.db
 
 # Secrets (never commit the key)
-.secrets.key
+.lockbox/store.key
 
 # Test fixtures with real values
 tests/fixtures/*.key

@@ -104,8 +104,8 @@ Stores the secret payload in a local or cloud-synced folder (Dropbox, Google Dri
 
 **Encrypted format** (`format: encrypted`):
 
-- **Push**: Copies the `.secrets.enc` file to `{path}/secrets.enc`.
-- **Pull**: Reads `{path}/secrets.enc`, decrypts with the local `.secrets.key`, returns the payload.
+- **Push**: Copies the `.lockbox/store.enc` file to `{path}/secrets.enc`.
+- **Pull**: Reads `{path}/secrets.enc`, decrypts with the local `.lockbox/store.key`, returns the payload.
 - The cloud copy is encrypted — it's safe to store in shared or less-trusted locations.
 
 **Cleartext format** (`format: cleartext`):
@@ -144,7 +144,7 @@ plugins:
 
 ```
 ~/Dropbox/secrets/myproject/
-  secrets.enc       # Copy of .secrets.enc (AES-256-GCM encrypted)
+  secrets.enc       # Copy of .lockbox/store.enc (AES-256-GCM encrypted)
 ```
 
 **Cleartext:**

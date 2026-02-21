@@ -5,7 +5,7 @@ Encrypted secrets management with multi-target sync. Store secrets locally with 
 ## Why lockbox
 
 - **One config, many targets** — Define a secret once, sync it to every service that needs it.
-- **Encrypted at rest** — Secrets are AES-256-GCM encrypted. The store file (`.secrets.enc`) is safe to commit; the key file (`.secrets.key`) stays local.
+- **Encrypted at rest** — Secrets are AES-256-GCM encrypted. The store file (`.lockbox/store.enc`) is safe to commit; the key file (`.lockbox/store.key`) stays local.
 - **Change detection** — SHA-256 hashing skips secrets that haven't changed. No unnecessary writes or API calls.
 - **Pluggable storage** — Push/pull secrets to 1Password, Dropbox, Google Drive, or OneDrive for team sharing, with version-based reconciliation.
 
@@ -50,9 +50,9 @@ lockbox sync
 | File               | Purpose                                                         | Git           |
 | ------------------ | --------------------------------------------------------------- | ------------- |
 | `lockbox.yaml`     | Project config (environments, apps, adapters, plugins, secrets) | Commit        |
-| `.secrets.enc`     | Encrypted secret store                                          | Commit        |
-| `.secrets.key`     | 32-byte encryption key (hex)                                    | **Gitignore** |
-| `.sync-index.json` | Sync state tracker                                              | Optional      |
+| `.lockbox/store.enc`     | Encrypted secret store                                          | Commit        |
+| `.lockbox/store.key`     | 32-byte encryption key (hex)                                    | **Gitignore** |
+| `.lockbox/sync-index.json` | Sync state tracker                                              | Optional      |
 
 ## Configuration
 
@@ -200,7 +200,7 @@ lockbox pull --env prod --sync            # Pull + auto-sync targets
 - **Memory**: Secret key bytes are zeroized on drop.
 - **Atomic writes**: Store and sync index use temp file + rename to prevent corruption.
 
-The encrypted store is safe to commit to git. The key file must never be committed — add `.secrets.key` to `.gitignore`.
+The encrypted store is safe to commit to git. The key file must never be committed — add `.lockbox/store.key` to `.gitignore`.
 
 ## Plugin workflow
 

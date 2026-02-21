@@ -31,8 +31,13 @@ impl Drop for SecretStore {
 impl SecretStore {
     /// Load existing store or create a new empty one.
     pub fn load_or_create(root: &Path) -> Result<Self> {
-        let store_path = root.join(".secrets.enc");
-        let key_path = root.join(".secrets.key");
+        let lockbox_dir = root.join(".lockbox");
+        if !lockbox_dir.is_dir() {
+            std::fs::create_dir_all(&lockbox_dir)
+                .with_context(|| format!("failed to create {}", lockbox_dir.display()))?;
+        }
+        let store_path = lockbox_dir.join("store.enc");
+        let key_path = lockbox_dir.join("store.key");
 
         let key = if key_path.is_file() {
             Self::read_key(&key_path)?
@@ -62,8 +67,8 @@ impl SecretStore {
 
     /// Open an existing store (errors if key or store file is missing).
     pub fn open(root: &Path) -> Result<Self> {
-        let store_path = root.join(".secrets.enc");
-        let key_path = root.join(".secrets.key");
+        let store_path = root.join(".lockbox/store.enc");
+        let key_path = root.join(".lockbox/store.key");
 
         if !key_path.is_file() {
             bail!(
@@ -252,8 +257,8 @@ mod tests {
     fn load_or_create_fresh() {
         let dir = tmp_root();
         let store = SecretStore::load_or_create(dir.path()).unwrap();
-        assert!(dir.path().join(".secrets.key").is_file());
-        assert!(dir.path().join(".secrets.enc").is_file());
+        assert!(dir.path().join(".lockbox/store.key").is_file());
+        assert!(dir.path().join(".lockbox/store.enc").is_file());
         let payload = store.payload().unwrap();
         assert!(payload.secrets.is_empty());
         assert_eq!(payload.version, 0);
@@ -264,10 +269,10 @@ mod tests {
         let dir = tmp_root();
         let store = SecretStore::load_or_create(dir.path()).unwrap();
         store.set("KEY", "dev", "val").unwrap();
-        let key_before = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+        let key_before = std::fs::read_to_string(dir.path().join(".lockbox/store.key")).unwrap();
 
         let store2 = SecretStore::load_or_create(dir.path()).unwrap();
-        let key_after = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+        let key_after = std::fs::read_to_string(dir.path().join(".lockbox/store.key")).unwrap();
         assert_eq!(key_before, key_after);
         assert_eq!(store2.get("KEY", "dev").unwrap(), Some("val".to_string()));
     }
@@ -277,10 +282,10 @@ mod tests {
         let dir = tmp_root();
         // Create key only
         SecretStore::load_or_create(dir.path()).unwrap();
-        std::fs::remove_file(dir.path().join(".secrets.enc")).unwrap();
+        std::fs::remove_file(dir.path().join(".lockbox/store.enc")).unwrap();
 
         let store = SecretStore::load_or_create(dir.path()).unwrap();
-        assert!(dir.path().join(".secrets.enc").is_file());
+        assert!(dir.path().join(".lockbox/store.enc").is_file());
         let payload = store.payload().unwrap();
         assert_eq!(payload.version, 0);
     }
@@ -296,7 +301,7 @@ mod tests {
     fn open_missing_store() {
         let dir = tmp_root();
         SecretStore::load_or_create(dir.path()).unwrap();
-        std::fs::remove_file(dir.path().join(".secrets.enc")).unwrap();
+        std::fs::remove_file(dir.path().join(".lockbox/store.enc")).unwrap();
         let err = SecretStore::open(dir.path()).unwrap_err();
         assert!(err.to_string().contains("encrypted store not found"));
     }
@@ -379,7 +384,7 @@ mod tests {
         let dir = tmp_root();
         let store = SecretStore::load_or_create(dir.path()).unwrap();
         // Overwrite the enc file with empty content
-        std::fs::write(dir.path().join(".secrets.enc"), "").unwrap();
+        std::fs::write(dir.path().join(".lockbox/store.enc"), "").unwrap();
         let payload = store.payload().unwrap();
         assert_eq!(payload.version, 0);
         assert!(payload.secrets.is_empty());
@@ -525,7 +530,7 @@ mod tests {
         use std::os::unix::fs::PermissionsExt;
         let dir = tmp_root();
         SecretStore::load_or_create(dir.path()).unwrap();
-        let metadata = std::fs::metadata(dir.path().join(".secrets.key")).unwrap();
+        let metadata = std::fs::metadata(dir.path().join(".lockbox/store.key")).unwrap();
         let mode = metadata.permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
     }
@@ -534,7 +539,7 @@ mod tests {
     fn key_is_32_bytes() {
         let dir = tmp_root();
         SecretStore::load_or_create(dir.path()).unwrap();
-        let hex_str = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+        let hex_str = std::fs::read_to_string(dir.path().join(".lockbox/store.key")).unwrap();
         let key_bytes = hex::decode(hex_str.trim()).unwrap();
         assert_eq!(key_bytes.len(), 32);
     }
@@ -543,7 +548,7 @@ mod tests {
     fn key_hex_roundtrip() {
         let dir = tmp_root();
         SecretStore::load_or_create(dir.path()).unwrap();
-        let hex_str = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+        let hex_str = std::fs::read_to_string(dir.path().join(".lockbox/store.key")).unwrap();
         let key_bytes = hex::decode(hex_str.trim()).unwrap();
         assert_eq!(hex::encode(&key_bytes), hex_str.trim());
     }
@@ -553,7 +558,7 @@ mod tests {
         let dir = tmp_root();
         let store = SecretStore::load_or_create(dir.path()).unwrap();
         store.set("KEY", "dev", "val").unwrap();
-        assert!(dir.path().join(".secrets.enc").is_file());
+        assert!(dir.path().join(".lockbox/store.enc").is_file());
         // No temp files left behind
         let entries: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
@@ -577,7 +582,7 @@ mod tests {
     fn invalid_key_hex_in_file() {
         let dir = tmp_root();
         SecretStore::load_or_create(dir.path()).unwrap();
-        std::fs::write(dir.path().join(".secrets.key"), "not_valid_hex_zzz").unwrap();
+        std::fs::write(dir.path().join(".lockbox/store.key"), "not_valid_hex_zzz").unwrap();
         let err = SecretStore::open(dir.path()).unwrap_err();
         assert!(err.to_string().contains("invalid key hex"));
     }
@@ -586,7 +591,7 @@ mod tests {
     fn empty_key_file() {
         let dir = tmp_root();
         SecretStore::load_or_create(dir.path()).unwrap();
-        std::fs::write(dir.path().join(".secrets.key"), "").unwrap();
+        std::fs::write(dir.path().join(".lockbox/store.key"), "").unwrap();
         let store = SecretStore::open(dir.path()).unwrap();
         let err = store.encrypt("test").unwrap_err();
         assert!(err.to_string().contains("failed to create cipher"));

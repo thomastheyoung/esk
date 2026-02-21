@@ -42,7 +42,7 @@ impl TestProject {
     }
 
     pub fn sync_index_path(&self) -> PathBuf {
-        self.dir.path().join(".sync-index.json")
+        self.dir.path().join(".lockbox/sync-index.json")
     }
 }
 

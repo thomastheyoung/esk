@@ -7,9 +7,10 @@ use crate::tracker::SyncIndex;
 
 pub fn run(cwd: &Path) -> Result<()> {
     let config_path = cwd.join("lockbox.yaml");
-    let store_path = cwd.join(".secrets.enc");
-    let key_path = cwd.join(".secrets.key");
-    let sync_index_path = cwd.join(".sync-index.json");
+    let lockbox_dir = cwd.join(".lockbox");
+    let store_path = lockbox_dir.join("store.enc");
+    let key_path = lockbox_dir.join("store.key");
+    let sync_index_path = lockbox_dir.join("sync-index.json");
 
     // Scaffold lockbox.yaml if it doesn't exist
     if !config_path.is_file() {
@@ -72,11 +73,11 @@ secrets:
     let gitignore_path = cwd.join(".gitignore");
     if gitignore_path.is_file() {
         let contents = std::fs::read_to_string(&gitignore_path)?;
-        if !contents.contains(".secrets.key") {
+        if !contents.contains(".lockbox/store.key") {
             println!(
                 "\n  {} add {} to your .gitignore",
                 style("reminder:").yellow(),
-                style(".secrets.key").bold()
+                style(".lockbox/store.key").bold()
             );
         }
     }

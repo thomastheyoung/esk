@@ -13,11 +13,11 @@ lockbox init
 Creates:
 
 - `lockbox.yaml` — scaffold config with example structure
-- `.secrets.key` — random 32-byte encryption key (hex-encoded, `0600` permissions)
-- `.secrets.enc` — empty encrypted store
-- `.sync-index.json` — empty sync tracker
+- `.lockbox/store.key` — random 32-byte encryption key (hex-encoded, `0600` permissions)
+- `.lockbox/store.enc` — empty encrypted store
+- `.lockbox/sync-index.json` — empty sync tracker
 
-Idempotent — skips files that already exist. Warns if `.secrets.key` is not in `.gitignore`.
+Idempotent — skips files that already exist. Warns if `.lockbox/store.key` is not in `.gitignore`.
 
 ---
 
@@ -133,7 +133,7 @@ Targets whose adapter name matches a plugin (not an adapter) are skipped — plu
 
 **Change detection:**
 
-SHA-256 hash of each secret value is tracked per (secret, adapter, app, environment) tuple in `.sync-index.json`. Secrets are skipped when the hash matches unless `--force` is used. Failed syncs are always retried.
+SHA-256 hash of each secret value is tracked per (secret, adapter, app, environment) tuple in `.lockbox/sync-index.json`. Secrets are skipped when the hash matches unless `--force` is used. Failed syncs are always retried.
 
 **Example output:**
 
@@ -250,9 +250,9 @@ lockbox pull --env prod --sync            # Pull + reconcile + sync targets
 | File               | Description                             | Commit to git? |
 | ------------------ | --------------------------------------- | -------------- |
 | `lockbox.yaml`     | Project configuration                   | Yes            |
-| `.secrets.enc`     | AES-256-GCM encrypted secret store      | Yes            |
-| `.secrets.key`     | 32-byte encryption key (hex)            | **No**         |
-| `.sync-index.json` | Sync state (hashes, timestamps, status) | Optional       |
+| `.lockbox/store.enc`     | AES-256-GCM encrypted secret store      | Yes            |
+| `.lockbox/store.key`     | 32-byte encryption key (hex)            | **No**         |
+| `.lockbox/sync-index.json` | Sync state (hashes, timestamps, status) | Optional       |
 
 ## Exit codes
 

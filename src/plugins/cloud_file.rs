@@ -69,8 +69,8 @@ impl StoragePlugin for CloudFilePlugin {
 
         match self.plugin_config.format {
             CloudFileFormat::Encrypted => {
-                // Copy .secrets.enc to cloud path
-                let source = config.root.join(".secrets.enc");
+                // Copy store.enc to cloud path
+                let source = config.root.join(".lockbox/store.enc");
                 let dest = base_path.join("secrets.enc");
                 let content = std::fs::read(&source)
                     .with_context(|| format!("failed to read {}", source.display()))?;

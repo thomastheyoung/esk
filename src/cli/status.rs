@@ -8,7 +8,7 @@ use crate::tracker::{SyncIndex, SyncStatus};
 pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
-    let index_path = config.root.join(".sync-index.json");
+    let index_path = config.root.join(".lockbox/sync-index.json");
     let index = SyncIndex::load(&index_path)?;
     let resolved = config.resolve_secrets()?;
 

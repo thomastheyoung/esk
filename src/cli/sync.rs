@@ -27,7 +27,7 @@ pub fn run_with_runner(
 ) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
-    let index_path = config.root.join(".sync-index.json");
+    let index_path = config.root.join(".lockbox/sync-index.json");
     let mut index = SyncIndex::load(&index_path)?;
 
     let resolved = config.resolve_secrets()?;

@@ -12,25 +12,25 @@ fn init_creates_all_files() {
     let dir = tempfile::tempdir().unwrap();
     cli::init::run(dir.path()).unwrap();
     assert!(dir.path().join("lockbox.yaml").is_file());
-    assert!(dir.path().join(".secrets.enc").is_file());
-    assert!(dir.path().join(".secrets.key").is_file());
-    assert!(dir.path().join(".sync-index.json").is_file());
+    assert!(dir.path().join(".lockbox/store.enc").is_file());
+    assert!(dir.path().join(".lockbox/store.key").is_file());
+    assert!(dir.path().join(".lockbox/sync-index.json").is_file());
 }
 
 #[test]
 fn init_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     cli::init::run(dir.path()).unwrap();
-    let key1 = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+    let key1 = std::fs::read_to_string(dir.path().join(".lockbox/store.key")).unwrap();
     cli::init::run(dir.path()).unwrap();
-    let key2 = std::fs::read_to_string(dir.path().join(".secrets.key")).unwrap();
+    let key2 = std::fs::read_to_string(dir.path().join(".lockbox/store.key")).unwrap();
     assert_eq!(key1, key2); // Key not overwritten
 }
 
 #[test]
 fn init_gitignore_warning() {
     let dir = tempfile::tempdir().unwrap();
-    // Create .gitignore without .secrets.key
+    // Create .gitignore without .lockbox/store.key
     std::fs::write(dir.path().join(".gitignore"), "node_modules\n").unwrap();
     // Should not error (just warns)
     cli::init::run(dir.path()).unwrap();
