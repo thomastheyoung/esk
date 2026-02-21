@@ -98,6 +98,11 @@ pub trait SyncAdapter {
     /// Whether this adapter syncs individually or in batches.
     fn sync_mode(&self) -> SyncMode;
 
+    /// Validate that external dependencies are available before syncing.
+    fn preflight(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Sync a single secret to a target.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
 
@@ -123,19 +128,34 @@ pub trait SyncAdapter {
     }
 }
 
+/// Check that an external command is available via the CommandRunner.
+pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
+    runner
+        .run(program, &["--version"], CommandOpts::default())
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "{program} is not installed or not in PATH. Install it and try again."
+            )
+        })?;
+    Ok(())
+}
+
 /// Build all configured sync adapters from the config.
+/// Runs preflight checks and filters out adapters that fail, printing warnings.
 pub fn build_sync_adapters<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
 ) -> Vec<Box<dyn SyncAdapter + 'a>> {
     let mut adapters: Vec<Box<dyn SyncAdapter + 'a>> = Vec::new();
 
+    let mut candidates: Vec<Box<dyn SyncAdapter + 'a>> = Vec::new();
+
     if config.adapters.env.is_some() {
-        adapters.push(Box::new(env_file::EnvFileAdapter { config }));
+        candidates.push(Box::new(env_file::EnvFileAdapter { config }));
     }
 
     if let Some(adapter_config) = &config.adapters.cloudflare {
-        adapters.push(Box::new(cloudflare::CloudflareAdapter {
+        candidates.push(Box::new(cloudflare::CloudflareAdapter {
             config,
             adapter_config,
             runner,
@@ -143,11 +163,25 @@ pub fn build_sync_adapters<'a>(
     }
 
     if let Some(adapter_config) = &config.adapters.convex {
-        adapters.push(Box::new(convex::ConvexAdapter {
+        candidates.push(Box::new(convex::ConvexAdapter {
             config,
             adapter_config,
             runner,
         }));
+    }
+
+    for adapter in candidates {
+        match adapter.preflight() {
+            Ok(()) => adapters.push(adapter),
+            Err(e) => {
+                eprintln!(
+                    "  {} skipping {} adapter: {}",
+                    console::style("\u{26a0}").yellow(),
+                    adapter.name(),
+                    e
+                );
+            }
+        }
     }
 
     adapters
@@ -221,5 +255,65 @@ mod tests {
         let adapter = TestAdapter { fail_keys: vec![] };
         let results = adapter.sync_batch(&[], &make_target());
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn check_command_success() {
+        struct OkRunner;
+        impl CommandRunner for OkRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: b"1.0.0".to_vec(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+        assert!(check_command(&OkRunner, "some-tool").is_ok());
+    }
+
+    #[test]
+    fn check_command_missing() {
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                anyhow::bail!("No such file or directory")
+            }
+        }
+        let err = check_command(&FailRunner, "missing-tool").unwrap_err();
+        assert!(err.to_string().contains("missing-tool is not installed"));
+    }
+
+    #[test]
+    fn build_sync_adapters_filters_failing_preflight() {
+        // Use a config with cloudflare adapter, but a runner that fails
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env"
+  cloudflare:
+    env_flags: {}
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = crate::config::Config::load(&path).unwrap();
+
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                anyhow::bail!("not found")
+            }
+        }
+
+        let adapters = build_sync_adapters(&config, &FailRunner);
+        // env adapter has no preflight check, so it passes; cloudflare fails
+        assert_eq!(adapters.len(), 1);
+        assert_eq!(adapters[0].name(), "env");
     }
 }

@@ -32,7 +32,16 @@ pub fn run_with_runner(
 
     let resolved = config.resolve_secrets()?;
 
+    let has_configured_adapters = config.adapters.env.is_some()
+        || config.adapters.cloudflare.is_some()
+        || config.adapters.convex.is_some();
+
     let adapters = build_sync_adapters(config, runner);
+
+    if adapters.is_empty() && has_configured_adapters {
+        println!("  No adapters available after preflight checks. Fix the issues above and try again.");
+        return Ok(());
+    }
 
     // Build a lookup map: adapter_name -> (index, sync_mode)
     let adapter_map: HashMap<&str, (usize, SyncMode)> = adapters

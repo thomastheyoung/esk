@@ -179,6 +179,14 @@ impl<'a> StoragePlugin for OnePasswordPlugin<'a> {
         "onepassword"
     }
 
+    fn preflight(&self) -> Result<()> {
+        crate::adapters::check_command(self.runner, "op").map_err(|_| {
+            anyhow::anyhow!(
+                "1Password CLI (op) is not installed or not in PATH. Install it from: https://1password.com/downloads/command-line/"
+            )
+        })
+    }
+
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
         // Extract bare keys for this environment
         let suffix = format!(":{env}");
@@ -355,6 +363,67 @@ mod tests {
         });
         let item = OpItem::from_json(&json).unwrap();
         assert_eq!(item.secrets.get("KEY").unwrap(), "");
+    }
+
+    #[test]
+    fn onepassword_preflight_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        struct OkRunner;
+        impl CommandRunner for OkRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: b"2.0.0".to_vec(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+        let runner = OkRunner;
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        assert!(plugin.preflight().is_ok());
+    }
+
+    #[test]
+    fn onepassword_preflight_missing_op() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                anyhow::bail!("No such file or directory")
+            }
+        }
+        let runner = FailRunner;
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("1Password CLI (op) is not installed"));
     }
 
     #[test]

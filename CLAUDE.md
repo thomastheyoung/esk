@@ -156,7 +156,7 @@ cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-223 tests total: 161 unit (inline `#[cfg(test)]`) + 62 integration (`tests/`).
+236 tests total: 174 unit (inline `#[cfg(test)]`) + 62 integration (`tests/`).
 
 ### Test infrastructure
 

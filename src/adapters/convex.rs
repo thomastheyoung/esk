@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{CommandOpts, CommandRunner, SyncAdapter, SyncMode};
+use crate::adapters::{check_command, CommandOpts, CommandRunner, SyncAdapter, SyncMode};
 use crate::config::{Config, ConvexAdapterConfig, ResolvedTarget};
 
 pub struct ConvexAdapter<'a> {
@@ -16,6 +16,14 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
 
     fn sync_mode(&self) -> SyncMode {
         SyncMode::Individual
+    }
+
+    fn preflight(&self) -> Result<()> {
+        check_command(self.runner, "npx").map_err(|_| {
+            anyhow::anyhow!(
+                "npx is not installed or not in PATH. Install Node.js to get npx."
+            )
+        })
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
@@ -164,6 +172,47 @@ adapters:
             app: None,
             environment: env.to_string(),
         }
+    }
+
+    #[test]
+    fn convex_preflight_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path(), None);
+        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: b"10.0.0".to_vec(),
+            stderr: vec![],
+        }]);
+        let adapter = ConvexAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        assert!(adapter.preflight().is_ok());
+    }
+
+    #[test]
+    fn convex_preflight_missing_npx() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path(), None);
+        let adapter_config = config.adapters.convex.as_ref().unwrap();
+
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
+                anyhow::bail!("No such file or directory")
+            }
+        }
+
+        let adapter = ConvexAdapter {
+            config: &config,
+            adapter_config,
+            runner: &FailRunner,
+        };
+        let err = adapter.preflight().unwrap_err();
+        assert!(err.to_string().contains("npx is not installed"));
+        assert!(err.to_string().contains("Node.js"));
     }
 
     #[test]

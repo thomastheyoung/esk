@@ -15,6 +15,11 @@ use crate::store::StorePayload;
 pub trait StoragePlugin {
     fn name(&self) -> &str;
 
+    /// Validate that external dependencies are available before push/pull.
+    fn preflight(&self) -> Result<()> {
+        Ok(())
+    }
+
     /// Push store state to this plugin for a given environment.
     fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()>;
 
@@ -24,20 +29,37 @@ pub trait StoragePlugin {
 }
 
 /// Build all configured plugins from the config.
+/// Runs preflight checks and filters out plugins that fail, printing warnings.
 pub fn build_plugins<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
 ) -> Vec<Box<dyn StoragePlugin + 'a>> {
     let mut plugins: Vec<Box<dyn StoragePlugin + 'a>> = Vec::new();
 
+    let mut candidates: Vec<Box<dyn StoragePlugin + 'a>> = Vec::new();
+
     if let Some(op_config) = config.onepassword_plugin_config() {
-        plugins.push(Box::new(onepassword::OnePasswordPlugin::new(
+        candidates.push(Box::new(onepassword::OnePasswordPlugin::new(
             config, op_config, runner,
         )));
     }
 
     for (name, cf_config) in config.cloud_file_plugin_configs() {
-        plugins.push(Box::new(cloud_file::CloudFilePlugin::new(name, cf_config)));
+        candidates.push(Box::new(cloud_file::CloudFilePlugin::new(name, cf_config)));
+    }
+
+    for plugin in candidates {
+        match plugin.preflight() {
+            Ok(()) => plugins.push(plugin),
+            Err(e) => {
+                eprintln!(
+                    "  {} skipping {} plugin: {}",
+                    console::style("\u{26a0}").yellow(),
+                    plugin.name(),
+                    e
+                );
+            }
+        }
     }
 
     plugins
@@ -94,15 +116,19 @@ plugins:
     #[test]
     fn build_plugins_with_cloud_file() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let yaml = format!(
+            r#"
 project: x
 environments: [dev]
 plugins:
   dropbox:
     type: cloud_file
-    path: /tmp/test
+    path: {}
     format: encrypted
-"#;
+"#,
+            cloud_dir.path().display()
+        );
         let path = dir.path().join("lockbox.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -113,9 +139,69 @@ plugins:
     }
 
     #[test]
-    fn build_plugins_mixed() {
+    fn build_plugins_filters_failing_preflight() {
+        let dir = tempfile::tempdir().unwrap();
+        // onepassword will fail (runner fails), cloud_file with existing dir will pass
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let yaml = format!(
+            r#"
+project: x
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+  testcloud:
+    type: cloud_file
+    path: {}
+    format: cleartext
+"#,
+            cloud_dir.path().display()
+        );
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                anyhow::bail!("not found")
+            }
+        }
+
+        let plugins = build_plugins(&config, &FailRunner);
+        // onepassword fails preflight, cloud_file with existing dir passes
+        assert_eq!(plugins.len(), 1);
+        assert_eq!(plugins[0].name(), "testcloud");
+    }
+
+    #[test]
+    fn build_plugins_filters_cloud_file_missing_dir() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
+project: x
+environments: [dev]
+plugins:
+  testcloud:
+    type: cloud_file
+    path: /nonexistent/path/nowhere
+    format: cleartext
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let runner = DummyRunner;
+        let plugins = build_plugins(&config, &runner);
+        assert!(plugins.is_empty());
+    }
+
+    #[test]
+    fn build_plugins_mixed() {
+        let dir = tempfile::tempdir().unwrap();
+        let cloud_dir1 = tempfile::tempdir().unwrap();
+        let cloud_dir2 = tempfile::tempdir().unwrap();
+        let yaml = format!(
+            r#"
 project: x
 environments: [dev]
 plugins:
@@ -124,13 +210,16 @@ plugins:
     item_pattern: test
   dropbox:
     type: cloud_file
-    path: /tmp/test
+    path: {}
     format: encrypted
   gdrive:
     type: cloud_file
-    path: /tmp/gdrive
+    path: {}
     format: cleartext
-"#;
+"#,
+            cloud_dir1.path().display(),
+            cloud_dir2.path().display()
+        );
         let path = dir.path().join("lockbox.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();

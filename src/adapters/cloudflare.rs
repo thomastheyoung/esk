@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{CommandOpts, CommandRunner, SyncAdapter, SyncMode};
+use crate::adapters::{check_command, CommandOpts, CommandRunner, SyncAdapter, SyncMode};
 use crate::config::{CloudflareAdapterConfig, Config, ResolvedTarget};
 
 pub struct CloudflareAdapter<'a> {
@@ -16,6 +16,14 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
 
     fn sync_mode(&self) -> SyncMode {
         SyncMode::Individual
+    }
+
+    fn preflight(&self) -> Result<()> {
+        check_command(self.runner, "wrangler").map_err(|_| {
+            anyhow::anyhow!(
+                "wrangler is not installed or not in PATH. Install it with: npm install -g wrangler"
+            )
+        })
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
@@ -154,6 +162,48 @@ adapters:
             app: app.map(String::from),
             environment: env.to_string(),
         }
+    }
+
+    #[test]
+    fn cloudflare_preflight_success() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path());
+        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: b"1.0.0".to_vec(),
+            stderr: vec![],
+        }]);
+        let adapter = CloudflareAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        assert!(adapter.preflight().is_ok());
+    }
+
+    #[test]
+    fn cloudflare_preflight_missing_wrangler() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path());
+        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+
+        // Runner that returns an error (simulating missing command)
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
+                anyhow::bail!("No such file or directory")
+            }
+        }
+
+        let adapter = CloudflareAdapter {
+            config: &config,
+            adapter_config,
+            runner: &FailRunner,
+        };
+        let err = adapter.preflight().unwrap_err();
+        assert!(err.to_string().contains("wrangler is not installed"));
+        assert!(err.to_string().contains("npm install -g wrangler"));
     }
 
     #[test]

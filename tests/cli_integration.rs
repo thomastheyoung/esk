@@ -464,8 +464,6 @@ fn cloud_file_push_pull_encrypted() {
 #[test]
 fn push_only_flag() {
     // Test that --only filters to a specific plugin
-    // We can't easily test with real plugins in integration, but we can verify
-    // the error when specifying an unknown plugin name
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -476,7 +474,9 @@ plugins:
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
-    let err = cli::push::run(&config, "dev", Some("nonexistent")).unwrap_err();
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    let err = cli::push::run_with_runner(&config, "dev", Some("nonexistent"), &runner).unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
 }
 
@@ -492,7 +492,9 @@ plugins:
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "dev", Some("nonexistent"), false).unwrap_err();
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    let err = cli::pull::run_with_runner(&config, "dev", Some("nonexistent"), false, &runner).unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
 }
 
@@ -507,16 +509,17 @@ fn sync_cloudflare_calls_wrangler() {
     store.set("STRIPE_KEY", "dev", "sk_test_123").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].program, "wrangler");
-    assert_eq!(calls[0].args, vec!["secret", "put", "STRIPE_KEY"]);
-    assert_eq!(calls[0].cwd.as_ref().unwrap(), &project.root().join("apps/web"));
-    assert_eq!(calls[0].stdin.as_ref().unwrap(), b"sk_test_123");
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].program, "wrangler");
+    assert_eq!(calls[1].args, vec!["secret", "put", "STRIPE_KEY"]);
+    assert_eq!(calls[1].cwd.as_ref().unwrap(), &project.root().join("apps/web"));
+    assert_eq!(calls[1].stdin.as_ref().unwrap(), b"sk_test_123");
 }
 
 #[test]
@@ -528,14 +531,15 @@ fn sync_cloudflare_prod_env_flags() {
     store.set("STRIPE_KEY", "prod", "sk_live_456").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 1);
+    assert_eq!(calls.len(), 2);
     assert_eq!(
-        calls[0].args,
+        calls[1].args,
         vec!["secret", "put", "STRIPE_KEY", "--env", "production"]
     );
 }
@@ -549,6 +553,7 @@ fn sync_cloudflare_records_tracker() {
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
@@ -567,6 +572,7 @@ fn sync_cloudflare_failure_tracked() {
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_failure(b"auth error");
 
     let err =
@@ -592,14 +598,16 @@ fn sync_cloudflare_multiple_secrets() {
     store.set("STRIPE_WEBHOOK", "dev", "whsec_test").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_success(b"", b"");
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 2);
-    let keys: Vec<&str> = calls.iter().map(|c| c.args[2].as_str()).collect();
+    assert_eq!(calls.len(), 3);
+    // Skip preflight call (index 0), check sync calls
+    let keys: Vec<&str> = calls[1..].iter().map(|c| c.args[2].as_str()).collect();
     assert!(keys.contains(&"STRIPE_KEY"));
     assert!(keys.contains(&"STRIPE_WEBHOOK"));
 }
@@ -613,15 +621,16 @@ fn sync_cloudflare_skip_unchanged() {
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_success(b"", b"");
 
     // First sync
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
-    assert_eq!(runner.take_calls().len(), 1);
+    assert_eq!(runner.take_calls().len(), 2); // preflight + sync
 
-    // Second sync — same value, should skip
+    // Second sync — same value, should skip (only preflight call)
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
-    assert_eq!(runner.take_calls().len(), 0);
+    assert_eq!(runner.take_calls().len(), 1); // preflight only
 }
 
 // === convex adapter integration ===
@@ -635,18 +644,19 @@ fn sync_convex_calls_npx() {
     store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].program, "npx");
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].program, "npx");
     assert_eq!(
-        calls[0].args,
+        calls[1].args,
         vec!["convex", "env", "set", "CONVEX_URL", "https://dev.convex.cloud"]
     );
-    assert_eq!(calls[0].cwd.as_ref().unwrap(), &project.root().join("apps/api"));
+    assert_eq!(calls[1].cwd.as_ref().unwrap(), &project.root().join("apps/api"));
 }
 
 #[test]
@@ -658,14 +668,15 @@ fn sync_convex_prod_env_flags() {
     store.set("CONVEX_URL", "prod", "https://prod.convex.cloud").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 1);
+    assert_eq!(calls.len(), 2);
     assert_eq!(
-        calls[0].args,
+        calls[1].args,
         vec!["convex", "env", "set", "CONVEX_URL", "https://prod.convex.cloud", "--prod"]
     );
 }
@@ -684,13 +695,14 @@ fn sync_convex_reads_deployment_source() {
     store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 1);
-    assert!(calls[0].env.contains(&(
+    assert_eq!(calls.len(), 2);
+    assert!(calls[1].env.contains(&(
         "CONVEX_DEPLOYMENT".to_string(),
         "dev:my-deploy-abc".to_string()
     )));
@@ -705,6 +717,7 @@ fn sync_convex_failure_tracked() {
     store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_failure(b"deploy error");
 
     let err =
@@ -730,6 +743,7 @@ fn push_onepassword_creates_item() {
     store.set("STRIPE_KEY", "dev", "sk_test_999").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
     // op item get → not found
     runner.push_failure(b"isn't an item in vault");
     // op item create → success
@@ -738,16 +752,17 @@ fn push_onepassword_creates_item() {
     cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 2);
-    // First call: op item get
-    assert_eq!(calls[0].program, "op");
-    assert!(calls[0].args.contains(&"get".to_string()));
-    assert!(calls[0].args.contains(&"testapp - Dev".to_string()));
-    // Second call: op item create
+    assert_eq!(calls.len(), 3);
+    // First call: op --version (preflight)
+    // Second call: op item get
     assert_eq!(calls[1].program, "op");
-    assert!(calls[1].args.contains(&"create".to_string()));
+    assert!(calls[1].args.contains(&"get".to_string()));
     assert!(calls[1].args.contains(&"testapp - Dev".to_string()));
-    assert!(calls[1]
+    // Third call: op item create
+    assert_eq!(calls[2].program, "op");
+    assert!(calls[2].args.contains(&"create".to_string()));
+    assert!(calls[2].args.contains(&"testapp - Dev".to_string()));
+    assert!(calls[2]
         .args
         .iter()
         .any(|a| a.contains("STRIPE_KEY[concealed]=sk_test_999")));
@@ -761,6 +776,7 @@ fn push_onepassword_edits_existing() {
     store.set("STRIPE_KEY", "dev", "sk_test_999").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     // op item get → found (return valid JSON)
     let item_json = json!({
         "fields": [
@@ -775,9 +791,9 @@ fn push_onepassword_edits_existing() {
     cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 2);
-    assert!(calls[1].args.contains(&"edit".to_string()));
-    assert!(calls[1]
+    assert_eq!(calls.len(), 3);
+    assert!(calls[2].args.contains(&"edit".to_string()));
+    assert!(calls[2]
         .args
         .iter()
         .any(|a| a.contains("STRIPE_KEY[concealed]=sk_test_999")));
@@ -791,6 +807,7 @@ fn push_onepassword_version_metadata() {
     store.set("STRIPE_KEY", "dev", "val").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     // op item get → not found
     runner.push_failure(b"isn't an item in vault");
     // op item create → success
@@ -800,7 +817,7 @@ fn push_onepassword_version_metadata() {
 
     let calls = runner.take_calls();
     // The create call should include version metadata
-    assert!(calls[1]
+    assert!(calls[2]
         .args
         .iter()
         .any(|a| a == "_Metadata.version[text]=1"));
@@ -815,6 +832,7 @@ fn pull_onepassword_merges_remote() {
     // Local is now v1
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     // op item get → returns higher version with different value
     let item_json = json!({
         "fields": [
@@ -851,6 +869,7 @@ fn pull_onepassword_no_item() {
     store.set("STRIPE_KEY", "dev", "local_val").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     // op item get → not found
     runner.push_failure(b"isn't an item in vault");
 
@@ -878,6 +897,9 @@ fn sync_full_config_cloudflare_and_convex() {
     store.set("CONVEX_URL", "prod", "https://prod.convex.cloud").unwrap();
 
     let runner = MockCommandRunner::new();
+    // preflight: cloudflare + convex
+    runner.push_success(b"", b""); // wrangler --version
+    runner.push_success(b"", b""); // npx --version
     // env adapter is batch (no command runner calls), but cloudflare + convex each need one
     runner.push_success(b"", b""); // cloudflare: STRIPE_KEY
     runner.push_success(b"", b""); // convex: CONVEX_URL
@@ -885,10 +907,11 @@ fn sync_full_config_cloudflare_and_convex() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 2);
-    let programs: Vec<&str> = calls.iter().map(|c| c.program.as_str()).collect();
-    assert!(programs.contains(&"wrangler"));
-    assert!(programs.contains(&"npx"));
+    assert_eq!(calls.len(), 4);
+    // Skip preflight calls, check that both wrangler and npx were called for sync
+    let sync_programs: Vec<&str> = calls[2..].iter().map(|c| c.program.as_str()).collect();
+    assert!(sync_programs.contains(&"wrangler"));
+    assert!(sync_programs.contains(&"npx"));
 }
 
 #[test]
@@ -900,14 +923,16 @@ fn sync_cloudflare_force_resyncs() {
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
 
     let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
     runner.push_success(b"", b"");
 
     // First sync
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
-    assert_eq!(runner.take_calls().len(), 1);
+    assert_eq!(runner.take_calls().len(), 2); // preflight + sync
 
     // Force sync — should re-run despite unchanged hash
+    runner.push_success(b"", b""); // preflight (new build_sync_adapters call)
     runner.push_success(b"", b"");
     cli::sync::run_with_runner(&config, Some("dev"), true, false, false, &runner).unwrap();
-    assert_eq!(runner.take_calls().len(), 1);
+    assert_eq!(runner.take_calls().len(), 2); // preflight + sync
 }

@@ -52,6 +52,18 @@ impl StoragePlugin for CloudFilePlugin {
         &self.name
     }
 
+    fn preflight(&self) -> Result<()> {
+        let path = self.expand_path()?;
+        if !path.is_dir() {
+            anyhow::bail!(
+                "{} sync folder not found at {}. Make sure the cloud sync app is installed and the folder exists.",
+                self.name,
+                path.display()
+            );
+        }
+        Ok(())
+    }
+
     fn push(&self, payload: &StorePayload, config: &Config, _env: &str) -> Result<()> {
         let base_path = self.expand_path()?;
 
@@ -133,6 +145,33 @@ mod tests {
             secrets: map,
             version,
         }
+    }
+
+    #[test]
+    fn cloud_file_preflight_success() {
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let plugin = CloudFilePlugin::new(
+            "dropbox".to_string(),
+            CloudFilePluginConfig {
+                path: cloud_dir.path().to_string_lossy().to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+        assert!(plugin.preflight().is_ok());
+    }
+
+    #[test]
+    fn cloud_file_preflight_missing_dir() {
+        let plugin = CloudFilePlugin::new(
+            "dropbox".to_string(),
+            CloudFilePluginConfig {
+                path: "/nonexistent/path/that/does/not/exist".to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("dropbox sync folder not found"));
+        assert!(err.to_string().contains("/nonexistent/path/that/does/not/exist"));
     }
 
     #[test]

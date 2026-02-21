@@ -36,7 +36,12 @@ pub fn run_with_runner(
     let all_plugins = plugins::build_plugins(config, runner);
 
     if all_plugins.is_empty() {
-        bail!("no plugins configured in lockbox.yaml");
+        if config.plugins.is_empty() {
+            bail!("no plugins configured in lockbox.yaml");
+        } else {
+            println!("  No plugins available after preflight checks. Fix the issues above and try again.");
+            return Ok(());
+        }
     }
 
     // Filter by --only if provided
