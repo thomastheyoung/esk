@@ -37,7 +37,7 @@ tests/
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (31)
+└── cli_integration.rs      # CLI command tests (48)
 ```
 
 ## Core design
@@ -68,24 +68,26 @@ Project-level config defines everything: environments, apps, adapter settings, p
 pub trait SyncAdapter {
     fn name(&self) -> &str;
     fn sync_mode(&self) -> SyncMode;  // Batch or Individual
+    fn preflight(&self) -> Result<()>;  // Validate external deps (default: Ok)
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
     fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<SyncResult>;
 }
 ```
 
-`SyncMode::Batch` adapters (env) regenerate the full output when any secret changes. `SyncMode::Individual` adapters (cloudflare, convex) sync one secret at a time. The `build_sync_adapters()` factory constructs all configured adapters from config.
+`SyncMode::Batch` adapters (env) regenerate the full output when any secret changes. `SyncMode::Individual` adapters (cloudflare, convex) sync one secret at a time. The `build_sync_adapters()` factory constructs all configured adapters from config, running preflight checks and filtering out adapters that fail.
 
 ### Storage plugin trait
 
 ```rust
 pub trait StoragePlugin {
     fn name(&self) -> &str;
+    fn preflight(&self) -> Result<()>;  // Validate external deps (default: Ok)
     fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()>;
     fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>>;
 }
 ```
 
-Plugins receive the full store payload and operate per environment. The `build_plugins()` factory constructs all configured plugins from config.
+Plugins receive the full store payload and operate per environment. The `build_plugins()` factory constructs all configured plugins from config, running preflight checks and filtering out plugins that fail.
 
 ### CommandRunner trait
 
@@ -111,16 +113,20 @@ Version-counter-based reconciliation between local store and remote plugins. Two
 
 ## Key crates
 
-| Crate                               | Purpose                            |
-| ----------------------------------- | ---------------------------------- |
-| `clap`                              | CLI argument parsing with derive   |
-| `serde`, `serde_yaml`, `serde_json` | Config and store serialization     |
-| `aes-gcm`                           | Authenticated encryption           |
-| `sha2`                              | Change detection hashing           |
-| `dialoguer`                         | Interactive prompts (secret input) |
-| `console`                           | Terminal colors and styling        |
-| `tempfile`                          | Atomic file writes                 |
-| `anyhow`                            | Error handling                     |
+| Crate                               | Purpose                               |
+| ----------------------------------- | ------------------------------------- |
+| `clap`                              | CLI argument parsing with derive      |
+| `serde`, `serde_yaml`, `serde_json` | Config and store serialization        |
+| `aes-gcm`                           | Authenticated encryption              |
+| `sha2`                              | Change detection hashing              |
+| `hex`                               | Hex encoding for keys, nonces, hashes |
+| `rand`                              | Random key and nonce generation       |
+| `chrono`                            | Timestamps in sync records            |
+| `dialoguer`                         | Interactive prompts (secret input)    |
+| `console`                           | Terminal colors and styling           |
+| `tempfile`                          | Atomic file writes                    |
+| `anyhow`                            | Error handling                        |
+| `zeroize`                           | Zeroing secret key bytes on drop      |
 
 ## Rules
 
@@ -146,7 +152,7 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 223 tests
+cargo test                    # Run all 236 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
@@ -161,7 +167,7 @@ cargo test --test cli_integration  # Run CLI integration tests only
 ### Test infrastructure
 
 - **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid lockbox project (writes `lockbox.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `sync_index_path()`.
-- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG` — reusable YAML for tests.
+- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for adapter/plugin tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.

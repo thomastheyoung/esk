@@ -47,11 +47,11 @@ lockbox sync
 
 `lockbox init` creates four files:
 
-| File               | Purpose                                                         | Git           |
-| ------------------ | --------------------------------------------------------------- | ------------- |
-| `lockbox.yaml`     | Project config (environments, apps, adapters, plugins, secrets) | Commit        |
-| `.lockbox/store.enc`     | Encrypted secret store                                          | Commit        |
-| `.lockbox/store.key`     | 32-byte encryption key (hex)                                    | **Gitignore** |
+| File                       | Purpose                                                         | Git           |
+| -------------------------- | --------------------------------------------------------------- | ------------- |
+| `lockbox.yaml`             | Project config (environments, apps, adapters, plugins, secrets) | Commit        |
+| `.lockbox/store.enc`       | Encrypted secret store                                          | Commit        |
+| `.lockbox/store.key`       | 32-byte encryption key (hex)                                    | **Gitignore** |
 | `.lockbox/sync-index.json` | Sync state tracker                                              | Optional      |
 
 ## Configuration
@@ -223,7 +223,7 @@ This means you can use 1Password for team sharing and Dropbox as a backup simult
 
 ### Auto-push
 
-The `set` command automatically pushes to all configured plugins after storing a secret.
+The `set` command automatically pushes to all configured plugins after storing a secret (unless `--no-sync` is used).
 
 ## License
 

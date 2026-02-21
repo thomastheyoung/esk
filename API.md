@@ -34,15 +34,15 @@ lockbox set <KEY> --env <ENV> [--value <VALUE>] [--no-sync]
 | `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                    |
 | `--env`     | Yes      | Target environment                                             |
 | `--value`   | No       | Secret value. If omitted, prompts interactively (hidden input) |
-| `--no-sync` | No       | Skip the auto-sync that normally follows                       |
+| `--no-sync` | No       | Store only — skip auto-push to plugins and auto-sync           |
 
 **Behavior:**
 
 1. Validates the environment exists in config.
 2. Warns if the key isn't defined in `lockbox.yaml` (but still allows it).
 3. Stores the value in the encrypted store, incrementing the version counter.
-4. If any plugins are configured, auto-pushes the environment's secrets to all plugins.
-5. Runs `sync` for the affected environment (unless `--no-sync`).
+4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
+5. Unless `--no-sync`: runs `sync` for the affected environment.
 
 **Examples:**
 
@@ -247,11 +247,11 @@ lockbox pull --env prod --sync            # Pull + reconcile + sync targets
 
 ## Files
 
-| File               | Description                             | Commit to git? |
-| ------------------ | --------------------------------------- | -------------- |
-| `lockbox.yaml`     | Project configuration                   | Yes            |
-| `.lockbox/store.enc`     | AES-256-GCM encrypted secret store      | Yes            |
-| `.lockbox/store.key`     | 32-byte encryption key (hex)            | **No**         |
+| File                       | Description                             | Commit to git? |
+| -------------------------- | --------------------------------------- | -------------- |
+| `lockbox.yaml`             | Project configuration                   | Yes            |
+| `.lockbox/store.enc`       | AES-256-GCM encrypted secret store      | Yes            |
+| `.lockbox/store.key`       | 32-byte encryption key (hex)            | **No**         |
 | `.lockbox/sync-index.json` | Sync state (hashes, timestamps, status) | Optional       |
 
 ## Exit codes

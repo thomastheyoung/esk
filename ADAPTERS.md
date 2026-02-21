@@ -172,7 +172,7 @@ Syncs environment variables to Convex deployments using `npx convex env set`.
 adapters:
   convex:
     path: apps/api
-    deployment_source: apps/web/.env.local
+    deployment_source: apps/api/.env.local
     env_flags:
       dev: ""
       prod: "--prod"
