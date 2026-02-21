@@ -41,7 +41,7 @@ lockbox set <KEY> --env <ENV> [--value <VALUE>] [--no-sync]
 1. Validates the environment exists in config.
 2. Warns if the key isn't defined in `lockbox.yaml` (but still allows it).
 3. Stores the value in the encrypted store, incrementing the version counter.
-4. If the 1Password adapter is configured, auto-pushes the environment's secrets.
+4. If any plugins are configured, auto-pushes the environment's secrets to all plugins.
 5. Runs `sync` for the affected environment (unless `--no-sync`).
 
 **Examples:**
@@ -126,10 +126,10 @@ lockbox sync [--env <ENV>] [--force] [--dry-run] [--verbose]
 
 **Adapter behavior:**
 
-- **env**: Regenerates the entire `.env` file atomically when any secret in an (app, env) pair changes. Groups secrets by vendor in the output.
-- **cloudflare**: Runs `wrangler secret put <KEY>` with the value on stdin, in the app's directory.
-- **convex**: Runs `npx convex env set <KEY> <VALUE>` in the configured path. Reads `CONVEX_DEPLOYMENT` from `deployment_source` if configured.
-- **onepassword**: Skipped by sync — use `push`/`pull` instead.
+- **Batch adapters** (env): Regenerate the entire output atomically when any secret in a target group changes.
+- **Individual adapters** (cloudflare, convex): Sync one secret at a time via external CLI calls.
+
+Targets whose adapter name matches a plugin (not an adapter) are skipped — plugins use `push`/`pull` instead.
 
 **Change detection:**
 
@@ -148,7 +148,7 @@ SHA-256 hash of each secret value is tracked per (secret, adapter, app, environm
 
 ## `lockbox status`
 
-Show sync status and drift for all configured targets.
+Show sync status and drift for all configured adapter targets.
 
 ```bash
 lockbox status [--env <ENV>]
@@ -158,7 +158,7 @@ lockbox status [--env <ENV>]
 | -------- | -------- | ------------------------------ |
 | `--env`  | No       | Filter to a single environment |
 
-Shows each (secret, target) pair with its sync state:
+Shows each (secret, target) pair with its sync state. Targets for plugins are excluded — only adapter targets are shown.
 
 | Status         | Meaning                                             |
 | -------------- | --------------------------------------------------- |
@@ -184,50 +184,64 @@ Also displays the current store version number.
 
 ## `lockbox push`
 
-Push secrets to 1Password.
+Push secrets to configured storage plugins.
 
 ```bash
-lockbox push --env <ENV>
+lockbox push --env <ENV> [--only <PLUGIN>]
 ```
 
-| Argument | Required | Description         |
-| -------- | -------- | ------------------- |
-| `--env`  | Yes      | Environment to push |
+| Argument | Required | Description                    |
+| -------- | -------- | ------------------------------ |
+| `--env`  | Yes      | Environment to push            |
+| `--only` | No       | Push to a specific plugin only |
 
-**Requires:** `onepassword` adapter configured in `lockbox.yaml` and the `op` CLI authenticated.
+**Requires:** At least one plugin configured in `lockbox.yaml` and its dependencies available (e.g., `op` CLI for 1Password).
 
-Uploads all secrets for the given environment to a 1Password item. The item name is derived from `item_pattern` in config (e.g., `"myapp - Prod"`).
+Uploads all secrets for the given environment to each configured plugin. Without `--only`, pushes to all plugins. With `--only`, pushes to just the named plugin.
 
-- Creates the item if it doesn't exist; updates if it does.
-- Secrets are stored as concealed fields, grouped by vendor under sections.
-- A `_lockbox_version` field tracks the store version for reconciliation.
+**Examples:**
+
+```bash
+lockbox push --env prod                     # Push to all plugins
+lockbox push --env prod --only onepassword  # Push to 1Password only
+lockbox push --env dev --only dropbox       # Push to Dropbox only
+```
 
 ---
 
 ## `lockbox pull`
 
-Pull secrets from 1Password and reconcile with the local store.
+Pull secrets from configured storage plugins and reconcile with the local store.
 
 ```bash
-lockbox pull --env <ENV> [--sync]
+lockbox pull --env <ENV> [--only <PLUGIN>] [--sync]
 ```
 
-| Argument | Required | Description                   |
-| -------- | -------- | ----------------------------- |
-| `--env`  | Yes      | Environment to pull           |
-| `--sync` | No       | Auto-run `sync` after pulling |
+| Argument | Required | Description                      |
+| -------- | -------- | -------------------------------- |
+| `--env`  | Yes      | Environment to pull              |
+| `--only` | No       | Pull from a specific plugin only |
+| `--sync` | No       | Auto-run `sync` after pulling    |
 
-**Requires:** `onepassword` adapter configured in `lockbox.yaml` and the `op` CLI authenticated.
+**Requires:** At least one plugin configured in `lockbox.yaml` and its dependencies available.
 
-Downloads secrets from the 1Password item and reconciles with the local store:
+Downloads secrets from all configured plugins (or just `--only <name>`) and reconciles with the local store using multi-plugin reconciliation:
 
-| Scenario               | Action                                                                |
-| ---------------------- | --------------------------------------------------------------------- |
-| Remote version > local | Merge remote secrets into local store. Push any local-only keys back. |
-| Local version > remote | Print a message advising to `push`.                                   |
-| Versions equal         | No action (already in sync).                                          |
+1. Collects secrets and versions from all plugin sources.
+2. The highest-version source becomes the base.
+3. Unique secrets from lower-version sources are merged in.
+4. Local store is updated with the merged result.
+5. Plugins that were behind are updated with the merged result.
 
-With `--sync`, automatically runs `lockbox sync --env <ENV>` after a successful pull to propagate changes to all targets.
+With `--sync`, automatically runs `lockbox sync --env <ENV>` after a successful pull.
+
+**Examples:**
+
+```bash
+lockbox pull --env prod                   # Pull from all plugins + reconcile
+lockbox pull --env prod --only onepassword  # Pull from 1Password only
+lockbox pull --env prod --sync            # Pull + reconcile + sync targets
+```
 
 ---
 

@@ -1,13 +1,13 @@
 # lockbox
 
-Encrypted secrets management with multi-target sync. Store secrets locally with AES-256-GCM encryption, then sync them to `.env` files, Cloudflare Workers, Convex, and 1Password from a single source of truth.
+Encrypted secrets management with multi-target sync. Store secrets locally with AES-256-GCM encryption, then sync them to `.env` files, Cloudflare Workers, and Convex from a single source of truth. Back up and share secrets across your team with 1Password or cloud file storage.
 
 ## Why lockbox
 
 - **One config, many targets** — Define a secret once, sync it to every service that needs it.
 - **Encrypted at rest** — Secrets are AES-256-GCM encrypted. The store file (`.secrets.enc`) is safe to commit; the key file (`.secrets.key`) stays local.
 - **Change detection** — SHA-256 hashing skips secrets that haven't changed. No unnecessary writes or API calls.
-- **1Password as team remote** — Push/pull secrets to 1Password for team sharing, with version-based reconciliation.
+- **Pluggable storage** — Push/pull secrets to 1Password, Dropbox, Google Drive, or OneDrive for team sharing, with version-based reconciliation.
 
 ## Quick start
 
@@ -27,12 +27,12 @@ lockbox sync
 
 `lockbox init` creates four files:
 
-| File | Purpose | Git |
-|------|---------|-----|
-| `lockbox.yaml` | Project config (environments, apps, adapters, secrets) | Commit |
-| `.secrets.enc` | Encrypted secret store | Commit |
-| `.secrets.key` | 32-byte encryption key (hex) | **Gitignore** |
-| `.sync-index.json` | Sync state tracker | Optional |
+| File               | Purpose                                                         | Git           |
+| ------------------ | --------------------------------------------------------------- | ------------- |
+| `lockbox.yaml`     | Project config (environments, apps, adapters, plugins, secrets) | Commit        |
+| `.secrets.enc`     | Encrypted secret store                                          | Commit        |
+| `.secrets.key`     | 32-byte encryption key (hex)                                    | **Gitignore** |
+| `.sync-index.json` | Sync state tracker                                              | Optional      |
 
 ## Configuration
 
@@ -62,9 +62,15 @@ adapters:
   convex:
     path: apps/api
     deployment_source: apps/api/.env.local
+
+plugins:
   onepassword:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
+  dropbox:
+    type: cloud_file
+    path: ~/Dropbox/secrets/myproject
+    format: encrypted
 
 secrets:
   Stripe:
@@ -92,12 +98,26 @@ Named paths relative to the project root. Used by adapters that need to know whe
 
 ### Adapters
 
-| Adapter | What it does | External CLI |
-|---------|-------------|--------------|
-| `env` | Generates `.env` files from a configurable path pattern | None |
-| `cloudflare` | Runs `wrangler secret put` per secret | `wrangler` |
-| `convex` | Runs `npx convex env set` per secret | `npx` |
-| `onepassword` | Push/pull entire environment snapshots to 1Password items | `op` |
+Adapters deploy secrets to targets via `lockbox sync`. Each secret declares which adapters it targets.
+
+| Adapter      | What it does                                            | External CLI |
+| ------------ | ------------------------------------------------------- | ------------ |
+| `env`        | Generates `.env` files from a configurable path pattern | None         |
+| `cloudflare` | Runs `wrangler secret put` per secret                   | `wrangler`   |
+| `convex`     | Runs `npx convex env set` per secret                    | `npx`        |
+
+See [ADAPTERS.md](ADAPTERS.md) for detailed configuration of each adapter.
+
+### Plugins
+
+Plugins store and back up the entire secret list via `lockbox push`/`pull`. They operate on the full store per environment — no per-secret routing.
+
+| Plugin                                             | What it does                                               | External CLI |
+| -------------------------------------------------- | ---------------------------------------------------------- | ------------ |
+| `onepassword`                                      | Push/pull environment snapshots to 1Password items         | `op`         |
+| Cloud file (`dropbox`, `gdrive`, `onedrive`, etc.) | Sync encrypted or cleartext store to a cloud-synced folder | None         |
+
+See [PLUGINS.md](PLUGINS.md) for detailed configuration of each plugin.
 
 ### Secrets
 
@@ -107,16 +127,16 @@ Target format: `app:environment` (e.g., `web:prod`) or just `environment` for ad
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `lockbox init` | Initialize encrypted store and config |
-| `lockbox set <KEY>` | Set a secret value |
-| `lockbox get <KEY>` | Retrieve a secret value |
-| `lockbox list` | List all secrets and their status |
-| `lockbox sync` | Sync secrets to configured targets |
-| `lockbox status` | Show sync status and drift |
-| `lockbox push` | Push secrets to 1Password |
-| `lockbox pull` | Pull secrets from 1Password |
+| Command             | Description                                        |
+| ------------------- | -------------------------------------------------- |
+| `lockbox init`      | Initialize encrypted store and config              |
+| `lockbox set <KEY>` | Set a secret value                                 |
+| `lockbox get <KEY>` | Retrieve a secret value                            |
+| `lockbox list`      | List all secrets and their status                  |
+| `lockbox sync`      | Sync secrets to configured adapter targets         |
+| `lockbox status`    | Show sync status and drift                         |
+| `lockbox push`      | Push secrets to configured plugins                 |
+| `lockbox pull`      | Pull secrets from configured plugins and reconcile |
 
 See [API.md](API.md) for the full command reference with all flags and behaviors.
 
@@ -134,7 +154,7 @@ lockbox get STRIPE_SECRET_KEY --env dev
 lockbox list
 lockbox list --env prod
 
-# Sync to all configured targets
+# Sync to all configured adapter targets
 lockbox sync
 lockbox sync --env prod
 lockbox sync --force          # Ignore change detection
@@ -144,10 +164,12 @@ lockbox sync --dry-run        # Preview without writing
 lockbox status
 lockbox status --env dev
 
-# 1Password team sharing
-lockbox push --env prod       # Upload to 1Password
-lockbox pull --env prod       # Download + reconcile
-lockbox pull --env prod --sync  # Download + reconcile + sync targets
+# Push/pull to storage plugins
+lockbox push --env prod                   # Push to all plugins
+lockbox push --env prod --only onepassword  # Push to specific plugin
+lockbox pull --env prod                   # Pull from all plugins + reconcile
+lockbox pull --env prod --only dropbox    # Pull from specific plugin
+lockbox pull --env prod --sync            # Pull + auto-sync targets
 ```
 
 ## Security model
@@ -160,21 +182,28 @@ lockbox pull --env prod --sync  # Download + reconcile + sync targets
 
 The encrypted store is safe to commit to git. The key file must never be committed — add `.secrets.key` to `.gitignore`.
 
-## 1Password workflow
+## Plugin workflow
 
-Lockbox uses 1Password as a team remote. Secrets are stored as items in a vault, with fields organized by vendor and a `_lockbox_version` field for reconciliation.
+Lockbox plugins act as team remotes. Secrets are pushed to and pulled from one or more storage backends, with version-based reconciliation to handle concurrent edits.
 
 ```bash
-lockbox push --env prod    # Upload local secrets to 1Password
-lockbox pull --env prod    # Download and reconcile
+lockbox push --env prod    # Upload local secrets to all plugins
+lockbox pull --env prod    # Download from all plugins and reconcile
 ```
 
-Reconciliation rules:
-- **Remote is newer**: Pull remote secrets into local store. Push any local-only keys back.
-- **Local is newer**: Advise to push.
-- **Same version**: No action.
+### Multi-plugin reconciliation
 
-The `set` command auto-pushes to 1Password when the adapter is configured.
+When pulling from multiple plugins, lockbox reconciles across all sources:
+
+1. The source with the highest version becomes the base.
+2. Unique secrets from lower-version sources are merged in.
+3. Sources that were behind are updated with the merged result.
+
+This means you can use 1Password for team sharing and Dropbox as a backup simultaneously — pull reconciles them all.
+
+### Auto-push
+
+The `set` command automatically pushes to all configured plugins after storing a secret.
 
 ## Build
 
@@ -182,7 +211,7 @@ The `set` command auto-pushes to 1Password when the adapter is configured.
 cargo build --release
 ```
 
-The binary has no runtime dependencies beyond the external CLIs used by adapters (`wrangler`, `npx`, `op`).
+The binary has no runtime dependencies beyond the external CLIs used by adapters and plugins (`wrangler`, `npx`, `op`).
 
 ## License
 

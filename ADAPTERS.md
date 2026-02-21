@@ -1,15 +1,21 @@
 # Adapters
 
-Lockbox ships with four built-in sync adapters. Each adapter is configured in the `adapters` section of `lockbox.yaml` and handles syncing secrets to a specific target.
+Adapters deploy secrets to targets via `lockbox sync`. Each adapter is configured in the `adapters` section of `lockbox.yaml`. Secrets declare which adapters they target — only targeted secrets are synced.
+
+For storage/backup plugins (1Password, cloud files), see [PLUGINS.md](PLUGINS.md).
 
 ## Overview
 
-| Adapter                                   | Config key    | External CLI | Sync method                     | Targets require app? |
-| ----------------------------------------- | ------------- | ------------ | ------------------------------- | -------------------- |
-| [Env file](#env-file)                     | `env`         | None         | `lockbox sync`                  | Yes                  |
-| [Cloudflare Workers](#cloudflare-workers) | `cloudflare`  | `wrangler`   | `lockbox sync`                  | Yes                  |
-| [Convex](#convex)                         | `convex`      | `npx`        | `lockbox sync`                  | No                   |
-| [1Password](#1password)                   | `onepassword` | `op`         | `lockbox push` / `lockbox pull` | No                   |
+| Adapter                                   | Config key   | External CLI | Sync mode  | Targets require app? |
+| ----------------------------------------- | ------------ | ------------ | ---------- | -------------------- |
+| [Env file](#env-file)                     | `env`        | None         | Batch      | Yes                  |
+| [Cloudflare Workers](#cloudflare-workers) | `cloudflare` | `wrangler`   | Individual | Yes                  |
+| [Convex](#convex)                         | `convex`     | `npx`        | Individual | No                   |
+
+**Sync modes:**
+
+- **Batch** — When any secret changes for a target group, the entire output is regenerated. Used by env file adapter.
+- **Individual** — Each changed secret is synced independently. Used by cloudflare and convex adapters.
 
 ---
 
@@ -208,101 +214,3 @@ secrets:
       targets:
         convex: [dev, prod]
 ```
-
----
-
-## 1Password
-
-Uses the 1Password CLI (`op`) to push and pull entire environment snapshots. Unlike the other adapters, 1Password is **not** used by `lockbox sync` — it has its own dedicated `push` and `pull` commands.
-
-### How it works
-
-**Push** (`lockbox push --env <ENV>`):
-
-1. Collects all secrets for the environment from the local store.
-2. Groups them by vendor (using the `secrets` section of `lockbox.yaml`).
-3. Creates or updates a 1Password item with concealed fields organized into vendor sections.
-4. Stores a `_lockbox_version` metadata field for reconciliation.
-
-**Pull** (`lockbox pull --env <ENV>`):
-
-1. Fetches the 1Password item for the environment.
-2. Parses fields back into key-value pairs (section label = vendor, field label = key).
-3. Reads the `_lockbox_version` field.
-4. Reconciles with the local store using version comparison:
-   - Remote newer: merge remote secrets into local, push any local-only keys back.
-   - Local newer: advise to run `push`.
-   - Equal: no-op.
-
-**Auto-push**: The `set` command automatically pushes to 1Password after storing a secret (when the adapter is configured).
-
-### Prerequisites
-
-- [1Password CLI](https://developer.1password.com/docs/cli/) (`op`) installed and authenticated.
-- A vault accessible to the authenticated user.
-
-### Configuration
-
-```yaml
-adapters:
-  onepassword:
-    vault: Engineering
-    item_pattern: "{project} - {Environment}"
-```
-
-| Field          | Required | Description                                                                                                                 |
-| -------------- | -------- | --------------------------------------------------------------------------------------------------------------------------- |
-| `vault`        | Yes      | 1Password vault name to store items in.                                                                                     |
-| `item_pattern` | Yes      | Template for item names. Supports `{project}`, `{Environment}` (capitalized), and `{environment}` (lowercase) placeholders. |
-
-### Item naming
-
-The `item_pattern` is resolved per environment:
-
-| Pattern                     | Project | Environment | Result          |
-| --------------------------- | ------- | ----------- | --------------- |
-| `{project} - {Environment}` | `myapp` | `dev`       | `myapp - Dev`   |
-| `{project} - {Environment}` | `myapp` | `prod`      | `myapp - Prod`  |
-| `{project} {environment}`   | `myapp` | `staging`   | `myapp staging` |
-
-### 1Password item structure
-
-Items are created as "Secure Note" category with the following field layout:
-
-```
-Title: myapp - Prod
-Category: Secure Note
-Vault: Engineering
-
-Sections:
-  Stripe:
-    STRIPE_KEY [concealed] = sk_live_...
-    STRIPE_WEBHOOK_SECRET [concealed] = whsec_...
-  Auth:
-    AUTH_SECRET [concealed] = my-session-key
-  _Metadata:
-    version [text] = 5
-```
-
-Fields use the `[concealed]` type so values are hidden by default in the 1Password UI. The `_Metadata` section is internal and excluded when pulling secrets.
-
-### Target format
-
-Targets are environment-only:
-
-```yaml
-secrets:
-  Stripe:
-    STRIPE_KEY:
-      targets:
-        onepassword: [dev, prod]
-```
-
-### Version reconciliation
-
-The `_lockbox_version` field enables conflict-free merging between team members:
-
-1. Alice sets a secret locally (version goes to 5), pushes to 1Password.
-2. Bob pulls from 1Password — his local store is at version 3, remote is 5.
-3. Remote wins: Bob's store is updated with remote secrets. Any keys Bob has that Alice doesn't are pushed back (version becomes 6).
-4. If Bob's local version were higher, pull would advise him to push instead.
