@@ -9,12 +9,32 @@ Encrypted secrets management with multi-target sync. Store secrets locally with 
 - **Change detection** — SHA-256 hashing skips secrets that haven't changed. No unnecessary writes or API calls.
 - **Pluggable storage** — Push/pull secrets to 1Password, Dropbox, Google Drive, or OneDrive for team sharing, with version-based reconciliation.
 
+## Installation
+
+**Shell script** (Linux/macOS):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/thomastheyoung/lockbox/main/install.sh | bash
+```
+
+**Cargo**:
+
+```bash
+cargo install lockbox        # build from source
+cargo binstall lockbox       # download prebuilt binary
+```
+
+**From source**:
+
+```bash
+git clone https://github.com/thomastheyoung/lockbox.git
+cd lockbox
+cargo build --release
+```
+
 ## Quick start
 
 ```bash
-# Build from source
-cargo build --release
-
 # Initialize a new project
 lockbox init
 
@@ -204,14 +224,6 @@ This means you can use 1Password for team sharing and Dropbox as a backup simult
 ### Auto-push
 
 The `set` command automatically pushes to all configured plugins after storing a secret.
-
-## Build
-
-```bash
-cargo build --release
-```
-
-The binary has no runtime dependencies beyond the external CLIs used by adapters and plugins (`wrangler`, `npx`, `op`).
 
 ## License
 

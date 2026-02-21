@@ -1,15 +1,7 @@
-mod adapters;
-mod cli;
-mod config;
-mod plugins;
-mod reconcile;
-mod store;
-mod tracker;
-
 use anyhow::Result;
 use clap::Parser;
-use cli::{Cli, Commands};
-use config::Config;
+use lockbox::cli::{Cli, Commands};
+use lockbox::config::Config;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -17,7 +9,7 @@ fn main() -> Result<()> {
     match &cli.command {
         Commands::Init => {
             let cwd = std::env::current_dir()?;
-            cli::init::run(&cwd)?;
+            lockbox::cli::init::run(&cwd)?;
         }
         Commands::Set {
             key,
@@ -28,19 +20,19 @@ fn main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::set::run(&config, key, env, value.as_deref(), *no_sync)?;
+            lockbox::cli::set::run(&config, key, env, value.as_deref(), *no_sync)?;
         }
         Commands::Get { key, env } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::get::run(&config, key, env)?;
+            lockbox::cli::get::run(&config, key, env)?;
         }
         Commands::List { env } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::list::run(&config, env.as_deref())?;
+            lockbox::cli::list::run(&config, env.as_deref())?;
         }
         Commands::Sync {
             env,
@@ -51,25 +43,25 @@ fn main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::sync::run(&config, env.as_deref(), *force, *dry_run, *verbose)?;
+            lockbox::cli::sync::run(&config, env.as_deref(), *force, *dry_run, *verbose)?;
         }
         Commands::Status { env } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::status::run(&config, env.as_deref())?;
+            lockbox::cli::status::run(&config, env.as_deref())?;
         }
         Commands::Push { env, only } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::push::run(&config, env, only.as_deref())?;
+            lockbox::cli::push::run(&config, env, only.as_deref())?;
         }
         Commands::Pull { env, only, sync } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            cli::pull::run(&config, env, only.as_deref(), *sync)?;
+            lockbox::cli::pull::run(&config, env, only.as_deref(), *sync)?;
         }
     }
 

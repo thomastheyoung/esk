@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    name: Build ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: x86_64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use-cross: true
+          - target: x86_64-unknown-linux-musl
+            runner: ubuntu-latest
+            use-cross: true
+          - target: aarch64-unknown-linux-gnu
+            runner: ubuntu-latest
+            use-cross: true
+          - target: x86_64-apple-darwin
+            runner: macos-latest
+            use-cross: false
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            use-cross: false
+          - target: x86_64-pc-windows-msvc
+            runner: windows-latest
+            use-cross: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Install cross
+        if: matrix.use-cross
+        run: cargo install cross --git https://github.com/cross-rs/cross
+
+      - name: Build
+        run: ${{ matrix.use-cross && 'cross' || 'cargo' }} build --release --target ${{ matrix.target }}
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        run: |
+          dir="lockbox-${{ matrix.target }}"
+          mkdir "$dir"
+          cp "target/${{ matrix.target }}/release/lockbox" "$dir/"
+          tar czf "$dir.tar.gz" "$dir"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $dir = "lockbox-${{ matrix.target }}"
+          New-Item -ItemType Directory -Path $dir
+          Copy-Item "target/${{ matrix.target }}/release/lockbox.exe" "$dir/"
+          Compress-Archive -Path $dir -DestinationPath "$dir.zip"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lockbox-${{ matrix.target }}
+          path: lockbox-${{ matrix.target }}.*
+
+  release:
+    name: Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Create release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "${{ github.ref_name }}" artifacts/* --generate-notes
