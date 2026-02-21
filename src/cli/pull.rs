@@ -1,14 +1,18 @@
 use anyhow::{bail, Context, Result};
 use console::style;
 
-use crate::adapters::onepass::OnePasswordAdapter;
+use crate::adapters::onepassword::OnePasswordAdapter;
+use crate::adapters::RealCommandRunner;
 use crate::config::Config;
 use crate::reconcile::{self, ReconcileAction};
 use crate::store::SecretStore;
 
 pub fn run(config: &Config, env: &str, auto_sync: bool) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
-        bail!("unknown environment '{env}'. Valid: {}", config.environments.join(", "));
+        bail!(
+            "unknown environment '{env}'. Valid: {}",
+            config.environments.join(", ")
+        );
     }
 
     let op_config = config
@@ -20,9 +24,11 @@ pub fn run(config: &Config, env: &str, auto_sync: bool) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
 
+    let runner = RealCommandRunner;
     let adapter = OnePasswordAdapter {
         config,
         adapter_config: op_config,
+        runner: &runner,
     };
 
     let item_name = config.onepassword_item_name(env)?;
@@ -91,7 +97,11 @@ pub fn run(config: &Config, env: &str, auto_sync: bool) -> Result<()> {
             );
         }
         ReconcileAction::NoOp => {
-            println!("  {} already in sync (v{})", style("up to date").green(), payload.version);
+            println!(
+                "  {} already in sync (v{})",
+                style("up to date").green(),
+                payload.version
+            );
         }
     }
 

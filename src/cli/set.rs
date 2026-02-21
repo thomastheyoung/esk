@@ -2,13 +2,23 @@ use anyhow::{bail, Result};
 use console::style;
 use dialoguer::Password;
 
-use crate::adapters::onepass::OnePasswordAdapter;
+use crate::adapters::onepassword::OnePasswordAdapter;
+use crate::adapters::RealCommandRunner;
 use crate::config::Config;
 use crate::store::SecretStore;
 
-pub fn run(config: &Config, key: &str, env: &str, value: Option<&str>, no_sync: bool) -> Result<()> {
+pub fn run(
+    config: &Config,
+    key: &str,
+    env: &str,
+    value: Option<&str>,
+    no_sync: bool,
+) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
-        bail!("unknown environment '{env}'. Valid: {}", config.environments.join(", "));
+        bail!(
+            "unknown environment '{env}'. Valid: {}",
+            config.environments.join(", ")
+        );
     }
 
     // Validate that the key is defined in config (warn if not, but allow it)
@@ -43,9 +53,11 @@ pub fn run(config: &Config, key: &str, env: &str, value: Option<&str>, no_sync: 
 
     // Auto-push to 1Password if configured
     if let Some(op_config) = &config.adapters.onepassword {
+        let runner = RealCommandRunner;
         let adapter = OnePasswordAdapter {
             config,
             adapter_config: op_config,
+            runner: &runner,
         };
 
         let suffix = format!(":{env}");

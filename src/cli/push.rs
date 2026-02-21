@@ -2,13 +2,17 @@ use anyhow::{bail, Context, Result};
 use console::style;
 use std::collections::BTreeMap;
 
-use crate::adapters::onepass::OnePasswordAdapter;
+use crate::adapters::onepassword::OnePasswordAdapter;
+use crate::adapters::RealCommandRunner;
 use crate::config::Config;
 use crate::store::SecretStore;
 
 pub fn run(config: &Config, env: &str) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
-        bail!("unknown environment '{env}'. Valid: {}", config.environments.join(", "));
+        bail!(
+            "unknown environment '{env}'. Valid: {}",
+            config.environments.join(", ")
+        );
     }
 
     let op_config = config
@@ -36,9 +40,11 @@ pub fn run(config: &Config, env: &str) -> Result<()> {
         return Ok(());
     }
 
+    let runner = RealCommandRunner;
     let adapter = OnePasswordAdapter {
         config,
         adapter_config: op_config,
+        runner: &runner,
     };
 
     let item_name = config.onepassword_item_name(env)?;
