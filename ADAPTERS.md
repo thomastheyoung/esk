@@ -1,10 +1,10 @@
-# Plugins
+# Adapters
 
-Lockbox ships with four built-in sync adapters (plugins). Each adapter is configured in the `adapters` section of `lockbox.yaml` and handles syncing secrets to a specific target.
+Lockbox ships with four built-in sync adapters. Each adapter is configured in the `adapters` section of `lockbox.yaml` and handles syncing secrets to a specific target.
 
 ## Overview
 
-| Plugin                                    | Config key    | External CLI | Sync method                     | Targets require app? |
+| Adapter                                   | Config key    | External CLI | Sync method                     | Targets require app? |
 | ----------------------------------------- | ------------- | ------------ | ------------------------------- | -------------------- |
 | [Env file](#env-file)                     | `env`         | None         | `lockbox sync`                  | Yes                  |
 | [Cloudflare Workers](#cloudflare-workers) | `cloudflare`  | `wrangler`   | `lockbox sync`                  | Yes                  |
