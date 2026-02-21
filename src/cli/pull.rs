@@ -2,13 +2,23 @@ use anyhow::{bail, Result};
 use console::style;
 use std::collections::BTreeMap;
 
-use crate::adapters::RealCommandRunner;
+use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
 use crate::plugins;
 use crate::reconcile;
 use crate::store::SecretStore;
 
 pub fn run(config: &Config, env: &str, only: Option<&str>, auto_sync: bool) -> Result<()> {
+    run_with_runner(config, env, only, auto_sync, &RealCommandRunner)
+}
+
+pub fn run_with_runner(
+    config: &Config,
+    env: &str,
+    only: Option<&str>,
+    auto_sync: bool,
+    runner: &dyn CommandRunner,
+) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
         bail!(
             "unknown environment '{env}'. Valid: {}",
@@ -23,8 +33,7 @@ pub fn run(config: &Config, env: &str, only: Option<&str>, auto_sync: bool) -> R
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
 
-    let runner = RealCommandRunner;
-    let all_plugins = plugins::build_plugins(config, &runner);
+    let all_plugins = plugins::build_plugins(config, runner);
 
     if all_plugins.is_empty() {
         bail!("no plugins configured in lockbox.yaml");
@@ -124,7 +133,7 @@ pub fn run(config: &Config, env: &str, only: Option<&str>, auto_sync: bool) -> R
 
     if auto_sync && result.local_changed {
         println!("\n  Running sync...");
-        crate::cli::sync::run(config, Some(env), false, false, false)?;
+        crate::cli::sync::run_with_runner(config, Some(env), false, false, false, runner)?;
     }
 
     Ok(())

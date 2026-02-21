@@ -2,7 +2,7 @@ use anyhow::Result;
 use console::style;
 use std::collections::{BTreeSet, HashMap};
 
-use crate::adapters::{build_sync_adapters, RealCommandRunner, SecretValue, SyncMode};
+use crate::adapters::{build_sync_adapters, CommandRunner, RealCommandRunner, SecretValue, SyncMode};
 use crate::config::Config;
 use crate::store::SecretStore;
 use crate::tracker::SyncIndex;
@@ -14,6 +14,17 @@ pub fn run(
     dry_run: bool,
     verbose: bool,
 ) -> Result<()> {
+    run_with_runner(config, env, force, dry_run, verbose, &RealCommandRunner)
+}
+
+pub fn run_with_runner(
+    config: &Config,
+    env: Option<&str>,
+    force: bool,
+    dry_run: bool,
+    verbose: bool,
+    runner: &dyn CommandRunner,
+) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
     let index_path = config.root.join(".sync-index.json");
@@ -21,8 +32,7 @@ pub fn run(
 
     let resolved = config.resolve_secrets()?;
 
-    let runner = RealCommandRunner;
-    let adapters = build_sync_adapters(config, &runner);
+    let adapters = build_sync_adapters(config, runner);
 
     // Build a lookup map: adapter_name -> (index, sync_mode)
     let adapter_map: HashMap<&str, (usize, SyncMode)> = adapters

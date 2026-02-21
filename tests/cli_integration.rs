@@ -3,6 +3,7 @@ mod helpers;
 use helpers::*;
 use lockbox::cli;
 use lockbox::tracker::SyncIndex;
+use serde_json::json;
 
 // === init ===
 
@@ -493,4 +494,420 @@ plugins:
     let config = project.config().unwrap();
     let err = cli::pull::run(&config, "dev", Some("nonexistent"), false).unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
+}
+
+// === cloudflare adapter integration ===
+
+#[test]
+fn sync_cloudflare_calls_wrangler() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test_123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].program, "wrangler");
+    assert_eq!(calls[0].args, vec!["secret", "put", "STRIPE_KEY"]);
+    assert_eq!(calls[0].cwd.as_ref().unwrap(), &project.root().join("apps/web"));
+    assert_eq!(calls[0].stdin.as_ref().unwrap(), b"sk_test_123");
+}
+
+#[test]
+fn sync_cloudflare_prod_env_flags() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "prod", "sk_live_456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].args,
+        vec!["secret", "put", "STRIPE_KEY", "--env", "production"]
+    );
+}
+
+#[test]
+fn sync_cloudflare_records_tracker() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path()).unwrap();
+    assert!(!index.records.is_empty());
+    assert!(index.records.keys().any(|k| k.contains("STRIPE_KEY") && k.contains("cloudflare")));
+}
+
+#[test]
+fn sync_cloudflare_failure_tracked() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_failure(b"auth error");
+
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path()).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("cloudflare"))
+        .unwrap();
+    assert!(record.last_error.is_some());
+}
+
+#[test]
+fn sync_cloudflare_multiple_secrets() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+    store.set("STRIPE_WEBHOOK", "dev", "whsec_test").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+    let keys: Vec<&str> = calls.iter().map(|c| c.args[2].as_str()).collect();
+    assert!(keys.contains(&"STRIPE_KEY"));
+    assert!(keys.contains(&"STRIPE_WEBHOOK"));
+}
+
+#[test]
+fn sync_cloudflare_skip_unchanged() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+
+    // First sync
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    assert_eq!(runner.take_calls().len(), 1);
+
+    // Second sync — same value, should skip
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    assert_eq!(runner.take_calls().len(), 0);
+}
+
+// === convex adapter integration ===
+
+#[test]
+fn sync_convex_calls_npx() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].program, "npx");
+    assert_eq!(
+        calls[0].args,
+        vec!["convex", "env", "set", "CONVEX_URL", "https://dev.convex.cloud"]
+    );
+    assert_eq!(calls[0].cwd.as_ref().unwrap(), &project.root().join("apps/api"));
+}
+
+#[test]
+fn sync_convex_prod_env_flags() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store.set("CONVEX_URL", "prod", "https://prod.convex.cloud").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].args,
+        vec!["convex", "env", "set", "CONVEX_URL", "https://prod.convex.cloud", "--prod"]
+    );
+}
+
+#[test]
+fn sync_convex_reads_deployment_source() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    std::fs::write(
+        project.root().join("apps/api/.env.local"),
+        "CONVEX_DEPLOYMENT=dev:my-deploy-abc\n",
+    )
+    .unwrap();
+    let store = project.store().unwrap();
+    store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].env.contains(&(
+        "CONVEX_DEPLOYMENT".to_string(),
+        "dev:my-deploy-abc".to_string()
+    )));
+}
+
+#[test]
+fn sync_convex_failure_tracked() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_failure(b"deploy error");
+
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path()).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("convex"))
+        .unwrap();
+    assert!(record.last_error.is_some());
+}
+
+// === onepassword plugin integration ===
+
+#[test]
+fn push_onepassword_creates_item() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test_999").unwrap();
+
+    let runner = MockCommandRunner::new();
+    // op item get → not found
+    runner.push_failure(b"isn't an item in vault");
+    // op item create → success
+    runner.push_success(b"", b"");
+
+    cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+    // First call: op item get
+    assert_eq!(calls[0].program, "op");
+    assert!(calls[0].args.contains(&"get".to_string()));
+    assert!(calls[0].args.contains(&"testapp - Dev".to_string()));
+    // Second call: op item create
+    assert_eq!(calls[1].program, "op");
+    assert!(calls[1].args.contains(&"create".to_string()));
+    assert!(calls[1].args.contains(&"testapp - Dev".to_string()));
+    assert!(calls[1]
+        .args
+        .iter()
+        .any(|a| a.contains("STRIPE_KEY[concealed]=sk_test_999")));
+}
+
+#[test]
+fn push_onepassword_edits_existing() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test_999").unwrap();
+
+    let runner = MockCommandRunner::new();
+    // op item get → found (return valid JSON)
+    let item_json = json!({
+        "fields": [
+            {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "sk_old"},
+            {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
+        ]
+    });
+    runner.push_success(serde_json::to_vec(&item_json).unwrap().as_slice(), b"");
+    // op item edit → success
+    runner.push_success(b"", b"");
+
+    cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+    assert!(calls[1].args.contains(&"edit".to_string()));
+    assert!(calls[1]
+        .args
+        .iter()
+        .any(|a| a.contains("STRIPE_KEY[concealed]=sk_test_999")));
+}
+
+#[test]
+fn push_onepassword_version_metadata() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "val").unwrap();
+
+    let runner = MockCommandRunner::new();
+    // op item get → not found
+    runner.push_failure(b"isn't an item in vault");
+    // op item create → success
+    runner.push_success(b"", b"");
+
+    cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    // The create call should include version metadata
+    assert!(calls[1]
+        .args
+        .iter()
+        .any(|a| a == "_Metadata.version[text]=1"));
+}
+
+#[test]
+fn pull_onepassword_merges_remote() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "local_val").unwrap();
+    // Local is now v1
+
+    let runner = MockCommandRunner::new();
+    // op item get → returns higher version with different value
+    let item_json = json!({
+        "fields": [
+            {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "remote_val"},
+            {"section": {"label": "_Metadata"}, "label": "version", "value": "5"},
+        ]
+    });
+    runner.push_success(serde_json::to_vec(&item_json).unwrap().as_slice(), b"");
+    // push-back of merged result: op item get + op item edit
+    let item_json2 = json!({
+        "fields": [
+            {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "remote_val"},
+            {"section": {"label": "_Metadata"}, "label": "version", "value": "5"},
+        ]
+    });
+    runner.push_success(serde_json::to_vec(&item_json2).unwrap().as_slice(), b"");
+    runner.push_success(b"", b"");
+
+    cli::pull::run_with_runner(&config, "dev", None, false, &runner).unwrap();
+
+    // Local store should be updated with remote value
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("STRIPE_KEY", "dev").unwrap(),
+        Some("remote_val".to_string())
+    );
+}
+
+#[test]
+fn pull_onepassword_no_item() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "local_val").unwrap();
+
+    let runner = MockCommandRunner::new();
+    // op item get → not found
+    runner.push_failure(b"isn't an item in vault");
+
+    // Should succeed — no remote data, nothing to reconcile
+    cli::pull::run_with_runner(&config, "dev", None, false, &runner).unwrap();
+
+    // Local value unchanged
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("STRIPE_KEY", "dev").unwrap(),
+        Some("local_val".to_string())
+    );
+}
+
+// === mixed adapter integration ===
+
+#[test]
+fn sync_full_config_cloudflare_and_convex() {
+    let project = TestProject::with_store(FULL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "prod", "sk_live").unwrap();
+    store.set("CONVEX_URL", "prod", "https://prod.convex.cloud").unwrap();
+
+    let runner = MockCommandRunner::new();
+    // env adapter is batch (no command runner calls), but cloudflare + convex each need one
+    runner.push_success(b"", b""); // cloudflare: STRIPE_KEY
+    runner.push_success(b"", b""); // convex: CONVEX_URL
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+    let programs: Vec<&str> = calls.iter().map(|c| c.program.as_str()).collect();
+    assert!(programs.contains(&"wrangler"));
+    assert!(programs.contains(&"npx"));
+}
+
+#[test]
+fn sync_cloudflare_force_resyncs() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b"");
+
+    // First sync
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    assert_eq!(runner.take_calls().len(), 1);
+
+    // Force sync — should re-run despite unchanged hash
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), true, false, false, &runner).unwrap();
+    assert_eq!(runner.take_calls().len(), 1);
 }

@@ -1,12 +1,21 @@
 use anyhow::{bail, Result};
 use console::style;
 
-use crate::adapters::RealCommandRunner;
+use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
 use crate::plugins;
 use crate::store::SecretStore;
 
 pub fn run(config: &Config, env: &str, only: Option<&str>) -> Result<()> {
+    run_with_runner(config, env, only, &RealCommandRunner)
+}
+
+pub fn run_with_runner(
+    config: &Config,
+    env: &str,
+    only: Option<&str>,
+    runner: &dyn CommandRunner,
+) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
         bail!(
             "unknown environment '{env}'. Valid: {}",
@@ -21,8 +30,7 @@ pub fn run(config: &Config, env: &str, only: Option<&str>) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
 
-    let runner = RealCommandRunner;
-    let all_plugins = plugins::build_plugins(config, &runner);
+    let all_plugins = plugins::build_plugins(config, runner);
 
     if all_plugins.is_empty() {
         bail!("no plugins configured in lockbox.yaml");

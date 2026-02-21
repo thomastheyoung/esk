@@ -130,6 +130,65 @@ secrets:
         env: [web:dev]
 "#;
 
+/// Cloudflare adapter config for integration testing.
+pub const CLOUDFLARE_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+apps:
+  web:
+    path: apps/web
+
+adapters:
+  cloudflare:
+    env_flags:
+      prod: "--env production"
+
+secrets:
+  Stripe:
+    STRIPE_KEY:
+      targets:
+        cloudflare: [web:dev, web:prod]
+    STRIPE_WEBHOOK:
+      targets:
+        cloudflare: [web:dev]
+"#;
+
+/// Convex adapter config for integration testing.
+pub const CONVEX_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  convex:
+    path: apps/api
+    deployment_source: apps/api/.env.local
+    env_flags:
+      prod: "--prod"
+
+secrets:
+  Convex:
+    CONVEX_URL:
+      targets:
+        convex: [dev, prod]
+"#;
+
+/// OnePassword plugin config for integration testing.
+pub const ONEPASSWORD_PLUGIN_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+plugins:
+  onepassword:
+    vault: Engineering
+    item_pattern: "{project} - {Environment}"
+
+secrets:
+  Stripe:
+    STRIPE_KEY:
+      targets: {}
+"#;
+
 /// Config with cloud_file plugins for testing.
 pub const PLUGIN_CONFIG: &str = r#"
 project: testapp

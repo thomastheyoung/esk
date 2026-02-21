@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use console::style;
 use dialoguer::Password;
 
-use crate::adapters::RealCommandRunner;
+use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
 use crate::plugins;
 use crate::store::SecretStore;
@@ -13,6 +13,17 @@ pub fn run(
     env: &str,
     value: Option<&str>,
     no_sync: bool,
+) -> Result<()> {
+    run_with_runner(config, key, env, value, no_sync, &RealCommandRunner)
+}
+
+pub fn run_with_runner(
+    config: &Config,
+    key: &str,
+    env: &str,
+    value: Option<&str>,
+    no_sync: bool,
+    runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
         bail!(
@@ -53,8 +64,7 @@ pub fn run(
 
     // Auto-push to all configured plugins
     if !config.plugins.is_empty() {
-        let runner = RealCommandRunner;
-        let all_plugins = plugins::build_plugins(config, &runner);
+        let all_plugins = plugins::build_plugins(config, runner);
         for plugin in &all_plugins {
             print!("  {} {}...", style("pushing").cyan(), plugin.name());
             match plugin.push(&payload, config, env) {
@@ -69,7 +79,7 @@ pub fn run(
 
     // Auto-sync affected targets
     println!();
-    crate::cli::sync::run(config, Some(env), false, false, false)?;
+    crate::cli::sync::run_with_runner(config, Some(env), false, false, false, runner)?;
 
     Ok(())
 }
