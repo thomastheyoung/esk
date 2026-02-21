@@ -2,10 +2,10 @@ use anyhow::{Context, Result};
 use console::style;
 use std::collections::BTreeSet;
 
-use crate::adapters::env_file::EnvFileAdapter;
 use crate::adapters::cloudflare::CloudflareAdapter;
 use crate::adapters::convex::ConvexAdapter;
-use crate::adapters::{SecretValue, SyncAdapter};
+use crate::adapters::env_file::EnvFileAdapter;
+use crate::adapters::{RealCommandRunner, SecretValue, SyncAdapter};
 use crate::config::{Config, ResolvedTarget};
 use crate::store::SecretStore;
 use crate::tracker::SyncIndex;
@@ -157,14 +157,14 @@ pub fn run(
 
             // Update tracker for ALL secrets in the regenerated file
             for result in &results {
-                let tracker_key = SyncIndex::tracker_key(
-                    &result.key,
-                    "env",
-                    Some(app.as_str()),
-                    target_env,
-                );
+                let tracker_key =
+                    SyncIndex::tracker_key(&result.key, "env", Some(app.as_str()), target_env);
                 let composite = format!("{}:{}", result.key, target_env);
-                let value = payload.secrets.get(&composite).map(|v| v.as_str()).unwrap_or("");
+                let value = payload
+                    .secrets
+                    .get(&composite)
+                    .map(|v| v.as_str())
+                    .unwrap_or("");
                 let value_hash = SyncIndex::hash_value(value);
 
                 if result.success {
@@ -172,9 +172,20 @@ pub fn run(
                     sync_count += 1;
                 } else {
                     let error = result.error.clone().unwrap_or_default();
-                    index.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
+                    index.record_failure(
+                        tracker_key,
+                        target.to_string(),
+                        value_hash,
+                        error.clone(),
+                    );
                     fail_count += 1;
-                    eprintln!("  {} {}:{} → env: {}", style("fail").red(), result.key, target_env, error);
+                    eprintln!(
+                        "  {} {}:{} → env: {}",
+                        style("fail").red(),
+                        result.key,
+                        target_env,
+                        error
+                    );
                 }
             }
         }
@@ -211,9 +222,11 @@ pub fn run(
                     .cloudflare
                     .as_ref()
                     .context("cloudflare adapter not configured")?;
+                let runner = RealCommandRunner;
                 let adapter = CloudflareAdapter {
                     config,
                     adapter_config,
+                    runner: &runner,
                 };
                 adapter.sync_secret(key, value, target)
             }
@@ -223,9 +236,11 @@ pub fn run(
                     .convex
                     .as_ref()
                     .context("convex adapter not configured")?;
+                let runner = RealCommandRunner;
                 let adapter = ConvexAdapter {
                     config,
                     adapter_config,
+                    runner: &runner,
                 };
                 adapter.sync_secret(key, value, target)
             }
