@@ -51,11 +51,15 @@ fn main() -> Result<()> {
             let config = Config::load(&config_path)?;
             lockbox::cli::sync::run(&config, env.as_deref(), *force, *dry_run, *verbose)?;
         }
-        Commands::Status { env, all } => {
+        Commands::Status {
+            env,
+            all,
+            group_by,
+        } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::status::run(&config, env.as_deref(), *all)?;
+            lockbox::cli::status::run(&config, env.as_deref(), *all, *group_by)?;
         }
         Commands::Push { env, only } => {
             let cwd = std::env::current_dir()?;

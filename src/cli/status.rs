@@ -2,6 +2,7 @@ use anyhow::Result;
 use console::style;
 use std::collections::BTreeMap;
 
+use crate::cli::GroupBy;
 use crate::config::{Config, ResolvedTarget};
 use crate::plugin_tracker::{PluginIndex, PushStatus};
 use crate::store::SecretStore;
@@ -23,7 +24,7 @@ struct Entry {
     error: Option<String>,
 }
 
-pub fn run(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
+pub fn run(config: &Config, env: Option<&str>, all: bool, group_by: GroupBy) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
     let index_path = config.root.join(".lockbox/sync-index.json");
@@ -90,10 +91,82 @@ pub fn run(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
         return Ok(());
     }
 
-    // Group by status
+    match group_by {
+        GroupBy::Status => render_by_status(&entries, all)?,
+        GroupBy::Env => render_by_group(&entries, all, |e| e.env.clone(), line_for_env)?,
+        GroupBy::Target => render_by_group(&entries, all, |e| e.target.clone(), line_for_target)?,
+        GroupBy::Key => render_by_group(&entries, all, |e| e.key.clone(), line_for_key)?,
+    }
+
+    print_plugin_status(config, env, payload.version)?;
+    cliclack::log::info(format!("Store version: {}", payload.version))?;
+
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Shared helpers
+// ---------------------------------------------------------------------------
+
+fn status_icon(status: &Status) -> &'static str {
+    match status {
+        Status::Failed => "✗",
+        Status::Pending => "●",
+        Status::Unset => "○",
+        Status::Synced => "✓",
+    }
+}
+
+fn status_label(status: &Status) -> &'static str {
+    match status {
+        Status::Failed => "failed",
+        Status::Pending => "pending",
+        Status::Unset => "unset",
+        Status::Synced => "synced",
+    }
+}
+
+fn worst_status<'a>(entries: impl Iterator<Item = &'a Entry>) -> Status {
+    entries
+        .map(|e| &e.status)
+        .min()
+        .cloned()
+        .unwrap_or(Status::Synced)
+}
+
+fn count_summary(entries: &[&Entry]) -> String {
+    let mut counts: BTreeMap<&Status, usize> = BTreeMap::new();
+    for e in entries {
+        *counts.entry(&e.status).or_default() += 1;
+    }
+    let parts: Vec<String> = counts
+        .iter()
+        .map(|(s, n)| format!("{n} {}", status_label(s)))
+        .collect();
+    parts.join(", ")
+}
+
+fn log_by_status(status: &Status, body: String) -> Result<()> {
+    match status {
+        Status::Failed => cliclack::log::error(body)?,
+        Status::Pending => cliclack::log::warning(body)?,
+        Status::Unset => cliclack::log::remark(body)?,
+        Status::Synced => cliclack::log::success(body)?,
+    }
+    Ok(())
+}
+
+// ---------------------------------------------------------------------------
+// Group-by-status rendering (original behavior)
+// ---------------------------------------------------------------------------
+
+fn render_by_status(entries: &[Entry], all: bool) -> Result<()> {
     let mut by_status: BTreeMap<Status, Vec<&Entry>> = BTreeMap::new();
-    for entry in &entries {
-        by_status.entry(entry.status.clone()).or_default().push(entry);
+    for entry in entries {
+        by_status
+            .entry(entry.status.clone())
+            .or_default()
+            .push(entry);
     }
 
     let problem_count = entries.iter().filter(|e| e.status != Status::Synced).count();
@@ -105,22 +178,18 @@ pub fn run(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
             style(synced_count).bold()
         ))?;
         if all {
-            print_group(&by_status, &Status::Synced)?;
+            print_status_group(&by_status, &Status::Synced)?;
         }
-        print_plugin_status(config, env, payload.version)?;
-        cliclack::log::info(format!("Store version: {}", payload.version))?;
         return Ok(());
     }
 
-    // Print problem groups in severity order
     for status in &[Status::Failed, Status::Pending, Status::Unset] {
-        print_group(&by_status, status)?;
+        print_status_group(&by_status, status)?;
     }
 
-    // Synced summary or expanded list
     if synced_count > 0 {
         if all {
-            print_group(&by_status, &Status::Synced)?;
+            print_status_group(&by_status, &Status::Synced)?;
         } else {
             cliclack::log::success(format!(
                 "{} synced  {}",
@@ -130,27 +199,25 @@ pub fn run(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
         }
     }
 
-    print_plugin_status(config, env, payload.version)?;
-    cliclack::log::info(format!("Store version: {}", payload.version))?;
-
     Ok(())
 }
 
-fn print_group(by_status: &BTreeMap<Status, Vec<&Entry>>, status: &Status) -> Result<()> {
+fn print_status_group(by_status: &BTreeMap<Status, Vec<&Entry>>, status: &Status) -> Result<()> {
     let entries = match by_status.get(status) {
         Some(e) if !e.is_empty() => e,
         _ => return Ok(()),
     };
 
-    let (icon, label, count_style) = match status {
-        Status::Failed => ("✗", "failed", style(entries.len()).red().bold()),
-        Status::Pending => ("●", "pending", style(entries.len()).yellow().bold()),
-        Status::Unset => ("○", "unset", style(entries.len()).dim().bold()),
-        Status::Synced => ("✓", "synced", style(entries.len()).green().bold()),
+    let count_style = match status {
+        Status::Failed => style(entries.len()).red().bold(),
+        Status::Pending => style(entries.len()).yellow().bold(),
+        Status::Unset => style(entries.len()).dim().bold(),
+        Status::Synced => style(entries.len()).green().bold(),
     };
 
-    // Group entries: key:env → [targets], collapsing same key+env+status
-    let grouped = group_entries(entries);
+    let icon = status_icon(status);
+    let label = status_label(status);
+    let grouped = collapse_by_key_env(entries);
 
     let header = format!("{icon} {count_style} {label}");
 
@@ -170,19 +237,12 @@ fn print_group(by_status: &BTreeMap<Status, Vec<&Entry>>, status: &Status) -> Re
         })
         .collect();
 
-    match status {
-        Status::Failed => cliclack::log::error(format!("{header}\n{}", lines.join("\n")))?,
-        Status::Pending => cliclack::log::warning(format!("{header}\n{}", lines.join("\n")))?,
-        Status::Unset => cliclack::log::remark(format!("{header}\n{}", lines.join("\n")))?,
-        Status::Synced => cliclack::log::success(format!("{header}\n{}", lines.join("\n")))?,
-    }
-
+    log_by_status(status, format!("{header}\n{}", lines.join("\n")))?;
     Ok(())
 }
 
-/// Group entries by (key, env), collecting targets into a list.
-/// Returns Vec<(key, env, targets, error)>.
-fn group_entries<'a>(
+/// Collapse entries by (key, env), collecting targets. Used by status grouping.
+fn collapse_by_key_env<'a>(
     entries: &[&'a Entry],
 ) -> Vec<(&'a str, &'a str, Vec<&'a str>, Option<&'a str>)> {
     let mut map: BTreeMap<(&str, &str), (Vec<&str>, Option<&str>)> = BTreeMap::new();
@@ -199,6 +259,120 @@ fn group_entries<'a>(
         .map(|((key, env), (targets, error))| (key, env, targets, error))
         .collect()
 }
+
+// ---------------------------------------------------------------------------
+// Generic group-by rendering (env, target, key)
+// ---------------------------------------------------------------------------
+
+fn render_by_group(
+    entries: &[Entry],
+    all: bool,
+    group_key_fn: impl Fn(&Entry) -> String,
+    line_fn: impl Fn(&Entry) -> String,
+) -> Result<()> {
+    let total = entries.len();
+    let synced_count = entries.iter().filter(|e| e.status == Status::Synced).count();
+
+    if synced_count == total {
+        cliclack::log::success(format!(
+            "All {} targets synced",
+            style(synced_count).bold()
+        ))?;
+        if !all {
+            return Ok(());
+        }
+    }
+
+    // Group entries by the chosen key
+    let mut groups: BTreeMap<String, Vec<&Entry>> = BTreeMap::new();
+    for entry in entries {
+        groups
+            .entry(group_key_fn(entry))
+            .or_default()
+            .push(entry);
+    }
+
+    let mut collapsed_synced = 0usize;
+
+    for (group_name, group_entries) in &groups {
+        let visible: Vec<&&Entry> = if all {
+            group_entries.iter().collect()
+        } else {
+            group_entries
+                .iter()
+                .filter(|e| e.status != Status::Synced)
+                .collect()
+        };
+
+        if visible.is_empty() {
+            collapsed_synced += group_entries.len();
+            continue;
+        }
+
+        let worst = worst_status(group_entries.iter().copied());
+        let summary = count_summary(group_entries);
+        let icon = status_icon(&worst);
+        let header = format!("{icon}  {}  {}", style(group_name).bold(), style(summary).dim());
+
+        let lines: Vec<String> = visible.iter().map(|e| line_fn(e)).collect();
+        let body = format!("{header}\n{}", lines.join("\n"));
+        log_by_status(&worst, body)?;
+    }
+
+    if !all && collapsed_synced > 0 {
+        cliclack::log::success(format!(
+            "{} synced  {}",
+            style(collapsed_synced).bold(),
+            style("(use --all to show)").dim()
+        ))?;
+    }
+
+    Ok(())
+}
+
+// Line formatters for each grouping mode
+
+fn line_for_env(entry: &Entry) -> String {
+    let icon = status_icon(&entry.status);
+    let mut line = format!(
+        "  {icon} {}  → {}",
+        style(&entry.key).dim(),
+        &entry.target
+    );
+    if let Some(err) = &entry.error {
+        line.push_str(&format!("  {}", style(format!("({err})")).dim()));
+    }
+    line
+}
+
+fn line_for_target(entry: &Entry) -> String {
+    let icon = status_icon(&entry.status);
+    let mut line = format!(
+        "  {icon} {}",
+        style(format!("{}:{}", entry.key, entry.env)).dim(),
+    );
+    if let Some(err) = &entry.error {
+        line.push_str(&format!("  {}", style(format!("({err})")).dim()));
+    }
+    line
+}
+
+fn line_for_key(entry: &Entry) -> String {
+    let icon = status_icon(&entry.status);
+    let mut line = format!(
+        "  {icon} {}  → {}",
+        style(&entry.env).dim(),
+        &entry.target
+    );
+    if let Some(err) = &entry.error {
+        line.push_str(&format!("  {}", style(format!("({err})")).dim()));
+    }
+    line
+}
+
+// ---------------------------------------------------------------------------
+// Shared utilities
+// ---------------------------------------------------------------------------
 
 fn format_target(target: &ResolvedTarget) -> String {
     let mut s = target.adapter.clone();

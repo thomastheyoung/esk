@@ -8,7 +8,7 @@ pub mod set;
 pub mod status;
 pub mod sync;
 
-use clap::{Parser, Subcommand};
+use clap::{Parser, Subcommand, ValueEnum};
 
 #[derive(Parser)]
 #[command(
@@ -86,6 +86,9 @@ pub enum Commands {
         /// Show all targets including synced ones
         #[arg(long)]
         all: bool,
+        /// Group output by axis
+        #[arg(long, value_enum, default_value_t)]
+        group_by: GroupBy,
     },
     /// Push secrets to storage plugins
     Push {
@@ -111,4 +114,13 @@ pub enum Commands {
         #[arg(long)]
         strict: bool,
     },
+}
+
+#[derive(Debug, Clone, Copy, Default, ValueEnum)]
+pub enum GroupBy {
+    #[default]
+    Status,
+    Env,
+    Target,
+    Key,
 }
