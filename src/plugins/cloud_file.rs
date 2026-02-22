@@ -4,6 +4,7 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 use crate::config::{CloudFileFormat, CloudFilePluginConfig, Config};
+use crate::reconcile::extract_env_secrets;
 use crate::store::{SecretStore, StorePayload};
 
 use super::StoragePlugin;
@@ -47,6 +48,46 @@ impl CloudFilePlugin {
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
     }
+
+    /// Build a per-env StorePayload with bare keys for a given environment.
+    /// Uses env-specific version when available, falling back to global version.
+    fn env_payload(payload: &StorePayload, env: &str) -> StorePayload {
+        let bare = extract_env_secrets(&payload.secrets, env);
+        let version = payload
+            .env_versions
+            .get(env)
+            .copied()
+            .unwrap_or(payload.version);
+        StorePayload {
+            secrets: bare,
+            version,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
+        }
+    }
+
+    /// Convert bare keys from a per-env file back to composite keys.
+    fn bare_to_composite(
+        bare: &BTreeMap<String, String>,
+        env: &str,
+    ) -> BTreeMap<String, String> {
+        bare.iter()
+            .map(|(k, v)| (format!("{k}:{env}"), v.clone()))
+            .collect()
+    }
+
+    /// Remove the legacy global file if per-env files are being written.
+    fn cleanup_legacy_file(&self, base_path: &Path) -> Result<()> {
+        let legacy = match self.plugin_config.format {
+            CloudFileFormat::Encrypted => base_path.join("secrets.enc"),
+            CloudFileFormat::Cleartext => base_path.join("secrets.json"),
+        };
+        if legacy.is_file() {
+            std::fs::remove_file(&legacy)
+                .with_context(|| format!("failed to remove legacy file {}", legacy.display()))?;
+        }
+        Ok(())
+    }
 }
 
 impl StoragePlugin for CloudFilePlugin {
@@ -66,60 +107,102 @@ impl StoragePlugin for CloudFilePlugin {
         Ok(())
     }
 
-    fn push(&self, payload: &StorePayload, config: &Config, _env: &str) -> Result<()> {
+    fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()> {
         let base_path = self.expand_path()?;
+        let env_payload = Self::env_payload(payload, env);
 
         match self.plugin_config.format {
             CloudFileFormat::Encrypted => {
-                // Copy store.enc to cloud path
-                let source = config.root.join(".lockbox/store.enc");
-                let dest = base_path.join("secrets.enc");
-                let content = std::fs::read(&source)
-                    .with_context(|| format!("failed to read {}", source.display()))?;
-                Self::atomic_write(&dest, &content)?;
+                // Build per-env payload, encrypt it using the local store key
+                let store = SecretStore::open(&config.root)?;
+                let json = serde_json::to_string(&env_payload)
+                    .context("failed to serialize env payload")?;
+                let encrypted = store.encrypt_raw(&json)?;
+                let dest = base_path.join(format!("secrets-{env}.enc"));
+                Self::atomic_write(&dest, encrypted.as_bytes())?;
             }
             CloudFileFormat::Cleartext => {
-                // Write JSON payload
-                let dest = base_path.join("secrets.json");
-                let json =
-                    serde_json::to_string_pretty(payload).context("failed to serialize payload")?;
+                let dest = base_path.join(format!("secrets-{env}.json"));
+                let json = serde_json::to_string_pretty(&env_payload)
+                    .context("failed to serialize env payload")?;
                 Self::atomic_write(&dest, json.as_bytes())?;
             }
         }
 
+        // One-time migration: remove legacy global file
+        self.cleanup_legacy_file(&base_path)?;
+
         Ok(())
     }
 
-    fn pull(&self, config: &Config, _env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let base_path = self.expand_path()?;
 
         match self.plugin_config.format {
             CloudFileFormat::Encrypted => {
-                let source = base_path.join("secrets.enc");
-                if !source.is_file() {
-                    return Ok(None);
-                }
+                let per_env = base_path.join(format!("secrets-{env}.enc"));
+                let source = if per_env.is_file() {
+                    per_env
+                } else {
+                    // Backward compat: fall back to legacy global file
+                    let legacy = base_path.join("secrets.enc");
+                    if !legacy.is_file() {
+                        return Ok(None);
+                    }
+                    eprintln!(
+                        "Warning: reading legacy secrets.enc for {env}. Run `lockbox push --env {env}` to migrate to per-env files."
+                    );
+                    legacy
+                };
                 let content = std::fs::read_to_string(&source)
                     .with_context(|| format!("failed to read {}", source.display()))?;
                 let content = content.trim();
                 if content.is_empty() {
                     return Ok(None);
                 }
-                // Decrypt using local key
                 let store = SecretStore::open(&config.root)?;
                 let payload = store.decrypt_raw(content)?;
-                Ok(Some((payload.secrets, payload.version)))
+                // Per-env files have bare keys — convert to composite
+                // Legacy files have composite keys — detect by checking if keys contain ":"
+                let has_composite = payload.secrets.keys().any(|k| k.contains(':'));
+                if has_composite {
+                    // Legacy global file — return as-is
+                    Ok(Some((payload.secrets, payload.version)))
+                } else {
+                    // Per-env file — convert bare keys to composite
+                    Ok(Some((
+                        Self::bare_to_composite(&payload.secrets, env),
+                        payload.version,
+                    )))
+                }
             }
             CloudFileFormat::Cleartext => {
-                let source = base_path.join("secrets.json");
-                if !source.is_file() {
-                    return Ok(None);
-                }
+                let per_env = base_path.join(format!("secrets-{env}.json"));
+                let source = if per_env.is_file() {
+                    per_env
+                } else {
+                    let legacy = base_path.join("secrets.json");
+                    if !legacy.is_file() {
+                        return Ok(None);
+                    }
+                    eprintln!(
+                        "Warning: reading legacy secrets.json for {env}. Run `lockbox push --env {env}` to migrate to per-env files."
+                    );
+                    legacy
+                };
                 let content = std::fs::read_to_string(&source)
                     .with_context(|| format!("failed to read {}", source.display()))?;
                 let payload: StorePayload =
-                    serde_json::from_str(&content).context("failed to parse secrets.json")?;
-                Ok(Some((payload.secrets, payload.version)))
+                    serde_json::from_str(&content).context("failed to parse secrets JSON")?;
+                let has_composite = payload.secrets.keys().any(|k| k.contains(':'));
+                if has_composite {
+                    Ok(Some((payload.secrets, payload.version)))
+                } else {
+                    Ok(Some((
+                        Self::bare_to_composite(&payload.secrets, env),
+                        payload.version,
+                    )))
+                }
             }
         }
     }
@@ -146,6 +229,8 @@ mod tests {
         StorePayload {
             secrets: map,
             version,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
         }
     }
 
@@ -196,12 +281,15 @@ mod tests {
         let payload = make_payload(&[("KEY:dev", "val1"), ("KEY:prod", "val2")], 5);
         plugin.push(&payload, &config, "dev").unwrap();
 
-        assert!(cloud_dir.path().join("secrets.json").is_file());
+        // Per-env file created, not global
+        assert!(cloud_dir.path().join("secrets-dev.json").is_file());
+        assert!(!cloud_dir.path().join("secrets.json").is_file());
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 5);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "val1");
-        assert_eq!(secrets.get("KEY:prod").unwrap(), "val2");
+        // prod key should NOT be in the dev-specific file
+        assert!(!secrets.contains_key("KEY:prod"));
     }
 
     #[test]
@@ -226,11 +314,98 @@ mod tests {
         let payload = store.payload().unwrap();
         plugin.push(&payload, &config, "dev").unwrap();
 
-        assert!(cloud_dir.path().join("secrets.enc").is_file());
+        // Per-env file created, not global
+        assert!(cloud_dir.path().join("secrets-dev.enc").is_file());
+        assert!(!cloud_dir.path().join("secrets.enc").is_file());
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 1);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "encrypted_val");
+    }
+
+    #[test]
+    fn per_env_isolation() {
+        let project_dir = tempfile::tempdir().unwrap();
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let config = make_config_with_store(project_dir.path());
+
+        let plugin = CloudFilePlugin::new(
+            "test".to_string(),
+            "testapp".to_string(),
+            CloudFilePluginConfig {
+                path: cloud_dir.path().to_string_lossy().to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+
+        // Push dev secrets
+        let payload = make_payload(&[("KEY:dev", "dev_val"), ("KEY:prod", "prod_val")], 5);
+        plugin.push(&payload, &config, "dev").unwrap();
+        // Push prod secrets
+        plugin.push(&payload, &config, "prod").unwrap();
+
+        // Dev file should only have dev secrets
+        let (dev_secrets, _) = plugin.pull(&config, "dev").unwrap().unwrap();
+        assert_eq!(dev_secrets.get("KEY:dev").unwrap(), "dev_val");
+        assert!(!dev_secrets.contains_key("KEY:prod"));
+
+        // Prod file should only have prod secrets
+        let (prod_secrets, _) = plugin.pull(&config, "prod").unwrap().unwrap();
+        assert_eq!(prod_secrets.get("KEY:prod").unwrap(), "prod_val");
+        assert!(!prod_secrets.contains_key("KEY:dev"));
+    }
+
+    #[test]
+    fn backward_compat_legacy_cleartext() {
+        let project_dir = tempfile::tempdir().unwrap();
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let config = make_config_with_store(project_dir.path());
+
+        // Write a legacy global secrets.json with composite keys
+        let legacy_payload = make_payload(&[("KEY:dev", "legacy_val")], 3);
+        let json = serde_json::to_string_pretty(&legacy_payload).unwrap();
+        std::fs::write(cloud_dir.path().join("secrets.json"), json).unwrap();
+
+        let plugin = CloudFilePlugin::new(
+            "test".to_string(),
+            "testapp".to_string(),
+            CloudFilePluginConfig {
+                path: cloud_dir.path().to_string_lossy().to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+
+        // Pull should fall back to legacy file
+        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        assert_eq!(version, 3);
+        assert_eq!(secrets.get("KEY:dev").unwrap(), "legacy_val");
+    }
+
+    #[test]
+    fn legacy_cleanup_on_push() {
+        let project_dir = tempfile::tempdir().unwrap();
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let config = make_config_with_store(project_dir.path());
+
+        // Create a legacy file
+        std::fs::write(cloud_dir.path().join("secrets.json"), "{}").unwrap();
+        assert!(cloud_dir.path().join("secrets.json").is_file());
+
+        let plugin = CloudFilePlugin::new(
+            "test".to_string(),
+            "testapp".to_string(),
+            CloudFilePluginConfig {
+                path: cloud_dir.path().to_string_lossy().to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+
+        let payload = make_payload(&[("KEY:dev", "val")], 1);
+        plugin.push(&payload, &config, "dev").unwrap();
+
+        // Legacy file removed, per-env file created
+        assert!(!cloud_dir.path().join("secrets.json").is_file());
+        assert!(cloud_dir.path().join("secrets-dev.json").is_file());
     }
 
     #[test]
@@ -287,7 +462,7 @@ mod tests {
 
         let payload = make_payload(&[("A:dev", "1")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
-        assert!(nested.join("secrets.json").is_file());
+        assert!(nested.join("secrets-dev.json").is_file());
     }
 
     #[test]

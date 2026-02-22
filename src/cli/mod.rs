@@ -1,3 +1,4 @@
+pub mod delete;
 pub mod get;
 pub mod init;
 pub mod list;
@@ -21,6 +22,17 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
+    /// Delete a secret value
+    Delete {
+        /// Secret key name
+        key: String,
+        /// Environment to delete from
+        #[arg(long)]
+        env: String,
+        /// Skip auto-sync after deleting
+        #[arg(long)]
+        no_sync: bool,
+    },
     /// Initialize encrypted store and config
     Init,
     /// Set a secret value
@@ -95,5 +107,8 @@ pub enum Commands {
         /// Auto-sync after pulling
         #[arg(long)]
         sync: bool,
+        /// Fail if any plugin is unreachable (no partial reconciliation)
+        #[arg(long)]
+        strict: bool,
     },
 }

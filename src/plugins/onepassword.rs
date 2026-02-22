@@ -203,7 +203,13 @@ impl<'a> StoragePlugin for OnePasswordPlugin<'a> {
             return Ok(());
         }
 
-        self.push_item(env, &env_secrets, payload.version)
+        // Use env-specific version when available, falling back to global
+        let version = payload
+            .env_versions
+            .get(env)
+            .copied()
+            .unwrap_or(payload.version);
+        self.push_item(env, &env_secrets, version)
     }
 
     fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {

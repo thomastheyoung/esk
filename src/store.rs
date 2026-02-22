@@ -1,6 +1,7 @@
 use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{bail, Context, Result};
+use fs2::FileExt;
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
@@ -12,6 +13,10 @@ use zeroize::Zeroize;
 pub struct StorePayload {
     pub secrets: BTreeMap<String, String>,
     pub version: u64,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub tombstones: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env_versions: BTreeMap<String, u64>,
 }
 
 #[derive(Debug)]
@@ -58,6 +63,8 @@ impl SecretStore {
             let payload = StorePayload {
                 secrets: BTreeMap::new(),
                 version: 0,
+                tombstones: BTreeMap::new(),
+                env_versions: BTreeMap::new(),
             };
             store.write_payload(&payload)?;
         }
@@ -101,6 +108,21 @@ impl SecretStore {
         &self.key_path
     }
 
+    /// Acquire an exclusive file lock on store.key, run the closure, then release.
+    fn with_lock<F, R>(&self, f: F) -> Result<R>
+    where
+        F: FnOnce() -> Result<R>,
+    {
+        let file = std::fs::File::open(&self.key_path)
+            .with_context(|| format!("failed to open {} for locking", self.key_path.display()))?;
+        file.lock_exclusive()
+            .with_context(|| format!("failed to acquire lock on {}", self.key_path.display()))?;
+        let result = f();
+        // Lock released when `file` is dropped
+        drop(file);
+        result
+    }
+
     /// Decrypt and return the full payload.
     pub fn payload(&self) -> Result<StorePayload> {
         let ciphertext = std::fs::read_to_string(&self.store_path)
@@ -110,6 +132,8 @@ impl SecretStore {
             return Ok(StorePayload {
                 secrets: BTreeMap::new(),
                 version: 0,
+                tombstones: BTreeMap::new(),
+                env_versions: BTreeMap::new(),
             });
         }
         self.decrypt(ciphertext)
@@ -122,14 +146,41 @@ impl SecretStore {
         Ok(payload.secrets.get(&composite).cloned())
     }
 
-    /// Set a secret, incrementing the version.
+    /// Set a secret, incrementing both global and env-specific versions. Acquires exclusive lock.
     pub fn set(&self, key: &str, env: &str, value: &str) -> Result<StorePayload> {
-        let mut payload = self.payload()?;
-        let composite = format!("{key}:{env}");
-        payload.secrets.insert(composite, value.to_string());
-        payload.version += 1;
-        self.write_payload(&payload)?;
-        Ok(payload)
+        self.with_lock(|| {
+            let mut payload = self.payload()?;
+            let composite = format!("{key}:{env}");
+            payload.secrets.insert(composite.clone(), value.to_string());
+            payload.tombstones.remove(&composite);
+            payload.version += 1;
+            let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+            *env_v += 1;
+            self.write_payload(&payload)?;
+            Ok(payload)
+        })
+    }
+
+    /// Delete a secret, adding a tombstone. Acquires exclusive lock.
+    pub fn delete(&self, key: &str, env: &str) -> Result<StorePayload> {
+        self.with_lock(|| {
+            let mut payload = self.payload()?;
+            let composite = format!("{key}:{env}");
+            if payload.secrets.remove(&composite).is_none() {
+                bail!("secret '{key}' has no value for environment '{env}'");
+            }
+            payload.version += 1;
+            let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+            *env_v += 1;
+            payload.tombstones.insert(composite, payload.version);
+            self.write_payload(&payload)?;
+            Ok(payload)
+        })
+    }
+
+    /// Write a full payload under exclusive lock. Used by pull reconciliation.
+    pub fn set_payload(&self, payload: &StorePayload) -> Result<()> {
+        self.with_lock(|| self.write_payload(payload))
     }
 
     /// List all secrets (returns the full BTreeMap).
@@ -151,6 +202,11 @@ impl SecretStore {
         tmp.persist(&self.store_path)
             .with_context(|| format!("failed to persist store to {}", self.store_path.display()))?;
         Ok(())
+    }
+
+    /// Encrypt arbitrary plaintext into nonce:ciphertext:tag hex format.
+    pub fn encrypt_raw(&self, plaintext: &str) -> Result<String> {
+        self.encrypt(plaintext)
     }
 
     /// Decrypt raw ciphertext (nonce:ciphertext:tag hex format) into a StorePayload.
@@ -595,6 +651,122 @@ mod tests {
         let store = SecretStore::open(dir.path()).unwrap();
         let err = store.encrypt("test").unwrap_err();
         assert!(err.to_string().contains("failed to create cipher"));
+    }
+
+    #[test]
+    fn delete_removes_secret() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap();
+        let payload = store.delete("KEY", "dev").unwrap();
+        assert_eq!(payload.version, 2);
+        assert!(payload.secrets.get("KEY:dev").is_none());
+        assert!(store.get("KEY", "dev").unwrap().is_none());
+    }
+
+    #[test]
+    fn delete_adds_tombstone() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap();
+        let payload = store.delete("KEY", "dev").unwrap();
+        assert_eq!(payload.tombstones.get("KEY:dev"), Some(&2));
+    }
+
+    #[test]
+    fn delete_nonexistent_errors() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.delete("NOPE", "dev").unwrap_err();
+        assert!(err.to_string().contains("no value for environment"));
+    }
+
+    #[test]
+    fn delete_preserves_other_envs() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "dev_val").unwrap();
+        store.set("KEY", "prod", "prod_val").unwrap();
+        store.delete("KEY", "dev").unwrap();
+        assert!(store.get("KEY", "dev").unwrap().is_none());
+        assert_eq!(
+            store.get("KEY", "prod").unwrap(),
+            Some("prod_val".to_string())
+        );
+    }
+
+    #[test]
+    fn set_clears_tombstone() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap();
+        store.delete("KEY", "dev").unwrap();
+        let payload = store.set("KEY", "dev", "new_val").unwrap();
+        assert!(!payload.tombstones.contains_key("KEY:dev"));
+    }
+
+    #[test]
+    fn tombstone_serialization_roundtrip() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("A", "dev", "val").unwrap();
+        store.delete("A", "dev").unwrap();
+
+        // Reload and verify tombstones survived
+        let store2 = SecretStore::open(dir.path()).unwrap();
+        let payload = store2.payload().unwrap();
+        assert_eq!(payload.tombstones.get("A:dev"), Some(&2));
+        assert!(payload.secrets.get("A:dev").is_none());
+    }
+
+    #[test]
+    fn set_increments_env_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let p1 = store.set("A", "dev", "1").unwrap();
+        assert_eq!(p1.env_versions.get("dev"), Some(&1));
+        let p2 = store.set("B", "dev", "2").unwrap();
+        assert_eq!(p2.env_versions.get("dev"), Some(&2));
+        // Setting a prod key shouldn't increment dev version
+        let p3 = store.set("C", "prod", "3").unwrap();
+        assert_eq!(p3.env_versions.get("dev"), Some(&2));
+        assert_eq!(p3.env_versions.get("prod"), Some(&1));
+    }
+
+    #[test]
+    fn delete_increments_env_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("A", "dev", "1").unwrap();
+        store.set("B", "prod", "2").unwrap();
+        let p = store.delete("A", "dev").unwrap();
+        assert_eq!(p.env_versions.get("dev"), Some(&2));
+        assert_eq!(p.env_versions.get("prod"), Some(&1));
+    }
+
+    #[test]
+    fn env_versions_absent_from_old_payloads() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":1}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".lockbox/store.enc"), &encrypted).unwrap();
+        let payload = store.payload().unwrap();
+        assert!(payload.env_versions.is_empty());
+    }
+
+    #[test]
+    fn tombstone_absent_from_old_payloads() {
+        // Simulate an old-format payload without tombstones field
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":1}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".lockbox/store.enc"), &encrypted).unwrap();
+
+        let payload = store.payload().unwrap();
+        assert!(payload.tombstones.is_empty());
+        assert_eq!(payload.secrets.get("KEY:dev").unwrap(), "val");
     }
 
     #[test]

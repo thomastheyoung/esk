@@ -131,6 +131,35 @@ pub fn run_with_runner(
         }
     }
 
+    // Mark batch groups as dirty when tombstones exist for their secrets
+    for composite_key in payload.tombstones.keys() {
+        let Some((bare_key, tomb_env)) = composite_key.rsplit_once(':') else {
+            continue;
+        };
+        if let Some(filter_env) = env {
+            if tomb_env != filter_env {
+                continue;
+            }
+        }
+        for secret in &resolved {
+            if secret.key != bare_key {
+                continue;
+            }
+            for target in &secret.targets {
+                if target.environment != tomb_env {
+                    continue;
+                }
+                if let Some((_, SyncMode::Batch)) = adapter_map.get(target.adapter.as_str()) {
+                    batch_dirty.insert((
+                        target.adapter.clone(),
+                        target.app.clone(),
+                        target.environment.clone(),
+                    ));
+                }
+            }
+        }
+    }
+
     // Normal mode: single spinner for the entire operation
     let spinner = if !verbose && !dry_run {
         let s = cliclack::spinner();
@@ -230,6 +259,11 @@ pub fn run_with_runner(
                 });
             }
         }
+
+        // Save index after each batch group
+        if !dry_run {
+            index.save()?;
+        }
     }
 
     // Handle individual adapters
@@ -294,6 +328,58 @@ pub fn run_with_runner(
                         "{}:{} → {}: {}",
                         key, target.environment, target, e
                     ));
+                }
+            }
+        }
+
+        // Save index after each individual secret
+        index.save()?;
+    }
+
+    // Process tombstones: delete secrets from individual adapters
+    for composite_key in payload.tombstones.keys() {
+        // Parse composite key "KEY:env"
+        let Some((bare_key, tomb_env)) = composite_key.rsplit_once(':') else {
+            continue;
+        };
+
+        // Filter by environment if specified
+        if let Some(filter_env) = env {
+            if tomb_env != filter_env {
+                continue;
+            }
+        }
+
+        // Find targets for this key in the resolved secrets list
+        for secret in &resolved {
+            if secret.key != bare_key {
+                continue;
+            }
+            for target in &secret.targets {
+                if target.environment != tomb_env {
+                    continue;
+                }
+                let Some((_, SyncMode::Individual)) = adapter_map.get(target.adapter.as_str())
+                else {
+                    continue;
+                };
+                let (adapter_idx, _) = adapter_map[target.adapter.as_str()];
+                let adapter = &adapters[adapter_idx];
+
+                if dry_run {
+                    continue;
+                }
+
+                if let Err(e) = adapter.delete_secret(bare_key, target) {
+                    if verbose {
+                        let _ = cliclack::log::warning(format!(
+                            "Failed to delete {}:{} from {}: {}",
+                            bare_key,
+                            tomb_env,
+                            format_target(target),
+                            e
+                        ));
+                    }
                 }
             }
         }

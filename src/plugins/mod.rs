@@ -56,12 +56,11 @@ pub fn build_plugins<'a>(
         match plugin.preflight() {
             Ok(()) => plugins.push(plugin),
             Err(e) => {
-                eprintln!(
-                    "  {} skipping {} plugin: {}",
-                    console::style("\u{26a0}").yellow(),
+                let _ = cliclack::log::warning(format!(
+                    "Skipping {} plugin: {}",
                     plugin.name(),
                     e
-                );
+                ));
             }
         }
     }

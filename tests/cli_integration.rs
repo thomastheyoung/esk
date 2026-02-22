@@ -113,6 +113,79 @@ fn set_no_sync_flag() {
     assert_eq!(store.get("KEY", "dev").unwrap(), Some("val".to_string()));
 }
 
+// === delete ===
+
+#[test]
+fn delete_removes_secret() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val").unwrap();
+    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", true, &MockCommandRunner::new())
+        .unwrap();
+    assert!(store.get("MY_SECRET", "dev").unwrap().is_none());
+}
+
+#[test]
+fn delete_unknown_env_errors() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let err =
+        cli::delete::run_with_runner(&config, "MY_SECRET", "staging", true, &MockCommandRunner::new())
+            .unwrap_err();
+    assert!(err.to_string().contains("unknown environment"));
+}
+
+#[test]
+fn delete_nonexistent_secret_errors() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let err =
+        cli::delete::run_with_runner(&config, "MY_SECRET", "dev", true, &MockCommandRunner::new())
+            .unwrap_err();
+    assert!(err.to_string().contains("no value for environment"));
+}
+
+#[test]
+fn delete_auto_syncs_env_file() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+    store.set("OTHER_SECRET", "dev", "val2").unwrap();
+
+    // Sync first to write both secrets
+    let runner = MockCommandRunner::new();
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let env_path = project.root().join("apps/web/.env.local");
+    let contents = std::fs::read_to_string(&env_path).unwrap();
+    assert!(contents.contains("MY_SECRET=val1"));
+    assert!(contents.contains("OTHER_SECRET=val2"));
+
+    // Delete MY_SECRET
+    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, &runner).unwrap();
+
+    // Env file should no longer contain MY_SECRET
+    let contents = std::fs::read_to_string(&env_path).unwrap();
+    assert!(!contents.contains("MY_SECRET"));
+    assert!(contents.contains("OTHER_SECRET=val2"));
+}
+
+#[test]
+fn delete_creates_tombstone() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val").unwrap();
+    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", true, &MockCommandRunner::new())
+        .unwrap();
+
+    let payload = store.payload().unwrap();
+    assert!(payload.tombstones.contains_key("MY_SECRET:dev"));
+}
+
 // === list ===
 
 #[test]
@@ -169,7 +242,7 @@ fn push_no_plugins() {
 fn pull_unknown_env_errors() {
     let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "staging", None, false).unwrap_err();
+    let err = cli::pull::run(&config, "staging", None, false, false).unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
@@ -177,7 +250,7 @@ fn pull_unknown_env_errors() {
 fn pull_no_plugins() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "dev", None, false).unwrap_err();
+    let err = cli::pull::run(&config, "dev", None, false, false).unwrap_err();
     assert!(err.to_string().contains("no plugins configured"));
 }
 
@@ -423,7 +496,7 @@ fn cloud_file_push_pull_cleartext() {
     );
 
     plugin.push(&payload, &config, "dev").unwrap();
-    assert!(cloud_dir.path().join("secrets.json").is_file());
+    assert!(cloud_dir.path().join("secrets-dev.json").is_file());
 
     let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
     assert_eq!(version, 1);
@@ -458,7 +531,7 @@ fn cloud_file_push_pull_encrypted() {
     );
 
     plugin.push(&payload, &config, "dev").unwrap();
-    assert!(cloud_dir.path().join("secrets.enc").is_file());
+    assert!(cloud_dir.path().join("secrets-dev.enc").is_file());
 
     let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
     assert_eq!(version, 1);
@@ -498,7 +571,7 @@ plugins:
     let config = project.config().unwrap();
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
-    let err = cli::pull::run_with_runner(&config, "dev", Some("nonexistent"), false, &runner).unwrap_err();
+    let err = cli::pull::run_with_runner(&config, "dev", Some("nonexistent"), false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
 }
 
@@ -855,7 +928,7 @@ fn pull_onepassword_merges_remote() {
     runner.push_success(serde_json::to_vec(&item_json2).unwrap().as_slice(), b"");
     runner.push_success(b"", b"");
 
-    cli::pull::run_with_runner(&config, "dev", None, false, &runner).unwrap();
+    cli::pull::run_with_runner(&config, "dev", None, false, false, &runner).unwrap();
 
     // Local store should be updated with remote value
     let store = project.store().unwrap();
@@ -878,7 +951,7 @@ fn pull_onepassword_no_item() {
     runner.push_failure(b"isn't an item in vault");
 
     // Should succeed — no remote data, nothing to reconcile
-    cli::pull::run_with_runner(&config, "dev", None, false, &runner).unwrap();
+    cli::pull::run_with_runner(&config, "dev", None, false, false, &runner).unwrap();
 
     // Local value unchanged
     let store = project.store().unwrap();

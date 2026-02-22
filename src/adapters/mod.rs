@@ -106,6 +106,12 @@ pub trait SyncAdapter {
     /// Sync a single secret to a target.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
 
+    /// Delete a single secret from a target. Default: no-op (batch adapters handle deletion
+    /// by regenerating the full output without the deleted key).
+    fn delete_secret(&self, _key: &str, _target: &ResolvedTarget) -> Result<()> {
+        Ok(())
+    }
+
     /// Sync a batch of secrets. Default implementation loops sync_secret.
     fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<SyncResult> {
         secrets
@@ -174,12 +180,11 @@ pub fn build_sync_adapters<'a>(
         match adapter.preflight() {
             Ok(()) => adapters.push(adapter),
             Err(e) => {
-                eprintln!(
-                    "  {} skipping {} adapter: {}",
-                    console::style("\u{26a0}").yellow(),
+                let _ = cliclack::log::warning(format!(
+                    "Skipping {} adapter: {}",
                     adapter.name(),
                     e
-                );
+                ));
             }
         }
     }

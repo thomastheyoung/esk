@@ -82,6 +82,63 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
 
         Ok(())
     }
+
+    fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
+        let convex_path = self.config.root.join(&self.adapter_config.path);
+
+        let env_flags = self
+            .adapter_config
+            .env_flags
+            .get(&target.environment)
+            .cloned()
+            .unwrap_or_default();
+
+        // Read CONVEX_DEPLOYMENT from deployment_source if configured
+        let mut env_vars: Vec<(String, String)> = Vec::new();
+        if let Some(source) = &self.adapter_config.deployment_source {
+            let source_path = self.config.root.join(source);
+            if source_path.is_file() {
+                let contents = std::fs::read_to_string(&source_path)
+                    .with_context(|| format!("failed to read {}", source_path.display()))?;
+                for line in contents.lines() {
+                    if let Some(deployment) = line.strip_prefix("CONVEX_DEPLOYMENT=") {
+                        let deployment = deployment.trim().trim_matches('"').trim_matches('\'');
+                        env_vars.push(("CONVEX_DEPLOYMENT".to_string(), deployment.to_string()));
+                        break;
+                    }
+                }
+            }
+        }
+
+        let mut args: Vec<&str> = vec!["convex", "env", "unset", key];
+        let flag_parts: Vec<String>;
+        if !env_flags.is_empty() {
+            flag_parts = env_flags.split_whitespace().map(String::from).collect();
+            for part in &flag_parts {
+                args.push(part);
+            }
+        }
+
+        let output = self
+            .runner
+            .run(
+                "npx",
+                &args,
+                CommandOpts {
+                    cwd: Some(convex_path),
+                    env: env_vars,
+                    ..Default::default()
+                },
+            )
+            .with_context(|| format!("failed to run convex delete for {key}"))?;
+
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("convex env unset failed for {key}: {stderr}");
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -349,6 +406,57 @@ adapters:
         assert!(calls[0]
             .3
             .contains(&("CONVEX_DEPLOYMENT".to_string(), "my-deploy".to_string())));
+    }
+
+    #[test]
+    fn convex_delete_builds_correct_command() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
+        let config = make_config(dir.path(), None);
+        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = ConvexAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .delete_secret("MY_KEY", &make_target("prod"))
+            .unwrap();
+
+        let calls = runner.take_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "npx");
+        assert_eq!(
+            calls[0].1,
+            vec!["convex", "env", "unset", "MY_KEY", "--prod"]
+        );
+    }
+
+    #[test]
+    fn convex_delete_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
+        let config = make_config(dir.path(), None);
+        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"not found".to_vec(),
+        }]);
+        let adapter = ConvexAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .delete_secret("KEY", &make_target("dev"))
+            .unwrap_err();
+        assert!(err.to_string().contains("not found"));
     }
 
     #[test]

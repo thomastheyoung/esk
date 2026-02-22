@@ -145,8 +145,17 @@ impl Config {
         }
         self.validate_plugins()?;
         // Validate secret targets reference known adapters, apps, and environments
+        // Check for duplicate key names across vendors
+        let mut key_vendors: BTreeMap<&str, &str> = BTreeMap::new();
         for (vendor, secrets) in &self.secrets {
             for (key, def) in secrets {
+                if let Some(prev_vendor) = key_vendors.get(key.as_str()) {
+                    bail!(
+                        "secret '{key}' is defined in multiple vendors: {prev_vendor}, {vendor}"
+                    );
+                }
+                key_vendors.insert(key, vendor);
+
                 for (adapter, targets) in &def.targets {
                     self.validate_adapter(adapter)
                         .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
@@ -807,7 +816,7 @@ secrets:
     }
 
     #[test]
-    fn find_secret_first_vendor_wins() {
+    fn validate_duplicate_key_across_vendors() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -829,10 +838,9 @@ secrets:
         env: [web:dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
-        let config = Config::load(&path).unwrap();
-        let (vendor, _) = config.find_secret("DUP").unwrap();
-        // BTreeMap iteration is alphabetical — Alpha comes first
-        assert_eq!(vendor, "Alpha");
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("defined in multiple vendors"));
+        assert!(err.to_string().contains("DUP"));
     }
 
     #[test]

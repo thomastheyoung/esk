@@ -9,8 +9,14 @@ use crate::plugins;
 use crate::reconcile;
 use crate::store::SecretStore;
 
-pub fn run(config: &Config, env: &str, only: Option<&str>, auto_sync: bool) -> Result<()> {
-    run_with_runner(config, env, only, auto_sync, &RealCommandRunner)
+pub fn run(
+    config: &Config,
+    env: &str,
+    only: Option<&str>,
+    auto_sync: bool,
+    strict: bool,
+) -> Result<()> {
+    run_with_runner(config, env, only, auto_sync, strict, &RealCommandRunner)
 }
 
 pub fn run_with_runner(
@@ -18,6 +24,7 @@ pub fn run_with_runner(
     env: &str,
     only: Option<&str>,
     auto_sync: bool,
+    strict: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
@@ -61,6 +68,7 @@ pub fn run_with_runner(
 
     // Pull from all target plugins
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
+    let mut pull_failures: Vec<String> = Vec::new();
 
     for plugin in &target_plugins {
         let spinner = cliclack::spinner();
@@ -90,7 +98,24 @@ pub fn run_with_runner(
                     plugin.name(),
                     style("failed").red()
                 ));
+                pull_failures.push(plugin.name().to_string());
             }
+        }
+    }
+
+    if !pull_failures.is_empty() {
+        if strict {
+            bail!(
+                "{} plugin(s) failed to respond: {}. Use without --strict to reconcile with partial data.",
+                pull_failures.len(),
+                pull_failures.join(", ")
+            );
+        }
+        if !remote_data.is_empty() {
+            cliclack::log::warning(format!(
+                "{} plugin(s) failed to respond. Reconciliation used partial data.",
+                pull_failures.len()
+            ))?;
         }
     }
 
@@ -105,10 +130,10 @@ pub fn run_with_runner(
         .map(|(name, secrets, version)| (name.as_str(), secrets, *version))
         .collect();
 
-    let result = reconcile::reconcile_multi(&payload, &remotes);
+    let result = reconcile::reconcile_multi(&payload, &remotes, Some(env));
 
     if result.local_changed {
-        store.write_payload(&result.merged_payload)?;
+        store.set_payload(&result.merged_payload)?;
         cliclack::log::success(format!(
             "Merged — local store updated to v{}",
             result.merged_payload.version
@@ -119,6 +144,7 @@ pub fn run_with_runner(
             let updated_payload = store.payload()?;
             let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
             let mut plugin_index = PluginIndex::load(&plugin_index_path);
+            let mut pushback_failures = 0u32;
             for plugin in &target_plugins {
                 if result
                     .sources_to_update
@@ -151,11 +177,17 @@ pub fn run_with_runner(
                                 updated_payload.version,
                                 e.to_string(),
                             );
+                            pushback_failures += 1;
                         }
                     }
                 }
             }
             plugin_index.save()?;
+            if pushback_failures > 0 {
+                bail!(
+                    "{pushback_failures} plugin(s) failed to receive merged data. Run `lockbox push --env {env}` to retry."
+                );
+            }
         }
     } else {
         cliclack::log::success(format!(

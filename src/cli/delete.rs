@@ -11,17 +11,15 @@ pub fn run(
     config: &Config,
     key: &str,
     env: &str,
-    value: Option<&str>,
     no_sync: bool,
 ) -> Result<()> {
-    run_with_runner(config, key, env, value, no_sync, &RealCommandRunner)
+    run_with_runner(config, key, env, no_sync, &RealCommandRunner)
 }
 
 pub fn run_with_runner(
     config: &Config,
     key: &str,
     env: &str,
-    value: Option<&str>,
     no_sync: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
@@ -32,7 +30,6 @@ pub fn run_with_runner(
         );
     }
 
-    // Validate that the key is defined in config (warn if not, but allow it)
     if config.find_secret(key).is_none() {
         cliclack::log::warning(format!(
             "Secret '{}' is not defined in lockbox.yaml",
@@ -40,18 +37,11 @@ pub fn run_with_runner(
         ))?;
     }
 
-    let secret_value = match value {
-        Some(v) => v.to_string(),
-        None => cliclack::password(format!("Value for {} ({})", key, env))
-            .mask('*')
-            .interact()?,
-    };
-
     let store = SecretStore::open(&config.root)?;
-    let payload = store.set(key, env, &secret_value)?;
+    let payload = store.delete(key, env)?;
 
     cliclack::log::success(format!(
-        "Set {}:{} (v{})",
+        "Deleted {}:{} (v{})",
         key, env, payload.version
     ))?;
 
@@ -91,7 +81,7 @@ pub fn run_with_runner(
         plugin_index.save()?;
     }
 
-    // Auto-sync affected targets
+    // Auto-sync adapters (env files regenerate without deleted key; individual adapters delete)
     crate::cli::sync::run_with_runner(config, Some(env), false, false, false, runner)?;
 
     if plugin_failures > 0 {
