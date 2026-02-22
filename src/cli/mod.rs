@@ -71,6 +71,9 @@ pub enum Commands {
         /// Filter by environment
         #[arg(long)]
         env: Option<String>,
+        /// Show all targets including synced ones
+        #[arg(long)]
+        all: bool,
     },
     /// Push secrets to storage plugins
     Push {

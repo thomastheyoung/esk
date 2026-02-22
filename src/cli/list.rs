@@ -1,8 +1,10 @@
 use anyhow::Result;
 use console::style;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::Config;
 use crate::store::SecretStore;
+use crate::tracker::{SyncIndex, SyncStatus};
 
 /// Custom theme that renders note body text without dim styling.
 ///
@@ -26,6 +28,14 @@ impl cliclack::Theme for ListTheme {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+enum CellStatus {
+    Unset,
+    Synced,
+    Pending,
+    Failed,
+}
+
 pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let all_secrets = store.list()?;
@@ -35,8 +45,6 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         return Ok(());
     }
 
-    // Use a theme that doesn't dim note body text, so our styled indicators
-    // render with consistent colors.
     cliclack::set_theme(ListTheme);
 
     let envs: Vec<&str> = match env {
@@ -44,10 +52,13 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         None => config.environments.iter().map(|s| s.as_str()).collect(),
     };
 
-    let mut shown_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    // Build sync status map: (key, env) → worst status across all targets
+    let cell_statuses = build_cell_statuses(config, &all_secrets)?;
+
+    let mut shown_keys: BTreeSet<String> = BTreeSet::new();
 
     // Collect uncategorized keys early so we can compute global key width
-    let mut uncat_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let mut uncat_keys: BTreeSet<String> = BTreeSet::new();
     for composite_key in all_secrets.keys() {
         if let Some((key, _)) = composite_key.rsplit_once(':') {
             let in_config = config
@@ -80,7 +91,14 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
         let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
-            all_secrets.contains_key(&composite)
+            if !all_secrets.contains_key(&composite) {
+                CellStatus::Unset
+            } else {
+                cell_statuses
+                    .get(&(key.to_string(), e.to_string()))
+                    .copied()
+                    .unwrap_or(CellStatus::Synced)
+            }
         });
 
         cliclack::note(vendor, body)?;
@@ -91,7 +109,12 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
         let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
-            all_secrets.contains_key(&composite)
+            if !all_secrets.contains_key(&composite) {
+                CellStatus::Unset
+            } else {
+                // Uncategorized keys have no configured targets
+                CellStatus::Synced
+            }
         });
 
         cliclack::note("Uncategorized (not in lockbox.yaml)", body)?;
@@ -102,11 +125,65 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Compute the worst sync status for each (key, env) pair across all its targets.
+fn build_cell_statuses(
+    config: &Config,
+    all_secrets: &BTreeMap<String, String>,
+) -> Result<BTreeMap<(String, String), CellStatus>> {
+    let resolved = config.resolve_secrets()?;
+    let adapter_names: Vec<&str> = config.adapter_names();
+    let index_path = config.root.join(".lockbox/sync-index.json");
+    let index = SyncIndex::load(&index_path);
+
+    let mut statuses: BTreeMap<(String, String), CellStatus> = BTreeMap::new();
+
+    for secret in &resolved {
+        for target in &secret.targets {
+            if !adapter_names.contains(&target.adapter.as_str()) {
+                continue;
+            }
+
+            let composite = format!("{}:{}", secret.key, target.environment);
+            let value = all_secrets.get(&composite);
+            let tracker_key = SyncIndex::tracker_key(
+                &secret.key,
+                &target.adapter,
+                target.app.as_deref(),
+                &target.environment,
+            );
+
+            let target_status = match (value, index.records.get(&tracker_key)) {
+                (None, _) => continue, // no value — cell status determined by has_value check
+                (Some(_), None) => CellStatus::Pending,
+                (Some(v), Some(record)) => {
+                    let current_hash = SyncIndex::hash_value(v);
+                    if record.last_sync_status == SyncStatus::Failed {
+                        CellStatus::Failed
+                    } else if current_hash != record.value_hash {
+                        CellStatus::Pending
+                    } else {
+                        CellStatus::Synced
+                    }
+                }
+            };
+
+            let cell_key = (secret.key.clone(), target.environment.clone());
+            let current = statuses.entry(cell_key).or_insert(CellStatus::Synced);
+            // Worst status wins (Failed > Pending > Synced)
+            if target_status > *current {
+                *current = target_status;
+            }
+        }
+    }
+
+    Ok(statuses)
+}
+
 fn render_table(
     keys: &[&str],
     envs: &[&str],
     key_width: usize,
-    has_value: impl Fn(&str, &str) -> bool,
+    cell_status: impl Fn(&str, &str) -> CellStatus,
 ) -> String {
     let col_widths: Vec<usize> = envs.iter().map(|e| e.len().max(1)).collect();
     let gap = 2;
@@ -128,10 +205,11 @@ fn render_table(
         for (e, w) in envs.iter().zip(&col_widths) {
             let pad_left = *w / 2;
             let pad_right = *w - pad_left - 1;
-            let indicator = if has_value(key, e) {
-                style("✓").green().to_string()
-            } else {
-                style("·").dim().to_string()
+            let indicator = match cell_status(key, e) {
+                CellStatus::Unset => style("○").dim().to_string(),
+                CellStatus::Synced => style("✓").green().to_string(),
+                CellStatus::Pending => style("●").yellow().to_string(),
+                CellStatus::Failed => style("✗").red().to_string(),
             };
             row.push_str(&format!(
                 "{}{}{}{}",

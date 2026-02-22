@@ -359,7 +359,7 @@ fn status_shows_all_states() {
     store.set("MY_SECRET", "dev", "changed").unwrap();
 
     // Status should work without error
-    cli::status::run(&config, None).unwrap();
+    cli::status::run(&config, None, false).unwrap();
 }
 
 #[test]
@@ -369,7 +369,7 @@ fn status_env_filter() {
     let store = project.store().unwrap();
     store.set("MY_SECRET", "dev", "val").unwrap();
 
-    cli::status::run(&config, Some("dev")).unwrap();
+    cli::status::run(&config, Some("dev"), false).unwrap();
 }
 
 #[test]
