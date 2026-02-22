@@ -117,6 +117,15 @@ fn status_icon(status: &Status) -> &'static str {
     }
 }
 
+fn styled_icon(status: &Status) -> console::StyledObject<&'static str> {
+    match status {
+        Status::Failed => style("✗").red(),
+        Status::Pending => style("●").yellow(),
+        Status::Unset => style("○").dim(),
+        Status::Synced => style("✓").green(),
+    }
+}
+
 fn status_label(status: &Status) -> &'static str {
     match status {
         Status::Failed => "failed",
@@ -333,7 +342,7 @@ fn render_by_group(
 // Line formatters for each grouping mode
 
 fn line_for_env(entry: &Entry) -> String {
-    let icon = status_icon(&entry.status);
+    let icon = styled_icon(&entry.status);
     let mut line = format!(
         "  {icon} {}  → {}",
         style(&entry.key).dim(),
@@ -346,7 +355,7 @@ fn line_for_env(entry: &Entry) -> String {
 }
 
 fn line_for_target(entry: &Entry) -> String {
-    let icon = status_icon(&entry.status);
+    let icon = styled_icon(&entry.status);
     let mut line = format!(
         "  {icon} {}",
         style(format!("{}:{}", entry.key, entry.env)).dim(),
@@ -358,7 +367,7 @@ fn line_for_target(entry: &Entry) -> String {
 }
 
 fn line_for_key(entry: &Entry) -> String {
-    let icon = status_icon(&entry.status);
+    let icon = styled_icon(&entry.status);
     let mut line = format!(
         "  {icon} {}  → {}",
         style(&entry.env).dim(),
