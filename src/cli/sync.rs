@@ -1,11 +1,19 @@
 use anyhow::Result;
 use console::style;
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use crate::adapters::{build_sync_adapters, CommandRunner, RealCommandRunner, SecretValue, SyncMode};
 use crate::config::Config;
 use crate::store::SecretStore;
 use crate::tracker::SyncIndex;
+
+/// A single sync result entry for display.
+struct SyncEntry {
+    key: String,
+    env: String,
+    target: String,
+    error: Option<String>,
+}
 
 pub fn run(
     config: &Config,
@@ -39,7 +47,7 @@ pub fn run_with_runner(
     let adapters = build_sync_adapters(config, runner);
 
     if adapters.is_empty() && has_configured_adapters {
-        println!("  No adapters available after preflight checks. Fix the issues above and try again.");
+        cliclack::log::warning("No adapters available after preflight checks. Fix the issues above and try again.")?;
         return Ok(());
     }
 
@@ -55,9 +63,10 @@ pub fn run_with_runner(
     // Individual-mode work items: (key, value, target)
     let mut individual_work: Vec<(String, String, crate::config::ResolvedTarget)> = Vec::new();
 
-    let mut sync_count = 0u32;
-    let mut skip_count = 0u32;
-    let mut fail_count = 0u32;
+    // Collect structured results
+    let mut synced: Vec<SyncEntry> = Vec::new();
+    let mut skipped: Vec<SyncEntry> = Vec::new();
+    let mut failed: Vec<SyncEntry> = Vec::new();
 
     for secret in &resolved {
         for target in &secret.targets {
@@ -79,12 +88,10 @@ pub fn run_with_runner(
                 Some(v) => v,
                 None => {
                     if verbose {
-                        println!(
-                            "  {} {}:{} — no value set",
-                            style("skip").dim(),
-                            secret.key,
-                            target.environment
-                        );
+                        cliclack::log::remark(format!(
+                            "{}:{} — no value set",
+                            secret.key, target.environment
+                        ))?;
                     }
                     continue;
                 }
@@ -112,21 +119,26 @@ pub fn run_with_runner(
                     if index.should_sync(&tracker_key, &value_hash, force) {
                         individual_work.push((secret.key.clone(), value.clone(), target.clone()));
                     } else {
-                        skip_count += 1;
-                        if verbose {
-                            println!(
-                                "  {} {}:{} → {}",
-                                style("skip").dim(),
-                                secret.key,
-                                target.environment,
-                                target.adapter
-                            );
-                        }
+                        skipped.push(SyncEntry {
+                            key: secret.key.clone(),
+                            env: target.environment.clone(),
+                            target: format_target(target),
+                            error: None,
+                        });
                     }
                 }
             }
         }
     }
+
+    // Normal mode: single spinner for the entire operation
+    let spinner = if !verbose && !dry_run {
+        let s = cliclack::spinner();
+        s.start("Syncing secrets...");
+        Some(s)
+    } else {
+        None
+    };
 
     // Handle batch adapters: for each dirty target group, gather ALL secrets and sync
     for (adapter_name, app, target_env) in &batch_dirty {
@@ -163,26 +175,27 @@ pub fn run_with_runner(
             environment: target_env.clone(),
         };
 
+        let target_display = format_target(&target);
+
         if dry_run {
-            println!(
-                "  {} {} ({} secrets) → {}",
-                style("would sync").cyan(),
-                style(adapter_name).bold(),
-                secrets_for_batch.len(),
-                target
-            );
-            sync_count += secrets_for_batch.len() as u32;
+            for s in &secrets_for_batch {
+                synced.push(SyncEntry {
+                    key: s.key.clone(),
+                    env: target_env.clone(),
+                    target: target_display.clone(),
+                    error: None,
+                });
+            }
             continue;
         }
 
         if verbose {
-            println!(
-                "  {} {} ({} secrets) → {}",
-                style("syncing").cyan(),
+            cliclack::log::step(format!(
+                "Syncing {} ({} secrets) → {}",
                 style(adapter_name).bold(),
                 secrets_for_batch.len(),
                 target
-            );
+            ))?;
         }
 
         let results = adapter.sync_batch(&secrets_for_batch, &target);
@@ -200,45 +213,44 @@ pub fn run_with_runner(
 
             if result.success {
                 index.record_success(tracker_key, target.to_string(), value_hash);
-                sync_count += 1;
+                synced.push(SyncEntry {
+                    key: result.key.clone(),
+                    env: target_env.clone(),
+                    target: target_display.clone(),
+                    error: None,
+                });
             } else {
                 let error = result.error.clone().unwrap_or_default();
                 index.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
-                fail_count += 1;
-                eprintln!(
-                    "  {} {}:{} → {}: {}",
-                    style("fail").red(),
-                    result.key,
-                    target_env,
-                    adapter_name,
-                    error
-                );
+                failed.push(SyncEntry {
+                    key: result.key.clone(),
+                    env: target_env.clone(),
+                    target: target_display.clone(),
+                    error: Some(error),
+                });
             }
         }
     }
 
     // Handle individual adapters
     for (key, value, target) in &individual_work {
+        let target_display = format_target(target);
+
         if dry_run {
-            println!(
-                "  {} {}:{} → {}",
-                style("would sync").cyan(),
-                key,
-                target.environment,
-                target
-            );
-            sync_count += 1;
+            synced.push(SyncEntry {
+                key: key.clone(),
+                env: target.environment.clone(),
+                target: target_display,
+                error: None,
+            });
             continue;
         }
 
         if verbose {
-            println!(
-                "  {} {}:{} → {}",
-                style("syncing").cyan(),
-                key,
-                target.environment,
-                target
-            );
+            cliclack::log::step(format!(
+                "Syncing {}:{} → {}",
+                key, target.environment, target
+            ))?;
         }
 
         let (adapter_idx, _) = adapter_map[target.adapter.as_str()];
@@ -256,26 +268,33 @@ pub fn run_with_runner(
         match result {
             Ok(()) => {
                 index.record_success(tracker_key, target.to_string(), value_hash);
-                sync_count += 1;
-                println!(
-                    "  {} {}:{} → {}",
-                    style("synced").green(),
-                    key,
-                    target.environment,
-                    target
-                );
+                synced.push(SyncEntry {
+                    key: key.clone(),
+                    env: target.environment.clone(),
+                    target: target_display,
+                    error: None,
+                });
+                if verbose {
+                    cliclack::log::success(format!(
+                        "Synced {}:{} → {}",
+                        key, target.environment, target
+                    ))?;
+                }
             }
             Err(e) => {
                 index.record_failure(tracker_key, target.to_string(), value_hash, e.to_string());
-                fail_count += 1;
-                eprintln!(
-                    "  {} {}:{} → {}: {}",
-                    style("fail").red(),
-                    key,
-                    target.environment,
-                    target,
-                    e
-                );
+                failed.push(SyncEntry {
+                    key: key.clone(),
+                    env: target.environment.clone(),
+                    target: target_display,
+                    error: Some(e.to_string()),
+                });
+                if verbose {
+                    let _ = cliclack::log::error(format!(
+                        "{}:{} → {}: {}",
+                        key, target.environment, target, e
+                    ));
+                }
             }
         }
     }
@@ -297,7 +316,12 @@ pub fn run_with_runner(
                 if !batch_dirty.contains(&group) {
                     let composite = format!("{}:{}", secret.key, target.environment);
                     if payload.secrets.contains_key(&composite) {
-                        skip_count += 1;
+                        skipped.push(SyncEntry {
+                            key: secret.key.clone(),
+                            env: target.environment.clone(),
+                            target: format_target(target),
+                            error: None,
+                        });
                     }
                 }
             }
@@ -308,29 +332,51 @@ pub fn run_with_runner(
         index.save()?;
     }
 
-    // Summary
+    let sync_count = synced.len();
+    let skip_count = skipped.len();
+    let fail_count = failed.len();
+
+    // Stop spinner before printing results
+    if let Some(s) = spinner {
+        s.stop("Syncing secrets...");
+    }
+
+    // Output
     if dry_run {
-        println!(
-            "\n  {} {} to sync, {} up to date",
-            style("dry run:").cyan(),
-            sync_count,
-            skip_count
-        );
-    } else {
-        let mut parts = Vec::new();
-        if sync_count > 0 {
-            parts.push(format!("{} synced", sync_count));
-        }
+        print_group("synced", &synced)?;
         if skip_count > 0 {
-            parts.push(format!("{} up to date", skip_count));
+            cliclack::log::remark(format!(
+                "{} up to date",
+                style(skip_count).bold()
+            ))?;
         }
-        if fail_count > 0 {
-            parts.push(format!("{} failed", fail_count));
-        }
-        if parts.is_empty() {
-            println!("  Nothing to sync.");
-        } else {
-            println!("\n  {}", parts.join(", "));
+        cliclack::log::warning(format!("Dry run — no changes made"))?;
+    } else if sync_count == 0 && skip_count == 0 && fail_count == 0 {
+        cliclack::log::info("Nothing to sync.")?;
+    } else if fail_count == 0 && sync_count == 0 && skip_count > 0 {
+        // Everything up to date
+        cliclack::log::success(format!(
+            "All {} targets up to date",
+            style(skip_count).bold()
+        ))?;
+    } else {
+        // Print failed first (most important)
+        print_group("failed", &failed)?;
+
+        // Print synced
+        print_group("synced", &synced)?;
+
+        // Print skipped summary
+        if skip_count > 0 {
+            if verbose {
+                print_group("up to date", &skipped)?;
+            } else {
+                cliclack::log::remark(format!(
+                    "{} up to date  {}",
+                    style(skip_count).bold(),
+                    style("(use --verbose to show)").dim()
+                ))?;
+            }
         }
     }
 
@@ -339,4 +385,73 @@ pub fn run_with_runner(
     }
 
     Ok(())
+}
+
+/// Group entries by (key, env) → [targets], collapsing same key+env.
+/// Returns Vec<(key, env, targets, error)>.
+fn group_entries(entries: &[SyncEntry]) -> Vec<(&str, &str, Vec<&str>, Option<&str>)> {
+    let mut map: BTreeMap<(&str, &str), (Vec<&str>, Option<&str>)> = BTreeMap::new();
+    for entry in entries {
+        let group = map
+            .entry((&entry.key, &entry.env))
+            .or_insert_with(|| (Vec::new(), None));
+        group.0.push(&entry.target);
+        if entry.error.is_some() {
+            group.1 = entry.error.as_deref();
+        }
+    }
+    map.into_iter()
+        .map(|((key, env), (targets, error))| (key, env, targets, error))
+        .collect()
+}
+
+fn print_group(label: &str, entries: &[SyncEntry]) -> Result<()> {
+    if entries.is_empty() {
+        return Ok(());
+    }
+
+    let grouped = group_entries(entries);
+
+    let (icon, count_style) = match label {
+        "failed" => ("✗", style(grouped.len()).red().bold()),
+        "synced" => ("✓", style(grouped.len()).green().bold()),
+        _ => ("●", style(grouped.len()).dim().bold()),
+    };
+
+    let header = format!("{icon} {count_style} {label}");
+
+    let lines: Vec<String> = grouped
+        .iter()
+        .map(|(key, env, targets, error)| {
+            let targets_str = targets.join(", ");
+            let mut line = format!(
+                "  {}  → {}",
+                style(format!("{key}:{env}")).dim(),
+                targets_str
+            );
+            if let Some(err) = error {
+                line.push_str(&format!("  {}", style(format!("({err})")).dim()));
+            }
+            line
+        })
+        .collect();
+
+    let body = format!("{header}\n{}", lines.join("\n"));
+
+    match label {
+        "failed" => cliclack::log::error(body)?,
+        "synced" => cliclack::log::success(body)?,
+        _ => cliclack::log::remark(body)?,
+    }
+
+    Ok(())
+}
+
+fn format_target(target: &crate::config::ResolvedTarget) -> String {
+    let mut s = target.adapter.clone();
+    if let Some(app) = &target.app {
+        s.push(':');
+        s.push_str(app);
+    }
+    s
 }
