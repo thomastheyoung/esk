@@ -225,6 +225,19 @@ This means you can use 1Password for team sharing and Dropbox as a backup simult
 
 The `set` command automatically pushes to all configured plugins after storing a secret (unless `--no-sync` is used).
 
+## Development
+
+### Sandbox environment
+
+`cargo xtask sandbox` builds a release binary and scaffolds a test project in `/private/tmp/lockbox-test` with mock CLI shims and sample secrets — useful for manual testing without real external services.
+
+```bash
+cargo xtask sandbox          # build + scaffold + seed
+cargo xtask sandbox --clean  # tear down
+```
+
+After setup, follow the printed instructions to `cd` and update your `PATH`.
+
 ## License
 
 MIT
