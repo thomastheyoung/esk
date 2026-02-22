@@ -46,6 +46,29 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
     let mut shown_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
 
+    // Collect uncategorized keys early so we can compute global key width
+    let mut uncat_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    for composite_key in all_secrets.keys() {
+        if let Some((key, _)) = composite_key.rsplit_once(':') {
+            let in_config = config
+                .secrets
+                .values()
+                .any(|vs| vs.contains_key(key));
+            if !in_config {
+                uncat_keys.insert(key.to_string());
+            }
+        }
+    }
+
+    // Compute global max key width across all groups for aligned columns
+    let global_key_width = config
+        .secrets
+        .values()
+        .flat_map(|vs| vs.keys().map(|k| k.len()))
+        .chain(uncat_keys.iter().map(|k| k.len()))
+        .max()
+        .unwrap_or(0);
+
     for (vendor, vendor_secrets) in &config.secrets {
         let keys: Vec<&str> = vendor_secrets.keys().map(|k| k.as_str()).collect();
         if keys.is_empty() {
@@ -55,7 +78,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
             shown_keys.insert(k.to_string());
         }
 
-        let body = render_table(&keys, &envs, |key, e| {
+        let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
             all_secrets.contains_key(&composite)
         });
@@ -63,20 +86,10 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         cliclack::note(vendor, body)?;
     }
 
-    // Uncategorized secrets (in store but not in config)
-    let mut uncat_keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for composite_key in all_secrets.keys() {
-        if let Some((key, _)) = composite_key.rsplit_once(':') {
-            if !shown_keys.contains(key) {
-                uncat_keys.insert(key.to_string());
-            }
-        }
-    }
-
     if !uncat_keys.is_empty() {
         let keys: Vec<&str> = uncat_keys.iter().map(|s| s.as_str()).collect();
 
-        let body = render_table(&keys, &envs, |key, e| {
+        let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
             all_secrets.contains_key(&composite)
         });
@@ -89,8 +102,12 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-fn render_table(keys: &[&str], envs: &[&str], has_value: impl Fn(&str, &str) -> bool) -> String {
-    let key_width = keys.iter().map(|k| k.len()).max().unwrap_or(0);
+fn render_table(
+    keys: &[&str],
+    envs: &[&str],
+    key_width: usize,
+    has_value: impl Fn(&str, &str) -> bool,
+) -> String {
     let col_widths: Vec<usize> = envs.iter().map(|e| e.len().max(1)).collect();
     let gap = 2;
 
