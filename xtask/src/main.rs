@@ -227,12 +227,12 @@ fn print_instructions(root: &Path) {
     eprintln!("Try:");
     eprintln!("  lockbox list");
     eprintln!("  lockbox list --env dev");
-    eprintln!("  lockbox get STRIPE_KEY dev");
+    eprintln!("  lockbox get STRIPE_KEY --env dev");
     eprintln!("  lockbox status");
     eprintln!("  lockbox status --env prod");
     eprintln!("  lockbox sync --env dev");
     eprintln!("  lockbox sync --env dev --dry-run --verbose");
-    eprintln!("  lockbox set NEW_SECRET dev --value test123");
+    eprintln!("  lockbox set NEW_SECRET --env dev --value test123");
     eprintln!("  lockbox push --env dev");
     eprintln!();
 }
