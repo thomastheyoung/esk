@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
+use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::reconcile;
 use crate::store::SecretStore;
@@ -39,7 +40,7 @@ pub fn run_with_runner(
         if config.plugins.is_empty() {
             bail!("no plugins configured in lockbox.yaml");
         } else {
-            println!("  No plugins available after preflight checks. Fix the issues above and try again.");
+            cliclack::log::warning("No plugins available after preflight checks. Fix the issues above and try again.")?;
             return Ok(());
         }
     }
@@ -62,30 +63,39 @@ pub fn run_with_runner(
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
 
     for plugin in &target_plugins {
-        print!("  {} ← {}...", style("pulling").cyan(), plugin.name());
+        let spinner = cliclack::spinner();
+        spinner.start(format!("Pulling ← {}...", plugin.name()));
 
         match plugin.pull(config, env) {
             Ok(Some((secrets, version))) => {
-                println!(
-                    " {} (v{}, {} secrets)",
+                spinner.stop(format!(
+                    "Pulled ← {} {} (v{}, {} secrets)",
+                    plugin.name(),
                     style("ok").green(),
                     version,
                     secrets.len()
-                );
+                ));
                 remote_data.push((plugin.name().to_string(), secrets, version));
             }
             Ok(None) => {
-                println!(" {}", style("no data").dim());
+                spinner.stop(format!(
+                    "Pulled ← {} {}",
+                    plugin.name(),
+                    style("no data").dim()
+                ));
             }
             Err(e) => {
-                println!(" {}", style("failed").red());
-                eprintln!("  {e}");
+                spinner.error(format!(
+                    "Pulled ← {} {} — {e}",
+                    plugin.name(),
+                    style("failed").red()
+                ));
             }
         }
     }
 
     if remote_data.is_empty() {
-        println!("\n  No remote data found. Nothing to reconcile.");
+        cliclack::log::info("No remote data found. Nothing to reconcile.")?;
         return Ok(());
     }
 
@@ -99,45 +109,63 @@ pub fn run_with_runner(
 
     if result.local_changed {
         store.write_payload(&result.merged_payload)?;
-        println!(
-            "\n  {} local store updated to v{}",
-            style("merged").green(),
+        cliclack::log::success(format!(
+            "Merged — local store updated to v{}",
             result.merged_payload.version
-        );
+        ))?;
 
         // Push merged result back to plugins that were behind
         if !result.sources_to_update.is_empty() {
             let updated_payload = store.payload()?;
+            let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
+            let mut plugin_index = PluginIndex::load(&plugin_index_path);
             for plugin in &target_plugins {
                 if result
                     .sources_to_update
                     .contains(&plugin.name().to_string())
                 {
-                    print!(
-                        "  {} → {}...",
-                        style("pushing merged").cyan(),
-                        plugin.name()
-                    );
+                    let spinner = cliclack::spinner();
+                    spinner.start(format!("Pushing merged → {}...", plugin.name()));
                     match plugin.push(&updated_payload, config, env) {
-                        Ok(()) => println!(" {}", style("done").green()),
+                        Ok(()) => {
+                            spinner.stop(format!(
+                                "Pushed merged → {} {}",
+                                plugin.name(),
+                                style("done").green()
+                            ));
+                            plugin_index.record_success(
+                                plugin.name(),
+                                env,
+                                updated_payload.version,
+                            );
+                        }
                         Err(e) => {
-                            println!(" {}", style("failed").red());
-                            eprintln!("  {e}");
+                            spinner.error(format!(
+                                "Pushed merged → {} {} — {e}",
+                                plugin.name(),
+                                style("failed").red()
+                            ));
+                            plugin_index.record_failure(
+                                plugin.name(),
+                                env,
+                                updated_payload.version,
+                                e.to_string(),
+                            );
                         }
                     }
                 }
             }
+            plugin_index.save()?;
         }
     } else {
-        println!(
-            "\n  {} already in sync (v{})",
-            style("up to date").green(),
+        cliclack::log::success(format!(
+            "Up to date — already in sync (v{})",
             payload.version
-        );
+        ))?;
     }
 
     if auto_sync && result.local_changed {
-        println!("\n  Running sync...");
+        cliclack::log::step("Running sync...")?;
         crate::cli::sync::run_with_runner(config, Some(env), false, false, false, runner)?;
     }
 

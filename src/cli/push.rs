@@ -3,6 +3,7 @@ use console::style;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
+use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::store::SecretStore;
 
@@ -36,7 +37,7 @@ pub fn run_with_runner(
         if config.plugins.is_empty() {
             bail!("no plugins configured in lockbox.yaml");
         } else {
-            println!("  No plugins available after preflight checks. Fix the issues above and try again.");
+            cliclack::log::warning("No plugins available after preflight checks. Fix the issues above and try again.")?;
             return Ok(());
         }
     }
@@ -55,34 +56,51 @@ pub fn run_with_runner(
         all_plugins
     };
 
+    let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
+    let mut plugin_index = PluginIndex::load(&plugin_index_path);
+
     let mut success_count = 0u32;
     let mut fail_count = 0u32;
 
     for plugin in &target_plugins {
-        print!("  {} → {}...", style("pushing").cyan(), plugin.name());
+        let spinner = cliclack::spinner();
+        spinner.start(format!("Pushing → {}...", plugin.name()));
 
         match plugin.push(&payload, config, env) {
             Ok(()) => {
-                println!(" {}", style("done").green());
+                spinner.stop(format!(
+                    "Pushed → {} {}",
+                    plugin.name(),
+                    style("done").green()
+                ));
+                plugin_index.record_success(plugin.name(), env, payload.version);
                 success_count += 1;
             }
             Err(e) => {
-                println!(" {}", style("failed").red());
-                eprintln!("  {e}");
+                spinner.error(format!(
+                    "Pushed → {} {} — {e}",
+                    plugin.name(),
+                    style("failed").red()
+                ));
+                plugin_index.record_failure(plugin.name(), env, payload.version, e.to_string());
                 fail_count += 1;
             }
         }
     }
 
-    println!(
-        "\n  {} (v{})",
-        if fail_count == 0 {
-            format!("{} plugin(s) pushed", success_count)
-        } else {
-            format!("{} pushed, {} failed", success_count, fail_count)
-        },
-        payload.version
-    );
+    plugin_index.save()?;
+
+    if fail_count == 0 {
+        cliclack::log::success(format!(
+            "{} plugin(s) pushed (v{})",
+            success_count, payload.version
+        ))?;
+    } else {
+        cliclack::log::error(format!(
+            "{} pushed, {} failed (v{})",
+            success_count, fail_count, payload.version
+        ))?;
+    }
 
     if fail_count > 0 {
         bail!("{fail_count} plugin push(es) failed");

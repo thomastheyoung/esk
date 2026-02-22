@@ -3,6 +3,7 @@ use console::style;
 use std::collections::BTreeMap;
 
 use crate::config::{Config, ResolvedTarget};
+use crate::plugin_tracker::{PluginIndex, PushStatus};
 use crate::store::SecretStore;
 use crate::tracker::{SyncIndex, SyncStatus};
 
@@ -84,6 +85,7 @@ pub fn run(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
 
     if entries.is_empty() {
         cliclack::log::info("No sync targets configured.")?;
+        print_plugin_status(config, env, payload.version)?;
         cliclack::log::info(format!("Store version: {}", payload.version))?;
         return Ok(());
     }
@@ -105,6 +107,7 @@ pub fn run(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
         if all {
             print_group(&by_status, &Status::Synced)?;
         }
+        print_plugin_status(config, env, payload.version)?;
         cliclack::log::info(format!("Store version: {}", payload.version))?;
         return Ok(());
     }
@@ -127,6 +130,7 @@ pub fn run(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
         }
     }
 
+    print_plugin_status(config, env, payload.version)?;
     cliclack::log::info(format!("Store version: {}", payload.version))?;
 
     Ok(())
@@ -203,4 +207,77 @@ fn format_target(target: &ResolvedTarget) -> String {
         s.push_str(app);
     }
     s
+}
+
+fn print_plugin_status(config: &Config, env: Option<&str>, store_version: u64) -> Result<()> {
+    if config.plugins.is_empty() {
+        return Ok(());
+    }
+
+    let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
+    let plugin_index = PluginIndex::load(&plugin_index_path);
+
+    let plugin_names: Vec<&String> = config.plugins.keys().collect();
+    let envs: Vec<&str> = match env {
+        Some(e) => vec![e],
+        None => config.environments.iter().map(|s| s.as_str()).collect(),
+    };
+
+    let mut lines: Vec<String> = Vec::new();
+
+    for plugin_name in &plugin_names {
+        for env_name in &envs {
+            let key = PluginIndex::tracker_key(plugin_name, env_name);
+            let line = match plugin_index.records.get(&key) {
+                Some(record) if record.last_push_status == PushStatus::Failed => {
+                    let err = record
+                        .last_error
+                        .as_deref()
+                        .unwrap_or("unknown error");
+                    format!(
+                        "  {} {}  {} {}",
+                        style("✗").red(),
+                        style(format!("{plugin_name}:{env_name}")).dim(),
+                        style(format!("v{}", record.pushed_version)).dim(),
+                        style(format!("({err})")).dim()
+                    )
+                }
+                Some(record) if record.pushed_version >= store_version => {
+                    format!(
+                        "  {} {}  {}",
+                        style("✓").green(),
+                        style(format!("{plugin_name}:{env_name}")).dim(),
+                        style(format!("v{}", record.pushed_version)).dim()
+                    )
+                }
+                Some(record) => {
+                    format!(
+                        "  {} {}  {}",
+                        style("●").yellow(),
+                        style(format!("{plugin_name}:{env_name}")).dim(),
+                        style(format!(
+                            "v{} (local is v{})",
+                            record.pushed_version, store_version
+                        ))
+                        .dim()
+                    )
+                }
+                None => {
+                    format!(
+                        "  {} {}  {}",
+                        style("○").dim(),
+                        style(format!("{plugin_name}:{env_name}")).dim(),
+                        style("never pushed").dim()
+                    )
+                }
+            };
+            lines.push(line);
+        }
+    }
+
+    if !lines.is_empty() {
+        cliclack::log::info(format!("Plugins\n{}", lines.join("\n")))?;
+    }
+
+    Ok(())
 }

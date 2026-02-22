@@ -44,6 +44,10 @@ impl TestProject {
     pub fn sync_index_path(&self) -> PathBuf {
         self.dir.path().join(".lockbox/sync-index.json")
     }
+
+    pub fn plugin_index_path(&self) -> PathBuf {
+        self.dir.path().join(".lockbox/plugin-index.json")
+    }
 }
 
 /// Minimal valid config: project + 1 env, no apps/adapters/secrets.

@@ -1,9 +1,9 @@
 use anyhow::{bail, Result};
 use console::style;
-use dialoguer::Password;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
+use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::store::SecretStore;
 
@@ -34,29 +34,26 @@ pub fn run_with_runner(
 
     // Validate that the key is defined in config (warn if not, but allow it)
     if config.find_secret(key).is_none() {
-        eprintln!(
-            "  {} secret '{key}' is not defined in lockbox.yaml",
-            style("warning:").yellow()
-        );
+        cliclack::log::warning(format!(
+            "Secret '{}' is not defined in lockbox.yaml",
+            key
+        ))?;
     }
 
     let secret_value = match value {
         Some(v) => v.to_string(),
-        None => Password::new()
-            .with_prompt(format!("Value for {key} ({env})"))
+        None => cliclack::password(format!("Value for {} ({})", key, env))
+            .mask('*')
             .interact()?,
     };
 
     let store = SecretStore::open(&config.root)?;
     let payload = store.set(key, env, &secret_value)?;
 
-    println!(
-        "  {} {}:{} (v{})",
-        style("set").green(),
-        key,
-        env,
-        payload.version
-    );
+    cliclack::log::success(format!(
+        "Set {}:{} (v{})",
+        key, env, payload.version
+    ))?;
 
     if no_sync {
         return Ok(());
@@ -64,21 +61,35 @@ pub fn run_with_runner(
 
     // Auto-push to all configured plugins
     if !config.plugins.is_empty() {
+        let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
+        let mut plugin_index = PluginIndex::load(&plugin_index_path);
         let all_plugins = plugins::build_plugins(config, runner);
         for plugin in &all_plugins {
-            print!("  {} {}...", style("pushing").cyan(), plugin.name());
+            let spinner = cliclack::spinner();
+            spinner.start(format!("Pushing → {}...", plugin.name()));
             match plugin.push(&payload, config, env) {
-                Ok(()) => println!(" {}", style("done").green()),
+                Ok(()) => {
+                    spinner.stop(format!(
+                        "Pushed → {} {}",
+                        plugin.name(),
+                        style("done").green()
+                    ));
+                    plugin_index.record_success(plugin.name(), env, payload.version);
+                }
                 Err(e) => {
-                    println!(" {}", style("failed").red());
-                    eprintln!("  {e}");
+                    spinner.error(format!(
+                        "Pushed → {} {} — {e}",
+                        plugin.name(),
+                        style("failed").red()
+                    ));
+                    plugin_index.record_failure(plugin.name(), env, payload.version, e.to_string());
                 }
             }
         }
+        plugin_index.save()?;
     }
 
     // Auto-sync affected targets
-    println!();
     crate::cli::sync::run_with_runner(config, Some(env), false, false, false, runner)?;
 
     Ok(())

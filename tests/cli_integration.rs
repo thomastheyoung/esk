@@ -2,6 +2,7 @@ mod helpers;
 
 use helpers::*;
 use lockbox::cli;
+use lockbox::plugin_tracker::PluginIndex;
 use lockbox::tracker::SyncIndex;
 use serde_json::json;
 
@@ -15,6 +16,7 @@ fn init_creates_all_files() {
     assert!(dir.path().join(".lockbox/store.enc").is_file());
     assert!(dir.path().join(".lockbox/store.key").is_file());
     assert!(dir.path().join(".lockbox/sync-index.json").is_file());
+    assert!(dir.path().join(".lockbox/plugin-index.json").is_file());
 }
 
 #[test]
@@ -937,4 +939,141 @@ fn sync_cloudflare_force_resyncs() {
     runner.push_success(b"", b"");
     cli::sync::run_with_runner(&config, Some("dev"), true, false, false, &runner).unwrap();
     assert_eq!(runner.take_calls().len(), 2); // preflight + sync
+}
+
+// === plugin tracker integration ===
+
+#[test]
+fn push_records_plugin_index() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    runner.push_failure(b"isn't an item in vault"); // op item get
+    runner.push_success(b"", b""); // op item create
+
+    cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
+
+    let index = PluginIndex::load(&project.plugin_index_path());
+    assert_eq!(index.records.len(), 1);
+    let record = &index.records["onepassword:dev"];
+    assert_eq!(record.plugin, "onepassword");
+    assert_eq!(record.environment, "dev");
+    assert_eq!(record.pushed_version, 1);
+    assert_eq!(
+        record.last_push_status,
+        lockbox::plugin_tracker::PushStatus::Success
+    );
+}
+
+#[test]
+fn push_records_failure_in_plugin_index() {
+    let yaml = r#"
+project: testapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: Test
+    item_pattern: test
+"#;
+    let project = TestProject::with_store(yaml).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("KEY", "dev", "val").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    runner.push_failure(b"isn't an item in vault"); // op item get
+    runner.push_failure(b"op create failed"); // op item create fails
+
+    // push will bail because of failure
+    let _ = cli::push::run_with_runner(&config, "dev", None, &runner);
+
+    let index = PluginIndex::load(&project.plugin_index_path());
+    assert_eq!(index.records.len(), 1);
+    let record = &index.records["onepassword:dev"];
+    assert_eq!(
+        record.last_push_status,
+        lockbox::plugin_tracker::PushStatus::Failed
+    );
+    assert!(record.last_error.is_some());
+}
+
+#[test]
+fn status_shows_plugin_section() {
+    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    // No push yet — should show "never pushed"
+    cli::status::run(&config, None, false).unwrap();
+}
+
+#[test]
+fn status_shows_pushed_plugin() {
+    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    let payload = store.payload().unwrap();
+
+    // Manually write a plugin index with a pushed record
+    let mut index = PluginIndex::new(&project.plugin_index_path());
+    index.record_success("onepassword", "dev", payload.version);
+    index.save().unwrap();
+
+    cli::status::run(&config, Some("dev"), false).unwrap();
+}
+
+#[test]
+fn status_shows_stale_plugin() {
+    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    // Push at v0, then bump store version
+    let mut index = PluginIndex::new(&project.plugin_index_path());
+    index.record_success("onepassword", "dev", 0);
+    index.save().unwrap();
+
+    store.set("KEY", "dev", "val").unwrap(); // bumps to v1
+
+    cli::status::run(&config, Some("dev"), false).unwrap();
+}
+
+#[test]
+fn status_plugin_env_filter() {
+    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    let mut index = PluginIndex::new(&project.plugin_index_path());
+    index.record_success("onepassword", "dev", 1);
+    index.record_success("onepassword", "prod", 1);
+    index.save().unwrap();
+
+    // Filter to dev only — should not error
+    cli::status::run(&config, Some("dev"), false).unwrap();
+}
+
+#[test]
+fn set_auto_push_records_plugin_index() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    runner.push_failure(b"isn't an item in vault"); // op item get
+    runner.push_success(b"", b""); // op item create
+
+    // no_sync=false so auto-push runs (no adapters configured, sync is a no-op)
+    cli::set::run_with_runner(&config, "STRIPE_KEY", "dev", Some("val"), false, &runner).unwrap();
+
+    let index = PluginIndex::load(&project.plugin_index_path());
+    assert_eq!(index.records.len(), 1);
+    let record = &index.records["onepassword:dev"];
+    assert_eq!(
+        record.last_push_status,
+        lockbox::plugin_tracker::PushStatus::Success
+    );
 }
