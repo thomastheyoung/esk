@@ -147,16 +147,17 @@ Target format: `app:environment` (e.g., `web:prod`) or just `environment` for ad
 
 ## Commands
 
-| Command             | Description                                        |
-| ------------------- | -------------------------------------------------- |
-| `lockbox init`      | Initialize encrypted store and config              |
-| `lockbox set <KEY>` | Set a secret value                                 |
-| `lockbox get <KEY>` | Retrieve a secret value                            |
-| `lockbox list`      | List all secrets and their status                  |
-| `lockbox sync`      | Sync secrets to configured adapter targets         |
-| `lockbox status`    | Show sync status and drift                         |
-| `lockbox push`      | Push secrets to configured plugins                 |
-| `lockbox pull`      | Pull secrets from configured plugins and reconcile |
+| Command                | Description                                        |
+| ---------------------- | -------------------------------------------------- |
+| `lockbox init`         | Initialize encrypted store and config              |
+| `lockbox set <KEY>`    | Set a secret value                                 |
+| `lockbox get <KEY>`    | Retrieve a secret value                            |
+| `lockbox delete <KEY>` | Delete a secret value                              |
+| `lockbox list`         | List all secrets and their status                  |
+| `lockbox sync`         | Sync secrets to configured adapter targets         |
+| `lockbox status`       | Show sync status and drift                         |
+| `lockbox push`         | Push secrets to configured plugins                 |
+| `lockbox pull`         | Pull secrets from configured plugins and reconcile |
 
 See [API.md](API.md) for the full command reference with all flags and behaviors.
 
@@ -169,6 +170,9 @@ lockbox set STRIPE_SECRET_KEY --env prod --value sk_live_...
 
 # Retrieve a secret
 lockbox get STRIPE_SECRET_KEY --env dev
+
+# Delete a secret
+lockbox delete STRIPE_SECRET_KEY --env dev
 
 # List all secrets and their environments
 lockbox list
@@ -223,7 +227,7 @@ This means you can use 1Password for team sharing and Dropbox as a backup simult
 
 ### Auto-push
 
-The `set` command automatically pushes to all configured plugins after storing a secret (unless `--no-sync` is used).
+The `set` and `delete` commands automatically push to all configured plugins and sync to adapter targets (unless `--no-sync` is used).
 
 ## Development
 

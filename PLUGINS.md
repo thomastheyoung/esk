@@ -102,19 +102,23 @@ Stores the secret payload in a local or cloud-synced folder (Dropbox, Google Dri
 
 ### How it works
 
+Files are stored per environment (`secrets-{env}.enc` or `secrets-{env}.json`), so each environment is isolated. Only secrets for the pushed environment are included — no cross-environment leakage.
+
 **Encrypted format** (`format: encrypted`):
 
-- **Push**: Copies the `.lockbox/store.enc` file to `{path}/secrets.enc`.
-- **Pull**: Reads `{path}/secrets.enc`, decrypts with the local `.lockbox/store.key`, returns the payload.
+- **Push**: Encrypts the environment's secrets and writes to `{path}/secrets-{env}.enc`.
+- **Pull**: Reads `{path}/secrets-{env}.enc`, decrypts with the local `.lockbox/store.key`, returns the payload.
 - The cloud copy is encrypted — it's safe to store in shared or less-trusted locations.
 
 **Cleartext format** (`format: cleartext`):
 
-- **Push**: Writes `{path}/secrets.json` containing the full store payload as JSON.
-- **Pull**: Reads `{path}/secrets.json`, parses secrets and version.
+- **Push**: Writes `{path}/secrets-{env}.json` containing the environment's secrets as JSON.
+- **Pull**: Reads `{path}/secrets-{env}.json`, parses secrets and version.
 - Useful when you want human-readable backup or when other tools need to consume the secrets.
 
 Both formats use atomic writes (temp file + rename) and create parent directories automatically.
+
+**Backward compatibility**: On pull, if a per-env file doesn't exist, the plugin falls back to the legacy global file (`secrets.enc` or `secrets.json`) and prints a migration warning. On push, legacy global files are automatically removed after the per-env file is written.
 
 ### Configuration
 
@@ -132,11 +136,11 @@ plugins:
     format: cleartext
 ```
 
-| Field    | Required | Default     | Description                                                            |
-| -------- | -------- | ----------- | ---------------------------------------------------------------------- |
-| `type`   | Yes      | —           | Must be `cloud_file`.                                                  |
-| `path`   | Yes      | —           | Directory to store files in. Tilde (`~`) is expanded to `$HOME`.       |
-| `format` | No       | `encrypted` | Storage format: `encrypted` (binary, needs key) or `cleartext` (JSON). |
+| Field    | Required | Default     | Description                                                                                        |
+| -------- | -------- | ----------- | -------------------------------------------------------------------------------------------------- |
+| `type`   | Yes      | —           | Must be `cloud_file`.                                                                              |
+| `path`   | Yes      | —           | Directory to store files in. Supports `{project}` interpolation and tilde (`~`) expansion to `$HOME`. |
+| `format` | No       | `encrypted` | Storage format: `encrypted` (binary, needs key) or `cleartext` (JSON).                             |
 
 ### File layout
 
@@ -144,21 +148,29 @@ plugins:
 
 ```
 ~/Dropbox/secrets/myproject/
-  secrets.enc       # Copy of .lockbox/store.enc (AES-256-GCM encrypted)
+  secrets-dev.enc    # AES-256-GCM encrypted, dev environment only
+  secrets-prod.enc   # AES-256-GCM encrypted, prod environment only
 ```
 
 **Cleartext:**
 
 ```
 ~/Google Drive/secrets/myproject/
-  secrets.json      # { "secrets": { "KEY:env": "value", ... }, "version": N }
+  secrets-dev.json   # { "secrets": { "KEY": "value", ... }, "version": N }
+  secrets-prod.json  # { "secrets": { "KEY": "value", ... }, "version": N }
 ```
 
-### Tilde expansion
+Per-env files use bare keys (e.g., `KEY`) rather than composite keys (`KEY:env`), since the environment is encoded in the filename.
 
-Paths starting with `~` are expanded using the `$HOME` environment variable:
+### Path interpolation and expansion
 
-- `~/Dropbox/...` → `/Users/alice/Dropbox/...`
+- `{project}` is replaced with the project name from `lockbox.yaml`
+- `~` is expanded to the `$HOME` environment variable
+
+Examples:
+
+- `~/Dropbox/lockbox/{project}` → `/Users/alice/Dropbox/lockbox/myapp`
+- `~/Dropbox/secrets/myproject` → `/Users/alice/Dropbox/secrets/myproject`
 - `/absolute/path` → unchanged
 
 ---

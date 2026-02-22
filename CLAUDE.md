@@ -6,38 +6,40 @@ Rust CLI for encrypted secrets management with multi-target sync.
 
 ```
 src/
-├── main.rs           # CLI entry point (clap)
-├── lib.rs            # Library root (re-exports all modules)
-├── config.rs         # YAML config parsing + validation
-├── store.rs          # Encrypted secret store (AES-256-GCM)
-├── tracker.rs        # Sync tracking (SHA-256 change detection)
-├── reconcile.rs      # Version-based store reconciliation (pairwise + multi)
+├── main.rs              # CLI entry point (clap)
+├── lib.rs               # Library root (re-exports all modules)
+├── config.rs            # YAML config parsing + validation
+├── store.rs             # Encrypted secret store (AES-256-GCM)
+├── tracker.rs           # Sync tracking (SHA-256 change detection)
+├── plugin_tracker.rs    # Plugin push tracking (version + status per plugin/env)
+├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
 ├── adapters/
-│   ├── mod.rs        # SyncAdapter + CommandRunner traits, build_sync_adapters()
-│   ├── env_file.rs   # .env file generation (batch sync)
-│   ├── cloudflare.rs # wrangler secret put (individual sync)
-│   └── convex.rs     # convex env set (individual sync)
+│   ├── mod.rs           # SyncAdapter + CommandRunner traits, build_sync_adapters()
+│   ├── env_file.rs      # .env file generation (batch sync)
+│   ├── cloudflare.rs    # wrangler secret put/delete (individual sync)
+│   └── convex.rs        # convex env set/unset (individual sync)
 ├── plugins/
-│   ├── mod.rs        # StoragePlugin trait, build_plugins()
-│   ├── onepassword.rs # 1Password op CLI
-│   └── cloud_file.rs # Cloud file storage (Dropbox, Google Drive, OneDrive)
+│   ├── mod.rs           # StoragePlugin trait, build_plugins()
+│   ├── onepassword.rs   # 1Password op CLI
+│   └── cloud_file.rs    # Cloud file storage (Dropbox, Google Drive, OneDrive)
 ├── cli/
-│   ├── mod.rs        # Command routing
-│   ├── init.rs       # lockbox init
-│   ├── set.rs        # lockbox set
-│   ├── get.rs        # lockbox get
-│   ├── list.rs       # lockbox list
-│   ├── sync.rs       # lockbox sync (adapter-agnostic)
-│   ├── status.rs     # lockbox status (adapter-agnostic)
-│   ├── push.rs       # lockbox push (plugin-agnostic)
-│   └── pull.rs       # lockbox pull (plugin-agnostic + multi-reconciliation)
+│   ├── mod.rs           # Command routing
+│   ├── init.rs          # lockbox init
+│   ├── set.rs           # lockbox set
+│   ├── get.rs           # lockbox get
+│   ├── delete.rs        # lockbox delete
+│   ├── list.rs          # lockbox list
+│   ├── sync.rs          # lockbox sync (adapter-agnostic)
+│   ├── status.rs        # lockbox status (adapter-agnostic)
+│   ├── push.rs          # lockbox push (plugin-agnostic)
+│   └── pull.rs          # lockbox pull (plugin-agnostic + multi-reconciliation)
 tests/
 ├── helpers/
 │   └── mod.rs              # TestProject, fixtures, MockCommandRunner
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (48)
+└── cli_integration.rs      # CLI command tests (64)
 ```
 
 ## Core design
@@ -59,7 +61,7 @@ Project-level config defines everything: environments, apps, adapter settings, p
 - Random 32-byte key in `.lockbox/store.key` (gitignored)
 - Per-encryption 12-byte nonce
 - Storage format: `nonce:ciphertext:tag` (hex-encoded)
-- JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N }`
+- JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N, "tombstones": { "KEY:env": N }, "env_versions": { "env": N } }`
 - Safe to commit to git
 
 ### Sync adapter trait
@@ -70,9 +72,12 @@ pub trait SyncAdapter {
     fn sync_mode(&self) -> SyncMode;  // Batch or Individual
     fn preflight(&self) -> Result<()>;  // Validate external deps (default: Ok)
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
+    fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()>;  // Default: no-op
     fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<SyncResult>;
 }
 ```
+
+Batch adapters handle deletion by regenerating the full output without the deleted key. Individual adapters (cloudflare, convex) override `delete_secret` to call the external CLI's delete/unset command.
 
 `SyncMode::Batch` adapters (env) regenerate the full output when any secret changes. `SyncMode::Individual` adapters (cloudflare, convex) sync one secret at a time. The `build_sync_adapters()` factory constructs all configured adapters from config, running preflight checks and filtering out adapters that fail.
 
@@ -101,8 +106,13 @@ pub trait CommandRunner: Send + Sync {
 
 ### Change tracking (`.lockbox/sync-index.json`)
 
-SHA-256 hash per (secret, target) pair. Skip sync when hash matches.
+SHA-256 hash per (secret, adapter, app, environment) tuple. Skip sync when hash matches.
+Records include target, value hash, timestamp, sync status (success/failed), and optional error.
 Atomic writes via temp file + rename.
+
+### Plugin push tracking (`.lockbox/plugin-index.json`)
+
+Tracks push state per (plugin, environment) pair. Records pushed version, timestamp, push status (success/failed), and optional error. Used by `status` to show plugin push drift. Atomic writes via temp file + rename.
 
 ### Reconciliation
 
@@ -122,10 +132,12 @@ Version-counter-based reconciliation between local store and remote plugins. Two
 | `hex`                               | Hex encoding for keys, nonces, hashes |
 | `rand`                              | Random key and nonce generation       |
 | `chrono`                            | Timestamps in sync records            |
-| `dialoguer`                         | Interactive prompts (secret input)    |
+| `cliclack`                          | Terminal UI (spinners, logs, prompts) |
 | `console`                           | Terminal colors and styling           |
+| `fs2`                               | File locking (exclusive store locks)  |
 | `tempfile`                          | Atomic file writes                    |
 | `anyhow`                            | Error handling                        |
+| `thiserror`                         | Typed errors at API boundaries        |
 | `zeroize`                           | Zeroing secret key bytes on drop      |
 
 ## Rules
@@ -152,17 +164,18 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 236 tests
+cargo test                    # Run all 290 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
 cargo test tracker::          # Run tracker unit tests only
+cargo test plugin_tracker::   # Run plugin tracker unit tests only
 cargo test adapters::         # Run all adapter unit tests
 cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-236 tests total: 174 unit (inline `#[cfg(test)]`) + 62 integration (`tests/`).
+290 tests total: 212 unit (inline `#[cfg(test)]`) + 78 integration (`tests/`).
 
 ### Test infrastructure
 

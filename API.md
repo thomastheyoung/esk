@@ -21,6 +21,37 @@ Idempotent — skips files that already exist. Warns if `.lockbox/store.key` is 
 
 ---
 
+## `lockbox delete`
+
+Delete a secret value from an environment.
+
+```bash
+lockbox delete <KEY> --env <ENV> [--no-sync]
+```
+
+| Argument    | Required | Description                                              |
+| ----------- | -------- | -------------------------------------------------------- |
+| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)              |
+| `--env`     | Yes      | Environment to delete from                               |
+| `--no-sync` | No       | Store only — skip auto-push to plugins and auto-sync     |
+
+**Behavior:**
+
+1. Validates the environment exists in config.
+2. Warns if the key isn't defined in `lockbox.yaml`.
+3. Removes the value from the encrypted store and records a tombstone, incrementing the version counter.
+4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
+5. Unless `--no-sync`: runs `sync` for the affected environment (batch adapters regenerate without the deleted key; individual adapters call their delete command).
+
+**Examples:**
+
+```bash
+lockbox delete API_KEY --env dev                     # Delete + auto-sync
+lockbox delete API_KEY --env dev --no-sync           # Delete only, don't sync
+```
+
+---
+
 ## `lockbox set`
 
 Set a secret value for an environment.
@@ -151,14 +182,16 @@ SHA-256 hash of each secret value is tracked per (secret, adapter, app, environm
 Show sync status and drift for all configured adapter targets.
 
 ```bash
-lockbox status [--env <ENV>]
+lockbox status [--env <ENV>] [--all] [--group-by <AXIS>]
 ```
 
-| Argument | Required | Description                    |
-| -------- | -------- | ------------------------------ |
-| `--env`  | No       | Filter to a single environment |
+| Argument     | Required | Description                                              |
+| ------------ | -------- | -------------------------------------------------------- |
+| `--env`      | No       | Filter to a single environment                           |
+| `--all`      | No       | Show all targets including synced ones                   |
+| `--group-by` | No       | Group output by axis: `status` (default), `env`, `target`, or `key` |
 
-Shows each (secret, target) pair with its sync state. Targets for plugins are excluded — only adapter targets are shown.
+Shows each (secret, target) pair with its sync state. Targets for plugins are excluded — only adapter targets are shown. Also displays plugin push status when plugins are configured.
 
 | Status         | Meaning                                             |
 | -------------- | --------------------------------------------------- |
@@ -214,14 +247,15 @@ lockbox push --env dev --only dropbox       # Push to Dropbox only
 Pull secrets from configured storage plugins and reconcile with the local store.
 
 ```bash
-lockbox pull --env <ENV> [--only <PLUGIN>] [--sync]
+lockbox pull --env <ENV> [--only <PLUGIN>] [--sync] [--strict]
 ```
 
-| Argument | Required | Description                      |
-| -------- | -------- | -------------------------------- |
-| `--env`  | Yes      | Environment to pull              |
-| `--only` | No       | Pull from a specific plugin only |
-| `--sync` | No       | Auto-run `sync` after pulling    |
+| Argument   | Required | Description                                                  |
+| ---------- | -------- | ------------------------------------------------------------ |
+| `--env`    | Yes      | Environment to pull                                          |
+| `--only`   | No       | Pull from a specific plugin only                             |
+| `--sync`   | No       | Auto-run `sync` after pulling                                |
+| `--strict` | No       | Fail if any plugin is unreachable (no partial reconciliation) |
 
 **Requires:** At least one plugin configured in `lockbox.yaml` and its dependencies available.
 
@@ -247,12 +281,13 @@ lockbox pull --env prod --sync            # Pull + reconcile + sync targets
 
 ## Files
 
-| File                       | Description                             | Commit to git? |
-| -------------------------- | --------------------------------------- | -------------- |
-| `lockbox.yaml`             | Project configuration                   | Yes            |
-| `.lockbox/store.enc`       | AES-256-GCM encrypted secret store      | Yes            |
-| `.lockbox/store.key`       | 32-byte encryption key (hex)            | **No**         |
-| `.lockbox/sync-index.json` | Sync state (hashes, timestamps, status) | Optional       |
+| File                         | Description                               | Commit to git? |
+| ---------------------------- | ----------------------------------------- | -------------- |
+| `lockbox.yaml`               | Project configuration                     | Yes            |
+| `.lockbox/store.enc`         | AES-256-GCM encrypted secret store        | Yes            |
+| `.lockbox/store.key`         | 32-byte encryption key (hex)              | **No**         |
+| `.lockbox/sync-index.json`   | Sync state (hashes, timestamps, status)   | Optional       |
+| `.lockbox/plugin-index.json` | Plugin push state (versions, timestamps)  | Optional       |
 
 ## Exit codes
 
