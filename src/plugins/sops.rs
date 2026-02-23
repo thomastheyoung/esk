@@ -29,9 +29,7 @@ impl<'a> SopsPlugin<'a> {
 
     /// Resolve the file path for an environment.
     fn resolve_path(&self, env: &str) -> String {
-        self.plugin_config
-            .path
-            .replace("{environment}", env)
+        self.plugin_config.path.replace("{environment}", env)
     }
 }
 
@@ -73,8 +71,8 @@ impl<'a> StoragePlugin for SopsPlugin<'a> {
         // Build JSON payload with bare keys + version metadata
         let mut json_map: BTreeMap<String, String> = env_secrets;
         json_map.insert("_esk_version".to_string(), version.to_string());
-        let json = serde_json::to_string_pretty(&json_map)
-            .context("failed to serialize secrets")?;
+        let json =
+            serde_json::to_string_pretty(&json_map).context("failed to serialize secrets")?;
 
         let dest_path = self.resolve_path(env);
 
@@ -122,11 +120,7 @@ impl<'a> StoragePlugin for SopsPlugin<'a> {
         // Decrypt via sops
         let output = self
             .runner
-            .run(
-                "sops",
-                &["-d", &file_path],
-                CommandOpts::default(),
-            )
+            .run("sops", &["-d", &file_path], CommandOpts::default())
             .context("failed to run sops decrypt")?;
 
         if !output.success {
@@ -390,7 +384,12 @@ plugins:
             calls: Mutex<Vec<(String, Vec<String>, Option<Vec<u8>>)>>,
         }
         impl CommandRunner for StdinCapture {
-            fn run(&self, program: &str, args: &[&str], opts: CommandOpts) -> Result<CommandOutput> {
+            fn run(
+                &self,
+                program: &str,
+                args: &[&str],
+                opts: CommandOpts,
+            ) -> Result<CommandOutput> {
                 self.calls.lock().unwrap().push((
                     program.to_string(),
                     args.iter().map(|s| s.to_string()).collect(),

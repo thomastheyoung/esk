@@ -97,7 +97,9 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
         }
     }
 
-    if let Some(bw_config) = config.plugin_config::<crate::config::BitwardenPluginConfig>("bitwarden") {
+    if let Some(bw_config) =
+        config.plugin_config::<crate::config::BitwardenPluginConfig>("bitwarden")
+    {
         let plugin = bitwarden::BitwardenPlugin::new(config, bw_config, runner);
         match plugin.preflight() {
             Ok(()) => results.push(PluginHealth {
@@ -161,7 +163,9 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
         }
     }
 
-    if let Some(doppler_config) = config.plugin_config::<crate::config::DopplerPluginConfig>("doppler") {
+    if let Some(doppler_config) =
+        config.plugin_config::<crate::config::DopplerPluginConfig>("doppler")
+    {
         let plugin = doppler::DopplerPlugin::new(config, doppler_config, runner);
         match plugin.preflight() {
             Ok(()) => results.push(PluginHealth {
@@ -193,7 +197,9 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
         }
     }
 
-    if let Some(asm_config) = config.plugin_config::<crate::config::AwsSecretsManagerPluginConfig>("aws_secrets_manager") {
+    if let Some(asm_config) =
+        config.plugin_config::<crate::config::AwsSecretsManagerPluginConfig>("aws_secrets_manager")
+    {
         let plugin = aws_secrets_manager::AwsSecretsManagerPlugin::new(config, asm_config, runner);
         match plugin.preflight() {
             Ok(()) => results.push(PluginHealth {
@@ -238,47 +244,53 @@ pub fn build_plugins<'a>(
 
     if let Some(vault_config) = config.plugin_config::<crate::config::VaultPluginConfig>("vault") {
         candidates.push(Box::new(vault::VaultPlugin::new(
-            config, vault_config, runner,
+            config,
+            vault_config,
+            runner,
         )));
     }
 
-    if let Some(bw_config) = config.plugin_config::<crate::config::BitwardenPluginConfig>("bitwarden") {
+    if let Some(bw_config) =
+        config.plugin_config::<crate::config::BitwardenPluginConfig>("bitwarden")
+    {
         candidates.push(Box::new(bitwarden::BitwardenPlugin::new(
             config, bw_config, runner,
         )));
     }
 
     if let Some(s3_config) = config.plugin_config::<crate::config::S3PluginConfig>("s3") {
-        candidates.push(Box::new(s3::S3Plugin::new(
-            config, s3_config, runner,
-        )));
+        candidates.push(Box::new(s3::S3Plugin::new(config, s3_config, runner)));
     }
 
     if let Some(gcp_config) = config.plugin_config::<crate::config::GcpPluginConfig>("gcp") {
-        candidates.push(Box::new(gcp::GcpPlugin::new(
-            config, gcp_config, runner,
-        )));
+        candidates.push(Box::new(gcp::GcpPlugin::new(config, gcp_config, runner)));
     }
 
     if let Some(azure_config) = config.plugin_config::<crate::config::AzurePluginConfig>("azure") {
         candidates.push(Box::new(azure::AzurePlugin::new(
-            config, azure_config, runner,
+            config,
+            azure_config,
+            runner,
         )));
     }
 
-    if let Some(doppler_config) = config.plugin_config::<crate::config::DopplerPluginConfig>("doppler") {
+    if let Some(doppler_config) =
+        config.plugin_config::<crate::config::DopplerPluginConfig>("doppler")
+    {
         candidates.push(Box::new(doppler::DopplerPlugin::new(
-            config, doppler_config, runner,
+            config,
+            doppler_config,
+            runner,
         )));
     }
 
     if let Some(sops_config) = config.plugin_config::<crate::config::SopsPluginConfig>("sops") {
-        candidates.push(Box::new(sops::SopsPlugin::new(
-            config, sops_config, runner,
-        )));
+        candidates.push(Box::new(sops::SopsPlugin::new(config, sops_config, runner)));
     }
 
-    if let Some(asm_config) = config.plugin_config::<crate::config::AwsSecretsManagerPluginConfig>("aws_secrets_manager") {
+    if let Some(asm_config) =
+        config.plugin_config::<crate::config::AwsSecretsManagerPluginConfig>("aws_secrets_manager")
+    {
         candidates.push(Box::new(aws_secrets_manager::AwsSecretsManagerPlugin::new(
             config, asm_config, runner,
         )));

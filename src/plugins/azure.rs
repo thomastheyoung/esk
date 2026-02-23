@@ -37,7 +37,13 @@ impl<'a> AzurePlugin<'a> {
 
         // Replace non-alphanumeric, non-hyphen characters with hyphens
         raw.chars()
-            .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+            .map(|c| {
+                if c.is_alphanumeric() || c == '-' {
+                    c
+                } else {
+                    '-'
+                }
+            })
             .collect()
     }
 }

@@ -555,8 +555,6 @@ mod tests {
         let expanded = plugin.expand_path().unwrap();
         assert!(!expanded.to_string_lossy().contains('~'));
         assert!(!expanded.to_string_lossy().contains("{project}"));
-        assert!(expanded
-            .to_string_lossy()
-            .ends_with("/Dropbox/esk/myapp"));
+        assert!(expanded.to_string_lossy().ends_with("/Dropbox/esk/myapp"));
     }
 }

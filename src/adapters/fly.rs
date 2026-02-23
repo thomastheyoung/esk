@@ -173,10 +173,22 @@ adapters:
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
         let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"1.0.0".to_vec(), stderr: vec![] },
-            CommandOutput { success: true, stdout: b"user@test".to_vec(), stderr: vec![] },
+            CommandOutput {
+                success: true,
+                stdout: b"1.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"user@test".to_vec(),
+                stderr: vec![],
+            },
         ]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
@@ -190,10 +202,22 @@ adapters:
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
         let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"1.0.0".to_vec(), stderr: vec![] },
-            CommandOutput { success: false, stdout: vec![], stderr: b"not logged in".to_vec() },
+            CommandOutput {
+                success: true,
+                stdout: b"1.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"not logged in".to_vec(),
+            },
         ]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("fly is not authenticated"));
     }
@@ -209,7 +233,11 @@ adapters:
                 anyhow::bail!("No such file or directory")
             }
         }
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &FailRunner };
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &FailRunner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("fly is not installed"));
     }
@@ -219,12 +247,25 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
+            .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].0, "fly");
-        assert_eq!(calls[0].1, vec!["secrets", "set", "MY_KEY=secret_val", "-a", "my-fly-app"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["secrets", "set", "MY_KEY=secret_val", "-a", "my-fly-app"]
+        );
     }
 
     #[test]
@@ -232,11 +273,24 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("KEY", "val", &make_target(Some("web"), "prod")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "val", &make_target(Some("web"), "prod"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["secrets", "set", "KEY=val", "-a", "my-fly-app", "--stage"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["secrets", "set", "KEY=val", "-a", "my-fly-app", "--stage"]
+        );
     }
 
     #[test]
@@ -245,8 +299,14 @@ adapters:
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
         let runner = MockRunner::new(vec![]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.sync_secret("KEY", "val", &make_target(None, "dev")).unwrap_err();
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "val", &make_target(None, "dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("requires an app"));
     }
 
@@ -256,8 +316,14 @@ adapters:
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
         let runner = MockRunner::new(vec![]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.sync_secret("KEY", "val", &make_target(Some("api"), "dev")).unwrap_err();
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "val", &make_target(Some("api"), "dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("no fly app_names mapping"));
     }
 
@@ -266,11 +332,24 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.delete_secret("MY_KEY", &make_target(Some("web"), "dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .delete_secret("MY_KEY", &make_target(Some("web"), "dev"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["secrets", "unset", "MY_KEY", "-a", "my-fly-app"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["secrets", "unset", "MY_KEY", "-a", "my-fly-app"]
+        );
     }
 
     #[test]
@@ -278,9 +357,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"not found".to_vec() }]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.delete_secret("KEY", &make_target(Some("web"), "dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"not found".to_vec(),
+        }]);
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .delete_secret("KEY", &make_target(Some("web"), "dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 
@@ -289,9 +378,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"deploy error".to_vec() }]);
-        let adapter = FlyAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.sync_secret("KEY", "val", &make_target(Some("web"), "dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"deploy error".to_vec(),
+        }]);
+        let adapter = FlyAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("deploy error"));
     }
 }

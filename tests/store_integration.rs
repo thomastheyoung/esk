@@ -1,7 +1,7 @@
 mod helpers;
 
-use helpers::*;
 use esk::store::SecretStore;
+use helpers::*;
 
 #[test]
 fn store_full_lifecycle() {

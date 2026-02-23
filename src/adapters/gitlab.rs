@@ -156,10 +156,22 @@ adapters:
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
         let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"1.0.0".to_vec(), stderr: vec![] },
-            CommandOutput { success: true, stdout: b"Logged in".to_vec(), stderr: vec![] },
+            CommandOutput {
+                success: true,
+                stdout: b"1.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"Logged in".to_vec(),
+                stderr: vec![],
+            },
         ]);
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &runner };
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls[1].1, vec!["auth", "status"]);
@@ -171,10 +183,22 @@ adapters:
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
         let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"1.0.0".to_vec(), stderr: vec![] },
-            CommandOutput { success: false, stdout: vec![], stderr: b"not logged in".to_vec() },
+            CommandOutput {
+                success: true,
+                stdout: b"1.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"not logged in".to_vec(),
+            },
         ]);
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &runner };
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("glab is not authenticated"));
     }
@@ -190,7 +214,11 @@ adapters:
                 anyhow::bail!("No such file or directory")
             }
         }
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &FailRunner };
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &FailRunner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("glab is not installed"));
     }
@@ -200,12 +228,25 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("MY_KEY", "secret_val", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].0, "glab");
-        assert_eq!(calls[0].1, vec!["variable", "set", "MY_KEY", "secret_val", "--scope", "dev"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["variable", "set", "MY_KEY", "secret_val", "--scope", "dev"]
+        );
     }
 
     #[test]
@@ -213,11 +254,24 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("KEY", "val", &make_target("prod")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "val", &make_target("prod"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["variable", "set", "KEY", "val", "--scope", "prod", "--masked"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["variable", "set", "KEY", "val", "--scope", "prod", "--masked"]
+        );
     }
 
     #[test]
@@ -225,11 +279,24 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.delete_secret("MY_KEY", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .delete_secret("MY_KEY", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["variable", "delete", "MY_KEY", "--scope", "dev"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["variable", "delete", "MY_KEY", "--scope", "dev"]
+        );
     }
 
     #[test]
@@ -237,11 +304,22 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &runner };
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         adapter.delete_secret("KEY", &make_target("prod")).unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["variable", "delete", "KEY", "--scope", "prod", "--masked"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["variable", "delete", "KEY", "--scope", "prod", "--masked"]
+        );
     }
 
     #[test]
@@ -249,9 +327,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"not found".to_vec() }]);
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.delete_secret("KEY", &make_target("dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"not found".to_vec(),
+        }]);
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .delete_secret("KEY", &make_target("dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 
@@ -260,9 +348,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"api error".to_vec() }]);
-        let adapter = GitlabAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.sync_secret("KEY", "val", &make_target("dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"api error".to_vec(),
+        }]);
+        let adapter = GitlabAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "val", &make_target("dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("api error"));
     }
 }

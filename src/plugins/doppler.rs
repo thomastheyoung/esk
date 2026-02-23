@@ -34,9 +34,7 @@ impl<'a> DopplerPlugin<'a> {
             .get(env)
             .cloned()
             .with_context(|| {
-                format!(
-                    "no Doppler config mapping for environment '{env}' in config_map"
-                )
+                format!("no Doppler config mapping for environment '{env}' in config_map")
             })
     }
 }

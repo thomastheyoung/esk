@@ -1,9 +1,9 @@
 mod helpers;
 
-use helpers::*;
 use esk::adapters::env_file::EnvFileAdapter;
 use esk::adapters::{SecretValue, SyncAdapter};
 use esk::config::ResolvedTarget;
+use helpers::*;
 
 fn make_target(app: &str, env: &str) -> ResolvedTarget {
     ResolvedTarget {

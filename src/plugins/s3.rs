@@ -50,16 +50,15 @@ impl<'a> S3Plugin<'a> {
             CloudFileFormat::Encrypted => "enc",
             CloudFileFormat::Cleartext => "json",
         };
-        let prefix = self
-            .plugin_config
-            .prefix
-            .as_deref()
-            .unwrap_or("");
+        let prefix = self.plugin_config.prefix.as_deref().unwrap_or("");
         if prefix.is_empty() {
             format!("s3://{}/secrets-{env}.{ext}", self.plugin_config.bucket)
         } else {
             let prefix = prefix.trim_end_matches('/');
-            format!("s3://{}/{prefix}/secrets-{env}.{ext}", self.plugin_config.bucket)
+            format!(
+                "s3://{}/{prefix}/secrets-{env}.{ext}",
+                self.plugin_config.bucket
+            )
         }
     }
 
@@ -126,13 +125,16 @@ impl<'a> StoragePlugin for S3Plugin<'a> {
                     .context("failed to serialize env payload")?;
                 store.encrypt_raw(&json)?
             }
-            CloudFileFormat::Cleartext => {
-                serde_json::to_string_pretty(&env_payload)
-                    .context("failed to serialize env payload")?
-            }
+            CloudFileFormat::Cleartext => serde_json::to_string_pretty(&env_payload)
+                .context("failed to serialize env payload")?,
         };
 
-        let mut args = vec!["s3".to_string(), "cp".to_string(), "-".to_string(), s3_uri.clone()];
+        let mut args = vec![
+            "s3".to_string(),
+            "cp".to_string(),
+            "-".to_string(),
+            s3_uri.clone(),
+        ];
         args.extend(base_args);
         let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
@@ -160,7 +162,12 @@ impl<'a> StoragePlugin for S3Plugin<'a> {
         let s3_uri = self.s3_uri(env);
         let base_args = self.base_args();
 
-        let mut args = vec!["s3".to_string(), "cp".to_string(), s3_uri.clone(), "-".to_string()];
+        let mut args = vec![
+            "s3".to_string(),
+            "cp".to_string(),
+            s3_uri.clone(),
+            "-".to_string(),
+        ];
         args.extend(base_args);
         let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
 
@@ -171,14 +178,16 @@ impl<'a> StoragePlugin for S3Plugin<'a> {
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("NoSuchKey") || stderr.contains("404") || stderr.contains("does not exist") {
+            if stderr.contains("NoSuchKey")
+                || stderr.contains("404")
+                || stderr.contains("does not exist")
+            {
                 return Ok(None);
             }
             anyhow::bail!("aws s3 cp download failed: {stderr}");
         }
 
-        let content = String::from_utf8(output.stdout)
-            .context("S3 response is not valid UTF-8")?;
+        let content = String::from_utf8(output.stdout).context("S3 response is not valid UTF-8")?;
         let content = content.trim();
 
         if content.is_empty() {
@@ -329,13 +338,23 @@ plugins:
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput { success: true, stdout: Vec::new(), stderr: Vec::new() })
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
             }
         }
 
         let plugin = S3Plugin::new(&config, plugin_config, &DummyRunner);
-        assert_eq!(plugin.s3_uri("dev"), "s3://my-bucket/esk/myapp/secrets-dev.enc");
-        assert_eq!(plugin.s3_uri("prod"), "s3://my-bucket/esk/myapp/secrets-prod.enc");
+        assert_eq!(
+            plugin.s3_uri("dev"),
+            "s3://my-bucket/esk/myapp/secrets-dev.enc"
+        );
+        assert_eq!(
+            plugin.s3_uri("prod"),
+            "s3://my-bucket/esk/myapp/secrets-prod.enc"
+        );
     }
 
     #[test]
@@ -353,7 +372,11 @@ plugins:
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput { success: true, stdout: Vec::new(), stderr: Vec::new() })
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
             }
         }
 
@@ -377,7 +400,11 @@ plugins:
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput { success: true, stdout: Vec::new(), stderr: Vec::new() })
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
             }
         }
 

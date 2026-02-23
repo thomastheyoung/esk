@@ -80,7 +80,12 @@ impl<'a> SyncAdapter for AwsSsmAdapter<'a> {
         });
 
         let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["ssm", "put-parameter", "--cli-input-json", "file:///dev/stdin"];
+        let mut args: Vec<&str> = vec![
+            "ssm",
+            "put-parameter",
+            "--cli-input-json",
+            "file:///dev/stdin",
+        ];
         for a in &base {
             args.push(a);
         }
@@ -209,14 +214,29 @@ adapters:
         let config = make_config(dir.path());
         let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
         let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"2.0.0".to_vec(), stderr: vec![] },
-            CommandOutput { success: true, stdout: b"{}".to_vec(), stderr: vec![] },
+            CommandOutput {
+                success: true,
+                stdout: b"2.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"{}".to_vec(),
+                stderr: vec![],
+            },
         ]);
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &runner };
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["sts", "get-caller-identity", "--region", "us-east-1"]);
+        assert_eq!(
+            calls[1].1,
+            vec!["sts", "get-caller-identity", "--region", "us-east-1"]
+        );
     }
 
     #[test]
@@ -225,10 +245,22 @@ adapters:
         let config = make_config(dir.path());
         let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
         let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"2.0.0".to_vec(), stderr: vec![] },
-            CommandOutput { success: false, stdout: vec![], stderr: b"not configured".to_vec() },
+            CommandOutput {
+                success: true,
+                stdout: b"2.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"not configured".to_vec(),
+            },
         ]);
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &runner };
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("aws is not authenticated"));
     }
@@ -244,7 +276,11 @@ adapters:
                 anyhow::bail!("No such file or directory")
             }
         }
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &FailRunner };
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &FailRunner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("aws is not installed"));
     }
@@ -254,12 +290,32 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("MY_KEY", "secret_val", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].0, "aws");
-        assert_eq!(calls[0].1, vec!["ssm", "put-parameter", "--cli-input-json", "file:///dev/stdin", "--region", "us-east-1"]);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "ssm",
+                "put-parameter",
+                "--cli-input-json",
+                "file:///dev/stdin",
+                "--region",
+                "us-east-1"
+            ]
+        );
         // Verify stdin contains the JSON payload
         let stdin = calls[0].2.as_ref().unwrap();
         let json: serde_json::Value = serde_json::from_slice(stdin).unwrap();
@@ -274,9 +330,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("KEY", "val", &make_target("prod")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "val", &make_target("prod"))
+            .unwrap();
         let calls = runner.take_calls();
         assert!(calls[0].1.contains(&"--no-paginate".to_string()));
     }
@@ -286,11 +352,31 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.delete_secret("MY_KEY", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .delete_secret("MY_KEY", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["ssm", "delete-parameter", "--name", "/myapp/dev/MY_KEY", "--region", "us-east-1"]);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "ssm",
+                "delete-parameter",
+                "--name",
+                "/myapp/dev/MY_KEY",
+                "--region",
+                "us-east-1"
+            ]
+        );
     }
 
     #[test]
@@ -298,9 +384,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"not found".to_vec() }]);
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.delete_secret("KEY", &make_target("dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"not found".to_vec(),
+        }]);
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .delete_secret("KEY", &make_target("dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 
@@ -309,9 +405,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"access denied".to_vec() }]);
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.sync_secret("KEY", "val", &make_target("dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"access denied".to_vec(),
+        }]);
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "val", &make_target("dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("access denied"));
     }
 
@@ -320,7 +426,11 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
-        let adapter = AwsSsmAdapter { config: &config, adapter_config, runner: &MockRunner::new(vec![]) };
+        let adapter = AwsSsmAdapter {
+            config: &config,
+            adapter_config,
+            runner: &MockRunner::new(vec![]),
+        };
         let path = adapter.resolve_path("DB_PASSWORD", &make_target("prod"));
         assert_eq!(path, "/myapp/prod/DB_PASSWORD");
     }

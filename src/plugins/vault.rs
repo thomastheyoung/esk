@@ -66,11 +66,7 @@ impl<'a> StoragePlugin for VaultPlugin<'a> {
 
         let output = self
             .runner
-            .run(
-                "vault",
-                &["token", "lookup"],
-                self.command_opts(),
-            )
+            .run("vault", &["token", "lookup"], self.command_opts())
             .context("failed to run vault token lookup")?;
 
         if !output.success {
@@ -267,10 +263,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![
-            ok_output(b"vault 1.15.0"),
-            ok_output(b"{}"),
-        ]);
+        let runner = MockRunner::new(vec![ok_output(b"vault 1.15.0"), ok_output(b"{}")]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = runner.calls();
@@ -300,7 +293,9 @@ plugins:
 
         let plugin = VaultPlugin::new(&config, plugin_config, &FailRunner);
         let err = plugin.preflight().unwrap_err();
-        assert!(err.to_string().contains("Vault CLI (vault) is not installed"));
+        assert!(err
+            .to_string()
+            .contains("Vault CLI (vault) is not installed"));
     }
 
     #[test]
@@ -487,7 +482,9 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![fail_output(b"No value found at secret/data/myapp/dev")]);
+        let runner = MockRunner::new(vec![fail_output(
+            b"No value found at secret/data/myapp/dev",
+        )]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
 
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
@@ -532,6 +529,9 @@ plugins:
         assert_eq!(calls.len(), 2);
         // First call is --version (check_command), no env vars
         // Second call is token lookup, should have VAULT_ADDR
-        assert!(calls[1].2.iter().any(|(k, v)| k == "VAULT_ADDR" && v == "https://vault.example.com"));
+        assert!(calls[1]
+            .2
+            .iter()
+            .any(|(k, v)| k == "VAULT_ADDR" && v == "https://vault.example.com"));
     }
 }

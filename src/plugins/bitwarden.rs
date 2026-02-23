@@ -42,7 +42,14 @@ impl<'a> BitwardenPlugin<'a> {
             .runner
             .run(
                 "bws",
-                &["secret", "list", "--project-id", project_id, "--output", "json"],
+                &[
+                    "secret",
+                    "list",
+                    "--project-id",
+                    project_id,
+                    "--output",
+                    "json",
+                ],
                 CommandOpts::default(),
             )
             .context("failed to run bws secret list")?;
@@ -157,7 +164,14 @@ impl<'a> StoragePlugin for BitwardenPlugin<'a> {
                 .runner
                 .run(
                     "bws",
-                    &["secret", "create", &secret_name, &json, "--project-id", project_id],
+                    &[
+                        "secret",
+                        "create",
+                        &secret_name,
+                        &json,
+                        "--project-id",
+                        project_id,
+                    ],
                     CommandOpts::default(),
                 )
                 .context("failed to run bws secret create")?;
@@ -295,10 +309,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
-        let runner = MockRunner::new(vec![
-            ok_output(b"bws 0.4.0"),
-            ok_output(b"[]"),
-        ]);
+        let runner = MockRunner::new(vec![ok_output(b"bws 0.4.0"), ok_output(b"[]")]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = runner.calls();
@@ -346,10 +357,7 @@ plugins:
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
 
         // list returns empty array (no existing secret), then create succeeds
-        let runner = MockRunner::new(vec![
-            ok_output(b"[]"),
-            ok_output(b"{}"),
-        ]);
+        let runner = MockRunner::new(vec![ok_output(b"[]"), ok_output(b"{}")]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -453,14 +461,13 @@ plugins:
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
 
-        let inner_value = json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", "_esk_version": 7});
+        let inner_value =
+            json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", "_esk_version": 7});
         let items = json!([
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()},
             {"id": "s2", "key": "myapp-prod", "value": "{}"}
         ]);
-        let runner = MockRunner::new(vec![
-            ok_output(&serde_json::to_vec(&items).unwrap()),
-        ]);
+        let runner = MockRunner::new(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
@@ -534,9 +541,7 @@ plugins:
         let items = json!([
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()}
         ]);
-        let runner = MockRunner::new(vec![
-            ok_output(&serde_json::to_vec(&items).unwrap()),
-        ]);
+        let runner = MockRunner::new(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();

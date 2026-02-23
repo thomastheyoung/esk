@@ -52,7 +52,15 @@ impl<'a> CloudflareAdapter<'a> {
             .context("cloudflare pages_project is required when mode is 'pages'")?;
 
         let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["pages", "secret", "delete", key, "--project", project, "--force"];
+        let mut args: Vec<&str> = vec![
+            "pages",
+            "secret",
+            "delete",
+            key,
+            "--project",
+            project,
+            "--force",
+        ];
         append_env_flags(&mut args, &flag_parts);
 
         let output = self
@@ -594,7 +602,14 @@ adapters:
         assert_eq!(calls[0].0, "wrangler");
         assert_eq!(
             calls[0].1,
-            vec!["pages", "secret", "put", "MY_KEY", "--project", "my-pages-app"]
+            vec![
+                "pages",
+                "secret",
+                "put",
+                "MY_KEY",
+                "--project",
+                "my-pages-app"
+            ]
         );
         assert_eq!(calls[0].3.as_ref().unwrap(), b"secret_val");
     }
@@ -620,7 +635,16 @@ adapters:
         let calls = runner.take_calls();
         assert_eq!(
             calls[0].1,
-            vec!["pages", "secret", "put", "KEY", "--project", "my-pages-app", "--env", "production"]
+            vec![
+                "pages",
+                "secret",
+                "put",
+                "KEY",
+                "--project",
+                "my-pages-app",
+                "--env",
+                "production"
+            ]
         );
     }
 
@@ -645,7 +669,15 @@ adapters:
         let calls = runner.take_calls();
         assert_eq!(
             calls[0].1,
-            vec!["pages", "secret", "delete", "MY_KEY", "--project", "my-pages-app", "--force"]
+            vec![
+                "pages",
+                "secret",
+                "delete",
+                "MY_KEY",
+                "--project",
+                "my-pages-app",
+                "--force"
+            ]
         );
     }
 

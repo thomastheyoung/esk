@@ -1,9 +1,9 @@
 mod helpers;
 
-use helpers::*;
 use esk::cli;
 use esk::plugin_tracker::PluginIndex;
 use esk::tracker::SyncIndex;
+use helpers::*;
 use serde_json::json;
 
 // === init ===
@@ -1537,10 +1537,7 @@ fn sync_records_tombstone_delete_success() {
     let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
-    assert_eq!(
-        record.last_sync_status,
-        esk::tracker::SyncStatus::Success
-    );
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Success);
 }
 
 #[test]
@@ -1564,10 +1561,7 @@ fn sync_records_tombstone_delete_failure() {
     let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
-    assert_eq!(
-        record.last_sync_status,
-        esk::tracker::SyncStatus::Failed
-    );
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 
 #[test]
@@ -1596,10 +1590,7 @@ fn sync_retries_failed_tombstone_delete() {
     let index = SyncIndex::load(&project.sync_index_path());
     let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
-    assert_eq!(
-        record.last_sync_status,
-        esk::tracker::SyncStatus::Success
-    );
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Success);
 }
 
 #[test]
@@ -1687,7 +1678,10 @@ fn sync_fly_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "fly");
-    assert_eq!(calls[2].args, vec!["secrets", "set", "API_KEY=secret123", "-a", "my-fly-app"]);
+    assert_eq!(
+        calls[2].args,
+        vec!["secrets", "set", "API_KEY=secret123", "-a", "my-fly-app"]
+    );
 }
 
 #[test]
@@ -1705,7 +1699,17 @@ fn sync_fly_prod_env_flags() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls[2].args, vec!["secrets", "set", "API_KEY=secret456", "-a", "my-fly-app", "--stage"]);
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "secrets",
+            "set",
+            "API_KEY=secret456",
+            "-a",
+            "my-fly-app",
+            "--stage"
+        ]
+    );
 }
 
 #[test]
@@ -1723,7 +1727,10 @@ fn sync_fly_records_tracker() {
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
-    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("fly")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("fly")));
 }
 
 #[test]
@@ -1738,11 +1745,16 @@ fn sync_fly_failure_tracked() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_failure(b"deploy error");
 
-    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
-    let record = index.records.values().find(|r| r.target.contains("fly")).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("fly"))
+        .unwrap();
     assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 
@@ -1789,7 +1801,10 @@ fn sync_netlify_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "netlify");
-    assert_eq!(calls[2].args, vec!["env:set", "API_KEY", "secret123", "--site", "my-site-id"]);
+    assert_eq!(
+        calls[2].args,
+        vec!["env:set", "API_KEY", "secret123", "--site", "my-site-id"]
+    );
 }
 
 #[test]
@@ -1807,7 +1822,18 @@ fn sync_netlify_prod_env_flags() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls[2].args, vec!["env:set", "API_KEY", "secret456", "--site", "my-site-id", "--context", "production"]);
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "env:set",
+            "API_KEY",
+            "secret456",
+            "--site",
+            "my-site-id",
+            "--context",
+            "production"
+        ]
+    );
 }
 
 #[test]
@@ -1825,7 +1851,10 @@ fn sync_netlify_records_tracker() {
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
-    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("netlify")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("netlify")));
 }
 
 #[test]
@@ -1840,11 +1869,16 @@ fn sync_netlify_failure_tracked() {
     runner.push_success(b"", b""); // netlify status
     runner.push_failure(b"auth error");
 
-    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
-    let record = index.records.values().find(|r| r.target.contains("netlify")).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("netlify"))
+        .unwrap();
     assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 
@@ -1889,7 +1923,10 @@ fn sync_vercel_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "vercel");
-    assert_eq!(calls[2].args, vec!["env", "add", "API_KEY", "development", "--force"]);
+    assert_eq!(
+        calls[2].args,
+        vec!["env", "add", "API_KEY", "development", "--force"]
+    );
     assert_eq!(calls[2].stdin.as_ref().unwrap(), b"secret123");
 }
 
@@ -1908,7 +1945,18 @@ fn sync_vercel_prod_env_flags() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls[2].args, vec!["env", "add", "API_KEY", "production", "--force", "--scope", "my-team"]);
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "env",
+            "add",
+            "API_KEY",
+            "production",
+            "--force",
+            "--scope",
+            "my-team"
+        ]
+    );
 }
 
 #[test]
@@ -1926,7 +1974,10 @@ fn sync_vercel_records_tracker() {
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
-    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("vercel")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("vercel")));
 }
 
 #[test]
@@ -1941,11 +1992,16 @@ fn sync_vercel_failure_tracked() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_failure(b"auth error");
 
-    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
-    let record = index.records.values().find(|r| r.target.contains("vercel")).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("vercel"))
+        .unwrap();
     assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 
@@ -1990,7 +2046,10 @@ fn sync_github_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "gh");
-    assert_eq!(calls[2].args, vec!["secret", "set", "API_KEY", "-R", "owner/repo"]);
+    assert_eq!(
+        calls[2].args,
+        vec!["secret", "set", "API_KEY", "-R", "owner/repo"]
+    );
     assert_eq!(calls[2].stdin.as_ref().unwrap(), b"secret123");
 }
 
@@ -2009,7 +2068,18 @@ fn sync_github_prod_env_flags() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls[2].args, vec!["secret", "set", "API_KEY", "-R", "owner/repo", "--env", "production"]);
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "secret",
+            "set",
+            "API_KEY",
+            "-R",
+            "owner/repo",
+            "--env",
+            "production"
+        ]
+    );
 }
 
 #[test]
@@ -2027,7 +2097,10 @@ fn sync_github_records_tracker() {
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
-    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("github")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("github")));
 }
 
 #[test]
@@ -2042,11 +2115,16 @@ fn sync_github_failure_tracked() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_failure(b"auth error");
 
-    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
-    let record = index.records.values().find(|r| r.target.contains("github")).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("github"))
+        .unwrap();
     assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 
@@ -2091,7 +2169,10 @@ fn sync_heroku_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "heroku");
-    assert_eq!(calls[2].args, vec!["config:set", "API_KEY=secret123", "-a", "my-heroku-app"]);
+    assert_eq!(
+        calls[2].args,
+        vec!["config:set", "API_KEY=secret123", "-a", "my-heroku-app"]
+    );
 }
 
 #[test]
@@ -2109,7 +2190,17 @@ fn sync_heroku_prod_env_flags() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls[2].args, vec!["config:set", "API_KEY=secret456", "-a", "my-heroku-app", "--remote", "staging"]);
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "config:set",
+            "API_KEY=secret456",
+            "-a",
+            "my-heroku-app",
+            "--remote",
+            "staging"
+        ]
+    );
 }
 
 #[test]
@@ -2127,7 +2218,10 @@ fn sync_heroku_records_tracker() {
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
-    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("heroku")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("heroku")));
 }
 
 #[test]
@@ -2142,11 +2236,16 @@ fn sync_heroku_failure_tracked() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_failure(b"auth error");
 
-    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
-    let record = index.records.values().find(|r| r.target.contains("heroku")).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("heroku"))
+        .unwrap();
     assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 
@@ -2190,7 +2289,16 @@ fn sync_supabase_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
     assert_eq!(calls[1].program, "supabase");
-    assert_eq!(calls[1].args, vec!["secrets", "set", "API_KEY=secret123", "--project-ref", "abcdef123456"]);
+    assert_eq!(
+        calls[1].args,
+        vec![
+            "secrets",
+            "set",
+            "API_KEY=secret123",
+            "--project-ref",
+            "abcdef123456"
+        ]
+    );
 }
 
 #[test]
@@ -2207,7 +2315,17 @@ fn sync_supabase_prod_env_flags() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls[1].args, vec!["secrets", "set", "API_KEY=secret456", "--project-ref", "abcdef123456", "--experimental"]);
+    assert_eq!(
+        calls[1].args,
+        vec![
+            "secrets",
+            "set",
+            "API_KEY=secret456",
+            "--project-ref",
+            "abcdef123456",
+            "--experimental"
+        ]
+    );
 }
 
 #[test]
@@ -2224,7 +2342,10 @@ fn sync_supabase_records_tracker() {
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
-    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("supabase")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("supabase")));
 }
 
 #[test]
@@ -2238,11 +2359,16 @@ fn sync_supabase_failure_tracked() {
     runner.push_success(b"", b""); // supabase --version
     runner.push_failure(b"api error");
 
-    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
-    let record = index.records.values().find(|r| r.target.contains("supabase")).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("supabase"))
+        .unwrap();
     assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 
@@ -2285,7 +2411,10 @@ fn sync_railway_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "railway");
-    assert_eq!(calls[2].args, vec!["variables", "--set", "API_KEY=secret123"]);
+    assert_eq!(
+        calls[2].args,
+        vec!["variables", "--set", "API_KEY=secret123"]
+    );
 }
 
 #[test]
@@ -2303,7 +2432,16 @@ fn sync_railway_prod_env_flags() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls[2].args, vec!["variables", "--set", "API_KEY=secret456", "--environment", "production"]);
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "variables",
+            "--set",
+            "API_KEY=secret456",
+            "--environment",
+            "production"
+        ]
+    );
 }
 
 #[test]
@@ -2321,7 +2459,10 @@ fn sync_railway_records_tracker() {
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
-    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("railway")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("railway")));
 }
 
 #[test]
@@ -2336,11 +2477,16 @@ fn sync_railway_failure_tracked() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_failure(b"api error");
 
-    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
-    let record = index.records.values().find(|r| r.target.contains("railway")).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("railway"))
+        .unwrap();
     assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 
@@ -2385,7 +2531,10 @@ fn sync_gitlab_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "glab");
-    assert_eq!(calls[2].args, vec!["variable", "set", "API_KEY", "secret123", "--scope", "dev"]);
+    assert_eq!(
+        calls[2].args,
+        vec!["variable", "set", "API_KEY", "secret123", "--scope", "dev"]
+    );
 }
 
 #[test]
@@ -2403,7 +2552,18 @@ fn sync_gitlab_prod_env_flags() {
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls[2].args, vec!["variable", "set", "API_KEY", "secret456", "--scope", "prod", "--masked"]);
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "variable",
+            "set",
+            "API_KEY",
+            "secret456",
+            "--scope",
+            "prod",
+            "--masked"
+        ]
+    );
 }
 
 #[test]
@@ -2421,7 +2581,10 @@ fn sync_gitlab_records_tracker() {
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
-    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("gitlab")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("gitlab")));
 }
 
 #[test]
@@ -2436,11 +2599,16 @@ fn sync_gitlab_failure_tracked() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_failure(b"api error");
 
-    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
-    let record = index.records.values().find(|r| r.target.contains("gitlab")).unwrap();
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("gitlab"))
+        .unwrap();
     assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
 }
 

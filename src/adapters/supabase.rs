@@ -147,10 +147,16 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.supabase.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"1.0.0".to_vec(), stderr: vec![] },
-        ]);
-        let adapter = SupabaseAdapter { config: &config, adapter_config, runner: &runner };
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: b"1.0.0".to_vec(),
+            stderr: vec![],
+        }]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls.len(), 1);
@@ -168,7 +174,11 @@ adapters:
                 anyhow::bail!("No such file or directory")
             }
         }
-        let adapter = SupabaseAdapter { config: &config, adapter_config, runner: &FailRunner };
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &FailRunner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("supabase is not installed"));
     }
@@ -178,12 +188,31 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.supabase.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = SupabaseAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("MY_KEY", "secret_val", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].0, "supabase");
-        assert_eq!(calls[0].1, vec!["secrets", "set", "MY_KEY=secret_val", "--project-ref", "abcdef123456"]);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "secrets",
+                "set",
+                "MY_KEY=secret_val",
+                "--project-ref",
+                "abcdef123456"
+            ]
+        );
     }
 
     #[test]
@@ -191,11 +220,31 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.supabase.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = SupabaseAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("KEY", "val", &make_target("prod")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "val", &make_target("prod"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["secrets", "set", "KEY=val", "--project-ref", "abcdef123456", "--experimental"]);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "secrets",
+                "set",
+                "KEY=val",
+                "--project-ref",
+                "abcdef123456",
+                "--experimental"
+            ]
+        );
     }
 
     #[test]
@@ -203,11 +252,30 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.supabase.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = SupabaseAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.delete_secret("MY_KEY", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .delete_secret("MY_KEY", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["secrets", "unset", "MY_KEY", "--project-ref", "abcdef123456"]);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "secrets",
+                "unset",
+                "MY_KEY",
+                "--project-ref",
+                "abcdef123456"
+            ]
+        );
     }
 
     #[test]
@@ -215,9 +283,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.supabase.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"not found".to_vec() }]);
-        let adapter = SupabaseAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.delete_secret("KEY", &make_target("dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"not found".to_vec(),
+        }]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .delete_secret("KEY", &make_target("dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 
@@ -226,9 +304,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.supabase.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"api error".to_vec() }]);
-        let adapter = SupabaseAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.sync_secret("KEY", "val", &make_target("dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"api error".to_vec(),
+        }]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "val", &make_target("dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("api error"));
     }
 }

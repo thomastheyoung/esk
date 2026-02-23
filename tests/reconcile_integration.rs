@@ -1,7 +1,7 @@
 mod helpers;
 
-use helpers::*;
 use esk::reconcile::{reconcile, ReconcileAction};
+use helpers::*;
 use std::collections::BTreeMap;
 
 #[test]

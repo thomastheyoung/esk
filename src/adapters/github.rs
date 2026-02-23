@@ -177,10 +177,22 @@ adapters:
         let config = make_config(dir.path(), true);
         let adapter_config = config.adapters.github.as_ref().unwrap();
         let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"2.0.0".to_vec(), stderr: vec![] },
-            CommandOutput { success: true, stdout: b"Logged in".to_vec(), stderr: vec![] },
+            CommandOutput {
+                success: true,
+                stdout: b"2.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"Logged in".to_vec(),
+                stderr: vec![],
+            },
         ]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls[1].1, vec!["auth", "status"]);
@@ -192,10 +204,22 @@ adapters:
         let config = make_config(dir.path(), true);
         let adapter_config = config.adapters.github.as_ref().unwrap();
         let runner = MockRunner::new(vec![
-            CommandOutput { success: true, stdout: b"2.0.0".to_vec(), stderr: vec![] },
-            CommandOutput { success: false, stdout: vec![], stderr: b"not logged in".to_vec() },
+            CommandOutput {
+                success: true,
+                stdout: b"2.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"not logged in".to_vec(),
+            },
         ]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("gh is not authenticated"));
     }
@@ -211,7 +235,11 @@ adapters:
                 anyhow::bail!("No such file or directory")
             }
         }
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &FailRunner };
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &FailRunner,
+        };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("gh is not installed"));
     }
@@ -221,12 +249,25 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), true);
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("MY_KEY", "secret_val", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].0, "gh");
-        assert_eq!(calls[0].1, vec!["secret", "set", "MY_KEY", "-R", "owner/repo"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["secret", "set", "MY_KEY", "-R", "owner/repo"]
+        );
     }
 
     #[test]
@@ -234,9 +275,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), true);
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("KEY", "my_secret", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "my_secret", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].2.as_ref().unwrap(), b"my_secret");
     }
@@ -246,9 +297,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), false);
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("KEY", "val", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "val", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].1, vec!["secret", "set", "KEY"]);
     }
@@ -258,11 +319,32 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), true);
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.sync_secret("KEY", "val", &make_target("prod")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "val", &make_target("prod"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["secret", "set", "KEY", "-R", "owner/repo", "--env", "production"]);
+        assert_eq!(
+            calls[0].1,
+            vec![
+                "secret",
+                "set",
+                "KEY",
+                "-R",
+                "owner/repo",
+                "--env",
+                "production"
+            ]
+        );
     }
 
     #[test]
@@ -270,11 +352,24 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), true);
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: true, stdout: vec![], stderr: vec![] }]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
-        adapter.delete_secret("MY_KEY", &make_target("dev")).unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .delete_secret("MY_KEY", &make_target("dev"))
+            .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].1, vec!["secret", "delete", "MY_KEY", "-R", "owner/repo"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["secret", "delete", "MY_KEY", "-R", "owner/repo"]
+        );
     }
 
     #[test]
@@ -282,9 +377,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), true);
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"not found".to_vec() }]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.delete_secret("KEY", &make_target("dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"not found".to_vec(),
+        }]);
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .delete_secret("KEY", &make_target("dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("not found"));
     }
 
@@ -293,9 +398,19 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), false);
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput { success: false, stdout: vec![], stderr: b"auth error".to_vec() }]);
-        let adapter = GithubAdapter { config: &config, adapter_config, runner: &runner };
-        let err = adapter.sync_secret("KEY", "val", &make_target("dev")).unwrap_err();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"auth error".to_vec(),
+        }]);
+        let adapter = GithubAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "val", &make_target("dev"))
+            .unwrap_err();
         assert!(err.to_string().contains("auth error"));
     }
 }

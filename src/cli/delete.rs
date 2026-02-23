@@ -84,9 +84,7 @@ pub fn run_with_runner(
     crate::cli::sync::run_with_runner(config, Some(env), false, false, false, runner)?;
 
     if plugin_failures > 0 {
-        bail!(
-            "{plugin_failures} plugin(s) failed to push. Run `esk push --env {env}` to retry."
-        );
+        bail!("{plugin_failures} plugin(s) failed to push. Run `esk push --env {env}` to retry.");
     }
 
     Ok(())

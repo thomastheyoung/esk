@@ -448,7 +448,12 @@ plugins:
             calls: Mutex<Vec<(String, Vec<String>, Option<Vec<u8>>)>>,
         }
         impl CommandRunner for StdinCapture {
-            fn run(&self, program: &str, args: &[&str], opts: CommandOpts) -> Result<CommandOutput> {
+            fn run(
+                &self,
+                program: &str,
+                args: &[&str],
+                opts: CommandOpts,
+            ) -> Result<CommandOutput> {
                 self.calls.lock().unwrap().push((
                     program.to_string(),
                     args.iter().map(|s| s.to_string()).collect(),

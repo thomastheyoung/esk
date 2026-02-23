@@ -53,10 +53,9 @@ pub fn run_with_runner(
             config::add_secret_to_config(&config_path, key, group)?;
             cliclack::log::success(format!("Added '{}' to esk.yaml under {}", key, group))?;
         } else if atty::is(atty::Stream::Stdin) {
-            let add =
-                cliclack::confirm(format!("Secret '{}' is not in esk.yaml. Add it?", key))
-                    .initial_value(true)
-                    .interact()?;
+            let add = cliclack::confirm(format!("Secret '{}' is not in esk.yaml. Add it?", key))
+                .initial_value(true)
+                .interact()?;
 
             if add {
                 let mut groups = config::secret_group_names(config);
@@ -157,9 +156,7 @@ pub fn run_with_runner(
     crate::cli::sync::run_with_runner(config, Some(env), false, false, false, runner)?;
 
     if plugin_failures > 0 {
-        bail!(
-            "{plugin_failures} plugin(s) failed to push. Run `esk push --env {env}` to retry."
-        );
+        bail!("{plugin_failures} plugin(s) failed to push. Run `esk push --env {env}` to retry.");
     }
 
     Ok(())
