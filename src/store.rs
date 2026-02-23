@@ -28,7 +28,50 @@ pub fn validate_key(key: &str) -> Result<()> {
     Ok(())
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// Validate a config identifier (environment, project, app name).
+///
+/// Must match `[a-zA-Z][a-zA-Z0-9_-]*`, max 64 chars. Blocks path separators,
+/// spaces, colons, newlines, and other characters that could cause injection
+/// when interpolated into file paths, YAML, or CLI arguments.
+pub fn validate_identifier(name: &str, label: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("invalid {label} '': must not be empty");
+    }
+    if name.len() > 64 {
+        bail!(
+            "invalid {label} '{}...': exceeds 64 character limit",
+            &name[..32]
+        );
+    }
+    let mut chars = name.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() {
+        bail!("invalid {label} '{name}': must start with a letter and match [a-zA-Z][a-zA-Z0-9_-]*");
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' && c != '-' {
+            bail!("invalid {label} '{name}': must match [a-zA-Z][a-zA-Z0-9_-]*");
+        }
+    }
+    Ok(())
+}
+
+/// Validate an environment name.
+pub fn validate_environment(name: &str) -> Result<()> {
+    validate_identifier(name, "environment")
+}
+
+/// Validate a project name.
+pub fn validate_project(name: &str) -> Result<()> {
+    validate_identifier(name, "project")
+}
+
+/// Validate an app name.
+pub fn validate_app(name: &str) -> Result<()> {
+    validate_identifier(name, "app")
+}
+
+#[derive(Clone, Serialize, Deserialize)]
 pub struct StorePayload {
     pub secrets: BTreeMap<String, String>,
     pub version: u64,
@@ -38,12 +81,30 @@ pub struct StorePayload {
     pub env_versions: BTreeMap<String, u64>,
 }
 
-#[derive(Debug)]
+impl std::fmt::Debug for StorePayload {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StorePayload")
+            .field("secrets", &format_args!("<{} entries>", self.secrets.len()))
+            .field("version", &self.version)
+            .field("tombstones", &self.tombstones)
+            .field("env_versions", &self.env_versions)
+            .finish()
+    }
+}
+
 pub struct SecretStore {
     key: Vec<u8>,
     store_path: PathBuf,
     #[allow(dead_code)]
     key_path: PathBuf,
+}
+
+impl std::fmt::Debug for SecretStore {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("SecretStore")
+            .field("store_path", &self.store_path)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Drop for SecretStore {
@@ -59,6 +120,11 @@ impl SecretStore {
         if !esk_dir.is_dir() {
             std::fs::create_dir_all(&esk_dir)
                 .with_context(|| format!("failed to create {}", esk_dir.display()))?;
+        }
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&esk_dir, std::fs::Permissions::from_mode(0o700))?;
         }
         let store_path = esk_dir.join("store.enc");
         let key_path = esk_dir.join("store.key");
@@ -168,6 +234,9 @@ impl SecretStore {
     /// Set a secret, incrementing both global and env-specific versions. Acquires exclusive lock.
     pub fn set(&self, key: &str, env: &str, value: &str) -> Result<StorePayload> {
         validate_key(key)?;
+        if value.contains('\0') {
+            bail!("secret value for '{key}' contains null bytes");
+        }
         self.with_lock(|| {
             let mut payload = self.payload()?;
             let composite = format!("{key}:{env}");
@@ -210,7 +279,7 @@ impl SecretStore {
     }
 
     /// Write a payload to the store, encrypting it.
-    pub fn write_payload(&self, payload: &StorePayload) -> Result<()> {
+    pub(crate) fn write_payload(&self, payload: &StorePayload) -> Result<()> {
         let json = serde_json::to_string(payload)?;
         let encrypted = self.encrypt(&json)?;
 
@@ -222,6 +291,11 @@ impl SecretStore {
         std::fs::write(tmp.path(), &encrypted)?;
         tmp.persist(&self.store_path)
             .with_context(|| format!("failed to persist store to {}", self.store_path.display()))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&self.store_path, std::fs::Permissions::from_mode(0o600))?;
+        }
         Ok(())
     }
 
@@ -303,7 +377,14 @@ impl SecretStore {
     fn read_key(path: &Path) -> Result<Vec<u8>> {
         let hex_str = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read key from {}", path.display()))?;
-        hex::decode(hex_str.trim()).context("invalid key hex")
+        let key = hex::decode(hex_str.trim()).context("invalid key hex")?;
+        if key.len() != 32 {
+            bail!(
+                "invalid key length: expected 32 bytes, got {}",
+                key.len()
+            );
+        }
+        Ok(key)
     }
 
     fn write_key(path: &Path, key: &[u8]) -> Result<()> {
@@ -669,9 +750,8 @@ mod tests {
         let dir = tmp_root();
         SecretStore::load_or_create(dir.path()).unwrap();
         std::fs::write(dir.path().join(".esk/store.key"), "").unwrap();
-        let store = SecretStore::open(dir.path()).unwrap();
-        let err = store.encrypt("test").unwrap_err();
-        assert!(err.to_string().contains("failed to create cipher"));
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("invalid key length"));
     }
 
     #[test]
@@ -825,6 +905,157 @@ mod tests {
         store.set("VALID_KEY", "dev", "val").unwrap();
         let err = store.delete("invalid-key", "dev").unwrap_err();
         assert!(err.to_string().contains("invalid secret key"));
+    }
+
+    // --- Phase 2a: identifier validation tests ---
+
+    #[test]
+    fn validate_identifier_valid() {
+        assert!(validate_identifier("dev", "env").is_ok());
+        assert!(validate_identifier("prod", "env").is_ok());
+        assert!(validate_identifier("staging_v2", "env").is_ok());
+        assert!(validate_identifier("my-app", "app").is_ok());
+        assert!(validate_identifier("MyProject", "project").is_ok());
+    }
+
+    #[test]
+    fn validate_identifier_empty() {
+        let err = validate_identifier("", "env").unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_identifier_path_separator() {
+        let err = validate_identifier("../escape", "env").unwrap_err();
+        assert!(err.to_string().contains("must start with a letter"));
+    }
+
+    #[test]
+    fn validate_identifier_colon() {
+        let err = validate_identifier("key:val", "env").unwrap_err();
+        assert!(err.to_string().contains("must match"));
+    }
+
+    #[test]
+    fn validate_identifier_newline() {
+        let err = validate_identifier("dev\ninjection", "env").unwrap_err();
+        assert!(err.to_string().contains("must match"));
+    }
+
+    #[test]
+    fn validate_identifier_space() {
+        let err = validate_identifier("my app", "env").unwrap_err();
+        assert!(err.to_string().contains("must match"));
+    }
+
+    #[test]
+    fn validate_identifier_starts_with_number() {
+        let err = validate_identifier("123abc", "env").unwrap_err();
+        assert!(err.to_string().contains("must start with a letter"));
+    }
+
+    #[test]
+    fn validate_identifier_too_long() {
+        let long = "a".repeat(65);
+        let err = validate_identifier(&long, "env").unwrap_err();
+        assert!(err.to_string().contains("exceeds 64"));
+    }
+
+    // --- Phase 4a: debug redaction tests ---
+
+    #[test]
+    fn store_payload_debug_redacts_secrets() {
+        let mut secrets = BTreeMap::new();
+        secrets.insert("KEY:dev".to_string(), "super_secret_value".to_string());
+        let payload = StorePayload {
+            secrets,
+            version: 1,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
+        };
+        let debug = format!("{:?}", payload);
+        assert!(!debug.contains("super_secret_value"));
+        assert!(debug.contains("1 entries"));
+    }
+
+    #[test]
+    fn secret_store_debug_redacts_key() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let debug = format!("{:?}", store);
+        assert!(!debug.contains(&hex::encode(&store.key)));
+        assert!(debug.contains("store_path"));
+    }
+
+    // --- Phase 5a: directory permissions ---
+
+    #[test]
+    #[cfg(unix)]
+    fn esk_dir_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        let metadata = std::fs::metadata(dir.path().join(".esk")).unwrap();
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o700);
+    }
+
+    // --- Phase 5b: store.enc permissions ---
+
+    #[test]
+    #[cfg(unix)]
+    fn store_enc_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap();
+        let metadata = std::fs::metadata(dir.path().join(".esk/store.enc")).unwrap();
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o600);
+    }
+
+    // --- Phase 5c: key length validation ---
+
+    #[test]
+    fn key_load_rejects_short_key() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        // Write a 16-byte key (32 hex chars for 16 bytes)
+        let short_key = hex::encode([0u8; 16]);
+        std::fs::write(dir.path().join(".esk/store.key"), &short_key).unwrap();
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("invalid key length"));
+        assert!(err.to_string().contains("expected 32 bytes, got 16"));
+    }
+
+    #[test]
+    fn key_load_rejects_empty() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        std::fs::write(dir.path().join(".esk/store.key"), "").unwrap();
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("invalid key length"));
+    }
+
+    // --- Phase 6a: null byte rejection ---
+
+    #[test]
+    fn set_rejects_null_bytes() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.set("KEY", "dev", "val\0ue").unwrap_err();
+        assert!(err.to_string().contains("contains null bytes"));
+    }
+
+    #[test]
+    fn set_accepts_newlines() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "line1\nline2").unwrap();
+        assert_eq!(
+            store.get("KEY", "dev").unwrap(),
+            Some("line1\nline2".to_string())
+        );
     }
 
     #[test]

@@ -460,7 +460,7 @@ fn push_no_plugins() {
 fn pull_unknown_env_errors() {
     let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "staging", None, false, false).unwrap_err();
+    let err = cli::pull::run(&config, "staging", None, false, false, false).unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
@@ -468,7 +468,7 @@ fn pull_unknown_env_errors() {
 fn pull_no_plugins() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "dev", None, false, false).unwrap_err();
+    let err = cli::pull::run(&config, "dev", None, false, false, false).unwrap_err();
     assert!(err.to_string().contains("no plugins configured"));
 }
 
@@ -792,7 +792,7 @@ plugins:
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
     let err =
-        cli::pull::run_with_runner(&config, "dev", Some("nonexistent"), false, false, &runner)
+        cli::pull::run_with_runner(&config, "dev", Some("nonexistent"), false, false, false, &runner)
             .unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
 }
@@ -1195,7 +1195,7 @@ fn pull_onepassword_merges_remote() {
     runner.push_success(serde_json::to_vec(&item_json2).unwrap().as_slice(), b"");
     runner.push_success(b"", b"");
 
-    cli::pull::run_with_runner(&config, "dev", None, false, false, &runner).unwrap();
+    cli::pull::run_with_runner(&config, "dev", None, false, false, false, &runner).unwrap();
 
     // Local store should be updated with remote value
     let store = project.store().unwrap();
@@ -1219,7 +1219,7 @@ fn pull_onepassword_no_item() {
     runner.push_failure(b"isn't an item in vault");
 
     // Should succeed — no remote data, nothing to reconcile
-    cli::pull::run_with_runner(&config, "dev", None, false, false, &runner).unwrap();
+    cli::pull::run_with_runner(&config, "dev", None, false, false, false, &runner).unwrap();
 
     // Local value unchanged
     let store = project.store().unwrap();

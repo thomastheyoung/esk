@@ -5,6 +5,28 @@ use tempfile::NamedTempFile;
 use crate::adapters::{SecretValue, SyncAdapter, SyncMode, SyncResult};
 use crate::config::{Config, ResolvedTarget};
 
+/// Format a value for safe inclusion in a .env file.
+///
+/// If the value contains characters that could cause parsing issues (newlines,
+/// double quotes, backslashes, spaces, `#`, or starts with `=`), wraps it in
+/// double quotes with proper escaping.
+fn format_env_value(value: &str) -> String {
+    let needs_quoting = value.contains('\n')
+        || value.contains('\r')
+        || value.contains('"')
+        || value.contains('\\')
+        || value.contains(' ')
+        || value.contains('#')
+        || value.starts_with('=');
+
+    if !needs_quoting {
+        return value.to_string();
+    }
+
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{}\"", escaped)
+}
+
 pub struct EnvFileAdapter<'a> {
     pub config: &'a Config,
 }
@@ -88,7 +110,7 @@ impl<'a> EnvFileAdapter<'a> {
             content.push('\n');
             content.push_str(&format!("# === {vendor} ===\n"));
             for (key, value) in entries {
-                content.push_str(&format!("{key}={value}\n"));
+                content.push_str(&format!("{key}={}\n", format_env_value(value)));
             }
         }
 
@@ -263,6 +285,56 @@ adapters:
         let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
         assert_eq!(results.len(), 3);
         assert!(results.iter().all(|r| r.success));
+    }
+
+    #[test]
+    fn format_env_value_plain() {
+        assert_eq!(format_env_value("simple_value"), "simple_value");
+    }
+
+    #[test]
+    fn format_env_value_with_newline() {
+        assert_eq!(format_env_value("line1\nline2"), "\"line1\nline2\"");
+    }
+
+    #[test]
+    fn format_env_value_with_double_quote() {
+        assert_eq!(format_env_value(r#"say "hi""#), r#""say \"hi\"""#);
+    }
+
+    #[test]
+    fn format_env_value_with_backslash() {
+        assert_eq!(format_env_value(r"path\to"), r#""path\\to""#);
+    }
+
+    #[test]
+    fn format_env_value_with_hash() {
+        assert_eq!(format_env_value("val#comment"), "\"val#comment\"");
+    }
+
+    #[test]
+    fn format_env_value_with_space() {
+        assert_eq!(format_env_value("has space"), "\"has space\"");
+    }
+
+    #[test]
+    fn format_env_value_starts_with_equals() {
+        assert_eq!(format_env_value("=oops"), "\"=oops\"");
+    }
+
+    #[test]
+    fn sync_batch_newline_value_is_quoted() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
+        let config = make_config(dir.path());
+        let adapter = EnvFileAdapter { config: &config };
+        let secrets = vec![make_secret("CERT", "line1\nline2", "General")];
+        let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
+        assert!(results.iter().all(|r| r.success));
+        let content = std::fs::read_to_string(dir.path().join("apps/web/.env.local")).unwrap();
+        assert!(content.contains("CERT=\"line1\nline2\""));
+        // The raw value should NOT appear unquoted
+        assert!(!content.contains("CERT=line1\nline2\n"));
     }
 
     #[test]

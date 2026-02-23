@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 
 use crate::adapters::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
-    SyncMode,
+    append_env_flags, check_command, resolve_env_flags, validate_stdin_kv_value, CommandOpts,
+    CommandRunner, SyncAdapter, SyncMode,
 };
 use crate::config::{Config, ResolvedTarget, SupabaseAdapterConfig};
 
@@ -48,6 +48,7 @@ impl<'a> SyncAdapter for SupabaseAdapter<'a> {
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+        validate_stdin_kv_value(key, value, "supabase")?;
         let project_ref = &self.adapter_config.project_ref;
         let stdin_data = format!("{key}={value}\n");
 
@@ -370,6 +371,40 @@ adapters:
             .delete_secret("KEY", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn supabase_rejects_newline_in_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path());
+        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let runner = MockRunner::new(vec![]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "line1\nline2", &make_target("dev"))
+            .unwrap_err();
+        assert!(err.to_string().contains("contains newlines"));
+    }
+
+    #[test]
+    fn supabase_rejects_cr_in_value() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path());
+        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let runner = MockRunner::new(vec![]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "line1\r\nline2", &make_target("dev"))
+            .unwrap_err();
+        assert!(err.to_string().contains("contains newlines"));
     }
 
     #[test]

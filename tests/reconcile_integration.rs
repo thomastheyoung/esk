@@ -16,7 +16,7 @@ fn reconcile_pull_then_push_flow() {
     // Remote has secrets at v3
     let mut remote = BTreeMap::new();
     remote.insert("API_KEY".to_string(), "remote_val".to_string());
-    let result = reconcile(&payload, &remote, 3, "dev");
+    let result = reconcile(&payload, &remote, 3, "dev").unwrap();
 
     assert!(matches!(result.action, ReconcileAction::PullRemote));
     assert_eq!(result.pulled, vec!["API_KEY"]);
@@ -24,14 +24,14 @@ fn reconcile_pull_then_push_flow() {
     // Write merged payload
     let merged = result.merged_payload.unwrap();
     assert_eq!(merged.version, 3);
-    store.write_payload(&merged).unwrap();
+    store.set_payload(&merged).unwrap();
 
     // Now local is at v3 — set a new secret to make it v4
     let updated = store.set("NEW_KEY", "dev", "new_val").unwrap();
     assert_eq!(updated.version, 4);
 
     // Reconcile again: local is newer
-    let result2 = reconcile(&updated, &remote, 3, "dev");
+    let result2 = reconcile(&updated, &remote, 3, "dev").unwrap();
     assert!(matches!(result2.action, ReconcileAction::PushLocal));
     assert!(result2.pushed.contains(&"NEW_KEY".to_string()));
 }
@@ -51,7 +51,7 @@ fn reconcile_bidirectional_merge() {
     remote.insert("A".to_string(), "a_remote".to_string());
     remote.insert("B".to_string(), "b_remote".to_string());
 
-    let result = reconcile(&payload, &remote, 5, "dev");
+    let result = reconcile(&payload, &remote, 5, "dev").unwrap();
     assert!(matches!(result.action, ReconcileAction::PullRemote));
 
     // A and B pulled from remote
@@ -83,7 +83,7 @@ fn reconcile_preserves_non_target_env() {
     let mut remote = BTreeMap::new();
     remote.insert("KEY".to_string(), "new_dev".to_string());
 
-    let result = reconcile(&payload, &remote, 5, "dev");
+    let result = reconcile(&payload, &remote, 5, "dev").unwrap();
     let merged = result.merged_payload.unwrap();
     assert_eq!(merged.secrets.get("KEY:dev").unwrap(), "new_dev");
     assert_eq!(merged.secrets.get("KEY:prod").unwrap(), "prod_val"); // untouched

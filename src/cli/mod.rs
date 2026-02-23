@@ -45,7 +45,7 @@ pub enum Commands {
         /// Environment to set for
         #[arg(long)]
         env: String,
-        /// Secret value (prompts interactively if omitted)
+        /// Secret value (WARNING: visible in process list; omit for interactive prompt)
         #[arg(long)]
         value: Option<String>,
         /// Config group to register the secret under (skips interactive prompt)
@@ -119,5 +119,8 @@ pub enum Commands {
         /// Fail if any plugin is unreachable (no partial reconciliation)
         #[arg(long)]
         strict: bool,
+        /// Bypass version jump protection (use with caution)
+        #[arg(long)]
+        force: bool,
     },
 }

@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::adapters::{
@@ -6,6 +6,41 @@ use crate::adapters::{
     SyncAdapter, SyncMode, SyncResult,
 };
 use crate::config::{Config, KubernetesAdapterConfig, ResolvedTarget};
+
+/// Validate a Kubernetes resource name or namespace.
+///
+/// Must match `[a-z0-9]([a-z0-9-]*[a-z0-9])?` and be at most 253 characters.
+/// This prevents YAML injection via crafted names in the Secret manifest.
+fn validate_k8s_name(name: &str, field: &str) -> Result<()> {
+    if name.is_empty() {
+        bail!("kubernetes {field} must not be empty");
+    }
+    if name.len() > 253 {
+        bail!(
+            "kubernetes {field} '{}...' exceeds 253 character limit",
+            &name[..32]
+        );
+    }
+    let bytes = name.as_bytes();
+    // First char must be [a-z0-9]
+    if !bytes[0].is_ascii_lowercase() && !bytes[0].is_ascii_digit() {
+        bail!("kubernetes {field} '{name}' must start with a lowercase letter or digit");
+    }
+    // Last char must be [a-z0-9]
+    let last = bytes[bytes.len() - 1];
+    if !last.is_ascii_lowercase() && !last.is_ascii_digit() {
+        bail!("kubernetes {field} '{name}' must end with a lowercase letter or digit");
+    }
+    // Middle chars must be [a-z0-9-]
+    if bytes.len() > 2 {
+        for &b in &bytes[1..bytes.len() - 1] {
+            if !b.is_ascii_lowercase() && !b.is_ascii_digit() && b != b'-' {
+                bail!("kubernetes {field} '{name}' contains invalid character '{}'; only lowercase letters, digits, and hyphens are allowed", b as char);
+            }
+        }
+    }
+    Ok(())
+}
 
 pub struct KubernetesAdapter<'a> {
     pub config: &'a Config,
@@ -36,6 +71,9 @@ impl<'a> KubernetesAdapter<'a> {
     ) -> Result<String> {
         let ns = self.resolve_namespace(&target.environment)?;
         let name = self.secret_name();
+
+        validate_k8s_name(&name, "secret name")?;
+        validate_k8s_name(ns, "namespace")?;
 
         let mut data_entries = String::new();
         for s in secrets {
@@ -454,6 +492,45 @@ adapters:
             runner: &MockRunner::new(vec![]),
         };
         assert_eq!(adapter.secret_name(), "custom-secret");
+    }
+
+    #[test]
+    fn validate_k8s_name_valid() {
+        assert!(validate_k8s_name("myapp-secrets", "name").is_ok());
+        assert!(validate_k8s_name("a", "name").is_ok());
+        assert!(validate_k8s_name("abc123", "name").is_ok());
+        assert!(validate_k8s_name("my-ns", "namespace").is_ok());
+    }
+
+    #[test]
+    fn validate_k8s_name_uppercase_fails() {
+        let err = validate_k8s_name("MyApp", "name").unwrap_err();
+        assert!(err.to_string().contains("must start with a lowercase"));
+    }
+
+    #[test]
+    fn validate_k8s_name_newline_fails() {
+        let err = validate_k8s_name("my\nname", "name").unwrap_err();
+        assert!(err.to_string().contains("invalid character"));
+    }
+
+    #[test]
+    fn validate_k8s_name_leading_hyphen_fails() {
+        let err = validate_k8s_name("-myname", "name").unwrap_err();
+        assert!(err.to_string().contains("must start with"));
+    }
+
+    #[test]
+    fn validate_k8s_name_empty_fails() {
+        let err = validate_k8s_name("", "name").unwrap_err();
+        assert!(err.to_string().contains("must not be empty"));
+    }
+
+    #[test]
+    fn validate_k8s_name_too_long_fails() {
+        let long_name = "a".repeat(254);
+        let err = validate_k8s_name(&long_name, "name").unwrap_err();
+        assert!(err.to_string().contains("exceeds 253"));
     }
 
     #[test]

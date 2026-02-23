@@ -83,11 +83,12 @@ fn main() -> Result<()> {
             only,
             sync,
             strict,
+            force,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            esk::cli::pull::run(&config, env, only.as_deref(), *sync, *strict)?;
+            esk::cli::pull::run(&config, env, only.as_deref(), *sync, *strict, *force)?;
         }
     }
 

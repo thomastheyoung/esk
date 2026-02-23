@@ -15,16 +15,19 @@ pub fn run(
     only: Option<&str>,
     auto_sync: bool,
     strict: bool,
+    force: bool,
 ) -> Result<()> {
-    run_with_runner(config, env, only, auto_sync, strict, &RealCommandRunner)
+    run_with_runner(config, env, only, auto_sync, strict, force, &RealCommandRunner)
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_with_runner(
     config: &Config,
     env: &str,
     only: Option<&str>,
     auto_sync: bool,
     strict: bool,
+    force: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
@@ -132,7 +135,61 @@ pub fn run_with_runner(
         .map(|(name, secrets, version)| (name.as_str(), secrets, *version))
         .collect();
 
-    let result = reconcile::reconcile_multi(&payload, &remotes, Some(env));
+    let result = match reconcile::reconcile_multi(&payload, &remotes, Some(env)) {
+        Ok(r) => r,
+        Err(e) if e.to_string().contains("version jump too large") && !force => {
+            if atty::is(atty::Stream::Stdin) {
+                cliclack::log::warning(format!("{e}"))?;
+                let accept = cliclack::confirm(
+                    "Accept the large version jump? This may indicate a compromised plugin.",
+                )
+                .initial_value(false)
+                .interact()?;
+                if !accept {
+                    bail!("Aborted by user. Use --force to bypass version jump protection.");
+                }
+                // Retry with a very high limit by directly calling without the check
+                // We re-call and the error won't happen since we handle it here
+                // Actually, we need to bypass. Let's use a simpler approach:
+                // just proceed by not propagating the error.
+                // Since we can't easily bypass, we re-do with force semantics.
+                // The simplest approach: catch the error and note the user accepted.
+            } else {
+                bail!(
+                    "{e}\nRun with --force to bypass version jump protection."
+                );
+            }
+            // If we get here, user confirmed interactively. We need to recompute.
+            // Use a local payload with inflated version to bypass the check.
+            let mut adjusted_payload = payload.clone();
+            // Set local version high enough to bypass the jump check
+            let max_remote = remotes.iter().map(|(_, _, v)| *v).max().unwrap_or(0);
+            if let Some(e_str) = adjusted_payload.env_versions.get_mut(env) {
+                *e_str = max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP);
+            } else {
+                adjusted_payload.env_versions.insert(
+                    env.to_string(),
+                    max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP),
+                );
+            }
+            reconcile::reconcile_multi(&adjusted_payload, &remotes, Some(env))?
+        }
+        Err(e) if e.to_string().contains("version jump too large") && force => {
+            // --force: adjust local version to bypass the check
+            let mut adjusted_payload = payload.clone();
+            let max_remote = remotes.iter().map(|(_, _, v)| *v).max().unwrap_or(0);
+            if let Some(e_str) = adjusted_payload.env_versions.get_mut(env) {
+                *e_str = max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP);
+            } else {
+                adjusted_payload.env_versions.insert(
+                    env.to_string(),
+                    max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP),
+                );
+            }
+            reconcile::reconcile_multi(&adjusted_payload, &remotes, Some(env))?
+        }
+        Err(e) => return Err(e),
+    };
 
     if result.local_changed {
         store.set_payload(&result.merged_payload)?;
@@ -142,7 +199,24 @@ pub fn run_with_runner(
         ))?;
 
         // Push merged result back to plugins that were behind
-        if !result.sources_to_update.is_empty() {
+        let should_pushback = if result.sources_to_update.is_empty() {
+            false
+        } else if !atty::is(atty::Stream::Stdin) {
+            cliclack::log::warning(
+                "Skipped auto-pushback in non-interactive mode. Run `esk push` to update stale plugins.",
+            )?;
+            false
+        } else {
+            let plugin_names = result.sources_to_update.join(", ");
+            cliclack::confirm(format!(
+                "Push merged result back to {} plugin(s)? ({})",
+                result.sources_to_update.len(),
+                plugin_names
+            ))
+            .initial_value(true)
+            .interact()?
+        };
+        if should_pushback {
             let updated_payload = &result.merged_payload;
             let plugin_index_path = config.root.join(".esk/plugin-index.json");
             let mut plugin_index = PluginIndex::load(&plugin_index_path);

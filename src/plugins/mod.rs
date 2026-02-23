@@ -56,10 +56,23 @@ pub fn parse_pulled_secrets(
     data: BTreeMap<String, String>,
     env: &str,
 ) -> (BTreeMap<String, String>, u64) {
-    let version: u64 = data
-        .get(ESK_VERSION_KEY)
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(0);
+    let version: u64 = match data.get(ESK_VERSION_KEY) {
+        Some(v) => match v.parse() {
+            Ok(n) => n,
+            Err(_) => {
+                let _ = cliclack::log::warning(format!(
+                    "Plugin returned unparseable {ESK_VERSION_KEY}: '{v}'. Defaulting to version 0."
+                ));
+                0
+            }
+        },
+        None => {
+            let _ = cliclack::log::warning(format!(
+                "Plugin did not include {ESK_VERSION_KEY}. Defaulting to version 0."
+            ));
+            0
+        }
+    };
 
     let composite: BTreeMap<String, String> = data
         .into_iter()

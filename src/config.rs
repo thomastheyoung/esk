@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use crate::store::validate_key;
+use crate::store::{validate_app, validate_environment, validate_key, validate_project};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -345,6 +345,13 @@ impl Config {
     fn validate(&self) -> Result<()> {
         if self.environments.is_empty() {
             bail!("at least one environment must be defined");
+        }
+        validate_project(&self.project)?;
+        for env in &self.environments {
+            validate_environment(env)?;
+        }
+        for app_name in self.apps.keys() {
+            validate_app(app_name)?;
         }
         self.validate_plugins()?;
         // Validate secret targets reference known adapters, apps, and environments
@@ -873,6 +880,39 @@ secrets:
         let dir = tempfile::tempdir().unwrap();
         let path = write_yaml(dir.path(), "not: [valid: yaml: {{}}");
         assert!(Config::load(&path).is_err());
+    }
+
+    #[test]
+    fn validate_project_name_with_path_separator() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: ../escape\nenvironments: [dev]");
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("invalid project"));
+    }
+
+    #[test]
+    fn validate_environment_with_colon() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: myapp\nenvironments: [\"dev:test\"]");
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("invalid environment"));
+    }
+
+    #[test]
+    fn validate_environment_with_space() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: myapp\nenvironments: [\"dev test\"]");
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("invalid environment"));
+    }
+
+    #[test]
+    fn validate_app_name_with_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: myapp\nenvironments: [dev]\napps:\n  web/api:\n    path: apps/api";
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("invalid app"));
     }
 
     #[test]

@@ -102,6 +102,12 @@ pub fn run_with_runner(
             .interact()?,
     };
 
+    if secret_value.contains('\n') || secret_value.contains('\r') {
+        cliclack::log::warning(
+            "Secret contains newlines. Some adapters (fly, supabase) cannot sync newline-containing values.",
+        )?;
+    }
+
     let store = SecretStore::open(&config.root)?;
     let payload = store.set(key, env, &secret_value)?;
 

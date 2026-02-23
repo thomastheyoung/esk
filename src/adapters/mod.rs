@@ -145,6 +145,20 @@ pub trait SyncAdapter {
     }
 }
 
+/// Validate that a secret value is safe for stdin-based KEY=VALUE adapters.
+///
+/// Adapters like Fly and Supabase pass `KEY=VALUE\n` via stdin. A newline
+/// in the value would inject additional environment variables.
+pub fn validate_stdin_kv_value(key: &str, value: &str, adapter_name: &str) -> Result<()> {
+    if value.contains('\n') || value.contains('\r') {
+        anyhow::bail!(
+            "{adapter_name}: secret '{key}' contains newlines, which would inject \
+             additional variables via stdin. Remove newlines or use a different adapter."
+        );
+    }
+    Ok(())
+}
+
 /// Resolve env_flags for a given environment into split parts.
 /// Returns an empty vec if no flags are configured for the environment.
 pub fn resolve_env_flags(flags: &BTreeMap<String, String>, env: &str) -> Vec<String> {
@@ -757,6 +771,23 @@ adapters:
         assert!(health[0].ok); // env always ok
         assert!(!health[1].ok); // cloudflare fails
         assert!(health[1].message.contains("wrangler is not installed"));
+    }
+
+    #[test]
+    fn validate_stdin_kv_value_normal() {
+        assert!(validate_stdin_kv_value("KEY", "normal_value", "test").is_ok());
+    }
+
+    #[test]
+    fn validate_stdin_kv_value_rejects_newline() {
+        let err = validate_stdin_kv_value("KEY", "line1\nline2", "test").unwrap_err();
+        assert!(err.to_string().contains("contains newlines"));
+    }
+
+    #[test]
+    fn validate_stdin_kv_value_rejects_carriage_return() {
+        let err = validate_stdin_kv_value("KEY", "line1\r\nline2", "test").unwrap_err();
+        assert!(err.to_string().contains("contains newlines"));
     }
 
     #[test]
