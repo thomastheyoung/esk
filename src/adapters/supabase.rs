@@ -27,6 +27,23 @@ impl<'a> SyncAdapter for SupabaseAdapter<'a> {
                 "supabase is not installed or not in PATH. Install it from: https://supabase.com/docs/guides/cli"
             )
         })?;
+
+        let project_ref = &self.adapter_config.project_ref;
+        let output = self
+            .runner
+            .run(
+                "supabase",
+                &["secrets", "list", "--project-ref", project_ref],
+                CommandOpts::default(),
+            )
+            .context("failed to run supabase secrets list")?;
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "supabase project '{project_ref}' not accessible (not logged in or invalid project ref): {stderr}"
+            );
+        }
+
         Ok(())
     }
 
@@ -147,11 +164,18 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.supabase.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
-            success: true,
-            stdout: b"1.0.0".to_vec(),
-            stderr: vec![],
-        }]);
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"1.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"[]".to_vec(),
+                stderr: vec![],
+            },
+        ]);
         let adapter = SupabaseAdapter {
             config: &config,
             adapter_config,
@@ -159,8 +183,38 @@ adapters:
         };
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
-        assert_eq!(calls.len(), 1);
+        assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(
+            calls[1].1,
+            vec!["secrets", "list", "--project-ref", "abcdef123456"]
+        );
+    }
+
+    #[test]
+    fn supabase_preflight_auth_failure() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path());
+        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"1.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"Unauthorized".to_vec(),
+            },
+        ]);
+        let adapter = SupabaseAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter.preflight().unwrap_err();
+        assert!(err.to_string().contains("not accessible"));
     }
 
     #[test]

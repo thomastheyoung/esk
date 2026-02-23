@@ -105,6 +105,20 @@ impl<'a> StoragePlugin for S3Plugin<'a> {
                 "AWS CLI (aws) is not installed or not in PATH. Install it from: https://aws.amazon.com/cli/"
             )
         })?;
+
+        let mut args: Vec<String> = vec!["sts".to_string(), "get-caller-identity".to_string()];
+        args.extend(self.base_args());
+        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+
+        let output = self
+            .runner
+            .run("aws", &args_ref, CommandOpts::default())
+            .context("failed to run aws sts get-caller-identity")?;
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("AWS authentication failed: {stderr}");
+        }
+
         Ok(())
     }
 
@@ -290,12 +304,66 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"aws-cli/2.13.0")]);
+        let runner = MockRunner::new(vec![
+            ok_output(b"aws-cli/2.13.0"),
+            ok_output(b"{\"Account\": \"123456789012\"}"),
+        ]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = runner.calls();
-        assert_eq!(calls.len(), 1);
+        assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[1].1, vec!["sts", "get-caller-identity"]);
+    }
+
+    #[test]
+    fn preflight_success_with_profile_region() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  s3:
+    bucket: my-secrets-bucket
+    region: us-west-2
+    profile: myprofile
+"#;
+        let config = make_config(yaml);
+        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let runner = MockRunner::new(vec![
+            ok_output(b"aws-cli/2.13.0"),
+            ok_output(b"{\"Account\": \"123456789012\"}"),
+        ]);
+        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        assert!(plugin.preflight().is_ok());
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 2);
+        let sts_args = &calls[1].1;
+        assert!(sts_args.contains(&"sts".to_string()));
+        assert!(sts_args.contains(&"get-caller-identity".to_string()));
+        assert!(sts_args.contains(&"--region".to_string()));
+        assert!(sts_args.contains(&"us-west-2".to_string()));
+        assert!(sts_args.contains(&"--profile".to_string()));
+        assert!(sts_args.contains(&"myprofile".to_string()));
+    }
+
+    #[test]
+    fn preflight_auth_failure() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  s3:
+    bucket: my-secrets-bucket
+"#;
+        let config = make_config(yaml);
+        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let runner = MockRunner::new(vec![
+            ok_output(b"aws-cli/2.13.0"),
+            fail_output(b"Unable to locate credentials"),
+        ]);
+        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("AWS authentication failed"));
     }
 
     #[test]

@@ -335,6 +335,27 @@ plugins:
     }
 
     #[test]
+    fn preflight_auth_failure() {
+        let config = make_config(gcp_yaml());
+        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"gcloud 400.0.0".to_vec(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"ERROR: (gcloud.auth.print-access-token) not authenticated".to_vec(),
+            },
+        ]);
+        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("not accessible"));
+    }
+
+    #[test]
     fn push_success() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();

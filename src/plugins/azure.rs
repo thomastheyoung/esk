@@ -330,6 +330,27 @@ plugins:
     }
 
     #[test]
+    fn preflight_auth_failure() {
+        let config = make_config(azure_yaml());
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"2.50.0".to_vec(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"Please run 'az login' to setup account".to_vec(),
+            },
+        ]);
+        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("not authenticated"));
+    }
+
+    #[test]
     fn push_success() {
         let config = make_config(azure_yaml());
         let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();

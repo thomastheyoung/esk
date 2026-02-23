@@ -64,6 +64,17 @@ impl<'a> SyncAdapter for KubernetesAdapter<'a> {
                 "kubectl is not installed or not in PATH. Install it from: https://kubernetes.io/docs/tasks/tools/"
             )
         })?;
+
+        let output = self
+            .runner
+            .run("kubectl", &["cluster-info"], CommandOpts::default())
+            .context("failed to run kubectl cluster-info")?;
+        if !output.success {
+            anyhow::bail!(
+                "kubectl cannot connect to a cluster. Check your kubeconfig and cluster status."
+            );
+        }
+
         Ok(())
     }
 
@@ -232,17 +243,54 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
-            success: true,
-            stdout: b"1.28.0".to_vec(),
-            stderr: vec![],
-        }]);
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"1.28.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"Kubernetes control plane is running".to_vec(),
+                stderr: vec![],
+            },
+        ]);
         let adapter = KubernetesAdapter {
             config: &config,
             adapter_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
+        let calls = runner.take_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[1].1, vec!["cluster-info"]);
+    }
+
+    #[test]
+    fn preflight_cluster_unreachable() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path());
+        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"1.28.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"connection refused".to_vec(),
+            },
+        ]);
+        let adapter = KubernetesAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter.preflight().unwrap_err();
+        assert!(err.to_string().contains("cannot connect to a cluster"));
     }
 
     #[test]

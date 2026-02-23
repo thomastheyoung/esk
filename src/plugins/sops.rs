@@ -44,6 +44,15 @@ impl<'a> StoragePlugin for SopsPlugin<'a> {
                 "Mozilla SOPS (sops) is not installed or not in PATH. Install it from: https://github.com/getsops/sops"
             )
         })?;
+
+        let sops_config = self.config.root.join(".sops.yaml");
+        if !sops_config.exists() {
+            anyhow::bail!(
+                "SOPS config (.sops.yaml) not found at {}. Create it with encryption rules or set SOPS key environment variables (SOPS_AGE_KEY_FILE, SOPS_PGP_FP, etc.).",
+                sops_config.display()
+            );
+        }
+
         Ok(())
     }
 
@@ -227,9 +236,23 @@ plugins:
         assert_eq!(plugin.resolve_path("prod"), "secrets/prod.enc.json");
     }
 
+    /// Create a config in a specific directory so we can also place .sops.yaml there.
+    fn make_config_in(dir: &std::path::Path, yaml: &str) -> Config {
+        let path = dir.join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        Config::load(&path).unwrap()
+    }
+
     #[test]
     fn preflight_success() {
-        let config = make_config(sops_yaml());
+        let dir = tempfile::tempdir().unwrap();
+        // Create .sops.yaml in the project root
+        std::fs::write(
+            dir.path().join(".sops.yaml"),
+            "creation_rules:\n  - age: age1xxx\n",
+        )
+        .unwrap();
+        let config = make_config_in(dir.path(), sops_yaml());
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
         let runner = MockRunner::new(vec![CommandOutput {
             success: true,
@@ -244,8 +267,30 @@ plugins:
     }
 
     #[test]
-    fn preflight_missing_sops() {
+    fn preflight_missing_sops_config() {
+        // Config root has no .sops.yaml
         let config = make_config(sops_yaml());
+        let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: b"sops 3.8.0".to_vec(),
+            stderr: Vec::new(),
+        }]);
+        let plugin = SopsPlugin::new(&config, plugin_config, &runner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains(".sops.yaml"));
+        assert!(err.to_string().contains("not found"));
+    }
+
+    #[test]
+    fn preflight_missing_sops() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".sops.yaml"),
+            "creation_rules:\n  - age: age1xxx\n",
+        )
+        .unwrap();
+        let config = make_config_in(dir.path(), sops_yaml());
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
 
         struct FailRunner;

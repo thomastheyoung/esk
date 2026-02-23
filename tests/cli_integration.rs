@@ -2282,15 +2282,16 @@ fn sync_supabase_calls_cli() {
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b""); // supabase secrets set
 
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 2);
-    assert_eq!(calls[1].program, "supabase");
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "supabase");
     assert_eq!(
-        calls[1].args,
+        calls[2].args,
         vec![
             "secrets",
             "set",
@@ -2310,13 +2311,14 @@ fn sync_supabase_prod_env_flags() {
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
-        calls[1].args,
+        calls[2].args,
         vec![
             "secrets",
             "set",
@@ -2337,6 +2339,7 @@ fn sync_supabase_records_tracker() {
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
 
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
@@ -2357,6 +2360,7 @@ fn sync_supabase_failure_tracked() {
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_failure(b"api error");
 
     let err =
@@ -2381,15 +2385,17 @@ fn sync_supabase_skip_unchanged() {
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b""); // supabase secrets list (preflight)
     cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 1); // only preflight (version check)
+    assert_eq!(calls.len(), 2); // only preflight (version check + secrets list)
 }
 
 // === railway adapter integration tests ===

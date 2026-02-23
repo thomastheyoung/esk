@@ -321,6 +321,27 @@ plugins:
     }
 
     #[test]
+    fn preflight_auth_failure() {
+        let config = make_config(doppler_yaml());
+        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"v3.60.0".to_vec(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"Unable to authenticate".to_vec(),
+            },
+        ]);
+        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("not authenticated"));
+    }
+
+    #[test]
     fn push_sets_each_secret_individually() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();

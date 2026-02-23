@@ -344,6 +344,27 @@ plugins:
     }
 
     #[test]
+    fn preflight_auth_failure() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  bitwarden:
+    project_id: "proj-123"
+    secret_name: "{project}-{environment}"
+"#;
+        let config = make_config(yaml);
+        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let runner = MockRunner::new(vec![
+            ok_output(b"bws 0.4.0"),
+            fail_output(b"Unauthorized"),
+        ]);
+        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("Bitwarden authentication failed"));
+    }
+
+    #[test]
     fn push_creates_new_secret() {
         let yaml = r#"
 project: myapp
