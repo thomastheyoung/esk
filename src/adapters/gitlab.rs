@@ -43,7 +43,6 @@ impl<'a> SyncAdapter for GitlabAdapter<'a> {
             "variable",
             "set",
             key,
-            value,
             "--scope",
             &target.environment,
         ];
@@ -51,7 +50,14 @@ impl<'a> SyncAdapter for GitlabAdapter<'a> {
 
         let output = self
             .runner
-            .run("glab", &args, CommandOpts::default())
+            .run(
+                "glab",
+                &args,
+                CommandOpts {
+                    stdin: Some(value.as_bytes().to_vec()),
+                    ..Default::default()
+                },
+            )
             .with_context(|| format!("failed to run glab for {key}"))?;
 
         if !output.success {
@@ -87,8 +93,14 @@ mod tests {
     use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
     use std::sync::Mutex;
 
+    struct RecordedCall {
+        program: String,
+        args: Vec<String>,
+        stdin: Option<Vec<u8>>,
+    }
+
     struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
+        calls: Mutex<Vec<RecordedCall>>,
         responses: Mutex<Vec<CommandOutput>>,
     }
 
@@ -99,7 +111,7 @@ mod tests {
                 responses: Mutex::new(responses),
             }
         }
-        fn take_calls(&self) -> Vec<(String, Vec<String>)> {
+        fn take_calls(&self) -> Vec<RecordedCall> {
             std::mem::take(&mut *self.calls.lock().unwrap())
         }
     }
@@ -109,12 +121,13 @@ mod tests {
             &self,
             program: &str,
             args: &[&str],
-            _opts: CommandOpts,
+            opts: CommandOpts,
         ) -> anyhow::Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
+            self.calls.lock().unwrap().push(RecordedCall {
+                program: program.to_string(),
+                args: args.iter().map(|s| s.to_string()).collect(),
+                stdin: opts.stdin,
+            });
             let mut responses = self.responses.lock().unwrap();
             if responses.is_empty() {
                 Ok(CommandOutput {
@@ -174,7 +187,7 @@ adapters:
         };
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
-        assert_eq!(calls[1].1, vec!["auth", "status"]);
+        assert_eq!(calls[1].args, vec!["auth", "status"]);
     }
 
     #[test]
@@ -224,7 +237,7 @@ adapters:
     }
 
     #[test]
-    fn gitlab_sync_correct_args() {
+    fn gitlab_sync_uses_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.gitlab.as_ref().unwrap();
@@ -242,11 +255,17 @@ adapters:
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].0, "glab");
+        assert_eq!(calls[0].program, "glab");
         assert_eq!(
-            calls[0].1,
-            vec!["variable", "set", "MY_KEY", "secret_val", "--scope", "dev"]
+            calls[0].args,
+            vec!["variable", "set", "MY_KEY", "--scope", "dev"]
         );
+        // Value is passed via stdin, not in args
+        assert_eq!(
+            calls[0].stdin.as_deref(),
+            Some(b"secret_val".as_slice())
+        );
+        assert!(!calls[0].args.iter().any(|a| a.contains("secret_val")));
     }
 
     #[test]
@@ -269,9 +288,10 @@ adapters:
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
-            vec!["variable", "set", "KEY", "val", "--scope", "prod", "--masked"]
+            calls[0].args,
+            vec!["variable", "set", "KEY", "--scope", "prod", "--masked"]
         );
+        assert_eq!(calls[0].stdin.as_deref(), Some(b"val".as_slice()));
     }
 
     #[test]
@@ -294,7 +314,7 @@ adapters:
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["variable", "delete", "MY_KEY", "--scope", "dev"]
         );
     }
@@ -317,7 +337,7 @@ adapters:
         adapter.delete_secret("KEY", &make_target("prod")).unwrap();
         let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["variable", "delete", "KEY", "--scope", "prod", "--masked"]
         );
     }

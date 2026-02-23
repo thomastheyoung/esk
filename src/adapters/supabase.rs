@@ -48,16 +48,23 @@ impl<'a> SyncAdapter for SupabaseAdapter<'a> {
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
-        let kv = format!("{key}={value}");
         let project_ref = &self.adapter_config.project_ref;
+        let stdin_data = format!("{key}={value}\n");
 
         let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["secrets", "set", &kv, "--project-ref", project_ref];
+        let mut args: Vec<&str> = vec!["secrets", "set", "--project-ref", project_ref];
         append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
-            .run("supabase", &args, CommandOpts::default())
+            .run(
+                "supabase",
+                &args,
+                CommandOpts {
+                    stdin: Some(stdin_data.into_bytes()),
+                    ..Default::default()
+                },
+            )
             .with_context(|| format!("failed to run supabase for {key}"))?;
 
         if !output.success {
@@ -95,8 +102,14 @@ mod tests {
     use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
     use std::sync::Mutex;
 
+    struct RecordedCall {
+        program: String,
+        args: Vec<String>,
+        stdin: Option<Vec<u8>>,
+    }
+
     struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
+        calls: Mutex<Vec<RecordedCall>>,
         responses: Mutex<Vec<CommandOutput>>,
     }
 
@@ -107,7 +120,7 @@ mod tests {
                 responses: Mutex::new(responses),
             }
         }
-        fn take_calls(&self) -> Vec<(String, Vec<String>)> {
+        fn take_calls(&self) -> Vec<RecordedCall> {
             std::mem::take(&mut *self.calls.lock().unwrap())
         }
     }
@@ -117,12 +130,13 @@ mod tests {
             &self,
             program: &str,
             args: &[&str],
-            _opts: CommandOpts,
+            opts: CommandOpts,
         ) -> anyhow::Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
+            self.calls.lock().unwrap().push(RecordedCall {
+                program: program.to_string(),
+                args: args.iter().map(|s| s.to_string()).collect(),
+                stdin: opts.stdin,
+            });
             let mut responses = self.responses.lock().unwrap();
             if responses.is_empty() {
                 Ok(CommandOutput {
@@ -184,9 +198,9 @@ adapters:
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
         assert_eq!(
-            calls[1].1,
+            calls[1].args,
             vec!["secrets", "list", "--project-ref", "abcdef123456"]
         );
     }
@@ -238,7 +252,7 @@ adapters:
     }
 
     #[test]
-    fn supabase_sync_correct_args() {
+    fn supabase_sync_uses_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.supabase.as_ref().unwrap();
@@ -256,17 +270,22 @@ adapters:
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].0, "supabase");
+        assert_eq!(calls[0].program, "supabase");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "secrets",
                 "set",
-                "MY_KEY=secret_val",
                 "--project-ref",
                 "abcdef123456"
             ]
         );
+        // Value is passed via stdin, not in args
+        assert_eq!(
+            calls[0].stdin.as_deref(),
+            Some(b"MY_KEY=secret_val\n".as_slice())
+        );
+        assert!(!calls[0].args.iter().any(|a| a.contains("secret_val")));
     }
 
     #[test]
@@ -289,16 +308,16 @@ adapters:
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "secrets",
                 "set",
-                "KEY=val",
                 "--project-ref",
                 "abcdef123456",
                 "--experimental"
             ]
         );
+        assert_eq!(calls[0].stdin.as_deref(), Some(b"KEY=val\n".as_slice()));
     }
 
     #[test]
@@ -321,7 +340,7 @@ adapters:
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "secrets",
                 "unset",

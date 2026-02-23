@@ -53,20 +53,27 @@ impl<'a> SyncAdapter for FlyAdapter<'a> {
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let fly_app = self.resolve_app(target)?;
-        let kv = format!("{key}={value}");
+        let stdin_data = format!("{key}={value}\n");
 
         let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["secrets", "set", &kv, "-a", fly_app];
+        let mut args: Vec<&str> = vec!["secrets", "import", "-a", fly_app];
         append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
-            .run("fly", &args, CommandOpts::default())
+            .run(
+                "fly",
+                &args,
+                CommandOpts {
+                    stdin: Some(stdin_data.into_bytes()),
+                    ..Default::default()
+                },
+            )
             .with_context(|| format!("failed to run fly for {key}"))?;
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("fly secrets set failed for {key}: {stderr}");
+            anyhow::bail!("fly secrets import failed for {key}: {stderr}");
         }
 
         Ok(())
@@ -99,8 +106,14 @@ mod tests {
     use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
     use std::sync::Mutex;
 
+    struct RecordedCall {
+        program: String,
+        args: Vec<String>,
+        stdin: Option<Vec<u8>>,
+    }
+
     struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
+        calls: Mutex<Vec<RecordedCall>>,
         responses: Mutex<Vec<CommandOutput>>,
     }
 
@@ -111,7 +124,7 @@ mod tests {
                 responses: Mutex::new(responses),
             }
         }
-        fn take_calls(&self) -> Vec<(String, Vec<String>)> {
+        fn take_calls(&self) -> Vec<RecordedCall> {
             std::mem::take(&mut *self.calls.lock().unwrap())
         }
     }
@@ -121,12 +134,13 @@ mod tests {
             &self,
             program: &str,
             args: &[&str],
-            _opts: CommandOpts,
+            opts: CommandOpts,
         ) -> anyhow::Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
+            self.calls.lock().unwrap().push(RecordedCall {
+                program: program.to_string(),
+                args: args.iter().map(|s| s.to_string()).collect(),
+                stdin: opts.stdin,
+            });
             let mut responses = self.responses.lock().unwrap();
             if responses.is_empty() {
                 Ok(CommandOutput {
@@ -192,8 +206,8 @@ adapters:
         assert!(adapter.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["auth", "whoami"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["auth", "whoami"]);
     }
 
     #[test]
@@ -243,7 +257,7 @@ adapters:
     }
 
     #[test]
-    fn fly_sync_correct_args() {
+    fn fly_sync_uses_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
@@ -261,11 +275,17 @@ adapters:
             .sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].0, "fly");
+        assert_eq!(calls[0].program, "fly");
         assert_eq!(
-            calls[0].1,
-            vec!["secrets", "set", "MY_KEY=secret_val", "-a", "my-fly-app"]
+            calls[0].args,
+            vec!["secrets", "import", "-a", "my-fly-app"]
         );
+        // Value is passed via stdin, not in args
+        assert_eq!(
+            calls[0].stdin.as_deref(),
+            Some(b"MY_KEY=secret_val\n".as_slice())
+        );
+        assert!(!calls[0].args.iter().any(|a| a.contains("secret_val")));
     }
 
     #[test]
@@ -288,9 +308,10 @@ adapters:
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
-            vec!["secrets", "set", "KEY=val", "-a", "my-fly-app", "--stage"]
+            calls[0].args,
+            vec!["secrets", "import", "-a", "my-fly-app", "--stage"]
         );
+        assert_eq!(calls[0].stdin.as_deref(), Some(b"KEY=val\n".as_slice()));
     }
 
     #[test]
@@ -347,7 +368,7 @@ adapters:
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["secrets", "unset", "MY_KEY", "-a", "my-fly-app"]
         );
     }

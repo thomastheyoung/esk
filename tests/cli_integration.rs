@@ -1680,8 +1680,11 @@ fn sync_fly_calls_cli() {
     assert_eq!(calls[2].program, "fly");
     assert_eq!(
         calls[2].args,
-        vec!["secrets", "set", "API_KEY=secret123", "-a", "my-fly-app"]
+        vec!["secrets", "import", "-a", "my-fly-app"]
     );
+    // Secret value passed via stdin, not in args
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"API_KEY=secret123\n");
 }
 
 #[test]
@@ -1694,22 +1697,17 @@ fn sync_fly_prod_env_flags() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // fly --version
     runner.push_success(b"", b""); // fly auth whoami
-    runner.push_success(b"", b""); // fly secrets set
+    runner.push_success(b"", b""); // fly secrets import
 
     cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
         calls[2].args,
-        vec![
-            "secrets",
-            "set",
-            "API_KEY=secret456",
-            "-a",
-            "my-fly-app",
-            "--stage"
-        ]
+        vec!["secrets", "import", "-a", "my-fly-app", "--stage"]
     );
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"API_KEY=secret456\n");
 }
 
 #[test]
@@ -2292,14 +2290,11 @@ fn sync_supabase_calls_cli() {
     assert_eq!(calls[2].program, "supabase");
     assert_eq!(
         calls[2].args,
-        vec![
-            "secrets",
-            "set",
-            "API_KEY=secret123",
-            "--project-ref",
-            "abcdef123456"
-        ]
+        vec!["secrets", "set", "--project-ref", "abcdef123456"]
     );
+    // Secret value passed via stdin, not in args
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"API_KEY=secret123\n");
 }
 
 #[test]
@@ -2322,12 +2317,13 @@ fn sync_supabase_prod_env_flags() {
         vec![
             "secrets",
             "set",
-            "API_KEY=secret456",
             "--project-ref",
             "abcdef123456",
             "--experimental"
         ]
     );
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"API_KEY=secret456\n");
 }
 
 #[test]
@@ -2539,8 +2535,11 @@ fn sync_gitlab_calls_cli() {
     assert_eq!(calls[2].program, "glab");
     assert_eq!(
         calls[2].args,
-        vec!["variable", "set", "API_KEY", "secret123", "--scope", "dev"]
+        vec!["variable", "set", "API_KEY", "--scope", "dev"]
     );
+    // Secret value passed via stdin, not in args
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"secret123");
 }
 
 #[test]
@@ -2564,12 +2563,13 @@ fn sync_gitlab_prod_env_flags() {
             "variable",
             "set",
             "API_KEY",
-            "secret456",
             "--scope",
             "prod",
             "--masked"
         ]
     );
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"secret456");
 }
 
 #[test]

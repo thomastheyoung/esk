@@ -51,6 +51,9 @@ impl<'a> SyncAdapter for HerokuAdapter<'a> {
         Ok(())
     }
 
+    // SECURITY: heroku CLI has no stdin/file support for config:set. Secret values are exposed
+    // in process arguments (visible via `ps aux`). Feature requested upstream since 2016, never
+    // implemented. No workaround available.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let heroku_app = self.resolve_app(target)?;
         let kv = format!("{key}={value}");

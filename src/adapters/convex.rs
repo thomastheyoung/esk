@@ -72,6 +72,8 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
         Ok(())
     }
 
+    // SECURITY: `npx convex env set` has no stdin support. Secret values are exposed in process
+    // arguments (visible via `ps aux`). Known limitation with the Convex CLI.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let (cwd, env_vars) = self.resolve_deployment_context()?;
 

@@ -63,77 +63,43 @@ impl<'a> StoragePlugin for DopplerPlugin<'a> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let suffix = format!(":{env}");
-        let env_secrets: BTreeMap<String, String> = payload
-            .secrets
-            .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
-            })
-            .collect();
-
-        if env_secrets.is_empty() {
-            return Ok(());
-        }
-
-        let version = payload
-            .env_versions
-            .get(env)
-            .copied()
-            .unwrap_or(payload.version);
+        let (env_secrets, version) = match super::extract_env_secrets(payload, env) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
 
         let doppler_config = self.config_name(env)?;
         let project = &self.plugin_config.project;
 
-        // Set each secret individually
-        for (key, value) in &env_secrets {
-            let assignment = format!("{key}={value}");
-            let output = self
-                .runner
-                .run(
-                    "doppler",
-                    &[
-                        "secrets",
-                        "set",
-                        &assignment,
-                        "-p",
-                        project,
-                        "-c",
-                        &doppler_config,
-                        "--silent",
-                    ],
-                    CommandOpts::default(),
-                )
-                .with_context(|| format!("failed to run doppler secrets set for {key}"))?;
-            if !output.success {
-                let stderr = String::from_utf8_lossy(&output.stderr);
-                anyhow::bail!("doppler secrets set failed for {key}: {stderr}");
-            }
-        }
+        // Build JSON payload with all secrets + version metadata, upload in a single call
+        // via stdin to avoid exposing values in process arguments.
+        let mut json_map: BTreeMap<String, String> = env_secrets;
+        json_map.insert(super::ESK_VERSION_KEY.to_string(), version.to_string());
+        let json = serde_json::to_string(&json_map).context("failed to serialize secrets")?;
 
-        // Set version metadata
-        let version_assignment = format!("_ESK_VERSION={version}");
         let output = self
             .runner
             .run(
                 "doppler",
                 &[
                     "secrets",
-                    "set",
-                    &version_assignment,
+                    "upload",
+                    "--json",
                     "-p",
                     project,
                     "-c",
                     &doppler_config,
                     "--silent",
                 ],
-                CommandOpts::default(),
+                CommandOpts {
+                    stdin: Some(json.into_bytes()),
+                    ..Default::default()
+                },
             )
-            .context("failed to set _ESK_VERSION in Doppler")?;
+            .context("failed to run doppler secrets upload")?;
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("doppler secrets set _ESK_VERSION failed: {stderr}");
+            anyhow::bail!("doppler secrets upload failed: {stderr}");
         }
 
         Ok(())
@@ -170,14 +136,16 @@ impl<'a> StoragePlugin for DopplerPlugin<'a> {
         let json_map: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)
             .context("failed to parse Doppler secrets JSON")?;
 
+        // Check both _esk_version (current) and _ESK_VERSION (legacy) for backward compatibility
         let version: u64 = json_map
-            .get("_ESK_VERSION")
+            .get(super::ESK_VERSION_KEY)
+            .or_else(|| json_map.get("_ESK_VERSION"))
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
         let composite: BTreeMap<String, String> = json_map
             .into_iter()
-            .filter(|(k, _)| k != "_ESK_VERSION")
+            .filter(|(k, _)| k != super::ESK_VERSION_KEY && k != "_ESK_VERSION")
             .map(|(k, v)| (format!("{k}:{env}"), v))
             .collect();
 
@@ -191,8 +159,14 @@ mod tests {
     use crate::adapters::{CommandOpts, CommandOutput};
     use std::sync::Mutex;
 
+    struct RecordedCall {
+        program: String,
+        args: Vec<String>,
+        stdin: Option<Vec<u8>>,
+    }
+
     struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
+        calls: Mutex<Vec<RecordedCall>>,
         responses: Mutex<Vec<CommandOutput>>,
     }
 
@@ -206,11 +180,12 @@ mod tests {
     }
 
     impl CommandRunner for MockRunner {
-        fn run(&self, program: &str, args: &[&str], _opts: CommandOpts) -> Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
+        fn run(&self, program: &str, args: &[&str], opts: CommandOpts) -> Result<CommandOutput> {
+            self.calls.lock().unwrap().push(RecordedCall {
+                program: program.to_string(),
+                args: args.iter().map(|s| s.to_string()).collect(),
+                stdin: opts.stdin,
+            });
             let mut responses = self.responses.lock().unwrap();
             if responses.is_empty() {
                 Ok(CommandOutput {
@@ -299,8 +274,8 @@ plugins:
         assert!(plugin.preflight().is_ok());
         let calls = runner.calls.lock().unwrap();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["me"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["me"]);
     }
 
     #[test]
@@ -342,44 +317,33 @@ plugins:
     }
 
     #[test]
-    fn push_sets_each_secret_individually() {
+    fn push_uploads_via_stdin() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-        // 2 secrets + 1 version = 3 calls, all succeed
-        let runner = MockRunner::new(vec![
-            CommandOutput {
-                success: true,
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            },
-            CommandOutput {
-                success: true,
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            },
-            CommandOutput {
-                success: true,
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            },
-        ]);
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }]);
         let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
         plugin.push(&payload, &config, "dev").unwrap();
 
         let calls = runner.calls.lock().unwrap();
-        assert_eq!(calls.len(), 3);
-        // Each call should use the doppler project and config
-        for call in calls.iter() {
-            assert_eq!(call.0, "doppler");
-            assert!(call.1.contains(&"-p".to_string()));
-            assert!(call.1.contains(&"myapp-doppler".to_string()));
-            assert!(call.1.contains(&"-c".to_string()));
-            assert!(call.1.contains(&"dev_config".to_string()));
-        }
-        // Last call should be the version
-        let last = &calls[2];
-        assert!(last.1.contains(&"_ESK_VERSION=3".to_string()));
+        assert_eq!(calls.len(), 1);
+        let call = &calls[0];
+        assert_eq!(call.program, "doppler");
+        assert_eq!(
+            call.args,
+            vec!["secrets", "upload", "--json", "-p", "myapp-doppler", "-c", "dev_config", "--silent"]
+        );
+
+        // Verify secrets are passed via stdin, not in args
+        let stdin = call.stdin.as_ref().expect("stdin should be set");
+        let parsed: BTreeMap<String, String> = serde_json::from_slice(stdin).unwrap();
+        assert_eq!(parsed.get("API_KEY").unwrap(), "sk_test");
+        assert_eq!(parsed.get("DB_URL").unwrap(), "pg://");
+        assert_eq!(parsed.get("_esk_version").unwrap(), "3");
     }
 
     #[test]
@@ -415,7 +379,9 @@ plugins:
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
+        // Neither version key variant should appear in output
         assert!(!secrets.contains_key("_ESK_VERSION:dev"));
+        assert!(!secrets.contains_key("_esk_version:dev"));
     }
 
     #[test]

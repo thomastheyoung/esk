@@ -9,6 +9,25 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use zeroize::Zeroize;
 
+/// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
+/// Prevents shell injection, format corruption, and adapter compatibility issues.
+pub fn validate_key(key: &str) -> Result<()> {
+    if key.is_empty() {
+        bail!("invalid secret key '': must match [A-Za-z_][A-Za-z0-9_]*");
+    }
+    let mut chars = key.chars();
+    let first = chars.next().unwrap();
+    if !first.is_ascii_alphabetic() && first != '_' {
+        bail!("invalid secret key '{key}': must match [A-Za-z_][A-Za-z0-9_]*");
+    }
+    for c in chars {
+        if !c.is_ascii_alphanumeric() && c != '_' {
+            bail!("invalid secret key '{key}': must match [A-Za-z_][A-Za-z0-9_]*");
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StorePayload {
     pub secrets: BTreeMap<String, String>,
@@ -148,6 +167,7 @@ impl SecretStore {
 
     /// Set a secret, incrementing both global and env-specific versions. Acquires exclusive lock.
     pub fn set(&self, key: &str, env: &str, value: &str) -> Result<StorePayload> {
+        validate_key(key)?;
         self.with_lock(|| {
             let mut payload = self.payload()?;
             let composite = format!("{key}:{env}");
@@ -163,6 +183,7 @@ impl SecretStore {
 
     /// Delete a secret, adding a tombstone. Acquires exclusive lock.
     pub fn delete(&self, key: &str, env: &str) -> Result<StorePayload> {
+        validate_key(key)?;
         self.with_lock(|| {
             let mut payload = self.payload()?;
             let composite = format!("{key}:{env}");
@@ -767,6 +788,43 @@ mod tests {
         let payload = store.payload().unwrap();
         assert!(payload.tombstones.is_empty());
         assert_eq!(payload.secrets.get("KEY:dev").unwrap(), "val");
+    }
+
+    #[test]
+    fn validate_key_valid() {
+        assert!(validate_key("API_KEY").is_ok());
+        assert!(validate_key("_PRIVATE").is_ok());
+        assert!(validate_key("a").is_ok());
+        assert!(validate_key("A123").is_ok());
+        assert!(validate_key("my_secret_key_42").is_ok());
+    }
+
+    #[test]
+    fn validate_key_invalid() {
+        assert!(validate_key("").is_err());
+        assert!(validate_key("123ABC").is_err());
+        assert!(validate_key("KEY-NAME").is_err());
+        assert!(validate_key("KEY.NAME").is_err());
+        assert!(validate_key("KEY NAME").is_err());
+        assert!(validate_key("KEY=VAL").is_err());
+        assert!(validate_key("$KEY").is_err());
+    }
+
+    #[test]
+    fn set_rejects_invalid_key() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let err = store.set("invalid-key", "dev", "val").unwrap_err();
+        assert!(err.to_string().contains("invalid secret key"));
+    }
+
+    #[test]
+    fn delete_rejects_invalid_key() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("VALID_KEY", "dev", "val").unwrap();
+        let err = store.delete("invalid-key", "dev").unwrap_err();
+        assert!(err.to_string().contains("invalid secret key"));
     }
 
     #[test]

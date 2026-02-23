@@ -109,32 +109,17 @@ impl<'a> StoragePlugin for BitwardenPlugin<'a> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let suffix = format!(":{env}");
-        let env_secrets: BTreeMap<String, String> = payload
-            .secrets
-            .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
-            })
-            .collect();
-
-        if env_secrets.is_empty() {
-            return Ok(());
-        }
-
-        let version = payload
-            .env_versions
-            .get(env)
-            .copied()
-            .unwrap_or(payload.version);
+        let (env_secrets, version) = match super::extract_env_secrets(payload, env) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
 
         // Build JSON payload with bare keys + version
         let mut data: BTreeMap<String, Value> = env_secrets
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
             .collect();
-        data.insert("_esk_version".to_string(), Value::Number(version.into()));
+        data.insert(super::ESK_VERSION_KEY.to_string(), Value::Number(version.into()));
 
         let json = serde_json::to_string(&data).context("failed to serialize secrets")?;
         let secret_name = self.secret_name(env);
@@ -143,6 +128,9 @@ impl<'a> StoragePlugin for BitwardenPlugin<'a> {
         let items = self.list_secrets()?;
         let existing_id = self.find_secret_id(&items, &secret_name);
 
+        // SECURITY: `bws` CLI requires `--value` as an argument for both `secret edit` and
+        // `secret create`. There is no stdin/file support. Secret values are exposed in process
+        // arguments (visible via `ps aux`). No workaround available.
         if let Some(id) = existing_id {
             // Update existing secret
             let output = self
@@ -212,7 +200,7 @@ impl<'a> StoragePlugin for BitwardenPlugin<'a> {
         let mut version = 0u64;
 
         for (k, v) in &data {
-            if k == "_esk_version" {
+            if k == super::ESK_VERSION_KEY {
                 version = v
                     .as_u64()
                     .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
@@ -483,7 +471,7 @@ plugins:
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
 
         let inner_value =
-            json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", "_esk_version": 7});
+            json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", crate::plugins::ESK_VERSION_KEY: 7});
         let items = json!([
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()},
             {"id": "s2", "key": "myapp-prod", "value": "{}"}
@@ -558,7 +546,7 @@ plugins:
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
 
-        let inner_value = json!({"KEY": "val", "_esk_version": "42"});
+        let inner_value = json!({"KEY": "val", crate::plugins::ESK_VERSION_KEY: "42"});
         let items = json!([
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()}
         ]);

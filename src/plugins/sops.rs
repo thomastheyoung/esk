@@ -57,29 +57,14 @@ impl<'a> StoragePlugin for SopsPlugin<'a> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let suffix = format!(":{env}");
-        let env_secrets: BTreeMap<String, String> = payload
-            .secrets
-            .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
-            })
-            .collect();
-
-        if env_secrets.is_empty() {
-            return Ok(());
-        }
-
-        let version = payload
-            .env_versions
-            .get(env)
-            .copied()
-            .unwrap_or(payload.version);
+        let (env_secrets, version) = match super::extract_env_secrets(payload, env) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
 
         // Build JSON payload with bare keys + version metadata
         let mut json_map: BTreeMap<String, String> = env_secrets;
-        json_map.insert("_esk_version".to_string(), version.to_string());
+        json_map.insert(super::ESK_VERSION_KEY.to_string(), version.to_string());
         let json =
             serde_json::to_string_pretty(&json_map).context("failed to serialize secrets")?;
 
@@ -140,18 +125,7 @@ impl<'a> StoragePlugin for SopsPlugin<'a> {
         let json_map: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)
             .context("failed to parse decrypted SOPS JSON")?;
 
-        let version: u64 = json_map
-            .get("_esk_version")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-
-        let composite: BTreeMap<String, String> = json_map
-            .into_iter()
-            .filter(|(k, _)| k != "_esk_version")
-            .map(|(k, v)| (format!("{k}:{env}"), v))
-            .collect();
-
-        Ok(Some((composite, version)))
+        Ok(Some(super::parse_pulled_secrets(json_map, env)))
     }
 }
 
@@ -379,7 +353,7 @@ plugins:
         let decrypted = serde_json::json!({
             "API_KEY": "sk_test",
             "DB_URL": "postgres://localhost",
-            "_esk_version": "5"
+            crate::plugins::ESK_VERSION_KEY: "5"
         });
         let runner = MockRunner::new(vec![CommandOutput {
             success: true,
@@ -465,6 +439,6 @@ plugins:
         let calls = runner.calls.lock().unwrap();
         let stdin = calls[0].2.as_ref().unwrap();
         let json: BTreeMap<String, String> = serde_json::from_slice(stdin).unwrap();
-        assert_eq!(json.get("_esk_version").unwrap(), "99");
+        assert_eq!(json.get(crate::plugins::ESK_VERSION_KEY).unwrap(), "99");
     }
 }

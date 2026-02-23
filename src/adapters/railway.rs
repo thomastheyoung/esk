@@ -37,6 +37,8 @@ impl<'a> SyncAdapter for RailwayAdapter<'a> {
         Ok(())
     }
 
+    // SECURITY: railway CLI has no stdin/file support for `variables --set`. Secret values are
+    // exposed in process arguments (visible via `ps aux`). No workaround available.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let kv = format!("{key}={value}");
 

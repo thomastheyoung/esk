@@ -37,6 +37,9 @@ impl<'a> SyncAdapter for NetlifyAdapter<'a> {
         Ok(())
     }
 
+    // SECURITY: netlify CLI has no stdin/file support for `env:set`. It has `env:import` but with
+    // different semantics (replaces all vars). Secret values are exposed in process arguments
+    // (visible via `ps aux`). No workaround available.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["env:set", key, value];

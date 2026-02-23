@@ -64,14 +64,13 @@ fn store_empty_value() {
 }
 
 #[test]
-fn store_special_characters_in_key() {
+fn store_rejects_invalid_key_characters() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let store = project.store().unwrap();
-    store.set("MY.KEY-WITH_SPECIAL", "dev", "val").unwrap();
-    assert_eq!(
-        store.get("MY.KEY-WITH_SPECIAL", "dev").unwrap(),
-        Some("val".to_string())
-    );
+    let err = store.set("MY.KEY-WITH_SPECIAL", "dev", "val").unwrap_err();
+    assert!(err.to_string().contains("invalid secret key"));
+    // Underscores and alphanumeric are fine
+    store.set("MY_KEY_WITH_UNDERSCORE", "dev", "val").unwrap();
 }
 
 #[test]

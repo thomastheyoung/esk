@@ -78,32 +78,17 @@ impl<'a> StoragePlugin for VaultPlugin<'a> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let suffix = format!(":{env}");
-        let env_secrets: BTreeMap<String, String> = payload
-            .secrets
-            .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
-            })
-            .collect();
-
-        if env_secrets.is_empty() {
-            return Ok(());
-        }
-
-        let version = payload
-            .env_versions
-            .get(env)
-            .copied()
-            .unwrap_or(payload.version);
+        let (env_secrets, version) = match super::extract_env_secrets(payload, env) {
+            Some(v) => v,
+            None => return Ok(()),
+        };
 
         // Build a JSON object with secrets + _esk_version
         let mut data: BTreeMap<String, Value> = env_secrets
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
             .collect();
-        data.insert("_esk_version".to_string(), Value::Number(version.into()));
+        data.insert(super::ESK_VERSION_KEY.to_string(), Value::Number(version.into()));
 
         let json = serde_json::to_string(&data).context("failed to serialize secrets")?;
 
@@ -166,7 +151,7 @@ impl<'a> StoragePlugin for VaultPlugin<'a> {
         let mut version = 0u64;
 
         for (k, v) in obj {
-            if k == "_esk_version" {
+            if k == super::ESK_VERSION_KEY {
                 version = v
                     .as_u64()
                     .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
@@ -430,7 +415,7 @@ plugins:
                 "data": {
                     "API_KEY": "sk_test",
                     "DB_URL": "postgres://localhost",
-                    "_esk_version": 7
+                    crate::plugins::ESK_VERSION_KEY: 7
                 }
             }
         });
@@ -460,7 +445,7 @@ plugins:
         let response = json!({
             "data": {
                 "API_KEY": "sk_test",
-                "_esk_version": 3
+                crate::plugins::ESK_VERSION_KEY: 3
             }
         });
         let runner = MockRunner::new(vec![ok_output(&serde_json::to_vec(&response).unwrap())]);

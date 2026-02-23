@@ -3,6 +3,8 @@ use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
+use crate::store::validate_key;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub project: String,
@@ -350,6 +352,8 @@ impl Config {
         let mut key_vendors: BTreeMap<&str, &str> = BTreeMap::new();
         for (vendor, secrets) in &self.secrets {
             for (key, def) in secrets {
+                validate_key(key)
+                    .with_context(|| format!("secret '{key}' in vendor '{vendor}'"))?;
                 if let Some(prev_vendor) = key_vendors.get(key.as_str()) {
                     bail!("secret '{key}' is defined in multiple vendors: {prev_vendor}, {vendor}");
                 }
@@ -1215,6 +1219,30 @@ secrets:
         let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
         let config = Config::load(&path).unwrap();
         assert!(config.find_secret("NOPE").is_none());
+    }
+
+    #[test]
+    fn validate_invalid_secret_key_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+adapters:
+  env:
+    pattern: "t"
+apps:
+  web:
+    path: w
+secrets:
+  G:
+    INVALID-KEY:
+      targets:
+        env: [web:dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("invalid secret key"), "error was: {msg}");
     }
 
     #[test]

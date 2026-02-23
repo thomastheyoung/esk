@@ -16,6 +16,60 @@ use crate::adapters::CommandRunner;
 use crate::config::Config;
 use crate::store::StorePayload;
 
+/// The key used to store version metadata in plugin payloads.
+pub const ESK_VERSION_KEY: &str = "_esk_version";
+
+/// Extract bare-key secrets for a specific environment from a store payload.
+/// Returns the filtered secrets (with `:env` suffix stripped) and the resolved version.
+/// Returns `None` if no secrets match the given environment.
+pub fn extract_env_secrets(
+    payload: &StorePayload,
+    env: &str,
+) -> Option<(BTreeMap<String, String>, u64)> {
+    let suffix = format!(":{env}");
+    let env_secrets: BTreeMap<String, String> = payload
+        .secrets
+        .iter()
+        .filter_map(|(k, v)| {
+            k.strip_suffix(&suffix)
+                .map(|bare| (bare.to_string(), v.clone()))
+        })
+        .collect();
+
+    if env_secrets.is_empty() {
+        return None;
+    }
+
+    let version = payload
+        .env_versions
+        .get(env)
+        .copied()
+        .unwrap_or(payload.version);
+
+    Some((env_secrets, version))
+}
+
+/// Parse a pulled string-valued secret map back into composite-key secrets.
+/// Extracts the version from `ESK_VERSION_KEY`, strips it from the map,
+/// and re-adds the `:env` suffix to all remaining keys.
+pub fn parse_pulled_secrets(
+    data: BTreeMap<String, String>,
+    env: &str,
+) -> (BTreeMap<String, String>, u64) {
+    let version: u64 = data
+        .get(ESK_VERSION_KEY)
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0);
+
+    let composite: BTreeMap<String, String> = data
+        .into_iter()
+        .filter(|(k, _)| k != ESK_VERSION_KEY)
+        .map(|(k, v)| (format!("{k}:{env}"), v))
+        .collect();
+
+    (composite, version)
+}
+
 /// A storage plugin that stores/retrieves the full secret state.
 ///
 /// Unlike sync adapters (which deploy secrets to targets), plugins

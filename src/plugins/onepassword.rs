@@ -77,6 +77,10 @@ impl<'a> OnePasswordPlugin<'a> {
 
     /// Push secrets to a 1Password item. Creates or updates.
     /// `secrets` should contain bare keys (not composite "KEY:env" keys).
+    // SECURITY: 1Password CLI (`op item create`/`op item edit`) requires field assignments as
+    // positional args (e.g. `section.key[concealed]=value`). There is no stdin/file support for
+    // field values. Secret values are exposed in process arguments (visible via `ps aux`).
+    // No workaround available.
     pub fn push_item(
         &self,
         env: &str,
