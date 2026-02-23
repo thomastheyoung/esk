@@ -229,6 +229,82 @@ This means you can use 1Password for team sharing and Dropbox as a backup simult
 
 The `set` and `delete` commands automatically push to all configured plugins and sync to adapter targets (unless `--no-sync` is used).
 
+## Troubleshooting
+
+### Setup
+
+| Error                                             | Cause                                | Fix                                                |
+| ------------------------------------------------- | ------------------------------------ | -------------------------------------------------- |
+| `encryption key not found at .lockbox/store.key`  | Store not initialized                | Run `lockbox init`                                 |
+| `encrypted store not found at .lockbox/store.enc` | Store not initialized                | Run `lockbox init`                                 |
+| `lockbox.yaml not found (searched from … upward)` | Not inside a lockbox project         | `cd` into your project root, or run `lockbox init` |
+| `at least one environment must be defined`        | Empty `environments` array in config | Add at least one environment to `lockbox.yaml`     |
+
+### Adapter preflight
+
+These errors appear when running `lockbox sync` or `lockbox status`. Preflight checks verify that external CLIs are installed and authenticated before syncing.
+
+| Error                                                | Cause                                                                                 | Fix                                                                                                                          |
+| ---------------------------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `wrangler is not installed or not in PATH`           | `wrangler` CLI not found                                                              | `npm install -g wrangler`                                                                                                    |
+| `wrangler is not authenticated. Run: wrangler login` | `wrangler whoami` failed                                                              | Run `wrangler login`                                                                                                         |
+| `npx is not installed or not in PATH`                | Node.js not found                                                                     | Install Node.js                                                                                                              |
+| `convex deployment not accessible: …`                | `convex env list` failed — bad auth, missing deployment, or wrong `deployment_source` | Check `convex` auth and that `deployment_source` in `lockbox.yaml` points to a valid `.env.local` with `CONVEX_DEPLOYMENT=…` |
+| `Skipping {adapter} adapter: …`                      | Preflight failed — adapter excluded from sync                                         | Fix the underlying issue (see error detail); remaining adapters still sync                                                   |
+| `No adapters available after preflight checks`       | All adapters failed preflight                                                         | Fix the errors printed above this message                                                                                    |
+
+### Plugin preflight
+
+These errors appear when running `lockbox push`, `lockbox pull`, or during auto-push from `lockbox set`/`delete`.
+
+| Error                                                | Cause                                                                    | Fix                                                                                              |
+| ---------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
+| `1Password CLI (op) is not installed or not in PATH` | `op` CLI not found                                                       | [Install 1Password CLI](https://1password.com/downloads/command-line/)                           |
+| `1Password vault '{vault}' not accessible: …`        | `op vault get` failed — not signed in, vault doesn't exist, or no access | Run `op signin` or check the `vault` name in `lockbox.yaml`                                      |
+| `{name} sync folder not found at {path}`             | Cloud sync folder doesn't exist                                          | Install the cloud sync app (Dropbox, Google Drive, etc.) and verify the `path` in `lockbox.yaml` |
+| `{name} sync folder at {path} is not writable: …`    | Cloud sync folder exists but isn't writable                              | Check file permissions on the sync folder                                                        |
+| `Skipping {plugin} plugin: …`                        | Preflight failed — plugin excluded                                       | Fix the underlying issue; remaining plugins still run                                            |
+| `No plugins available after preflight checks`        | All plugins failed preflight                                             | Fix the errors printed above this message                                                        |
+
+### Sync failures
+
+| Error                                        | Cause                                                                                                              | Fix                                                                             |
+| -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
+| `wrangler secret put failed for {KEY}: …`    | Cloudflare API rejected the secret write                                                                           | Check wrangler auth and that the Worker exists; the stderr detail has specifics |
+| `wrangler secret delete failed for {KEY}: …` | Cloudflare API rejected the secret deletion                                                                        | Same as above                                                                   |
+| `convex env set failed for {KEY}: …`         | Convex deployment rejected the env var write                                                                       | Check convex auth, deployment name, and `--prod` flag mapping in `env_flags`    |
+| `convex env unset failed for {KEY}: …`       | Convex deployment rejected the env var deletion                                                                    | Same as above                                                                   |
+| `cloudflare adapter requires an app`         | Secret targets cloudflare without specifying an app (e.g., `cloudflare: [dev]` instead of `cloudflare: [web:dev]`) | Use `app:env` format in `targets`                                               |
+| `{N} sync(s) failed`                         | One or more secrets failed to sync                                                                                 | Scroll up for per-secret errors; fix and re-run `lockbox sync`                  |
+
+### Push and pull failures
+
+| Error                                                 | Cause                                                               | Fix                                                            |
+| ----------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `no plugins configured in lockbox.yaml`               | No `plugins:` section in config                                     | Add a plugin to `lockbox.yaml` (see [PLUGINS.md](PLUGINS.md))  |
+| `unknown plugin '{name}'`                             | `--only` references a plugin that doesn't exist or failed preflight | Check the plugin name matches what's in `lockbox.yaml`         |
+| `op item create failed: …` / `op item edit failed: …` | 1Password rejected the item write                                   | Check vault permissions and that the `op` session is active    |
+| `{N} plugin push(es) failed`                          | One or more plugins failed during push                              | Run `lockbox push --env {env}` to retry after fixing the issue |
+| `{N} plugin(s) failed to receive merged data`         | Push-back after pull reconciliation failed                          | Run `lockbox push --env {env}` to retry                        |
+
+### Store and encryption
+
+| Error                                                 | Cause                                                            | Fix                                                                                       |
+| ----------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
+| `decryption failed — wrong key or corrupted store`    | Key file doesn't match the encrypted store                       | Restore the correct `.lockbox/store.key` for this store, or pull from a plugin to recover |
+| `invalid store format: expected nonce:ciphertext:tag` | `.lockbox/store.enc` is corrupt or was edited manually           | Restore from git or pull from a plugin                                                    |
+| `secret '{KEY}' has no value for environment '{env}'` | Trying to delete a secret that doesn't exist in this environment | Check `lockbox list --env {env}` for current state                                        |
+
+### Config validation
+
+| Error                                                                  | Cause                                                            | Fix                                                              |
+| ---------------------------------------------------------------------- | ---------------------------------------------------------------- | ---------------------------------------------------------------- |
+| `secret '{KEY}' is defined in multiple vendors`                        | Same key name appears under two vendor sections                  | Move the secret to a single vendor section                       |
+| `adapter '{name}' is not configured`                                   | Secret references an adapter that's not in the `adapters:` block | Add the adapter to `lockbox.yaml` or remove the target reference |
+| `unknown environment '{env}' in target '{target}'`                     | Target references an env not in `environments`                   | Add the environment or fix the target                            |
+| `unknown app '{app}' in target '{target}'`                             | Target references an app not in `apps`                           | Add the app or fix the target                                    |
+| `'onepassword' should be configured under 'plugins:', not 'adapters:'` | 1Password placed in the wrong config section                     | Move the `onepassword` block from `adapters:` to `plugins:`      |
+
 ## Development
 
 ### Sandbox environment
