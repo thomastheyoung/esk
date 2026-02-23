@@ -92,7 +92,7 @@ pub fn reconcile(
 
             let merged_payload = StorePayload {
                 secrets: merged,
-                version: merged_version,
+                version: merged_version.max(local.version),
                 tombstones: merged_tombstones,
                 env_versions: merged_env_versions,
             };
@@ -254,7 +254,7 @@ pub fn reconcile_multi(
     MultiReconcileResult {
         merged_payload: StorePayload {
             secrets: merged,
-            version: final_version,
+            version: final_version.max(local.version),
             tombstones: merged_tombstones,
             env_versions: merged_env_versions,
         },
@@ -645,5 +645,29 @@ mod tests {
         assert!(result.merged_payload.secrets.contains_key("R2:dev"));
         // Had merges so version is max(3)+1 = 4
         assert_eq!(result.merged_payload.version, 4);
+    }
+
+    #[test]
+    fn reconcile_version_never_regresses() {
+        // Global version 10, env-specific dev at 3, remote at 5
+        let mut local = make_payload(&[("KEY:dev", "old")], 10);
+        local.env_versions.insert("dev".to_string(), 3);
+        let remote = make_remote(&[("KEY", "new")]);
+        let result = reconcile(&local, &remote, 5, "dev");
+        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        let merged = result.merged_payload.unwrap();
+        // Global version must not drop below 10
+        assert!(merged.version >= 10);
+    }
+
+    #[test]
+    fn multi_reconcile_version_never_regresses() {
+        // Global version 10, env-specific dev at 3, remote at 5
+        let mut local = make_payload(&[("KEY:dev", "old")], 10);
+        local.env_versions.insert("dev".to_string(), 3);
+        let remote = make_composite(&[("KEY:dev", "new")]);
+        let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"));
+        // Global version must not drop below 10
+        assert!(result.merged_payload.version >= 10);
     }
 }

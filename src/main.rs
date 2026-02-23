@@ -7,11 +7,16 @@ fn main() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
-        Commands::Delete { key, env, no_sync } => {
+        Commands::Delete {
+            key,
+            env,
+            no_sync,
+            strict,
+        } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::delete::run(&config, key, env, *no_sync)?;
+            lockbox::cli::delete::run(&config, key, env, *no_sync, *strict)?;
         }
         Commands::Init => {
             let cwd = std::env::current_dir()?;
@@ -22,11 +27,12 @@ fn main() -> Result<()> {
             env,
             value,
             no_sync,
+            strict,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::set::run(&config, key, env, value.as_deref(), *no_sync)?;
+            lockbox::cli::set::run(&config, key, env, value.as_deref(), *no_sync, *strict)?;
         }
         Commands::Get { key, env } => {
             let cwd = std::env::current_dir()?;

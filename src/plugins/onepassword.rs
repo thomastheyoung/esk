@@ -114,6 +114,20 @@ impl<'a> OnePasswordPlugin<'a> {
         // Add version metadata
         assignments.push(format!("_Metadata.version[text]={version}"));
 
+        // Remove stale fields from 1Password (present remotely but not locally)
+        if let Some(ref item) = existing {
+            for remote_key in item.secrets.keys() {
+                if !secrets.contains_key(remote_key) {
+                    let section = item
+                        .sections
+                        .get(remote_key)
+                        .map(|s| s.as_str())
+                        .unwrap_or("General");
+                    assignments.push(format!("{section}.{remote_key}[delete]"));
+                }
+            }
+        }
+
         if existing.is_some() {
             // Update existing item
             let mut args: Vec<String> = vec![
@@ -244,6 +258,8 @@ impl<'a> StoragePlugin for OnePasswordPlugin<'a> {
 #[derive(Debug)]
 pub struct OpItem {
     pub secrets: BTreeMap<String, String>,
+    /// Tracks which section each secret key came from (key -> section label).
+    pub sections: BTreeMap<String, String>,
     pub version: u64,
 }
 
@@ -251,6 +267,7 @@ impl OpItem {
     /// Parse a 1Password item from JSON.
     pub fn from_json(json: &Value) -> Result<Self> {
         let mut secrets = BTreeMap::new();
+        let mut sections = BTreeMap::new();
         let mut version = 0u64;
 
         let fields = json["fields"].as_array().context("op item has no fields")?;
@@ -270,11 +287,16 @@ impl OpItem {
                 continue;
             }
 
-            // Key is the label, section is the vendor (we don't need vendor in the map)
+            // Key is the label, section is the vendor
             secrets.insert(label.to_string(), value.to_string());
+            sections.insert(label.to_string(), section.to_string());
         }
 
-        Ok(Self { secrets, version })
+        Ok(Self {
+            secrets,
+            sections,
+            version,
+        })
     }
 }
 
@@ -294,6 +316,8 @@ mod tests {
         let item = OpItem::from_json(&json).unwrap();
         assert_eq!(item.secrets.get("API_KEY").unwrap(), "sk_test");
         assert_eq!(item.secrets.get("URL").unwrap(), "https://example.com");
+        assert_eq!(item.sections.get("API_KEY").unwrap(), "Stripe");
+        assert_eq!(item.sections.get("URL").unwrap(), "Convex");
     }
 
     #[test]
@@ -608,5 +632,268 @@ plugins:
         let runner = DummyRunner;
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
         assert_eq!(plugin.item_name(""), "myapp - ");
+    }
+
+    #[test]
+    fn op_item_from_json_tracks_sections() {
+        let json = json!({
+            "fields": [
+                {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "sk_test"},
+                {"section": {"label": "AWS"}, "label": "SECRET", "value": "aws_secret"},
+            ]
+        });
+        let item = OpItem::from_json(&json).unwrap();
+        assert_eq!(item.sections.len(), 2);
+        assert_eq!(item.sections.get("API_KEY").unwrap(), "Stripe");
+        assert_eq!(item.sections.get("SECRET").unwrap(), "AWS");
+    }
+
+    #[test]
+    fn push_item_removes_stale_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+secrets:
+  Stripe:
+    API_KEY:
+      targets: {}
+  AWS:
+    SECRET:
+      targets: {}
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        use std::sync::Mutex;
+        struct MockRunner {
+            calls: Mutex<Vec<(String, Vec<String>)>>,
+        }
+        impl CommandRunner for MockRunner {
+            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                self.calls.lock().unwrap().push((
+                    program.to_string(),
+                    args.iter().map(|s| s.to_string()).collect(),
+                ));
+                // Return existing item with A, B, C fields
+                let json = json!({
+                    "fields": [
+                        {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
+                        {"section": {"label": "AWS"}, "label": "SECRET", "value": "old"},
+                        {"section": {"label": "Vendor"}, "label": "STALE_KEY", "value": "old"},
+                        {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
+                    ]
+                });
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: serde_json::to_vec(&json).unwrap(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+        let runner = MockRunner {
+            calls: Mutex::new(Vec::new()),
+        };
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+
+        // Push only API_KEY and SECRET (not STALE_KEY)
+        let mut secrets = BTreeMap::new();
+        secrets.insert("API_KEY".to_string(), "new_val".to_string());
+        secrets.insert("SECRET".to_string(), "new_val".to_string());
+        plugin.push_item("dev", &secrets, 2).unwrap();
+
+        let calls = runner.calls.lock().unwrap();
+        // Last call is op item edit
+        let edit_call = calls.last().unwrap();
+        let args_str = edit_call.1.join(" ");
+        assert!(args_str.contains("Vendor.STALE_KEY[delete]"));
+    }
+
+    #[test]
+    fn push_item_no_delete_when_no_stale_fields() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+secrets:
+  Stripe:
+    API_KEY:
+      targets: {}
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        use std::sync::Mutex;
+        struct MockRunner {
+            calls: Mutex<Vec<(String, Vec<String>)>>,
+        }
+        impl CommandRunner for MockRunner {
+            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                self.calls.lock().unwrap().push((
+                    program.to_string(),
+                    args.iter().map(|s| s.to_string()).collect(),
+                ));
+                let json = json!({
+                    "fields": [
+                        {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
+                        {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
+                    ]
+                });
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: serde_json::to_vec(&json).unwrap(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+        let runner = MockRunner {
+            calls: Mutex::new(Vec::new()),
+        };
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+
+        let mut secrets = BTreeMap::new();
+        secrets.insert("API_KEY".to_string(), "new_val".to_string());
+        plugin.push_item("dev", &secrets, 2).unwrap();
+
+        let calls = runner.calls.lock().unwrap();
+        let edit_call = calls.last().unwrap();
+        let args_str = edit_call.1.join(" ");
+        assert!(!args_str.contains("[delete]"));
+    }
+
+    #[test]
+    fn push_item_stale_field_uses_remote_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        use std::sync::Mutex;
+        struct MockRunner {
+            calls: Mutex<Vec<(String, Vec<String>)>>,
+        }
+        impl CommandRunner for MockRunner {
+            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                self.calls.lock().unwrap().push((
+                    program.to_string(),
+                    args.iter().map(|s| s.to_string()).collect(),
+                ));
+                let json = json!({
+                    "fields": [
+                        {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
+                        {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
+                    ]
+                });
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: serde_json::to_vec(&json).unwrap(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+        let runner = MockRunner {
+            calls: Mutex::new(Vec::new()),
+        };
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+
+        // Push with no secrets — API_KEY becomes stale
+        let secrets = BTreeMap::new();
+        plugin.push_item("dev", &secrets, 2).unwrap();
+
+        let calls = runner.calls.lock().unwrap();
+        let edit_call = calls.last().unwrap();
+        let args_str = edit_call.1.join(" ");
+        // Should use "Stripe" section from remote, not "General"
+        assert!(args_str.contains("Stripe.API_KEY[delete]"));
+        assert!(!args_str.contains("General.API_KEY[delete]"));
+    }
+
+    #[test]
+    fn push_item_create_path_no_delete() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        use std::sync::Mutex;
+        struct MockRunner {
+            calls: Mutex<Vec<(String, Vec<String>)>>,
+            call_count: Mutex<usize>,
+        }
+        impl CommandRunner for MockRunner {
+            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                self.calls.lock().unwrap().push((
+                    program.to_string(),
+                    args.iter().map(|s| s.to_string()).collect(),
+                ));
+                let mut count = self.call_count.lock().unwrap();
+                *count += 1;
+                if *count == 1 {
+                    // get_item returns "not found"
+                    Ok(CommandOutput {
+                        success: false,
+                        stdout: Vec::new(),
+                        stderr: b"isn't an item".to_vec(),
+                    })
+                } else {
+                    // create succeeds
+                    Ok(CommandOutput {
+                        success: true,
+                        stdout: Vec::new(),
+                        stderr: Vec::new(),
+                    })
+                }
+            }
+        }
+        let runner = MockRunner {
+            calls: Mutex::new(Vec::new()),
+            call_count: Mutex::new(0),
+        };
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+
+        let mut secrets = BTreeMap::new();
+        secrets.insert("API_KEY".to_string(), "val".to_string());
+        plugin.push_item("dev", &secrets, 1).unwrap();
+
+        let calls = runner.calls.lock().unwrap();
+        // Second call is op item create
+        let create_call = &calls[1];
+        let args_str = create_call.1.join(" ");
+        assert!(args_str.contains("create"));
+        assert!(!args_str.contains("[delete]"));
     }
 }

@@ -7,8 +7,8 @@ use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::store::SecretStore;
 
-pub fn run(config: &Config, key: &str, env: &str, no_sync: bool) -> Result<()> {
-    run_with_runner(config, key, env, no_sync, &RealCommandRunner)
+pub fn run(config: &Config, key: &str, env: &str, no_sync: bool, strict: bool) -> Result<()> {
+    run_with_runner(config, key, env, no_sync, strict, &RealCommandRunner)
 }
 
 pub fn run_with_runner(
@@ -16,6 +16,7 @@ pub fn run_with_runner(
     key: &str,
     env: &str,
     no_sync: bool,
+    strict: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
@@ -68,6 +69,15 @@ pub fn run_with_runner(
             }
         }
         plugin_index.save()?;
+
+        if plugin_failures > 0 && strict {
+            bail!(
+                "{plugin_failures} plugin(s) failed to push (--strict). Adapter sync skipped.\n\
+                 Fix the plugin issue, then run:\n  \
+                 lockbox push --env {env}\n  \
+                 lockbox sync --env {env}"
+            );
+        }
     }
 
     // Auto-sync adapters (env files regenerate without deleted key; individual adapters delete)
@@ -75,7 +85,7 @@ pub fn run_with_runner(
 
     if plugin_failures > 0 {
         bail!(
-            "{plugin_failures} plugin(s) failed to sync. Run `lockbox push --env {env}` to retry."
+            "{plugin_failures} plugin(s) failed to push. Run `lockbox push --env {env}` to retry."
         );
     }
 

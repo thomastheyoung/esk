@@ -342,19 +342,16 @@ pub fn run_with_runner(
 
     // Process tombstones: delete secrets from individual adapters
     for composite_key in payload.tombstones.keys() {
-        // Parse composite key "KEY:env"
         let Some((bare_key, tomb_env)) = composite_key.rsplit_once(':') else {
             continue;
         };
 
-        // Filter by environment if specified
         if let Some(filter_env) = env {
             if tomb_env != filter_env {
                 continue;
             }
         }
 
-        // Find targets for this key in the resolved secrets list
         for secret in &resolved {
             if secret.key != bare_key {
                 continue;
@@ -367,24 +364,62 @@ pub fn run_with_runner(
                 else {
                     continue;
                 };
-                let (adapter_idx, _) = adapter_map[target.adapter.as_str()];
-                let adapter = &adapters[adapter_idx];
 
-                if dry_run {
+                let tracker_key = SyncIndex::tracker_key(
+                    bare_key,
+                    &target.adapter,
+                    target.app.as_deref(),
+                    tomb_env,
+                );
+
+                // Skip if already successfully deleted (unless forced)
+                if !force && !index.should_sync(&tracker_key, SyncIndex::TOMBSTONE_HASH, false) {
                     continue;
                 }
 
-                if let Err(e) = adapter.delete_secret(bare_key, target) {
-                    if verbose {
-                        let _ = cliclack::log::warning(format!(
-                            "Failed to delete {}:{} from {}: {}",
-                            bare_key,
-                            tomb_env,
+                if dry_run {
+                    synced.push(SyncEntry {
+                        key: bare_key.to_string(),
+                        env: tomb_env.to_string(),
+                        target: format_target(target),
+                        error: None,
+                    });
+                    continue;
+                }
+
+                let (adapter_idx, _) = adapter_map[target.adapter.as_str()];
+                let adapter = &adapters[adapter_idx];
+
+                match adapter.delete_secret(bare_key, target) {
+                    Ok(()) => {
+                        index.record_success(
+                            tracker_key,
                             format_target(target),
-                            e
-                        ));
+                            SyncIndex::TOMBSTONE_HASH.to_string(),
+                        );
+                        synced.push(SyncEntry {
+                            key: bare_key.to_string(),
+                            env: tomb_env.to_string(),
+                            target: format_target(target),
+                            error: None,
+                        });
+                    }
+                    Err(e) => {
+                        index.record_failure(
+                            tracker_key,
+                            format_target(target),
+                            SyncIndex::TOMBSTONE_HASH.to_string(),
+                            e.to_string(),
+                        );
+                        failed.push(SyncEntry {
+                            key: bare_key.to_string(),
+                            env: tomb_env.to_string(),
+                            target: format_target(target),
+                            error: Some(e.to_string()),
+                        });
                     }
                 }
+                index.save()?;
             }
         }
     }

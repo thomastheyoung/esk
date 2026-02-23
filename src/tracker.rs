@@ -30,6 +30,10 @@ pub enum SyncStatus {
 }
 
 impl SyncIndex {
+    /// Sentinel hash for tombstone (deleted key) tracking.
+    /// Never collides with real SHA-256 hashes (which are 64-char hex).
+    pub const TOMBSTONE_HASH: &str = "__tombstone__";
+
     pub fn new(path: &Path) -> Self {
         Self {
             records: BTreeMap::new(),
@@ -334,5 +338,36 @@ mod tests {
             hash,
             "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
         );
+    }
+
+    #[test]
+    fn tombstone_hash_is_not_valid_sha256() {
+        // TOMBSTONE_HASH must never collide with a real SHA-256 output
+        let any_hash = SyncIndex::hash_value("anything");
+        assert_ne!(SyncIndex::TOMBSTONE_HASH, any_hash);
+        assert_ne!(SyncIndex::TOMBSTONE_HASH.len(), 64); // SHA-256 hex is 64 chars
+    }
+
+    #[test]
+    fn should_sync_tombstone_success_skips() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success(
+            "K".to_string(),
+            "t".to_string(),
+            SyncIndex::TOMBSTONE_HASH.to_string(),
+        );
+        assert!(!index.should_sync("K", SyncIndex::TOMBSTONE_HASH, false));
+    }
+
+    #[test]
+    fn should_sync_tombstone_failure_retries() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_failure(
+            "K".to_string(),
+            "t".to_string(),
+            SyncIndex::TOMBSTONE_HASH.to_string(),
+            "err".to_string(),
+        );
+        assert!(index.should_sync("K", SyncIndex::TOMBSTONE_HASH, false));
     }
 }

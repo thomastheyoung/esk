@@ -32,6 +32,9 @@ pub enum Commands {
         /// Skip auto-sync after deleting
         #[arg(long)]
         no_sync: bool,
+        /// Fail if any plugin push fails (skip adapter sync)
+        #[arg(long)]
+        strict: bool,
     },
     /// Initialize encrypted store and config
     Init,
@@ -48,6 +51,9 @@ pub enum Commands {
         /// Skip auto-sync after setting
         #[arg(long)]
         no_sync: bool,
+        /// Fail if any plugin push fails (skip adapter sync)
+        #[arg(long)]
+        strict: bool,
     },
     /// Retrieve a secret value
     Get {

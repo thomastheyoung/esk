@@ -73,7 +73,7 @@ fn get_returns_value() {
 fn set_unknown_env_errors() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::set::run(&config, "KEY", "staging", Some("val"), true).unwrap_err();
+    let err = cli::set::run(&config, "KEY", "staging", Some("val"), true, false).unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
@@ -81,7 +81,7 @@ fn set_unknown_env_errors() {
 fn set_with_value_flag() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    cli::set::run(&config, "TEST_KEY", "dev", Some("test_value"), true).unwrap();
+    cli::set::run(&config, "TEST_KEY", "dev", Some("test_value"), true, false).unwrap();
 
     let store = project.store().unwrap();
     assert_eq!(
@@ -95,7 +95,7 @@ fn set_warns_undeclared_key() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
     // KEY not in config — should warn but succeed
-    cli::set::run(&config, "UNDECLARED", "dev", Some("val"), true).unwrap();
+    cli::set::run(&config, "UNDECLARED", "dev", Some("val"), true, false).unwrap();
     let store = project.store().unwrap();
     assert_eq!(
         store.get("UNDECLARED", "dev").unwrap(),
@@ -107,7 +107,7 @@ fn set_warns_undeclared_key() {
 fn set_no_sync_flag() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    cli::set::run(&config, "KEY", "dev", Some("val"), true).unwrap();
+    cli::set::run(&config, "KEY", "dev", Some("val"), true, false).unwrap();
     // With no_sync=true, no sync should have happened — just verify set worked
     let store = project.store().unwrap();
     assert_eq!(store.get("KEY", "dev").unwrap(), Some("val".to_string()));
@@ -121,8 +121,15 @@ fn delete_removes_secret() {
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("MY_SECRET", "dev", "val").unwrap();
-    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", true, &MockCommandRunner::new())
-        .unwrap();
+    cli::delete::run_with_runner(
+        &config,
+        "MY_SECRET",
+        "dev",
+        true,
+        false,
+        &MockCommandRunner::new(),
+    )
+    .unwrap();
     assert!(store.get("MY_SECRET", "dev").unwrap().is_none());
 }
 
@@ -135,6 +142,7 @@ fn delete_unknown_env_errors() {
         "MY_SECRET",
         "staging",
         true,
+        false,
         &MockCommandRunner::new(),
     )
     .unwrap_err();
@@ -145,9 +153,15 @@ fn delete_unknown_env_errors() {
 fn delete_nonexistent_secret_errors() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err =
-        cli::delete::run_with_runner(&config, "MY_SECRET", "dev", true, &MockCommandRunner::new())
-            .unwrap_err();
+    let err = cli::delete::run_with_runner(
+        &config,
+        "MY_SECRET",
+        "dev",
+        true,
+        false,
+        &MockCommandRunner::new(),
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("no value for environment"));
 }
 
@@ -170,7 +184,7 @@ fn delete_auto_syncs_env_file() {
     assert!(contents.contains("OTHER_SECRET=val2"));
 
     // Delete MY_SECRET
-    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, &runner).unwrap();
+    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, false, &runner).unwrap();
 
     // Env file should no longer contain MY_SECRET
     let contents = std::fs::read_to_string(&env_path).unwrap();
@@ -184,11 +198,127 @@ fn delete_creates_tombstone() {
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("MY_SECRET", "dev", "val").unwrap();
-    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", true, &MockCommandRunner::new())
-        .unwrap();
+    cli::delete::run_with_runner(
+        &config,
+        "MY_SECRET",
+        "dev",
+        true,
+        false,
+        &MockCommandRunner::new(),
+    )
+    .unwrap();
 
     let payload = store.payload().unwrap();
     assert!(payload.tombstones.contains_key("MY_SECRET:dev"));
+}
+
+#[test]
+fn set_strict_plugin_failure_blocks_adapter_sync() {
+    let yaml = r#"
+project: testapp
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env.local"
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+secrets:
+  General:
+    MY_SECRET:
+      targets:
+        env: [web:dev]
+"#;
+    let project = TestProject::with_store(yaml).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    runner.push_success(b"", b""); // preflight: op vault get
+    runner.push_failure(b"push failed"); // op item get fails => push fails
+
+    let err = cli::set::run_with_runner(
+        &config,
+        "MY_SECRET",
+        "dev",
+        Some("val"),
+        false,
+        true,
+        &runner,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("--strict"));
+    assert!(err.to_string().contains("Adapter sync skipped"));
+
+    // Env file should NOT have been written
+    let env_path = project.root().join("apps/web/.env.local");
+    assert!(!env_path.exists());
+}
+
+#[test]
+fn delete_strict_plugin_failure_blocks_adapter_sync() {
+    let yaml = r#"
+project: testapp
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env.local"
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+secrets:
+  General:
+    MY_SECRET:
+      targets:
+        env: [web:dev]
+    OTHER:
+      targets:
+        env: [web:dev]
+"#;
+    let project = TestProject::with_store(yaml).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val").unwrap();
+    store.set("OTHER", "dev", "other_val").unwrap();
+
+    // First sync to write the env file
+    cli::sync::run_with_runner(
+        &config,
+        Some("dev"),
+        false,
+        false,
+        false,
+        &MockCommandRunner::new(),
+    )
+    .unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    assert!(env_path.exists());
+    let before = std::fs::read_to_string(&env_path).unwrap();
+    assert!(before.contains("MY_SECRET=val"));
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    runner.push_success(b"", b""); // preflight: op vault get
+    runner.push_failure(b"push failed"); // op item get fails => push fails
+
+    let err = cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, true, &runner)
+        .unwrap_err();
+    assert!(err.to_string().contains("--strict"));
+    assert!(err.to_string().contains("Adapter sync skipped"));
+
+    // Env file should still contain MY_SECRET (sync was skipped)
+    let after = std::fs::read_to_string(&env_path).unwrap();
+    assert!(after.contains("MY_SECRET=val"));
 }
 
 // === list ===
@@ -1273,7 +1403,16 @@ fn set_auto_push_records_plugin_index() {
     runner.push_success(b"", b""); // op item create
 
     // no_sync=false so auto-push runs (no adapters configured, sync is a no-op)
-    cli::set::run_with_runner(&config, "STRIPE_KEY", "dev", Some("val"), false, &runner).unwrap();
+    cli::set::run_with_runner(
+        &config,
+        "STRIPE_KEY",
+        "dev",
+        Some("val"),
+        false,
+        false,
+        &runner,
+    )
+    .unwrap();
 
     let index = PluginIndex::load(&project.plugin_index_path());
     assert_eq!(index.records.len(), 1);
@@ -1282,4 +1421,165 @@ fn set_auto_push_records_plugin_index() {
         record.last_push_status,
         lockbox::plugin_tracker::PushStatus::Success
     );
+}
+
+// === tombstone delete tracking ===
+
+#[test]
+fn sync_records_tombstone_delete_success() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+    // Sync to establish initial state
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_success(b"", b""); // sync_secret STRIPE_KEY
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    // Delete the key (creates tombstone)
+    store.delete("STRIPE_KEY", "dev").unwrap();
+
+    // Sync again — should call delete_secret and record tombstone
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_success(b"", b""); // delete_secret STRIPE_KEY
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
+    let record = index.records.get(&tracker_key).unwrap();
+    assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
+    assert_eq!(
+        record.last_sync_status,
+        lockbox::tracker::SyncStatus::Success
+    );
+}
+
+#[test]
+fn sync_records_tombstone_delete_failure() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+    store.delete("STRIPE_KEY", "dev").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_failure(b"delete failed"); // delete_secret fails
+    let err =
+        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
+    let record = index.records.get(&tracker_key).unwrap();
+    assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
+    assert_eq!(
+        record.last_sync_status,
+        lockbox::tracker::SyncStatus::Failed
+    );
+}
+
+#[test]
+fn sync_retries_failed_tombstone_delete() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+    store.delete("STRIPE_KEY", "dev").unwrap();
+
+    // First sync: delete fails
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_failure(b"delete failed");
+    let _ = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner);
+
+    // Second sync: delete succeeds — should retry because previous was failed
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_success(b"", b""); // delete_secret succeeds
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
+    let record = index.records.get(&tracker_key).unwrap();
+    assert_eq!(
+        record.last_sync_status,
+        lockbox::tracker::SyncStatus::Success
+    );
+}
+
+#[test]
+fn sync_skips_already_deleted_tombstone() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+    store.delete("STRIPE_KEY", "dev").unwrap();
+
+    // First sync: delete succeeds
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_success(b"", b""); // delete_secret
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    // Second sync: should skip (already successfully deleted)
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    // Verify no additional calls were made beyond preflight
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2); // wrangler --version + wrangler whoami
+    assert_eq!(calls[0].args[0], "--version");
+    assert_eq!(calls[1].args[0], "whoami");
+}
+
+#[test]
+fn delete_then_recreate_same_value_syncs() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    // Set and sync
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_success(b"", b""); // sync_secret
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    // Delete and sync (tombstone processed)
+    store.delete("STRIPE_KEY", "dev").unwrap();
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_success(b"", b""); // delete_secret
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    // Recreate with same value
+    store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: wrangler whoami
+    runner.push_success(b"", b""); // sync_secret — must NOT be skipped
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    // Verify sync_secret was called (3 calls: preflight x2 + sync)
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    // Third call should be wrangler secret put
+    assert!(calls[2].args.contains(&"put".to_string()));
 }

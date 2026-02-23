@@ -143,7 +143,7 @@ pub fn run_with_runner(
 
         // Push merged result back to plugins that were behind
         if !result.sources_to_update.is_empty() {
-            let updated_payload = store.payload()?;
+            let updated_payload = &result.merged_payload;
             let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
             let mut plugin_index = PluginIndex::load(&plugin_index_path);
             let mut pushback_failures = 0u32;
@@ -154,7 +154,7 @@ pub fn run_with_runner(
                 {
                     let spinner = cliclack::spinner();
                     spinner.start(format!("Pushing merged → {}...", plugin.name()));
-                    match plugin.push(&updated_payload, config, env) {
+                    match plugin.push(updated_payload, config, env) {
                         Ok(()) => {
                             spinner.stop(format!(
                                 "Pushed merged → {} {}",

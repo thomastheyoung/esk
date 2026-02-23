@@ -13,8 +13,9 @@ pub fn run(
     env: &str,
     value: Option<&str>,
     no_sync: bool,
+    strict: bool,
 ) -> Result<()> {
-    run_with_runner(config, key, env, value, no_sync, &RealCommandRunner)
+    run_with_runner(config, key, env, value, no_sync, strict, &RealCommandRunner)
 }
 
 pub fn run_with_runner(
@@ -23,6 +24,7 @@ pub fn run_with_runner(
     env: &str,
     value: Option<&str>,
     no_sync: bool,
+    strict: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
@@ -83,6 +85,15 @@ pub fn run_with_runner(
             }
         }
         plugin_index.save()?;
+
+        if plugin_failures > 0 && strict {
+            bail!(
+                "{plugin_failures} plugin(s) failed to push (--strict). Adapter sync skipped.\n\
+                 Fix the plugin issue, then run:\n  \
+                 lockbox push --env {env}\n  \
+                 lockbox sync --env {env}"
+            );
+        }
     }
 
     // Auto-sync affected targets
@@ -90,7 +101,7 @@ pub fn run_with_runner(
 
     if plugin_failures > 0 {
         bail!(
-            "{plugin_failures} plugin(s) failed to sync. Run `lockbox push --env {env}` to retry."
+            "{plugin_failures} plugin(s) failed to push. Run `lockbox push --env {env}` to retry."
         );
     }
 
