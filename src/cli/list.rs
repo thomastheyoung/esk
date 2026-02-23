@@ -30,6 +30,7 @@ impl cliclack::Theme for ListTheme {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CellStatus {
+    NotTargeted,
     Unset,
     Synced,
     Pending,
@@ -54,6 +55,17 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
     // Build sync status map: (key, env) → worst status across all targets
     let cell_statuses = build_cell_statuses(config, &all_secrets)?;
+
+    // Build set of (key, env) pairs that have at least one configured target
+    let resolved = config.resolve_secrets()?;
+    let targeted: BTreeSet<(String, String)> = resolved
+        .iter()
+        .flat_map(|s| {
+            s.targets
+                .iter()
+                .map(move |t| (s.key.clone(), t.environment.clone()))
+        })
+        .collect();
 
     let mut shown_keys: BTreeSet<String> = BTreeSet::new();
 
@@ -91,7 +103,12 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
         let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
-            if !all_secrets.contains_key(&composite) {
+            let has_value = all_secrets.contains_key(&composite);
+            let is_targeted = targeted.contains(&(key.to_string(), e.to_string()));
+
+            if !has_value && !is_targeted {
+                CellStatus::NotTargeted
+            } else if !has_value {
                 CellStatus::Unset
             } else {
                 cell_statuses
@@ -110,7 +127,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
             if !all_secrets.contains_key(&composite) {
-                CellStatus::Unset
+                CellStatus::NotTargeted
             } else {
                 // Uncategorized keys have no configured targets
                 CellStatus::Synced
@@ -206,6 +223,7 @@ fn render_table(
             let pad_left = *w / 2;
             let pad_right = *w - pad_left - 1;
             let indicator = match cell_status(key, e) {
+                CellStatus::NotTargeted => " ".to_string(),
                 CellStatus::Unset => style("○").dim().to_string(),
                 CellStatus::Synced => style("✓").green().to_string(),
                 CellStatus::Pending => style("●").yellow().to_string(),
