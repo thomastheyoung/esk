@@ -146,6 +146,69 @@ pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
     Ok(())
 }
 
+/// Health status of a configured adapter.
+pub struct AdapterHealth {
+    pub name: String,
+    pub ok: bool,
+    pub message: String,
+}
+
+/// Check the health of all configured adapters without filtering.
+/// Returns one entry per configured adapter with preflight pass/fail.
+pub fn check_adapter_health(config: &Config, runner: &dyn CommandRunner) -> Vec<AdapterHealth> {
+    let mut results = Vec::new();
+
+    if config.adapters.env.is_some() {
+        results.push(AdapterHealth {
+            name: "env".to_string(),
+            ok: true,
+            message: "writable".to_string(),
+        });
+    }
+
+    if let Some(adapter_config) = &config.adapters.cloudflare {
+        let adapter = cloudflare::CloudflareAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "cloudflare".to_string(),
+                ok: true,
+                message: "wrangler authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "cloudflare".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.convex {
+        let adapter = convex::ConvexAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "convex".to_string(),
+                ok: true,
+                message: "convex authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "convex".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    results
+}
+
 /// Build all configured sync adapters from the config.
 /// Runs preflight checks and filters out adapters that fail, printing warnings.
 pub fn build_sync_adapters<'a>(
@@ -320,5 +383,99 @@ adapters:
         // env adapter has no preflight check, so it passes; cloudflare fails
         assert_eq!(adapters.len(), 1);
         assert_eq!(adapters[0].name(), "env");
+    }
+
+    #[test]
+    fn check_adapter_health_all_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env"
+  cloudflare:
+    env_flags: {}
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = crate::config::Config::load(&path).unwrap();
+
+        struct OkRunner;
+        impl CommandRunner for OkRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: b"1.0.0".to_vec(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+
+        let health = check_adapter_health(&config, &OkRunner);
+        assert_eq!(health.len(), 2);
+        assert!(health[0].ok);
+        assert_eq!(health[0].name, "env");
+        assert!(health[1].ok);
+        assert_eq!(health[1].name, "cloudflare");
+    }
+
+    #[test]
+    fn check_adapter_health_cloudflare_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env"
+  cloudflare:
+    env_flags: {}
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = crate::config::Config::load(&path).unwrap();
+
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                anyhow::bail!("not found")
+            }
+        }
+
+        let health = check_adapter_health(&config, &FailRunner);
+        assert_eq!(health.len(), 2);
+        assert!(health[0].ok); // env always ok
+        assert!(!health[1].ok); // cloudflare fails
+        assert!(health[1].message.contains("wrangler is not installed"));
+    }
+
+    #[test]
+    fn check_adapter_health_no_adapters() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]";
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = crate::config::Config::load(&path).unwrap();
+
+        struct OkRunner;
+        impl CommandRunner for OkRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+
+        let health = check_adapter_health(&config, &OkRunner);
+        assert!(health.is_empty());
     }
 }

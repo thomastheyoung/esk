@@ -28,6 +28,53 @@ pub trait StoragePlugin {
     fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>>;
 }
 
+/// Health status of a configured plugin.
+pub struct PluginHealth {
+    pub name: String,
+    pub ok: bool,
+    pub message: String,
+}
+
+/// Check the health of all configured plugins without filtering.
+/// Returns one entry per configured plugin with preflight pass/fail.
+pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<PluginHealth> {
+    let mut results = Vec::new();
+
+    if let Some(op_config) = config.onepassword_plugin_config() {
+        let plugin = onepassword::OnePasswordPlugin::new(config, op_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "onepassword".to_string(),
+                ok: true,
+                message: "op authenticated".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "onepassword".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    for (name, cf_config) in config.cloud_file_plugin_configs() {
+        let plugin = cloud_file::CloudFilePlugin::new(name.clone(), config.project.clone(), cf_config);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name,
+                ok: true,
+                message: "directory accessible".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name,
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    results
+}
+
 /// Build all configured plugins from the config.
 /// Runs preflight checks and filters out plugins that fail, printing warnings.
 pub fn build_plugins<'a>(
@@ -196,6 +243,67 @@ plugins:
         let runner = DummyRunner;
         let plugins = build_plugins(&config, &runner);
         assert!(plugins.is_empty());
+    }
+
+    #[test]
+    fn check_plugin_health_op_ok() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+
+        let health = check_plugin_health(&config, &DummyRunner);
+        assert_eq!(health.len(), 1);
+        assert!(health[0].ok);
+        assert_eq!(health[0].name, "onepassword");
+    }
+
+    #[test]
+    fn check_plugin_health_op_fails() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+plugins:
+  onepassword:
+    vault: V
+    item_pattern: test
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                anyhow::bail!("op not found")
+            }
+        }
+
+        let health = check_plugin_health(&config, &FailRunner);
+        assert_eq!(health.len(), 1);
+        assert!(!health[0].ok);
+        assert!(health[0].message.contains("op) is not installed"));
+    }
+
+    #[test]
+    fn check_plugin_health_no_plugins() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]";
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+
+        let health = check_plugin_health(&config, &DummyRunner);
+        assert!(health.is_empty());
     }
 
     #[test]

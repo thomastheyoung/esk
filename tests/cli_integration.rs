@@ -2,7 +2,6 @@ mod helpers;
 
 use helpers::*;
 use lockbox::cli;
-use lockbox::cli::GroupBy;
 use lockbox::plugin_tracker::PluginIndex;
 use lockbox::tracker::SyncIndex;
 use serde_json::json;
@@ -435,7 +434,7 @@ fn status_shows_all_states() {
     store.set("MY_SECRET", "dev", "changed").unwrap();
 
     // Status should work without error
-    cli::status::run(&config, None, false, GroupBy::Status).unwrap();
+    cli::status::run(&config, None, false).unwrap();
 }
 
 #[test]
@@ -445,7 +444,7 @@ fn status_env_filter() {
     let store = project.store().unwrap();
     store.set("MY_SECRET", "dev", "val").unwrap();
 
-    cli::status::run(&config, Some("dev"), false, GroupBy::Status).unwrap();
+    cli::status::run(&config, Some("dev"), false).unwrap();
 }
 
 #[test]
@@ -1082,7 +1081,7 @@ fn status_shows_plugin_section() {
     let config = project.config().unwrap();
 
     // No push yet — should show "never pushed"
-    cli::status::run(&config, None, false, GroupBy::Status).unwrap();
+    cli::status::run(&config, None, false).unwrap();
 }
 
 #[test]
@@ -1097,7 +1096,7 @@ fn status_shows_pushed_plugin() {
     index.record_success("onepassword", "dev", payload.version);
     index.save().unwrap();
 
-    cli::status::run(&config, Some("dev"), false, GroupBy::Status).unwrap();
+    cli::status::run(&config, Some("dev"), false).unwrap();
 }
 
 #[test]
@@ -1113,7 +1112,7 @@ fn status_shows_stale_plugin() {
 
     store.set("KEY", "dev", "val").unwrap(); // bumps to v1
 
-    cli::status::run(&config, Some("dev"), false, GroupBy::Status).unwrap();
+    cli::status::run(&config, Some("dev"), false).unwrap();
 }
 
 #[test]
@@ -1127,56 +1126,11 @@ fn status_plugin_env_filter() {
     index.save().unwrap();
 
     // Filter to dev only — should not error
-    cli::status::run(&config, Some("dev"), false, GroupBy::Status).unwrap();
+    cli::status::run(&config, Some("dev"), false).unwrap();
 }
 
 #[test]
-fn status_group_by_env() {
-    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
-    let config = project.config().unwrap();
-    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
-    let store = project.store().unwrap();
-
-    store.set("MY_SECRET", "dev", "val").unwrap();
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
-    store.set("MY_SECRET", "dev", "changed").unwrap();
-
-    cli::status::run(&config, None, false, GroupBy::Env).unwrap();
-    cli::status::run(&config, None, true, GroupBy::Env).unwrap();
-}
-
-#[test]
-fn status_group_by_target() {
-    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
-    let config = project.config().unwrap();
-    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
-    let store = project.store().unwrap();
-
-    store.set("MY_SECRET", "dev", "val").unwrap();
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
-    store.set("MY_SECRET", "dev", "changed").unwrap();
-
-    cli::status::run(&config, None, false, GroupBy::Target).unwrap();
-    cli::status::run(&config, None, true, GroupBy::Target).unwrap();
-}
-
-#[test]
-fn status_group_by_key() {
-    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
-    let config = project.config().unwrap();
-    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
-    let store = project.store().unwrap();
-
-    store.set("MY_SECRET", "dev", "val").unwrap();
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
-    store.set("MY_SECRET", "dev", "changed").unwrap();
-
-    cli::status::run(&config, None, false, GroupBy::Key).unwrap();
-    cli::status::run(&config, None, true, GroupBy::Key).unwrap();
-}
-
-#[test]
-fn status_group_by_all_synced() {
+fn status_dashboard_healthy() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -1186,11 +1140,62 @@ fn status_group_by_all_synced() {
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
     cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
 
-    // All synced — each mode should succeed
-    for group_by in [GroupBy::Status, GroupBy::Env, GroupBy::Target, GroupBy::Key] {
-        cli::status::run(&config, Some("dev"), false, group_by).unwrap();
-        cli::status::run(&config, Some("dev"), true, group_by).unwrap();
-    }
+    // All synced — dashboard should render without error
+    cli::status::run(&config, Some("dev"), false).unwrap();
+    cli::status::run(&config, Some("dev"), true).unwrap();
+}
+
+#[test]
+fn status_dashboard_coverage_gap() {
+    // ENV_ONLY_CONFIG has MY_SECRET targeting web:dev and web:prod
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    // Set in dev but not prod → coverage gap
+    store.set("MY_SECRET", "dev", "val").unwrap();
+
+    cli::status::run(&config, None, false).unwrap();
+}
+
+#[test]
+fn status_dashboard_orphan() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    // Set a key that's not in config → orphan
+    store.set("ROGUE_KEY", "dev", "val").unwrap();
+
+    cli::status::run(&config, None, false).unwrap();
+}
+
+#[test]
+fn status_dashboard_adapter_health() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_error("wrangler not found"); // preflight fails
+
+    // Should not panic even with failing adapter
+    cli::status::run_with_runner(&config, None, false, &runner).unwrap();
+}
+
+#[test]
+fn status_dashboard_next_steps() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+
+    // Set and sync, then change to create pending state
+    store.set("MY_SECRET", "dev", "val").unwrap();
+    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    store.set("MY_SECRET", "dev", "changed").unwrap();
+
+    // Should render with next steps (pending sync)
+    cli::status::run(&config, None, false).unwrap();
 }
 
 #[test]

@@ -164,7 +164,7 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 290 tests
+cargo test                    # Run all 302 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
@@ -175,7 +175,7 @@ cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-290 tests total: 212 unit (inline `#[cfg(test)]`) + 78 integration (`tests/`).
+302 tests total: 223 unit (inline `#[cfg(test)]`) + 79 integration (`tests/`).
 
 ### Test infrastructure
 
