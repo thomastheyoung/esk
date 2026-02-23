@@ -297,7 +297,10 @@ impl Dashboard {
             let count = pending.iter().filter(|e| e.env == **env_name).count();
             next_steps.push(NextStep {
                 command: format!("lockbox sync --env {env_name}"),
-                description: format!("deploy {count} pending change{}", if count == 1 { "" } else { "s" }),
+                description: format!(
+                    "deploy {count} pending change{}",
+                    if count == 1 { "" } else { "s" }
+                ),
             });
         }
 
@@ -385,16 +388,18 @@ impl Dashboard {
                 parts.push(format!("{} unset", self.unset.len()));
             }
 
-            let all_synced = self.failed.is_empty()
-                && self.pending.is_empty()
-                && self.unset.is_empty();
+            let all_synced =
+                self.failed.is_empty() && self.pending.is_empty() && self.unset.is_empty();
 
             if all_synced {
                 format!(
                     "{} · {} · {}, all synced",
                     style(&self.project).bold(),
                     style(format!("v{}", self.version)).dim(),
-                    style(format!("{total} target{}", if total == 1 { "" } else { "s" })),
+                    style(format!(
+                        "{total} target{}",
+                        if total == 1 { "" } else { "s" }
+                    )),
                 )
             } else {
                 format!(
@@ -437,9 +442,8 @@ impl Dashboard {
         }
 
         // Sync section
-        let has_problems = !self.failed.is_empty()
-            || !self.pending.is_empty()
-            || !self.unset.is_empty();
+        let has_problems =
+            !self.failed.is_empty() || !self.pending.is_empty() || !self.unset.is_empty();
 
         if has_problems || (all && !self.synced.is_empty()) {
             let mut sync_lines = Vec::new();
@@ -652,7 +656,11 @@ impl Dashboard {
             cliclack::log::step(format!("Next steps\n{}", lines.join("\n")))?;
         }
 
-        cliclack::outro(style(format!("Store version: {}", self.version)).dim().to_string())?;
+        cliclack::outro(
+            style(format!("Store version: {}", self.version))
+                .dim()
+                .to_string(),
+        )?;
 
         cliclack::reset_theme();
 

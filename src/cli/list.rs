@@ -73,10 +73,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let mut uncat_keys: BTreeSet<String> = BTreeSet::new();
     for composite_key in all_secrets.keys() {
         if let Some((key, _)) = composite_key.rsplit_once(':') {
-            let in_config = config
-                .secrets
-                .values()
-                .any(|vs| vs.contains_key(key));
+            let in_config = config.secrets.values().any(|vs| vs.contains_key(key));
             if !in_config {
                 uncat_keys.insert(key.to_string());
             }

@@ -34,10 +34,7 @@ pub fn run_with_runner(
 
     // Validate that the key is defined in config (warn if not, but allow it)
     if config.find_secret(key).is_none() {
-        cliclack::log::warning(format!(
-            "Secret '{}' is not defined in lockbox.yaml",
-            key
-        ))?;
+        cliclack::log::warning(format!("Secret '{}' is not defined in lockbox.yaml", key))?;
     }
 
     let secret_value = match value {
@@ -50,10 +47,7 @@ pub fn run_with_runner(
     let store = SecretStore::open(&config.root)?;
     let payload = store.set(key, env, &secret_value)?;
 
-    cliclack::log::success(format!(
-        "Set {}:{} (v{})",
-        key, env, payload.version
-    ))?;
+    cliclack::log::success(format!("Set {}:{} (v{})", key, env, payload.version))?;
 
     if no_sync {
         return Ok(());

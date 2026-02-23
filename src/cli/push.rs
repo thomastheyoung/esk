@@ -37,7 +37,9 @@ pub fn run_with_runner(
         if config.plugins.is_empty() {
             bail!("no plugins configured in lockbox.yaml");
         } else {
-            cliclack::log::warning("No plugins available after preflight checks. Fix the issues above and try again.")?;
+            cliclack::log::warning(
+                "No plugins available after preflight checks. Fix the issues above and try again.",
+            )?;
             return Ok(());
         }
     }

@@ -40,41 +40,23 @@ secrets:
     #     env: [web:dev, web:prod]
 "#;
         std::fs::write(&config_path, scaffold).context("failed to write lockbox.yaml")?;
-        cliclack::log::success(format!(
-            "Created {}",
-            style(config_path.display()).dim()
-        ))?;
+        cliclack::log::success(format!("Created {}", style(config_path.display()).dim()))?;
     } else {
-        cliclack::log::remark(format!(
-            "Exists  {}",
-            style(config_path.display()).dim()
-        ))?;
+        cliclack::log::remark(format!("Exists  {}", style(config_path.display()).dim()))?;
     }
 
     // Create store (generates key + empty encrypted store)
     if !key_path.is_file() || !store_path.is_file() {
         let _store = SecretStore::load_or_create(cwd)?;
         if key_path.is_file() {
-            cliclack::log::success(format!(
-                "Created {}",
-                style(key_path.display()).dim()
-            ))?;
+            cliclack::log::success(format!("Created {}", style(key_path.display()).dim()))?;
         }
         if store_path.is_file() {
-            cliclack::log::success(format!(
-                "Created {}",
-                style(store_path.display()).dim()
-            ))?;
+            cliclack::log::success(format!("Created {}", style(store_path.display()).dim()))?;
         }
     } else {
-        cliclack::log::remark(format!(
-            "Exists  {}",
-            style(key_path.display()).dim()
-        ))?;
-        cliclack::log::remark(format!(
-            "Exists  {}",
-            style(store_path.display()).dim()
-        ))?;
+        cliclack::log::remark(format!("Exists  {}", style(key_path.display()).dim()))?;
+        cliclack::log::remark(format!("Exists  {}", style(store_path.display()).dim()))?;
     }
 
     // Create empty sync index

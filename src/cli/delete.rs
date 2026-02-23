@@ -7,12 +7,7 @@ use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::store::SecretStore;
 
-pub fn run(
-    config: &Config,
-    key: &str,
-    env: &str,
-    no_sync: bool,
-) -> Result<()> {
+pub fn run(config: &Config, key: &str, env: &str, no_sync: bool) -> Result<()> {
     run_with_runner(config, key, env, no_sync, &RealCommandRunner)
 }
 
@@ -31,19 +26,13 @@ pub fn run_with_runner(
     }
 
     if config.find_secret(key).is_none() {
-        cliclack::log::warning(format!(
-            "Secret '{}' is not defined in lockbox.yaml",
-            key
-        ))?;
+        cliclack::log::warning(format!("Secret '{}' is not defined in lockbox.yaml", key))?;
     }
 
     let store = SecretStore::open(&config.root)?;
     let payload = store.delete(key, env)?;
 
-    cliclack::log::success(format!(
-        "Deleted {}:{} (v{})",
-        key, env, payload.version
-    ))?;
+    cliclack::log::success(format!("Deleted {}:{} (v{})", key, env, payload.version))?;
 
     if no_sync {
         return Ok(());

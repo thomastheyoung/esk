@@ -511,10 +511,7 @@ mod tests {
         let remote = make_composite(&[("KEY:dev", "new")]);
         // Remote at v5 — should resurrect
         let result = reconcile_multi(&local, &[("op", &remote, 5)], None);
-        assert_eq!(
-            result.merged_payload.secrets.get("KEY:dev").unwrap(),
-            "new"
-        );
+        assert_eq!(result.merged_payload.secrets.get("KEY:dev").unwrap(), "new");
         assert!(!result.merged_payload.tombstones.contains_key("KEY:dev"));
     }
 

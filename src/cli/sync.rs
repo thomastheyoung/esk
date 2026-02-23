@@ -2,7 +2,9 @@ use anyhow::Result;
 use console::style;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::adapters::{build_sync_adapters, CommandRunner, RealCommandRunner, SecretValue, SyncMode};
+use crate::adapters::{
+    build_sync_adapters, CommandRunner, RealCommandRunner, SecretValue, SyncMode,
+};
 use crate::config::Config;
 use crate::store::SecretStore;
 use crate::tracker::SyncIndex;
@@ -47,7 +49,9 @@ pub fn run_with_runner(
     let adapters = build_sync_adapters(config, runner);
 
     if adapters.is_empty() && has_configured_adapters {
-        cliclack::log::warning("No adapters available after preflight checks. Fix the issues above and try again.")?;
+        cliclack::log::warning(
+            "No adapters available after preflight checks. Fix the issues above and try again.",
+        )?;
         return Ok(());
     }
 
@@ -431,10 +435,7 @@ pub fn run_with_runner(
     if dry_run {
         print_group("synced", &synced)?;
         if skip_count > 0 {
-            cliclack::log::remark(format!(
-                "{} up to date",
-                style(skip_count).bold()
-            ))?;
+            cliclack::log::remark(format!("{} up to date", style(skip_count).bold()))?;
         }
         cliclack::log::warning(format!("Dry run — no changes made"))?;
     } else if sync_count == 0 && skip_count == 0 && fail_count == 0 {

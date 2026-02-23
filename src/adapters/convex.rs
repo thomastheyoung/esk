@@ -47,9 +47,7 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
 
     fn preflight(&self) -> Result<()> {
         check_command(self.runner, "npx").map_err(|_| {
-            anyhow::anyhow!(
-                "npx is not installed or not in PATH. Install Node.js to get npx."
-            )
+            anyhow::anyhow!("npx is not installed or not in PATH. Install Node.js to get npx.")
         })?;
         let (cwd, env_vars) = self.resolve_deployment_context()?;
         let output = self

@@ -57,7 +57,8 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
     }
 
     for (name, cf_config) in config.cloud_file_plugin_configs() {
-        let plugin = cloud_file::CloudFilePlugin::new(name.clone(), config.project.clone(), cf_config);
+        let plugin =
+            cloud_file::CloudFilePlugin::new(name.clone(), config.project.clone(), cf_config);
         match plugin.preflight() {
             Ok(()) => results.push(PluginHealth {
                 name,
@@ -103,11 +104,7 @@ pub fn build_plugins<'a>(
         match plugin.preflight() {
             Ok(()) => plugins.push(plugin),
             Err(e) => {
-                let _ = cliclack::log::warning(format!(
-                    "Skipping {} plugin: {}",
-                    plugin.name(),
-                    e
-                ));
+                let _ = cliclack::log::warning(format!("Skipping {} plugin: {}", plugin.name(), e));
             }
         }
     }
@@ -119,7 +116,6 @@ pub fn build_plugins<'a>(
 mod tests {
     use super::*;
     use crate::adapters::{CommandOpts, CommandOutput};
-
 
     struct DummyRunner;
     impl CommandRunner for DummyRunner {

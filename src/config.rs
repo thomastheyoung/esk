@@ -150,9 +150,7 @@ impl Config {
         for (vendor, secrets) in &self.secrets {
             for (key, def) in secrets {
                 if let Some(prev_vendor) = key_vendors.get(key.as_str()) {
-                    bail!(
-                        "secret '{key}' is defined in multiple vendors: {prev_vendor}, {vendor}"
-                    );
+                    bail!("secret '{key}' is defined in multiple vendors: {prev_vendor}, {vendor}");
                 }
                 key_vendors.insert(key, vendor);
 

@@ -67,10 +67,7 @@ impl CloudFilePlugin {
     }
 
     /// Convert bare keys from a per-env file back to composite keys.
-    fn bare_to_composite(
-        bare: &BTreeMap<String, String>,
-        env: &str,
-    ) -> BTreeMap<String, String> {
+    fn bare_to_composite(bare: &BTreeMap<String, String>, env: &str) -> BTreeMap<String, String> {
         bare.iter()
             .map(|(k, v)| (format!("{k}:{env}"), v.clone()))
             .collect()
@@ -291,7 +288,9 @@ mod tests {
         );
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("dropbox sync folder not found"));
-        assert!(err.to_string().contains("/nonexistent/path/that/does/not/exist"));
+        assert!(err
+            .to_string()
+            .contains("/nonexistent/path/that/does/not/exist"));
     }
 
     #[test]
@@ -556,6 +555,8 @@ mod tests {
         let expanded = plugin.expand_path().unwrap();
         assert!(!expanded.to_string_lossy().contains('~'));
         assert!(!expanded.to_string_lossy().contains("{project}"));
-        assert!(expanded.to_string_lossy().ends_with("/Dropbox/lockbox/myapp"));
+        assert!(expanded
+            .to_string_lossy()
+            .ends_with("/Dropbox/lockbox/myapp"));
     }
 }

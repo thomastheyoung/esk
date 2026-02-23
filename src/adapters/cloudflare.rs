@@ -438,7 +438,14 @@ adapters:
         assert_eq!(calls[0].0, "wrangler");
         assert_eq!(
             calls[0].1,
-            vec!["secret", "delete", "MY_KEY", "--force", "--env", "production"]
+            vec![
+                "secret",
+                "delete",
+                "MY_KEY",
+                "--force",
+                "--env",
+                "production"
+            ]
         );
     }
 

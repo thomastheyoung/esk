@@ -408,10 +408,10 @@ plugins:
         }
         impl CommandRunner for MockRunner {
             fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls
-                    .lock()
-                    .unwrap()
-                    .push((program.to_string(), args.iter().map(|s| s.to_string()).collect()));
+                self.calls.lock().unwrap().push((
+                    program.to_string(),
+                    args.iter().map(|s| s.to_string()).collect(),
+                ));
                 Ok(CommandOutput {
                     success: true,
                     stdout: b"{}".to_vec(),
@@ -477,7 +477,9 @@ plugins:
         };
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
         let err = plugin.preflight().unwrap_err();
-        assert!(err.to_string().contains("1Password vault 'SecretVault' not accessible"));
+        assert!(err
+            .to_string()
+            .contains("1Password vault 'SecretVault' not accessible"));
         assert!(err.to_string().contains("vault not found"));
     }
 
@@ -507,7 +509,9 @@ plugins:
         let runner = FailRunner;
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
         let err = plugin.preflight().unwrap_err();
-        assert!(err.to_string().contains("1Password CLI (op) is not installed"));
+        assert!(err
+            .to_string()
+            .contains("1Password CLI (op) is not installed"));
     }
 
     #[test]

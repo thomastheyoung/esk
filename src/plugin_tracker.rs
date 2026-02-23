@@ -57,10 +57,7 @@ impl PluginIndex {
                 index
             }
             Err(e) => {
-                eprintln!(
-                    "Warning: plugin index corrupted ({}), starting fresh",
-                    e
-                );
+                eprintln!("Warning: plugin index corrupted ({}), starting fresh", e);
                 Self::new(path)
             }
         }
@@ -74,13 +71,9 @@ impl PluginIndex {
             .context("plugin index path has no parent")?;
         let tmp = NamedTempFile::new_in(dir)?;
         std::fs::write(tmp.path(), json)?;
-        tmp.persist(&self.path)
-            .with_context(|| {
-                format!(
-                    "failed to persist plugin index to {}",
-                    self.path.display()
-                )
-            })?;
+        tmp.persist(&self.path).with_context(|| {
+            format!("failed to persist plugin index to {}", self.path.display())
+        })?;
         Ok(())
     }
 
@@ -190,7 +183,10 @@ mod tests {
 
     #[test]
     fn tracker_key_format() {
-        assert_eq!(PluginIndex::tracker_key("onepassword", "dev"), "onepassword:dev");
+        assert_eq!(
+            PluginIndex::tracker_key("onepassword", "dev"),
+            "onepassword:dev"
+        );
         assert_eq!(PluginIndex::tracker_key("dropbox", "prod"), "dropbox:prod");
     }
 

@@ -139,9 +139,7 @@ pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
     runner
         .run(program, &["--version"], CommandOpts::default())
         .map_err(|_| {
-            anyhow::anyhow!(
-                "{program} is not installed or not in PATH. Install it and try again."
-            )
+            anyhow::anyhow!("{program} is not installed or not in PATH. Install it and try again.")
         })?;
     Ok(())
 }
@@ -243,11 +241,8 @@ pub fn build_sync_adapters<'a>(
         match adapter.preflight() {
             Ok(()) => adapters.push(adapter),
             Err(e) => {
-                let _ = cliclack::log::warning(format!(
-                    "Skipping {} adapter: {}",
-                    adapter.name(),
-                    e
-                ));
+                let _ =
+                    cliclack::log::warning(format!("Skipping {} adapter: {}", adapter.name(), e));
             }
         }
     }

@@ -130,9 +130,14 @@ fn delete_removes_secret() {
 fn delete_unknown_env_errors() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err =
-        cli::delete::run_with_runner(&config, "MY_SECRET", "staging", true, &MockCommandRunner::new())
-            .unwrap_err();
+    let err = cli::delete::run_with_runner(
+        &config,
+        "MY_SECRET",
+        "staging",
+        true,
+        &MockCommandRunner::new(),
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
@@ -573,7 +578,9 @@ plugins:
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    let err = cli::pull::run_with_runner(&config, "dev", Some("nonexistent"), false, false, &runner).unwrap_err();
+    let err =
+        cli::pull::run_with_runner(&config, "dev", Some("nonexistent"), false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
 }
 
@@ -598,7 +605,10 @@ fn sync_cloudflare_calls_wrangler() {
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "wrangler");
     assert_eq!(calls[2].args, vec!["secret", "put", "STRIPE_KEY"]);
-    assert_eq!(calls[2].cwd.as_ref().unwrap(), &project.root().join("apps/web"));
+    assert_eq!(
+        calls[2].cwd.as_ref().unwrap(),
+        &project.root().join("apps/web")
+    );
     assert_eq!(calls[2].stdin.as_ref().unwrap(), b"sk_test_123");
 }
 
@@ -642,7 +652,10 @@ fn sync_cloudflare_records_tracker() {
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(!index.records.is_empty());
-    assert!(index.records.keys().any(|k| k.contains("STRIPE_KEY") && k.contains("cloudflare")));
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("STRIPE_KEY") && k.contains("cloudflare")));
 }
 
 #[test]
@@ -726,7 +739,9 @@ fn sync_convex_calls_npx() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
     let store = project.store().unwrap();
-    store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: npx --version
@@ -740,9 +755,18 @@ fn sync_convex_calls_npx() {
     assert_eq!(calls[2].program, "npx");
     assert_eq!(
         calls[2].args,
-        vec!["convex", "env", "set", "CONVEX_URL", "https://dev.convex.cloud"]
+        vec![
+            "convex",
+            "env",
+            "set",
+            "CONVEX_URL",
+            "https://dev.convex.cloud"
+        ]
     );
-    assert_eq!(calls[2].cwd.as_ref().unwrap(), &project.root().join("apps/api"));
+    assert_eq!(
+        calls[2].cwd.as_ref().unwrap(),
+        &project.root().join("apps/api")
+    );
 }
 
 #[test]
@@ -751,7 +775,9 @@ fn sync_convex_prod_env_flags() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
     let store = project.store().unwrap();
-    store.set("CONVEX_URL", "prod", "https://prod.convex.cloud").unwrap();
+    store
+        .set("CONVEX_URL", "prod", "https://prod.convex.cloud")
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: npx --version
@@ -764,7 +790,14 @@ fn sync_convex_prod_env_flags() {
     assert_eq!(calls.len(), 3);
     assert_eq!(
         calls[2].args,
-        vec!["convex", "env", "set", "CONVEX_URL", "https://prod.convex.cloud", "--prod"]
+        vec![
+            "convex",
+            "env",
+            "set",
+            "CONVEX_URL",
+            "https://prod.convex.cloud",
+            "--prod"
+        ]
     );
 }
 
@@ -779,7 +812,9 @@ fn sync_convex_reads_deployment_source() {
     )
     .unwrap();
     let store = project.store().unwrap();
-    store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: npx --version
@@ -802,7 +837,9 @@ fn sync_convex_failure_tracked() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
     let store = project.store().unwrap();
-    store.set("CONVEX_URL", "dev", "https://dev.convex.cloud").unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: npx --version
@@ -834,7 +871,7 @@ fn push_onepassword_creates_item() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    // op item get → not found
+                                   // op item get → not found
     runner.push_failure(b"isn't an item in vault");
     // op item create → success
     runner.push_success(b"", b"");
@@ -869,7 +906,7 @@ fn push_onepassword_edits_existing() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    // op item get → found (return valid JSON)
+                                   // op item get → found (return valid JSON)
     let item_json = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "sk_old"},
@@ -901,7 +938,7 @@ fn push_onepassword_version_metadata() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    // op item get → not found
+                                   // op item get → not found
     runner.push_failure(b"isn't an item in vault");
     // op item create → success
     runner.push_success(b"", b"");
@@ -927,7 +964,7 @@ fn pull_onepassword_merges_remote() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    // op item get → returns higher version with different value
+                                   // op item get → returns higher version with different value
     let item_json = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "remote_val"},
@@ -965,7 +1002,7 @@ fn pull_onepassword_no_item() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    // op item get → not found
+                                   // op item get → not found
     runner.push_failure(b"isn't an item in vault");
 
     // Should succeed — no remote data, nothing to reconcile
@@ -989,7 +1026,9 @@ fn sync_full_config_cloudflare_and_convex() {
     std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "prod", "sk_live").unwrap();
-    store.set("CONVEX_URL", "prod", "https://prod.convex.cloud").unwrap();
+    store
+        .set("CONVEX_URL", "prod", "https://prod.convex.cloud")
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     // preflight: cloudflare (--version + whoami) + convex (--version + env list)
@@ -997,7 +1036,7 @@ fn sync_full_config_cloudflare_and_convex() {
     runner.push_success(b"", b""); // wrangler whoami
     runner.push_success(b"", b""); // npx --version
     runner.push_success(b"", b""); // convex env list
-    // env adapter is batch (no command runner calls), but cloudflare + convex each need one
+                                   // env adapter is batch (no command runner calls), but cloudflare + convex each need one
     runner.push_success(b"", b""); // cloudflare: STRIPE_KEY
     runner.push_success(b"", b""); // convex: CONVEX_URL
 

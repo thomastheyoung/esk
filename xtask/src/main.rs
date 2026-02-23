@@ -108,8 +108,16 @@ const SECRETS: &[(&str, &str, &str)] = &[
     ("STRIPE_WEBHOOK", "prod", "whsec_live_xyz"),
     ("CONVEX_URL", "dev", "https://happy-dog-123.convex.cloud"),
     ("CONVEX_URL", "prod", "https://cool-cat-456.convex.cloud"),
-    ("DATABASE_URL", "dev", "postgresql://localhost:5432/demo_dev"),
-    ("DATABASE_URL", "staging", "postgresql://staging-db:5432/demo"),
+    (
+        "DATABASE_URL",
+        "dev",
+        "postgresql://localhost:5432/demo_dev",
+    ),
+    (
+        "DATABASE_URL",
+        "staging",
+        "postgresql://staging-db:5432/demo",
+    ),
     ("DATABASE_URL", "prod", "postgresql://prod-db:5432/demo"),
 ];
 
@@ -184,8 +192,13 @@ pub fn setup(root: &Path, workspace: &Path) -> Result<()> {
     if link.exists() || link.symlink_metadata().is_ok() {
         fs::remove_file(&link).ok();
     }
-    std::os::unix::fs::symlink(&binary, &link)
-        .with_context(|| format!("failed to symlink {} -> {}", link.display(), binary.display()))?;
+    std::os::unix::fs::symlink(&binary, &link).with_context(|| {
+        format!(
+            "failed to symlink {} -> {}",
+            link.display(),
+            binary.display()
+        )
+    })?;
 
     // Initialize store and seed secrets
     eprintln!("Seeding secrets...");
@@ -200,8 +213,7 @@ pub fn setup(root: &Path, workspace: &Path) -> Result<()> {
 fn clean(root: &Path) -> Result<()> {
     if root.exists() {
         eprintln!("Cleaning up {}", root.display());
-        fs::remove_dir_all(root)
-            .with_context(|| format!("failed to remove {}", root.display()))?;
+        fs::remove_dir_all(root).with_context(|| format!("failed to remove {}", root.display()))?;
     } else {
         eprintln!("Nothing to clean ({})", root.display());
     }
@@ -209,8 +221,7 @@ fn clean(root: &Path) -> Result<()> {
 }
 
 fn write_executable(path: &Path, content: &str) -> Result<()> {
-    fs::write(path, content)
-        .with_context(|| format!("failed to write {}", path.display()))?;
+    fs::write(path, content).with_context(|| format!("failed to write {}", path.display()))?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o755))
         .with_context(|| format!("failed to chmod {}", path.display()))?;
     Ok(())
