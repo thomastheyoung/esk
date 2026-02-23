@@ -184,7 +184,21 @@ impl<'a> StoragePlugin for OnePasswordPlugin<'a> {
             anyhow::anyhow!(
                 "1Password CLI (op) is not installed or not in PATH. Install it from: https://1password.com/downloads/command-line/"
             )
-        })
+        })?;
+        let vault = &self.plugin_config.vault;
+        let output = self
+            .runner
+            .run(
+                "op",
+                &["vault", "get", vault, "--format", "json"],
+                CommandOpts::default(),
+            )
+            .context("failed to run op vault get")?;
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("1Password vault '{vault}' not accessible: {stderr}");
+        }
+        Ok(())
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
@@ -388,19 +402,83 @@ plugins:
         let op_config = config.onepassword_plugin_config().unwrap();
 
         use crate::adapters::{CommandOpts, CommandOutput};
-        struct OkRunner;
-        impl CommandRunner for OkRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+        use std::sync::Mutex;
+        struct MockRunner {
+            calls: Mutex<Vec<(String, Vec<String>)>>,
+        }
+        impl CommandRunner for MockRunner {
+            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                self.calls
+                    .lock()
+                    .unwrap()
+                    .push((program.to_string(), args.iter().map(|s| s.to_string()).collect()));
                 Ok(CommandOutput {
                     success: true,
-                    stdout: b"2.0.0".to_vec(),
+                    stdout: b"{}".to_vec(),
                     stderr: Vec::new(),
                 })
             }
         }
-        let runner = OkRunner;
+        let runner = MockRunner {
+            calls: Mutex::new(Vec::new()),
+        };
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
         assert!(plugin.preflight().is_ok());
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[1].1, vec!["vault", "get", "V", "--format", "json"]);
+    }
+
+    #[test]
+    fn onepassword_preflight_vault_inaccessible() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev]
+plugins:
+  onepassword:
+    vault: SecretVault
+    item_pattern: test
+"#;
+        let path = dir.path().join("lockbox.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_plugin_config().unwrap();
+
+        use crate::adapters::{CommandOpts, CommandOutput};
+        use std::sync::Mutex;
+        struct MockRunner {
+            call_count: Mutex<usize>,
+        }
+        impl CommandRunner for MockRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                let mut count = self.call_count.lock().unwrap();
+                *count += 1;
+                if *count == 1 {
+                    // --version succeeds
+                    Ok(CommandOutput {
+                        success: true,
+                        stdout: b"2.0.0".to_vec(),
+                        stderr: Vec::new(),
+                    })
+                } else {
+                    // vault get fails
+                    Ok(CommandOutput {
+                        success: false,
+                        stdout: Vec::new(),
+                        stderr: b"vault not found".to_vec(),
+                    })
+                }
+            }
+        }
+        let runner = MockRunner {
+            call_count: Mutex::new(0),
+        };
+        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("1Password vault 'SecretVault' not accessible"));
+        assert!(err.to_string().contains("vault not found"));
     }
 
     #[test]

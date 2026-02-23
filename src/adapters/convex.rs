@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use anyhow::{Context, Result};
 
 use crate::adapters::{check_command, CommandOpts, CommandRunner, SyncAdapter, SyncMode};
@@ -7,6 +9,31 @@ pub struct ConvexAdapter<'a> {
     pub config: &'a Config,
     pub adapter_config: &'a ConvexAdapterConfig,
     pub runner: &'a dyn CommandRunner,
+}
+
+impl<'a> ConvexAdapter<'a> {
+    /// Resolve the cwd and env vars needed for convex commands.
+    fn resolve_deployment_context(&self) -> Result<(PathBuf, Vec<(String, String)>)> {
+        let cwd = self.config.root.join(&self.adapter_config.path);
+        let mut env_vars: Vec<(String, String)> = Vec::new();
+
+        if let Some(source) = &self.adapter_config.deployment_source {
+            let source_path = self.config.root.join(source);
+            if source_path.is_file() {
+                let contents = std::fs::read_to_string(&source_path)
+                    .with_context(|| format!("failed to read {}", source_path.display()))?;
+                for line in contents.lines() {
+                    if let Some(deployment) = line.strip_prefix("CONVEX_DEPLOYMENT=") {
+                        let deployment = deployment.trim().trim_matches('"').trim_matches('\'');
+                        env_vars.push(("CONVEX_DEPLOYMENT".to_string(), deployment.to_string()));
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok((cwd, env_vars))
+    }
 }
 
 impl<'a> SyncAdapter for ConvexAdapter<'a> {
@@ -23,11 +50,29 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
             anyhow::anyhow!(
                 "npx is not installed or not in PATH. Install Node.js to get npx."
             )
-        })
+        })?;
+        let (cwd, env_vars) = self.resolve_deployment_context()?;
+        let output = self
+            .runner
+            .run(
+                "npx",
+                &["convex", "env", "list"],
+                CommandOpts {
+                    cwd: Some(cwd),
+                    env: env_vars,
+                    ..Default::default()
+                },
+            )
+            .context("failed to run convex env list")?;
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("convex deployment not accessible: {stderr}");
+        }
+        Ok(())
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
-        let convex_path = self.config.root.join(&self.adapter_config.path);
+        let (cwd, env_vars) = self.resolve_deployment_context()?;
 
         let env_flags = self
             .adapter_config
@@ -35,23 +80,6 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
             .get(&target.environment)
             .cloned()
             .unwrap_or_default();
-
-        // Read CONVEX_DEPLOYMENT from deployment_source if configured
-        let mut env_vars: Vec<(String, String)> = Vec::new();
-        if let Some(source) = &self.adapter_config.deployment_source {
-            let source_path = self.config.root.join(source);
-            if source_path.is_file() {
-                let contents = std::fs::read_to_string(&source_path)
-                    .with_context(|| format!("failed to read {}", source_path.display()))?;
-                for line in contents.lines() {
-                    if let Some(deployment) = line.strip_prefix("CONVEX_DEPLOYMENT=") {
-                        let deployment = deployment.trim().trim_matches('"').trim_matches('\'');
-                        env_vars.push(("CONVEX_DEPLOYMENT".to_string(), deployment.to_string()));
-                        break;
-                    }
-                }
-            }
-        }
 
         let mut args: Vec<&str> = vec!["convex", "env", "set", key, value];
         let flag_parts: Vec<String>;
@@ -68,7 +96,7 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
                 "npx",
                 &args,
                 CommandOpts {
-                    cwd: Some(convex_path),
+                    cwd: Some(cwd),
                     env: env_vars,
                     ..Default::default()
                 },
@@ -84,7 +112,7 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
-        let convex_path = self.config.root.join(&self.adapter_config.path);
+        let (cwd, env_vars) = self.resolve_deployment_context()?;
 
         let env_flags = self
             .adapter_config
@@ -92,23 +120,6 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
             .get(&target.environment)
             .cloned()
             .unwrap_or_default();
-
-        // Read CONVEX_DEPLOYMENT from deployment_source if configured
-        let mut env_vars: Vec<(String, String)> = Vec::new();
-        if let Some(source) = &self.adapter_config.deployment_source {
-            let source_path = self.config.root.join(source);
-            if source_path.is_file() {
-                let contents = std::fs::read_to_string(&source_path)
-                    .with_context(|| format!("failed to read {}", source_path.display()))?;
-                for line in contents.lines() {
-                    if let Some(deployment) = line.strip_prefix("CONVEX_DEPLOYMENT=") {
-                        let deployment = deployment.trim().trim_matches('"').trim_matches('\'');
-                        env_vars.push(("CONVEX_DEPLOYMENT".to_string(), deployment.to_string()));
-                        break;
-                    }
-                }
-            }
-        }
 
         let mut args: Vec<&str> = vec!["convex", "env", "unset", key];
         let flag_parts: Vec<String>;
@@ -125,7 +136,7 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
                 "npx",
                 &args,
                 CommandOpts {
-                    cwd: Some(convex_path),
+                    cwd: Some(cwd),
                     env: env_vars,
                     ..Default::default()
                 },
@@ -234,19 +245,59 @@ adapters:
     #[test]
     fn convex_preflight_success() {
         let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
-            success: true,
-            stdout: b"10.0.0".to_vec(),
-            stderr: vec![],
-        }]);
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"10.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"KEY=value".to_vec(),
+                stderr: vec![],
+            },
+        ]);
         let adapter = ConvexAdapter {
             config: &config,
             adapter_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
+        let calls = runner.take_calls();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[1].1, vec!["convex", "env", "list"]);
+    }
+
+    #[test]
+    fn convex_preflight_deployment_inaccessible() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
+        let config = make_config(dir.path(), None);
+        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"10.0.0".to_vec(),
+                stderr: vec![],
+            },
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"deployment not found".to_vec(),
+            },
+        ]);
+        let adapter = ConvexAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter.preflight().unwrap_err();
+        assert!(err.to_string().contains("convex deployment not accessible"));
+        assert!(err.to_string().contains("deployment not found"));
     }
 
     #[test]

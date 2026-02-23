@@ -46,7 +46,7 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
             Ok(()) => results.push(PluginHealth {
                 name: "onepassword".to_string(),
                 ok: true,
-                message: "op authenticated".to_string(),
+                message: "vault accessible".to_string(),
             }),
             Err(e) => results.push(PluginHealth {
                 name: "onepassword".to_string(),
@@ -62,7 +62,7 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
             Ok(()) => results.push(PluginHealth {
                 name,
                 ok: true,
-                message: "directory accessible".to_string(),
+                message: "directory writable".to_string(),
             }),
             Err(e) => results.push(PluginHealth {
                 name,

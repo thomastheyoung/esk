@@ -104,6 +104,16 @@ impl StoragePlugin for CloudFilePlugin {
                 path.display()
             );
         }
+        // Verify write access
+        let probe = path.join(".lockbox-probe");
+        std::fs::write(&probe, b"").map_err(|e| {
+            anyhow::anyhow!(
+                "{} sync folder at {} is not writable: {e}",
+                self.name,
+                path.display()
+            )
+        })?;
+        let _ = std::fs::remove_file(&probe);
         Ok(())
     }
 
@@ -246,6 +256,27 @@ mod tests {
             },
         );
         assert!(plugin.preflight().is_ok());
+    }
+
+    #[test]
+    fn cloud_file_preflight_not_writable() {
+        use std::os::unix::fs::PermissionsExt;
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let readonly = cloud_dir.path().join("readonly");
+        std::fs::create_dir(&readonly).unwrap();
+        std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o444)).unwrap();
+        let plugin = CloudFilePlugin::new(
+            "dropbox".to_string(),
+            "testapp".to_string(),
+            CloudFilePluginConfig {
+                path: readonly.to_string_lossy().to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("not writable"));
+        // Restore permissions so tempdir cleanup works
+        std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
 
     #[test]

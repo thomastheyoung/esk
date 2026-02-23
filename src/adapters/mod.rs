@@ -196,7 +196,7 @@ pub fn check_adapter_health(config: &Config, runner: &dyn CommandRunner) -> Vec<
             Ok(()) => results.push(AdapterHealth {
                 name: "convex".to_string(),
                 ok: true,
-                message: "convex authenticated".to_string(),
+                message: "deployment accessible".to_string(),
             }),
             Err(e) => results.push(AdapterHealth {
                 name: "convex".to_string(),
