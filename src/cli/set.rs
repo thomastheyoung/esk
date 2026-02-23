@@ -51,17 +51,12 @@ pub fn run_with_runner(
         let config_path = config.root.join("lockbox.yaml");
         if let Some(group) = group {
             config::add_secret_to_config(&config_path, key, group)?;
-            cliclack::log::success(format!(
-                "Added '{}' to lockbox.yaml under {}",
-                key, group
-            ))?;
+            cliclack::log::success(format!("Added '{}' to lockbox.yaml under {}", key, group))?;
         } else if atty::is(atty::Stream::Stdin) {
-            let add = cliclack::confirm(format!(
-                "Secret '{}' is not in lockbox.yaml. Add it?",
-                key
-            ))
-            .initial_value(true)
-            .interact()?;
+            let add =
+                cliclack::confirm(format!("Secret '{}' is not in lockbox.yaml. Add it?", key))
+                    .initial_value(true)
+                    .interact()?;
 
             if add {
                 let mut groups = config::secret_group_names(config);
@@ -78,15 +73,13 @@ pub fn run_with_runner(
                         .interact()?;
 
                     if selected == "(New group)" {
-                        let name: String = cliclack::input("Group name:")
-                            .interact()?;
+                        let name: String = cliclack::input("Group name:").interact()?;
                         name
                     } else {
                         selected.to_string()
                     }
                 } else {
-                    let name: String = cliclack::input("Group name:")
-                        .interact()?;
+                    let name: String = cliclack::input("Group name:").interact()?;
                     name
                 };
 
@@ -96,16 +89,10 @@ pub fn run_with_runner(
                     key, chosen_group
                 ))?;
             } else {
-                cliclack::log::warning(format!(
-                    "Secret '{}' is not defined in lockbox.yaml",
-                    key
-                ))?;
+                cliclack::log::warning(format!("Secret '{}' is not defined in lockbox.yaml", key))?;
             }
         } else {
-            cliclack::log::warning(format!(
-                "Secret '{}' is not defined in lockbox.yaml",
-                key
-            ))?;
+            cliclack::log::warning(format!("Secret '{}' is not defined in lockbox.yaml", key))?;
         }
     }
 

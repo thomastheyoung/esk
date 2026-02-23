@@ -468,13 +468,10 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
     };
 
     // Atomic write: temp file + rename
-    let dir = config_path
-        .parent()
-        .unwrap_or_else(|| Path::new("."));
+    let dir = config_path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = tempfile::NamedTempFile::new_in(dir)
         .context("failed to create temp file for config write")?;
-    std::fs::write(tmp.path(), &new_content)
-        .context("failed to write temp config file")?;
+    std::fs::write(tmp.path(), &new_content).context("failed to write temp config file")?;
     tmp.persist(config_path)
         .context("failed to persist config file")?;
 
@@ -1132,7 +1129,8 @@ adapters:
     #[test]
     fn add_secret_preserves_comments() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = "project: x\nenvironments: [dev]\n# My secrets\nsecrets:\n  Stripe:\n    SK: {}\n";
+        let yaml =
+            "project: x\nenvironments: [dev]\n# My secrets\nsecrets:\n  Stripe:\n    SK: {}\n";
         let path = write_yaml(dir.path(), yaml);
         add_secret_to_config(&path, "NEW", "Stripe").unwrap();
         let content = std::fs::read_to_string(&path).unwrap();

@@ -73,8 +73,7 @@ fn get_returns_value() {
 fn set_unknown_env_errors() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err =
-        cli::set::run(&config, "KEY", "staging", Some("val"), None, true, false).unwrap_err();
+    let err = cli::set::run(&config, "KEY", "staging", Some("val"), None, true, false).unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
@@ -82,7 +81,16 @@ fn set_unknown_env_errors() {
 fn set_with_value_flag() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    cli::set::run(&config, "TEST_KEY", "dev", Some("test_value"), None, true, false).unwrap();
+    cli::set::run(
+        &config,
+        "TEST_KEY",
+        "dev",
+        Some("test_value"),
+        None,
+        true,
+        false,
+    )
+    .unwrap();
 
     let store = project.store().unwrap();
     assert_eq!(
@@ -119,11 +127,23 @@ fn set_with_group_flag_adds_to_config() {
     let yaml = "project: testapp\nenvironments: [dev]\nsecrets:\n  Stripe:\n    EXISTING: {}\n";
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
-    cli::set::run(&config, "NEW_KEY", "dev", Some("val"), Some("Stripe"), true, false).unwrap();
+    cli::set::run(
+        &config,
+        "NEW_KEY",
+        "dev",
+        Some("val"),
+        Some("Stripe"),
+        true,
+        false,
+    )
+    .unwrap();
 
     // Key should be in the store
     let store = project.store().unwrap();
-    assert_eq!(store.get("NEW_KEY", "dev").unwrap(), Some("val".to_string()));
+    assert_eq!(
+        store.get("NEW_KEY", "dev").unwrap(),
+        Some("val".to_string())
+    );
 
     // Key should now appear in config under Stripe
     let reloaded = project.config().unwrap();
@@ -136,7 +156,16 @@ fn set_with_group_flag_adds_to_config() {
 fn set_with_group_flag_creates_new_group() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    cli::set::run(&config, "API_KEY", "dev", Some("val"), Some("NewVendor"), true, false).unwrap();
+    cli::set::run(
+        &config,
+        "API_KEY",
+        "dev",
+        Some("val"),
+        Some("NewVendor"),
+        true,
+        false,
+    )
+    .unwrap();
 
     let reloaded = project.config().unwrap();
     let (vendor, _) = reloaded.find_secret("API_KEY").unwrap();
@@ -150,7 +179,16 @@ fn set_with_group_flag_existing_key_no_duplicate() {
     let config = project.config().unwrap();
 
     // SK already exists in config — --group should be a no-op for config registration
-    cli::set::run(&config, "SK", "dev", Some("val"), Some("Stripe"), true, false).unwrap();
+    cli::set::run(
+        &config,
+        "SK",
+        "dev",
+        Some("val"),
+        Some("Stripe"),
+        true,
+        false,
+    )
+    .unwrap();
 
     // Verify no duplicate: SK should appear exactly once
     let content = std::fs::read_to_string(project.root().join("lockbox.yaml")).unwrap();

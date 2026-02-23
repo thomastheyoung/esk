@@ -472,7 +472,7 @@ pub fn run_with_runner(
         if skip_count > 0 {
             cliclack::log::remark(format!("{} up to date", style(skip_count).bold()))?;
         }
-        cliclack::log::warning(format!("Dry run — no changes made"))?;
+        cliclack::log::warning("Dry run — no changes made".to_string())?;
     } else if sync_count == 0 && skip_count == 0 && fail_count == 0 {
         cliclack::log::info("Nothing to sync.")?;
     } else if fail_count == 0 && sync_count == 0 && skip_count > 0 {
@@ -512,7 +512,8 @@ pub fn run_with_runner(
 /// Group entries by (key, env) → [targets], collapsing same key+env.
 /// Returns Vec<(key, env, targets, error)>.
 fn group_entries(entries: &[SyncEntry]) -> Vec<(&str, &str, Vec<&str>, Option<&str>)> {
-    let mut map: BTreeMap<(&str, &str), (Vec<&str>, Option<&str>)> = BTreeMap::new();
+    type EntryGroup<'a> = (Vec<&'a str>, Option<&'a str>);
+    let mut map: BTreeMap<(&str, &str), EntryGroup<'_>> = BTreeMap::new();
     for entry in entries {
         let group = map
             .entry((&entry.key, &entry.env))
