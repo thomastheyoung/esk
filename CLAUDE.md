@@ -1,4 +1,4 @@
-# lockbox
+# esk
 
 Rust CLI for encrypted secrets management with multi-target sync.
 
@@ -17,22 +17,30 @@ src/
 │   ├── mod.rs           # SyncAdapter + CommandRunner traits, build_sync_adapters()
 │   ├── env_file.rs      # .env file generation (batch sync)
 │   ├── cloudflare.rs    # wrangler secret put/delete (individual sync)
-│   └── convex.rs        # convex env set/unset (individual sync)
+│   ├── convex.rs        # convex env set/unset (individual sync)
+│   ├── fly.rs           # fly secrets set/unset (individual sync)
+│   ├── netlify.rs       # netlify env:set/unset (individual sync)
+│   ├── vercel.rs        # vercel env add/rm (individual sync, stdin)
+│   ├── github.rs        # gh secret set/delete (individual sync, stdin)
+│   ├── heroku.rs        # heroku config:set/unset (individual sync)
+│   ├── supabase.rs      # supabase secrets set/unset (individual sync)
+│   ├── railway.rs       # railway variables set/delete (individual sync)
+│   └── gitlab.rs        # glab variable set/delete (individual sync)
 ├── plugins/
 │   ├── mod.rs           # StoragePlugin trait, build_plugins()
 │   ├── onepassword.rs   # 1Password op CLI
 │   └── cloud_file.rs    # Cloud file storage (Dropbox, Google Drive, OneDrive)
 ├── cli/
 │   ├── mod.rs           # Command routing
-│   ├── init.rs          # lockbox init
-│   ├── set.rs           # lockbox set
-│   ├── get.rs           # lockbox get
-│   ├── delete.rs        # lockbox delete
-│   ├── list.rs          # lockbox list
-│   ├── sync.rs          # lockbox sync (adapter-agnostic)
-│   ├── status.rs        # lockbox status (adapter-agnostic)
-│   ├── push.rs          # lockbox push (plugin-agnostic)
-│   └── pull.rs          # lockbox pull (plugin-agnostic + multi-reconciliation)
+│   ├── init.rs          # esk init
+│   ├── set.rs           # esk set
+│   ├── get.rs           # esk get
+│   ├── delete.rs        # esk delete
+│   ├── list.rs          # esk list
+│   ├── sync.rs          # esk sync (adapter-agnostic)
+│   ├── status.rs        # esk status (adapter-agnostic)
+│   ├── push.rs          # esk push (plugin-agnostic)
+│   └── pull.rs          # esk pull (plugin-agnostic + multi-reconciliation)
 tests/
 ├── helpers/
 │   └── mod.rs              # TestProject, fixtures, MockCommandRunner
@@ -46,19 +54,19 @@ tests/
 
 ### Adapters vs plugins
 
-Lockbox distinguishes between two extension types:
+esk distinguishes between two extension types:
 
-- **Adapters** deploy secrets to targets via `lockbox sync`. Secrets declare which adapters they target in `targets:`. Each adapter syncs individual secrets or batches.
-- **Plugins** store/backup the entire secret list via `lockbox push`/`pull`. Plugins receive the full store payload per environment — no per-secret routing. Used for team sharing and backup.
+- **Adapters** deploy secrets to targets via `esk sync`. Secrets declare which adapters they target in `targets:`. Each adapter syncs individual secrets or batches.
+- **Plugins** store/backup the entire secret list via `esk push`/`pull`. Plugins receive the full store payload per environment — no per-secret routing. Used for team sharing and backup.
 
-### Config (`lockbox.yaml`)
+### Config (`esk.yaml`)
 
 Project-level config defines everything: environments, apps, adapter settings, plugin settings, and secrets. No hardcoded paths or project-specific assumptions in the binary.
 
-### Encrypted store (`.lockbox/store.enc`)
+### Encrypted store (`.esk/store.enc`)
 
-- AES-256-GCM (authenticated encryption — replaces CBC from the TS version)
-- Random 32-byte key in `.lockbox/store.key` (gitignored)
+- AES-256-GCM (authenticated encryption)
+- Random 32-byte key in `.esk/store.key` (gitignored)
 - Per-encryption 12-byte nonce
 - Storage format: `nonce:ciphertext:tag` (hex-encoded)
 - JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N, "tombstones": { "KEY:env": N }, "env_versions": { "env": N } }`
@@ -104,13 +112,13 @@ pub trait CommandRunner: Send + Sync {
 }
 ```
 
-### Change tracking (`.lockbox/sync-index.json`)
+### Change tracking (`.esk/sync-index.json`)
 
 SHA-256 hash per (secret, adapter, app, environment) tuple. Skip sync when hash matches.
 Records include target, value hash, timestamp, sync status (success/failed), and optional error.
 Atomic writes via temp file + rename.
 
-### Plugin push tracking (`.lockbox/plugin-index.json`)
+### Plugin push tracking (`.esk/plugin-index.json`)
 
 Tracks push state per (plugin, environment) pair. Records pushed version, timestamp, push status (success/failed), and optional error. Used by `status` to show plugin push drift. Atomic writes via temp file + rename.
 
@@ -131,6 +139,7 @@ Version-counter-based reconciliation between local store and remote plugins. Two
 | `sha2`                              | Change detection hashing              |
 | `hex`                               | Hex encoding for keys, nonces, hashes |
 | `rand`                              | Random key and nonce generation       |
+| `atty`                              | TTY detection for interactive prompts |
 | `chrono`                            | Timestamps in sync records            |
 | `cliclack`                          | Terminal UI (spinners, logs, prompts) |
 | `console`                           | Terminal colors and styling           |
@@ -164,7 +173,7 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 331 tests
+cargo test                    # Run all 445 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
@@ -175,12 +184,12 @@ cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-331 tests total: 242 unit (inline `#[cfg(test)]`) + 89 integration (`tests/`).
+445 tests total: 316 unit (inline `#[cfg(test)]`) + 129 integration (`tests/`).
 
 ### Test infrastructure
 
-- **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid lockbox project (writes `lockbox.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `sync_index_path()`.
-- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG` — reusable YAML for tests.
+- **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `sync_index_path()`, `plugin_index_path()`.
+- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `GITLAB_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for adapter/plugin tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.

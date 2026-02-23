@@ -1,6 +1,9 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{check_command, CommandOpts, CommandRunner, SyncAdapter, SyncMode};
+use crate::adapters::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
+    SyncMode,
+};
 use crate::config::{CloudflareAdapterConfig, Config, ResolvedTarget};
 
 pub struct CloudflareAdapter<'a> {
@@ -46,21 +49,9 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
             .with_context(|| format!("unknown app '{app}'"))?;
         let app_path = self.config.root.join(&app_config.path);
 
-        let env_flags = self
-            .adapter_config
-            .env_flags
-            .get(&target.environment)
-            .cloned()
-            .unwrap_or_default();
-
+        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "put", key];
-        let flag_parts: Vec<String>;
-        if !env_flags.is_empty() {
-            flag_parts = env_flags.split_whitespace().map(String::from).collect();
-            for part in &flag_parts {
-                args.push(part);
-            }
-        }
+        append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
@@ -95,21 +86,9 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
             .with_context(|| format!("unknown app '{app}'"))?;
         let app_path = self.config.root.join(&app_config.path);
 
-        let env_flags = self
-            .adapter_config
-            .env_flags
-            .get(&target.environment)
-            .cloned()
-            .unwrap_or_default();
-
+        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "delete", key, "--force"];
-        let flag_parts: Vec<String>;
-        if !env_flags.is_empty() {
-            flag_parts = env_flags.split_whitespace().map(String::from).collect();
-            for part in &flag_parts {
-                args.push(part);
-            }
-        }
+        append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
@@ -207,7 +186,7 @@ adapters:
     env_flags:
       prod: "--env production"
 "#;
-        let path = dir.join("lockbox.yaml");
+        let path = dir.join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         Config::load(&path).unwrap()
     }

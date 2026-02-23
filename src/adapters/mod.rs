@@ -1,8 +1,17 @@
 pub mod cloudflare;
 pub mod convex;
 pub mod env_file;
+pub mod fly;
+pub mod github;
+pub mod gitlab;
+pub mod heroku;
+pub mod netlify;
+pub mod railway;
+pub mod supabase;
+pub mod vercel;
 
 use anyhow::Result;
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use crate::config::{Config, ResolvedTarget};
@@ -134,6 +143,23 @@ pub trait SyncAdapter {
     }
 }
 
+/// Resolve env_flags for a given environment into split parts.
+/// Returns an empty vec if no flags are configured for the environment.
+pub fn resolve_env_flags(flags: &BTreeMap<String, String>, env: &str) -> Vec<String> {
+    flags
+        .get(env)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.split_whitespace().map(String::from).collect())
+        .unwrap_or_default()
+}
+
+/// Append resolved env flag parts to an args vector.
+pub fn append_env_flags<'a>(args: &mut Vec<&'a str>, flag_parts: &'a [String]) {
+    for part in flag_parts {
+        args.push(part);
+    }
+}
+
 /// Check that an external command is available via the CommandRunner.
 pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
     runner
@@ -204,6 +230,166 @@ pub fn check_adapter_health(config: &Config, runner: &dyn CommandRunner) -> Vec<
         }
     }
 
+    if let Some(adapter_config) = &config.adapters.fly {
+        let adapter = fly::FlyAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "fly".to_string(),
+                ok: true,
+                message: "fly authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "fly".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.netlify {
+        let adapter = netlify::NetlifyAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "netlify".to_string(),
+                ok: true,
+                message: "netlify linked".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "netlify".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.vercel {
+        let adapter = vercel::VercelAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "vercel".to_string(),
+                ok: true,
+                message: "vercel authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "vercel".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.github {
+        let adapter = github::GithubAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "github".to_string(),
+                ok: true,
+                message: "gh authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "github".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.heroku {
+        let adapter = heroku::HerokuAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "heroku".to_string(),
+                ok: true,
+                message: "heroku authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "heroku".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.supabase {
+        let adapter = supabase::SupabaseAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "supabase".to_string(),
+                ok: true,
+                message: "supabase available".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "supabase".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.railway {
+        let adapter = railway::RailwayAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "railway".to_string(),
+                ok: true,
+                message: "railway authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "railway".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.gitlab {
+        let adapter = gitlab::GitlabAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "gitlab".to_string(),
+                ok: true,
+                message: "glab authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "gitlab".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
     results
 }
 
@@ -231,6 +417,70 @@ pub fn build_sync_adapters<'a>(
 
     if let Some(adapter_config) = &config.adapters.convex {
         candidates.push(Box::new(convex::ConvexAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.fly {
+        candidates.push(Box::new(fly::FlyAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.netlify {
+        candidates.push(Box::new(netlify::NetlifyAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.vercel {
+        candidates.push(Box::new(vercel::VercelAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.github {
+        candidates.push(Box::new(github::GithubAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.heroku {
+        candidates.push(Box::new(heroku::HerokuAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.supabase {
+        candidates.push(Box::new(supabase::SupabaseAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.railway {
+        candidates.push(Box::new(railway::RailwayAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.gitlab {
+        candidates.push(Box::new(gitlab::GitlabAdapter {
             config,
             adapter_config,
             runner,
@@ -363,7 +613,7 @@ adapters:
   cloudflare:
     env_flags: {}
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = crate::config::Config::load(&path).unwrap();
 
@@ -395,7 +645,7 @@ adapters:
   cloudflare:
     env_flags: {}
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = crate::config::Config::load(&path).unwrap();
 
@@ -433,7 +683,7 @@ adapters:
   cloudflare:
     env_flags: {}
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = crate::config::Config::load(&path).unwrap();
 
@@ -455,7 +705,7 @@ adapters:
     fn check_adapter_health_no_adapters() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "project: x\nenvironments: [dev]";
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = crate::config::Config::load(&path).unwrap();
 

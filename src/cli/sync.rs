@@ -37,14 +37,12 @@ pub fn run_with_runner(
 ) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
-    let index_path = config.root.join(".lockbox/sync-index.json");
+    let index_path = config.root.join(".esk/sync-index.json");
     let mut index = SyncIndex::load(&index_path);
 
     let resolved = config.resolve_secrets()?;
 
-    let has_configured_adapters = config.adapters.env.is_some()
-        || config.adapters.cloudflare.is_some()
-        || config.adapters.convex.is_some();
+    let has_configured_adapters = !config.adapter_names().is_empty();
 
     let adapters = build_sync_adapters(config, runner);
 

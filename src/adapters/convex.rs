@@ -2,7 +2,10 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::adapters::{check_command, CommandOpts, CommandRunner, SyncAdapter, SyncMode};
+use crate::adapters::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
+    SyncMode,
+};
 use crate::config::{Config, ConvexAdapterConfig, ResolvedTarget};
 
 pub struct ConvexAdapter<'a> {
@@ -72,21 +75,9 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let (cwd, env_vars) = self.resolve_deployment_context()?;
 
-        let env_flags = self
-            .adapter_config
-            .env_flags
-            .get(&target.environment)
-            .cloned()
-            .unwrap_or_default();
-
+        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["convex", "env", "set", key, value];
-        let flag_parts: Vec<String>;
-        if !env_flags.is_empty() {
-            flag_parts = env_flags.split_whitespace().map(String::from).collect();
-            for part in &flag_parts {
-                args.push(part);
-            }
-        }
+        append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
@@ -112,21 +103,9 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let (cwd, env_vars) = self.resolve_deployment_context()?;
 
-        let env_flags = self
-            .adapter_config
-            .env_flags
-            .get(&target.environment)
-            .cloned()
-            .unwrap_or_default();
-
+        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["convex", "env", "unset", key];
-        let flag_parts: Vec<String>;
-        if !env_flags.is_empty() {
-            flag_parts = env_flags.split_whitespace().map(String::from).collect();
-            for part in &flag_parts {
-                args.push(part);
-            }
-        }
+        append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
@@ -227,7 +206,7 @@ adapters:
             yaml.push_str(&format!("    deployment_source: {s}\n"));
         }
         yaml.push_str("    env_flags:\n      prod: \"--prod\"\n");
-        let path = dir.join("lockbox.yaml");
+        let path = dir.join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         Config::load(&path).unwrap()
     }

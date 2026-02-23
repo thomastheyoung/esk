@@ -1,23 +1,23 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use lockbox::adapters::{CommandOpts, CommandOutput, CommandRunner};
-use lockbox::config::Config;
-use lockbox::store::SecretStore;
+use esk::adapters::{CommandOpts, CommandOutput, CommandRunner};
+use esk::config::Config;
+use esk::store::SecretStore;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tempfile::TempDir;
 
-/// A temporary lockbox project for testing.
+/// A temporary esk project for testing.
 pub struct TestProject {
     pub dir: TempDir,
 }
 
 impl TestProject {
-    /// Create a test project with a custom lockbox.yaml content.
+    /// Create a test project with a custom esk.yaml content.
     pub fn new(yaml: &str) -> Result<Self> {
         let dir = TempDir::new()?;
-        std::fs::write(dir.path().join("lockbox.yaml"), yaml)?;
+        std::fs::write(dir.path().join("esk.yaml"), yaml)?;
         Ok(Self { dir })
     }
 
@@ -33,7 +33,7 @@ impl TestProject {
     }
 
     pub fn config(&self) -> Result<Config> {
-        let path = self.dir.path().join("lockbox.yaml");
+        let path = self.dir.path().join("esk.yaml");
         Config::load(&path)
     }
 
@@ -42,11 +42,11 @@ impl TestProject {
     }
 
     pub fn sync_index_path(&self) -> PathBuf {
-        self.dir.path().join(".lockbox/sync-index.json")
+        self.dir.path().join(".esk/sync-index.json")
     }
 
     pub fn plugin_index_path(&self) -> PathBuf {
-        self.dir.path().join(".lockbox/plugin-index.json")
+        self.dir.path().join(".esk/plugin-index.json")
     }
 }
 
@@ -202,6 +202,160 @@ plugins:
   onepassword:
     vault: Test
     item_pattern: "{project} - {Environment}"
+"#;
+
+/// Fly adapter config for integration testing.
+pub const FLY_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+apps:
+  web:
+    path: apps/web
+
+adapters:
+  fly:
+    app_names:
+      web: my-fly-app
+    env_flags:
+      prod: "--stage"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        fly: [web:dev, web:prod]
+"#;
+
+/// Netlify adapter config for integration testing.
+pub const NETLIFY_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  netlify:
+    site: my-site-id
+    env_flags:
+      prod: "--context production"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        netlify: [dev, prod]
+"#;
+
+/// Vercel adapter config for integration testing.
+pub const VERCEL_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  vercel:
+    env_names:
+      dev: development
+      prod: production
+    env_flags:
+      prod: "--scope my-team"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        vercel: [dev, prod]
+"#;
+
+/// GitHub adapter config for integration testing.
+pub const GITHUB_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  github:
+    repo: owner/repo
+    env_flags:
+      prod: "--env production"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        github: [dev, prod]
+"#;
+
+/// Heroku adapter config for integration testing.
+pub const HEROKU_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+apps:
+  web:
+    path: apps/web
+
+adapters:
+  heroku:
+    app_names:
+      web: my-heroku-app
+    env_flags:
+      prod: "--remote staging"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        heroku: [web:dev, web:prod]
+"#;
+
+/// Supabase adapter config for integration testing.
+pub const SUPABASE_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  supabase:
+    project_ref: abcdef123456
+    env_flags:
+      prod: "--experimental"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        supabase: [dev, prod]
+"#;
+
+/// Railway adapter config for integration testing.
+pub const RAILWAY_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  railway:
+    env_flags:
+      prod: "--environment production"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        railway: [dev, prod]
+"#;
+
+/// GitLab adapter config for integration testing.
+pub const GITLAB_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  gitlab:
+    env_flags:
+      prod: "--masked"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        gitlab: [dev, prod]
 "#;
 
 /// Records calls made to a mock command runner.

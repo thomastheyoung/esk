@@ -1,9 +1,9 @@
 mod helpers;
 
 use helpers::*;
-use lockbox::cli;
-use lockbox::plugin_tracker::PluginIndex;
-use lockbox::tracker::SyncIndex;
+use esk::cli;
+use esk::plugin_tracker::PluginIndex;
+use esk::tracker::SyncIndex;
 use serde_json::json;
 
 // === init ===
@@ -12,27 +12,27 @@ use serde_json::json;
 fn init_creates_all_files() {
     let dir = tempfile::tempdir().unwrap();
     cli::init::run(dir.path()).unwrap();
-    assert!(dir.path().join("lockbox.yaml").is_file());
-    assert!(dir.path().join(".lockbox/store.enc").is_file());
-    assert!(dir.path().join(".lockbox/store.key").is_file());
-    assert!(dir.path().join(".lockbox/sync-index.json").is_file());
-    assert!(dir.path().join(".lockbox/plugin-index.json").is_file());
+    assert!(dir.path().join("esk.yaml").is_file());
+    assert!(dir.path().join(".esk/store.enc").is_file());
+    assert!(dir.path().join(".esk/store.key").is_file());
+    assert!(dir.path().join(".esk/sync-index.json").is_file());
+    assert!(dir.path().join(".esk/plugin-index.json").is_file());
 }
 
 #[test]
 fn init_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     cli::init::run(dir.path()).unwrap();
-    let key1 = std::fs::read_to_string(dir.path().join(".lockbox/store.key")).unwrap();
+    let key1 = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
     cli::init::run(dir.path()).unwrap();
-    let key2 = std::fs::read_to_string(dir.path().join(".lockbox/store.key")).unwrap();
+    let key2 = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
     assert_eq!(key1, key2); // Key not overwritten
 }
 
 #[test]
 fn init_gitignore_warning() {
     let dir = tempfile::tempdir().unwrap();
-    // Create .gitignore without .lockbox/store.key
+    // Create .gitignore without .esk/store.key
     std::fs::write(dir.path().join(".gitignore"), "node_modules\n").unwrap();
     // Should not error (just warns)
     cli::init::run(dir.path()).unwrap();
@@ -191,7 +191,7 @@ fn set_with_group_flag_existing_key_no_duplicate() {
     .unwrap();
 
     // Verify no duplicate: SK should appear exactly once
-    let content = std::fs::read_to_string(project.root().join("lockbox.yaml")).unwrap();
+    let content = std::fs::read_to_string(project.root().join("esk.yaml")).unwrap();
     assert_eq!(content.matches("    SK:").count(), 1);
 }
 
@@ -688,19 +688,19 @@ fn sync_records_to_tracker() {
 
 #[test]
 fn cloud_file_push_pull_cleartext() {
-    use lockbox::config::{CloudFileFormat, CloudFilePluginConfig};
-    use lockbox::plugins::cloud_file::CloudFilePlugin;
-    use lockbox::plugins::StoragePlugin;
+    use esk::config::{CloudFileFormat, CloudFilePluginConfig};
+    use esk::plugins::cloud_file::CloudFilePlugin;
+    use esk::plugins::StoragePlugin;
 
     let project_dir = tempfile::tempdir().unwrap();
     let cloud_dir = tempfile::tempdir().unwrap();
 
     let yaml = "project: testapp\nenvironments: [dev]";
-    std::fs::write(project_dir.path().join("lockbox.yaml"), yaml).unwrap();
-    lockbox::store::SecretStore::load_or_create(project_dir.path()).unwrap();
-    let config = lockbox::config::Config::load(&project_dir.path().join("lockbox.yaml")).unwrap();
+    std::fs::write(project_dir.path().join("esk.yaml"), yaml).unwrap();
+    esk::store::SecretStore::load_or_create(project_dir.path()).unwrap();
+    let config = esk::config::Config::load(&project_dir.path().join("esk.yaml")).unwrap();
 
-    let store = lockbox::store::SecretStore::open(&config.root).unwrap();
+    let store = esk::store::SecretStore::open(&config.root).unwrap();
     store.set("KEY", "dev", "val123").unwrap();
     let payload = store.payload().unwrap();
 
@@ -723,19 +723,19 @@ fn cloud_file_push_pull_cleartext() {
 
 #[test]
 fn cloud_file_push_pull_encrypted() {
-    use lockbox::config::{CloudFileFormat, CloudFilePluginConfig};
-    use lockbox::plugins::cloud_file::CloudFilePlugin;
-    use lockbox::plugins::StoragePlugin;
+    use esk::config::{CloudFileFormat, CloudFilePluginConfig};
+    use esk::plugins::cloud_file::CloudFilePlugin;
+    use esk::plugins::StoragePlugin;
 
     let project_dir = tempfile::tempdir().unwrap();
     let cloud_dir = tempfile::tempdir().unwrap();
 
     let yaml = "project: testapp\nenvironments: [dev]";
-    std::fs::write(project_dir.path().join("lockbox.yaml"), yaml).unwrap();
-    lockbox::store::SecretStore::load_or_create(project_dir.path()).unwrap();
-    let config = lockbox::config::Config::load(&project_dir.path().join("lockbox.yaml")).unwrap();
+    std::fs::write(project_dir.path().join("esk.yaml"), yaml).unwrap();
+    esk::store::SecretStore::load_or_create(project_dir.path()).unwrap();
+    let config = esk::config::Config::load(&project_dir.path().join("esk.yaml")).unwrap();
 
-    let store = lockbox::store::SecretStore::open(&config.root).unwrap();
+    let store = esk::store::SecretStore::open(&config.root).unwrap();
     store.set("SECRET", "dev", "encrypted_val").unwrap();
     let payload = store.payload().unwrap();
 
@@ -1313,7 +1313,7 @@ fn push_records_plugin_index() {
     assert_eq!(record.pushed_version, 1);
     assert_eq!(
         record.last_push_status,
-        lockbox::plugin_tracker::PushStatus::Success
+        esk::plugin_tracker::PushStatus::Success
     );
 }
 
@@ -1346,7 +1346,7 @@ plugins:
     let record = &index.records["onepassword:dev"];
     assert_eq!(
         record.last_push_status,
-        lockbox::plugin_tracker::PushStatus::Failed
+        esk::plugin_tracker::PushStatus::Failed
     );
     assert!(record.last_error.is_some());
 }
@@ -1503,7 +1503,7 @@ fn set_auto_push_records_plugin_index() {
     let record = &index.records["onepassword:dev"];
     assert_eq!(
         record.last_push_status,
-        lockbox::plugin_tracker::PushStatus::Success
+        esk::plugin_tracker::PushStatus::Success
     );
 }
 
@@ -1539,7 +1539,7 @@ fn sync_records_tombstone_delete_success() {
     assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
     assert_eq!(
         record.last_sync_status,
-        lockbox::tracker::SyncStatus::Success
+        esk::tracker::SyncStatus::Success
     );
 }
 
@@ -1566,7 +1566,7 @@ fn sync_records_tombstone_delete_failure() {
     assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
     assert_eq!(
         record.last_sync_status,
-        lockbox::tracker::SyncStatus::Failed
+        esk::tracker::SyncStatus::Failed
     );
 }
 
@@ -1598,7 +1598,7 @@ fn sync_retries_failed_tombstone_delete() {
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(
         record.last_sync_status,
-        lockbox::tracker::SyncStatus::Success
+        esk::tracker::SyncStatus::Success
     );
 }
 
@@ -1666,4 +1666,802 @@ fn delete_then_recreate_same_value_syncs() {
     assert_eq!(calls.len(), 3);
     // Third call should be wrangler secret put
     assert!(calls[2].args.contains(&"put".to_string()));
+}
+
+// === fly adapter integration tests ===
+
+#[test]
+fn sync_fly_calls_cli() {
+    let project = TestProject::with_store(FLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // fly --version
+    runner.push_success(b"", b""); // fly auth whoami
+    runner.push_success(b"", b""); // fly secrets set
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "fly");
+    assert_eq!(calls[2].args, vec!["secrets", "set", "API_KEY=secret123", "-a", "my-fly-app"]);
+}
+
+#[test]
+fn sync_fly_prod_env_flags() {
+    let project = TestProject::with_store(FLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // fly --version
+    runner.push_success(b"", b""); // fly auth whoami
+    runner.push_success(b"", b""); // fly secrets set
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].args, vec!["secrets", "set", "API_KEY=secret456", "-a", "my-fly-app", "--stage"]);
+}
+
+#[test]
+fn sync_fly_records_tracker() {
+    let project = TestProject::with_store(FLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // fly --version
+    runner.push_success(b"", b""); // fly auth whoami
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("fly")));
+}
+
+#[test]
+fn sync_fly_failure_tracked() {
+    let project = TestProject::with_store(FLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // fly --version
+    runner.push_success(b"", b""); // fly auth whoami
+    runner.push_failure(b"deploy error");
+
+    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let record = index.records.values().find(|r| r.target.contains("fly")).unwrap();
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
+}
+
+#[test]
+fn sync_fly_skip_unchanged() {
+    let project = TestProject::with_store(FLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    // First sync
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // fly --version
+    runner.push_success(b"", b""); // fly auth whoami
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    // Second sync (unchanged)
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // fly --version
+    runner.push_success(b"", b""); // fly auth whoami
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2); // only preflight, no sync
+}
+
+// === netlify adapter integration tests ===
+
+#[test]
+fn sync_netlify_calls_cli() {
+    let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // netlify --version
+    runner.push_success(b"", b""); // netlify status
+    runner.push_success(b"", b""); // netlify env:set
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "netlify");
+    assert_eq!(calls[2].args, vec!["env:set", "API_KEY", "secret123", "--site", "my-site-id"]);
+}
+
+#[test]
+fn sync_netlify_prod_env_flags() {
+    let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // netlify --version
+    runner.push_success(b"", b""); // netlify status
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].args, vec!["env:set", "API_KEY", "secret456", "--site", "my-site-id", "--context", "production"]);
+}
+
+#[test]
+fn sync_netlify_records_tracker() {
+    let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // netlify --version
+    runner.push_success(b"", b""); // netlify status
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("netlify")));
+}
+
+#[test]
+fn sync_netlify_failure_tracked() {
+    let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // netlify --version
+    runner.push_success(b"", b""); // netlify status
+    runner.push_failure(b"auth error");
+
+    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let record = index.records.values().find(|r| r.target.contains("netlify")).unwrap();
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
+}
+
+#[test]
+fn sync_netlify_skip_unchanged() {
+    let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // netlify --version
+    runner.push_success(b"", b""); // netlify status
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // netlify --version
+    runner.push_success(b"", b""); // netlify status
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+}
+
+// === vercel adapter integration tests ===
+
+#[test]
+fn sync_vercel_calls_cli() {
+    let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // vercel --version
+    runner.push_success(b"", b""); // vercel whoami
+    runner.push_success(b"", b""); // vercel env add
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "vercel");
+    assert_eq!(calls[2].args, vec!["env", "add", "API_KEY", "development", "--force"]);
+    assert_eq!(calls[2].stdin.as_ref().unwrap(), b"secret123");
+}
+
+#[test]
+fn sync_vercel_prod_env_flags() {
+    let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // vercel --version
+    runner.push_success(b"", b""); // vercel whoami
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].args, vec!["env", "add", "API_KEY", "production", "--force", "--scope", "my-team"]);
+}
+
+#[test]
+fn sync_vercel_records_tracker() {
+    let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // vercel --version
+    runner.push_success(b"", b""); // vercel whoami
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("vercel")));
+}
+
+#[test]
+fn sync_vercel_failure_tracked() {
+    let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // vercel --version
+    runner.push_success(b"", b""); // vercel whoami
+    runner.push_failure(b"auth error");
+
+    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let record = index.records.values().find(|r| r.target.contains("vercel")).unwrap();
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
+}
+
+#[test]
+fn sync_vercel_skip_unchanged() {
+    let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // vercel --version
+    runner.push_success(b"", b""); // vercel whoami
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // vercel --version
+    runner.push_success(b"", b""); // vercel whoami
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+}
+
+// === github adapter integration tests ===
+
+#[test]
+fn sync_github_calls_cli() {
+    let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gh --version
+    runner.push_success(b"", b""); // gh auth status
+    runner.push_success(b"", b""); // gh secret set
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "gh");
+    assert_eq!(calls[2].args, vec!["secret", "set", "API_KEY", "-R", "owner/repo"]);
+    assert_eq!(calls[2].stdin.as_ref().unwrap(), b"secret123");
+}
+
+#[test]
+fn sync_github_prod_env_flags() {
+    let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gh --version
+    runner.push_success(b"", b""); // gh auth status
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].args, vec!["secret", "set", "API_KEY", "-R", "owner/repo", "--env", "production"]);
+}
+
+#[test]
+fn sync_github_records_tracker() {
+    let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gh --version
+    runner.push_success(b"", b""); // gh auth status
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("github")));
+}
+
+#[test]
+fn sync_github_failure_tracked() {
+    let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gh --version
+    runner.push_success(b"", b""); // gh auth status
+    runner.push_failure(b"auth error");
+
+    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let record = index.records.values().find(|r| r.target.contains("github")).unwrap();
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
+}
+
+#[test]
+fn sync_github_skip_unchanged() {
+    let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gh --version
+    runner.push_success(b"", b""); // gh auth status
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gh --version
+    runner.push_success(b"", b""); // gh auth status
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+}
+
+// === heroku adapter integration tests ===
+
+#[test]
+fn sync_heroku_calls_cli() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // heroku --version
+    runner.push_success(b"", b""); // heroku auth:whoami
+    runner.push_success(b"", b""); // heroku config:set
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "heroku");
+    assert_eq!(calls[2].args, vec!["config:set", "API_KEY=secret123", "-a", "my-heroku-app"]);
+}
+
+#[test]
+fn sync_heroku_prod_env_flags() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // heroku --version
+    runner.push_success(b"", b""); // heroku auth:whoami
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].args, vec!["config:set", "API_KEY=secret456", "-a", "my-heroku-app", "--remote", "staging"]);
+}
+
+#[test]
+fn sync_heroku_records_tracker() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // heroku --version
+    runner.push_success(b"", b""); // heroku auth:whoami
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("heroku")));
+}
+
+#[test]
+fn sync_heroku_failure_tracked() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // heroku --version
+    runner.push_success(b"", b""); // heroku auth:whoami
+    runner.push_failure(b"auth error");
+
+    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let record = index.records.values().find(|r| r.target.contains("heroku")).unwrap();
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
+}
+
+#[test]
+fn sync_heroku_skip_unchanged() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // heroku --version
+    runner.push_success(b"", b""); // heroku auth:whoami
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // heroku --version
+    runner.push_success(b"", b""); // heroku auth:whoami
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+}
+
+// === supabase adapter integration tests ===
+
+#[test]
+fn sync_supabase_calls_cli() {
+    let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b""); // supabase secrets set
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].program, "supabase");
+    assert_eq!(calls[1].args, vec!["secrets", "set", "API_KEY=secret123", "--project-ref", "abcdef123456"]);
+}
+
+#[test]
+fn sync_supabase_prod_env_flags() {
+    let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[1].args, vec!["secrets", "set", "API_KEY=secret456", "--project-ref", "abcdef123456", "--experimental"]);
+}
+
+#[test]
+fn sync_supabase_records_tracker() {
+    let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("supabase")));
+}
+
+#[test]
+fn sync_supabase_failure_tracked() {
+    let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // supabase --version
+    runner.push_failure(b"api error");
+
+    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let record = index.records.values().find(|r| r.target.contains("supabase")).unwrap();
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
+}
+
+#[test]
+fn sync_supabase_skip_unchanged() {
+    let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // supabase --version
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // supabase --version
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 1); // only preflight (version check)
+}
+
+// === railway adapter integration tests ===
+
+#[test]
+fn sync_railway_calls_cli() {
+    let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // railway --version
+    runner.push_success(b"", b""); // railway whoami
+    runner.push_success(b"", b""); // railway variables --set
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "railway");
+    assert_eq!(calls[2].args, vec!["variables", "--set", "API_KEY=secret123"]);
+}
+
+#[test]
+fn sync_railway_prod_env_flags() {
+    let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // railway --version
+    runner.push_success(b"", b""); // railway whoami
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].args, vec!["variables", "--set", "API_KEY=secret456", "--environment", "production"]);
+}
+
+#[test]
+fn sync_railway_records_tracker() {
+    let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // railway --version
+    runner.push_success(b"", b""); // railway whoami
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("railway")));
+}
+
+#[test]
+fn sync_railway_failure_tracked() {
+    let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // railway --version
+    runner.push_success(b"", b""); // railway whoami
+    runner.push_failure(b"api error");
+
+    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let record = index.records.values().find(|r| r.target.contains("railway")).unwrap();
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
+}
+
+#[test]
+fn sync_railway_skip_unchanged() {
+    let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // railway --version
+    runner.push_success(b"", b""); // railway whoami
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // railway --version
+    runner.push_success(b"", b""); // railway whoami
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+}
+
+// === gitlab adapter integration tests ===
+
+#[test]
+fn sync_gitlab_calls_cli() {
+    let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // glab --version
+    runner.push_success(b"", b""); // glab auth status
+    runner.push_success(b"", b""); // glab variable set
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "glab");
+    assert_eq!(calls[2].args, vec!["variable", "set", "API_KEY", "secret123", "--scope", "dev"]);
+}
+
+#[test]
+fn sync_gitlab_prod_env_flags() {
+    let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // glab --version
+    runner.push_success(b"", b""); // glab auth status
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].args, vec!["variable", "set", "API_KEY", "secret456", "--scope", "prod", "--masked"]);
+}
+
+#[test]
+fn sync_gitlab_records_tracker() {
+    let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // glab --version
+    runner.push_success(b"", b""); // glab auth status
+    runner.push_success(b"", b"");
+
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    assert!(index.records.keys().any(|k| k.contains("API_KEY") && k.contains("gitlab")));
+}
+
+#[test]
+fn sync_gitlab_failure_tracked() {
+    let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // glab --version
+    runner.push_success(b"", b""); // glab auth status
+    runner.push_failure(b"api error");
+
+    let err = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = SyncIndex::load(&project.sync_index_path());
+    let record = index.records.values().find(|r| r.target.contains("gitlab")).unwrap();
+    assert_eq!(record.last_sync_status, esk::tracker::SyncStatus::Failed);
+}
+
+#[test]
+fn sync_gitlab_skip_unchanged() {
+    let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // glab --version
+    runner.push_success(b"", b""); // glab auth status
+    runner.push_success(b"", b"");
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // glab --version
+    runner.push_success(b"", b""); // glab auth status
+    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
 }

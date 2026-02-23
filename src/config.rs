@@ -15,7 +15,7 @@ pub struct Config {
     pub plugins: BTreeMap<String, serde_yaml::Value>,
     #[serde(default)]
     pub secrets: BTreeMap<String, BTreeMap<String, SecretDef>>,
-    /// Root directory containing lockbox.yaml
+    /// Root directory containing esk.yaml
     #[serde(skip)]
     pub root: PathBuf,
 }
@@ -33,6 +33,22 @@ pub struct AdaptersConfig {
     pub cloudflare: Option<CloudflareAdapterConfig>,
     #[serde(default)]
     pub convex: Option<ConvexAdapterConfig>,
+    #[serde(default)]
+    pub fly: Option<FlyAdapterConfig>,
+    #[serde(default)]
+    pub netlify: Option<NetlifyAdapterConfig>,
+    #[serde(default)]
+    pub vercel: Option<VercelAdapterConfig>,
+    #[serde(default)]
+    pub github: Option<GithubAdapterConfig>,
+    #[serde(default)]
+    pub heroku: Option<HerokuAdapterConfig>,
+    #[serde(default)]
+    pub supabase: Option<SupabaseAdapterConfig>,
+    #[serde(default)]
+    pub railway: Option<RailwayAdapterConfig>,
+    #[serde(default)]
+    pub gitlab: Option<GitlabAdapterConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -53,6 +69,68 @@ pub struct ConvexAdapterConfig {
     pub path: String,
     #[serde(default)]
     pub deployment_source: Option<String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlyAdapterConfig {
+    /// Maps esk app name → Fly app name (e.g. web → my-fly-app).
+    pub app_names: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct NetlifyAdapterConfig {
+    /// Optional Netlify site ID or name.
+    #[serde(default)]
+    pub site: Option<String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VercelAdapterConfig {
+    /// Maps esk env name → Vercel env name (e.g. prod → production).
+    pub env_names: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GithubAdapterConfig {
+    /// Optional GitHub repo in owner/repo format.
+    #[serde(default)]
+    pub repo: Option<String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HerokuAdapterConfig {
+    /// Maps esk app name → Heroku app name.
+    pub app_names: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SupabaseAdapterConfig {
+    /// Supabase project reference ID.
+    pub project_ref: String,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RailwayAdapterConfig {
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GitlabAdapterConfig {
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }
@@ -108,24 +186,24 @@ pub struct ResolvedSecret {
 }
 
 impl Config {
-    /// Walk up from `start` looking for `lockbox.yaml`.
+    /// Walk up from `start` looking for `esk.yaml`.
     pub fn find(start: &Path) -> Result<PathBuf> {
         let mut dir = start.to_path_buf();
         loop {
-            let candidate = dir.join("lockbox.yaml");
+            let candidate = dir.join("esk.yaml");
             if candidate.is_file() {
                 return Ok(candidate);
             }
             if !dir.pop() {
                 bail!(
-                    "lockbox.yaml not found (searched from {} upward)",
+                    "esk.yaml not found (searched from {} upward)",
                     start.display()
                 );
             }
         }
     }
 
-    /// Parse and validate a lockbox.yaml file.
+    /// Parse and validate a esk.yaml file.
     pub fn load(path: &Path) -> Result<Self> {
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
@@ -172,9 +250,17 @@ impl Config {
             "env" if self.adapters.env.is_some() => Ok(()),
             "cloudflare" if self.adapters.cloudflare.is_some() => Ok(()),
             "convex" if self.adapters.convex.is_some() => Ok(()),
+            "fly" if self.adapters.fly.is_some() => Ok(()),
+            "netlify" if self.adapters.netlify.is_some() => Ok(()),
+            "vercel" if self.adapters.vercel.is_some() => Ok(()),
+            "github" if self.adapters.github.is_some() => Ok(()),
+            "heroku" if self.adapters.heroku.is_some() => Ok(()),
+            "supabase" if self.adapters.supabase.is_some() => Ok(()),
+            "railway" if self.adapters.railway.is_some() => Ok(()),
+            "gitlab" if self.adapters.gitlab.is_some() => Ok(()),
             "onepassword" => bail!(
                 "'onepassword' should be configured under 'plugins:', not 'adapters:'. \
-                 Move your onepassword config from adapters to plugins in lockbox.yaml."
+                 Move your onepassword config from adapters to plugins in esk.yaml."
             ),
             _ => bail!("adapter '{adapter}' is not configured"),
         }
@@ -336,6 +422,30 @@ impl Config {
         if self.adapters.convex.is_some() {
             names.push("convex");
         }
+        if self.adapters.fly.is_some() {
+            names.push("fly");
+        }
+        if self.adapters.netlify.is_some() {
+            names.push("netlify");
+        }
+        if self.adapters.vercel.is_some() {
+            names.push("vercel");
+        }
+        if self.adapters.github.is_some() {
+            names.push("github");
+        }
+        if self.adapters.heroku.is_some() {
+            names.push("heroku");
+        }
+        if self.adapters.supabase.is_some() {
+            names.push("supabase");
+        }
+        if self.adapters.railway.is_some() {
+            names.push("railway");
+        }
+        if self.adapters.gitlab.is_some() {
+            names.push("gitlab");
+        }
         names
     }
 }
@@ -488,7 +598,7 @@ mod tests {
     use super::*;
 
     fn write_yaml(dir: &Path, content: &str) -> PathBuf {
-        let path = dir.join("lockbox.yaml");
+        let path = dir.join("esk.yaml");
         std::fs::write(&path, content).unwrap();
         path
     }
@@ -497,33 +607,33 @@ mod tests {
     fn find_in_current_dir() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.path().join("lockbox.yaml"),
+            dir.path().join("esk.yaml"),
             "project: x\nenvironments: [dev]",
         )
         .unwrap();
         let found = Config::find(dir.path()).unwrap();
-        assert_eq!(found, dir.path().join("lockbox.yaml"));
+        assert_eq!(found, dir.path().join("esk.yaml"));
     }
 
     #[test]
     fn find_walks_up() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
-            dir.path().join("lockbox.yaml"),
+            dir.path().join("esk.yaml"),
             "project: x\nenvironments: [dev]",
         )
         .unwrap();
         let child = dir.path().join("sub");
         std::fs::create_dir(&child).unwrap();
         let found = Config::find(&child).unwrap();
-        assert_eq!(found, dir.path().join("lockbox.yaml"));
+        assert_eq!(found, dir.path().join("esk.yaml"));
     }
 
     #[test]
     fn find_not_found() {
         let dir = tempfile::tempdir().unwrap();
         let err = Config::find(dir.path()).unwrap_err();
-        assert!(err.to_string().contains("lockbox.yaml not found"));
+        assert!(err.to_string().contains("esk.yaml not found"));
     }
 
     #[test]
@@ -589,7 +699,7 @@ secrets:
 
     #[test]
     fn load_nonexistent_file() {
-        let err = Config::load(Path::new("/nonexistent/lockbox.yaml")).unwrap_err();
+        let err = Config::load(Path::new("/nonexistent/esk.yaml")).unwrap_err();
         assert!(err.to_string().contains("failed to read"));
     }
 
