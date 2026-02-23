@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 use console::style;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::store::SecretStore;
@@ -12,17 +12,29 @@ pub fn run(
     key: &str,
     env: &str,
     value: Option<&str>,
+    group: Option<&str>,
     no_sync: bool,
     strict: bool,
 ) -> Result<()> {
-    run_with_runner(config, key, env, value, no_sync, strict, &RealCommandRunner)
+    run_with_runner(
+        config,
+        key,
+        env,
+        value,
+        group,
+        no_sync,
+        strict,
+        &RealCommandRunner,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_with_runner(
     config: &Config,
     key: &str,
     env: &str,
     value: Option<&str>,
+    group: Option<&str>,
     no_sync: bool,
     strict: bool,
     runner: &dyn CommandRunner,
@@ -34,9 +46,67 @@ pub fn run_with_runner(
         );
     }
 
-    // Validate that the key is defined in config (warn if not, but allow it)
+    // If the key isn't in config, offer to register it
     if config.find_secret(key).is_none() {
-        cliclack::log::warning(format!("Secret '{}' is not defined in lockbox.yaml", key))?;
+        let config_path = config.root.join("lockbox.yaml");
+        if let Some(group) = group {
+            config::add_secret_to_config(&config_path, key, group)?;
+            cliclack::log::success(format!(
+                "Added '{}' to lockbox.yaml under {}",
+                key, group
+            ))?;
+        } else if atty::is(atty::Stream::Stdin) {
+            let add = cliclack::confirm(format!(
+                "Secret '{}' is not in lockbox.yaml. Add it?",
+                key
+            ))
+            .initial_value(true)
+            .interact()?;
+
+            if add {
+                let mut groups = config::secret_group_names(config);
+                let has_groups = !groups.is_empty();
+
+                let chosen_group = if has_groups {
+                    groups.push("(New group)".to_string());
+                    let options: Vec<(&str, &str, &str)> = groups
+                        .iter()
+                        .map(|g| (g.as_str(), g.as_str(), ""))
+                        .collect();
+                    let selected: &str = cliclack::select("Which group?")
+                        .items(&options)
+                        .interact()?;
+
+                    if selected == "(New group)" {
+                        let name: String = cliclack::input("Group name:")
+                            .interact()?;
+                        name
+                    } else {
+                        selected.to_string()
+                    }
+                } else {
+                    let name: String = cliclack::input("Group name:")
+                        .interact()?;
+                    name
+                };
+
+                config::add_secret_to_config(&config_path, key, &chosen_group)?;
+                cliclack::log::success(format!(
+                    "Added '{}' to lockbox.yaml under {}",
+                    key, chosen_group
+                ))?;
+            } else {
+                cliclack::log::warning(format!(
+                    "Secret '{}' is not defined in lockbox.yaml",
+                    key
+                ))?;
+            }
+        } else {
+            cliclack::log::warning(format!(
+                "Secret '{}' is not defined in lockbox.yaml",
+                key
+            ))?;
+        }
     }
 
     let secret_value = match value {

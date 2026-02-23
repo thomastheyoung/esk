@@ -26,13 +26,22 @@ fn main() -> Result<()> {
             key,
             env,
             value,
+            group,
             no_sync,
             strict,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::set::run(&config, key, env, value.as_deref(), *no_sync, *strict)?;
+            lockbox::cli::set::run(
+                &config,
+                key,
+                env,
+                value.as_deref(),
+                group.as_deref(),
+                *no_sync,
+                *strict,
+            )?;
         }
         Commands::Get { key, env } => {
             let cwd = std::env::current_dir()?;

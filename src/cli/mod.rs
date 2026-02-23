@@ -48,6 +48,9 @@ pub enum Commands {
         /// Secret value (prompts interactively if omitted)
         #[arg(long)]
         value: Option<String>,
+        /// Config group to register the secret under (skips interactive prompt)
+        #[arg(long)]
+        group: Option<String>,
         /// Skip auto-sync after setting
         #[arg(long)]
         no_sync: bool,

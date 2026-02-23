@@ -350,6 +350,142 @@ impl std::fmt::Display for ResolvedTarget {
     }
 }
 
+/// Add a secret key to a config file under the given group, preserving
+/// comments and formatting. Uses string-based YAML insertion rather than
+/// serde round-tripping to avoid stripping comments.
+pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Result<()> {
+    let content = std::fs::read_to_string(config_path)
+        .with_context(|| format!("failed to read {}", config_path.display()))?;
+
+    let lines: Vec<&str> = content.lines().collect();
+
+    // Find the `secrets:` top-level line
+    let secrets_idx = lines
+        .iter()
+        .position(|line| *line == "secrets:" || line.starts_with("secrets:"));
+
+    let new_content = match secrets_idx {
+        Some(secrets_idx) => {
+            // Find the extent of the secrets section (next top-level key or EOF)
+            let secrets_end = lines
+                .iter()
+                .enumerate()
+                .skip(secrets_idx + 1)
+                .find(|(_, line)| {
+                    !line.is_empty()
+                        && !line.starts_with(' ')
+                        && !line.starts_with('#')
+                        && !line.starts_with('\t')
+                })
+                .map(|(i, _)| i)
+                .unwrap_or(lines.len());
+
+            // Look for the group within the secrets section
+            let group_line = format!("  {}:", group);
+            let group_idx = lines
+                .iter()
+                .enumerate()
+                .skip(secrets_idx + 1)
+                .take(secrets_end - secrets_idx - 1)
+                .find(|(_, line)| line.trim_end() == group_line.trim_end())
+                .map(|(i, _)| i);
+
+            match group_idx {
+                Some(group_idx) => {
+                    // Check if key already exists in this group
+                    let key_line = format!("    {}:", key);
+                    let group_end = lines
+                        .iter()
+                        .enumerate()
+                        .skip(group_idx + 1)
+                        .find(|(i, line)| {
+                            *i >= secrets_end
+                                || (!line.is_empty()
+                                    && !line.starts_with("    ")
+                                    && !line.starts_with('#'))
+                        })
+                        .map(|(i, _)| i)
+                        .unwrap_or(lines.len());
+
+                    let key_exists = lines
+                        .iter()
+                        .skip(group_idx + 1)
+                        .take(group_end - group_idx - 1)
+                        .any(|line| {
+                            line.starts_with(&key_line)
+                                && (line.len() == key_line.len()
+                                    || line.as_bytes().get(key_line.len()) == Some(&b' ')
+                                    || line.as_bytes().get(key_line.len()) == Some(&b'\n'))
+                        });
+
+                    if key_exists {
+                        return Ok(()); // Already present, no-op
+                    }
+
+                    // Insert after last line of this group
+                    let mut parts = Vec::new();
+                    for line in &lines[..group_end] {
+                        parts.push(line.to_string());
+                    }
+                    parts.push(format!("    {}: {{}}", key));
+                    for line in &lines[group_end..] {
+                        parts.push(line.to_string());
+                    }
+                    let mut out = parts.join("\n");
+                    if content.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out
+                }
+                None => {
+                    // Group doesn't exist — insert at end of secrets section
+                    let mut parts = Vec::new();
+                    for line in &lines[..secrets_end] {
+                        parts.push(line.to_string());
+                    }
+                    parts.push(format!("  {}:", group));
+                    parts.push(format!("    {}: {{}}", key));
+                    for line in &lines[secrets_end..] {
+                        parts.push(line.to_string());
+                    }
+                    let mut out = parts.join("\n");
+                    if content.ends_with('\n') {
+                        out.push('\n');
+                    }
+                    out
+                }
+            }
+        }
+        None => {
+            // No secrets section — append at end
+            let mut out = content.clone();
+            if !out.ends_with('\n') {
+                out.push('\n');
+            }
+            out.push_str(&format!("secrets:\n  {}:\n    {}: {{}}\n", group, key));
+            out
+        }
+    };
+
+    // Atomic write: temp file + rename
+    let dir = config_path
+        .parent()
+        .unwrap_or_else(|| Path::new("."));
+    let tmp = tempfile::NamedTempFile::new_in(dir)
+        .context("failed to create temp file for config write")?;
+    std::fs::write(tmp.path(), &new_content)
+        .context("failed to write temp config file")?;
+    tmp.persist(config_path)
+        .context("failed to persist config file")?;
+
+    Ok(())
+}
+
+/// Return the sorted list of group (vendor) names from config secrets.
+pub fn secret_group_names(config: &Config) -> Vec<String> {
+    config.secrets.keys().cloned().collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -944,5 +1080,74 @@ adapters:
             environment: "prod".to_string(),
         };
         assert_eq!(t.to_string(), "cloudflare:prod");
+    }
+
+    // --- add_secret_to_config tests ---
+
+    #[test]
+    fn add_secret_to_existing_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]\nsecrets:\n  Stripe:\n    EXISTING_KEY: {}\n";
+        let path = write_yaml(dir.path(), yaml);
+        add_secret_to_config(&path, "NEW_KEY", "Stripe").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("    NEW_KEY: {}"));
+        // Should still have the existing key
+        assert!(content.contains("    EXISTING_KEY: {}"));
+        // Verify it parses
+        let config = Config::load(&path).unwrap();
+        assert!(config.find_secret("NEW_KEY").is_some());
+        assert!(config.find_secret("EXISTING_KEY").is_some());
+    }
+
+    #[test]
+    fn add_secret_to_new_group() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]\nsecrets:\n  Stripe:\n    SK: {}\n";
+        let path = write_yaml(dir.path(), yaml);
+        add_secret_to_config(&path, "CONVEX_URL", "Convex").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("  Convex:"));
+        assert!(content.contains("    CONVEX_URL: {}"));
+        // Verify it parses with both groups
+        let config = Config::load(&path).unwrap();
+        assert!(config.find_secret("SK").is_some());
+        assert!(config.find_secret("CONVEX_URL").is_some());
+    }
+
+    #[test]
+    fn add_secret_no_secrets_section() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]\n";
+        let path = write_yaml(dir.path(), yaml);
+        add_secret_to_config(&path, "API_KEY", "General").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("secrets:"));
+        assert!(content.contains("  General:"));
+        assert!(content.contains("    API_KEY: {}"));
+        let config = Config::load(&path).unwrap();
+        assert!(config.find_secret("API_KEY").is_some());
+    }
+
+    #[test]
+    fn add_secret_preserves_comments() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]\n# My secrets\nsecrets:\n  Stripe:\n    SK: {}\n";
+        let path = write_yaml(dir.path(), yaml);
+        add_secret_to_config(&path, "NEW", "Stripe").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# My secrets"));
+        assert!(content.contains("    NEW: {}"));
+    }
+
+    #[test]
+    fn add_secret_idempotent_when_key_exists() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]\nsecrets:\n  Stripe:\n    SK: {}\n";
+        let path = write_yaml(dir.path(), yaml);
+        add_secret_to_config(&path, "SK", "Stripe").unwrap();
+        let content = std::fs::read_to_string(&path).unwrap();
+        // Should only appear once
+        assert_eq!(content.matches("    SK:").count(), 1);
     }
 }
