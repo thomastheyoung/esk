@@ -16,6 +16,7 @@ Creates:
 - `.lockbox/store.key` — random 32-byte encryption key (hex-encoded, `0600` permissions)
 - `.lockbox/store.enc` — empty encrypted store
 - `.lockbox/sync-index.json` — empty sync tracker
+- `.lockbox/plugin-index.json` — empty plugin push tracker
 
 Idempotent — skips files that already exist. Warns if `.lockbox/store.key` is not in `.gitignore`.
 
@@ -26,14 +27,15 @@ Idempotent — skips files that already exist. Warns if `.lockbox/store.key` is 
 Delete a secret value from an environment.
 
 ```bash
-lockbox delete <KEY> --env <ENV> [--no-sync]
+lockbox delete <KEY> --env <ENV> [--no-sync] [--strict]
 ```
 
-| Argument    | Required | Description                                              |
-| ----------- | -------- | -------------------------------------------------------- |
-| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)              |
-| `--env`     | Yes      | Environment to delete from                               |
-| `--no-sync` | No       | Store only — skip auto-push to plugins and auto-sync     |
+| Argument    | Required | Description                                                            |
+| ----------- | -------- | ---------------------------------------------------------------------- |
+| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                            |
+| `--env`     | Yes      | Environment to delete from                                             |
+| `--no-sync` | No       | Store only — skip auto-push to plugins and auto-sync                   |
+| `--strict`  | No       | Fail if any plugin push fails and skip adapter sync                    |
 
 **Behavior:**
 
@@ -42,12 +44,14 @@ lockbox delete <KEY> --env <ENV> [--no-sync]
 3. Removes the value from the encrypted store and records a tombstone, incrementing the version counter.
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
 5. Unless `--no-sync`: runs `sync` for the affected environment (batch adapters regenerate without the deleted key; individual adapters call their delete command).
+6. With `--strict`: if any plugin push fails, exits with an error and skips adapter sync entirely.
 
 **Examples:**
 
 ```bash
 lockbox delete API_KEY --env dev                     # Delete + auto-sync
 lockbox delete API_KEY --env dev --no-sync           # Delete only, don't sync
+lockbox delete API_KEY --env dev --strict            # Fail hard on plugin errors
 ```
 
 ---
@@ -57,30 +61,38 @@ lockbox delete API_KEY --env dev --no-sync           # Delete only, don't sync
 Set a secret value for an environment.
 
 ```bash
-lockbox set <KEY> --env <ENV> [--value <VALUE>] [--no-sync]
+lockbox set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--strict]
 ```
 
-| Argument    | Required | Description                                                    |
-| ----------- | -------- | -------------------------------------------------------------- |
-| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                    |
-| `--env`     | Yes      | Target environment                                             |
-| `--value`   | No       | Secret value. If omitted, prompts interactively (hidden input) |
-| `--no-sync` | No       | Store only — skip auto-push to plugins and auto-sync           |
+| Argument    | Required | Description                                                                |
+| ----------- | -------- | -------------------------------------------------------------------------- |
+| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                                |
+| `--env`     | Yes      | Target environment                                                         |
+| `--value`   | No       | Secret value. If omitted, prompts interactively (hidden input)             |
+| `--group`   | No       | Config group to register the secret under (skips interactive prompt)        |
+| `--no-sync` | No       | Store only — skip auto-push to plugins and auto-sync                       |
+| `--strict`  | No       | Fail if any plugin push fails and skip adapter sync                        |
 
 **Behavior:**
 
 1. Validates the environment exists in config.
-2. Warns if the key isn't defined in `lockbox.yaml` (but still allows it).
+2. If the key isn't in `lockbox.yaml`:
+   - With `--group`: adds the secret to that group in `lockbox.yaml` non-interactively.
+   - Interactive mode (TTY, no `--group`): prompts "Add it?" with a group selector (existing groups or new).
+   - Non-interactive mode (piped stdin, no `--group`): warns but proceeds.
 3. Stores the value in the encrypted store, incrementing the version counter.
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
 5. Unless `--no-sync`: runs `sync` for the affected environment.
+6. With `--strict`: if any plugin push fails, exits with an error and skips adapter sync entirely.
 
 **Examples:**
 
 ```bash
-lockbox set API_KEY --env dev                     # Interactive prompt
-lockbox set API_KEY --env dev --value sk_test_123 # Inline value
-lockbox set API_KEY --env dev --no-sync           # Store only, don't sync
+lockbox set API_KEY --env dev                        # Interactive prompt for value
+lockbox set API_KEY --env dev --value sk_test_123    # Inline value
+lockbox set API_KEY --env dev --group Stripe          # Register under Stripe group
+lockbox set API_KEY --env dev --no-sync              # Store only, don't sync
+lockbox set API_KEY --env dev --strict               # Fail hard on plugin errors
 ```
 
 ---
@@ -123,19 +135,27 @@ lockbox list [--env <ENV>]
 
 **Output:**
 
-- Secrets grouped by vendor (as defined in `lockbox.yaml`).
-- Each key shows which environments have stored values.
-- Keys in the store but not in config appear under "Uncategorized".
+- Secrets grouped by vendor (as defined in `lockbox.yaml`), displayed as tables.
+- Column headers show each environment.
+- Per-cell status indicators reflect sync state across all targets for that key/environment:
+  - `✓` (green) — synced: all targets up to date.
+  - `●` (yellow) — pending: value changed since last sync.
+  - `✗` (red) — failed: last sync attempt failed.
+  - `○` (dim) — unset: key is targeted for this environment but has no stored value.
+  - Blank — not targeted: key has no configured targets for this environment.
+- Keys in the store but not in config appear under "Uncategorized (not in lockbox.yaml)".
 
 **Example output:**
 
 ```
   Stripe
-    STRIPE_SECRET_KEY  [dev, prod]
-    STRIPE_WEBHOOK_SECRET  [dev]
+                       dev  prod
+  STRIPE_SECRET_KEY     ✓    ●
+  STRIPE_WEBHOOK_SECRET ✓
 
   Convex
-    CONVEX_DEPLOY_KEY  (no values)
+                       dev  prod
+  CONVEX_DEPLOY_KEY     ○    ○
 ```
 
 ---
@@ -169,46 +189,60 @@ SHA-256 hash of each secret value is tracked per (secret, adapter, app, environm
 **Example output:**
 
 ```
-  synced STRIPE_SECRET_KEY:prod → cloudflare:web:prod
-  skip   STRIPE_SECRET_KEY:dev → env:web:dev
+  ✓ 2 synced
+    STRIPE_SECRET_KEY:prod  → cloudflare:web:prod
+    STRIPE_WEBHOOK_SECRET:dev  → env:web:dev
 
-  3 synced, 2 up to date
+  3 up to date  (use --verbose to show)
 ```
 
 ---
 
 ## `lockbox status`
 
-Show sync status and drift for all configured adapter targets.
+Show sync status as an actionable dashboard.
 
 ```bash
-lockbox status [--env <ENV>] [--all] [--group-by <AXIS>]
+lockbox status [--env <ENV>] [--all]
 ```
 
-| Argument     | Required | Description                                              |
-| ------------ | -------- | -------------------------------------------------------- |
-| `--env`      | No       | Filter to a single environment                           |
-| `--all`      | No       | Show all targets including synced ones                   |
-| `--group-by` | No       | Group output by axis: `status` (default), `env`, `target`, or `key` |
+| Argument | Required | Description                                    |
+| -------- | -------- | ---------------------------------------------- |
+| `--env`  | No       | Filter to a single environment                 |
+| `--all`  | No       | Show all targets including synced ones          |
 
-Shows each (secret, target) pair with its sync state. Targets for plugins are excluded — only adapter targets are shown. Also displays plugin push status when plugins are configured.
+Displays a multi-section dashboard with the following sections:
 
-| Status         | Meaning                                             |
-| -------------- | --------------------------------------------------- |
-| `synced`       | Value hash matches last successful sync             |
-| `pending`      | Value has changed since last sync                   |
-| `never synced` | No sync record exists                               |
-| `no value`     | Secret is defined in config but has no stored value |
-| `failed`       | Last sync attempt failed (shows error)              |
+- **Summary** — Project name, store version, and target counts with status breakdown.
+- **Targets** — Adapter health from preflight checks (pass/fail per adapter).
+- **Sync** — Secrets grouped by status: failed, pending, unset, and synced (synced hidden unless `--all`). Each entry shows relative timestamps (e.g., "3h ago") and error details for failures.
+- **Coverage** — Gaps where a secret is set in some environments but not others, and orphaned secrets (in store but not in config).
+- **Plugins** — Push state per (plugin, environment): current, stale (version behind), failed, or never pushed.
+- **Next steps** — Actionable commands to fix issues (retry failed syncs, deploy pending changes, fill coverage gaps, push stale plugins, remove orphans).
 
-Also displays the current store version number.
+The dashboard closes with the current store version.
 
 **Example output:**
 
 ```
-  STRIPE_SECRET_KEY:dev → env:web:dev  synced
-  STRIPE_SECRET_KEY:prod → cloudflare:web:prod  pending
-  DATABASE_URL:dev → env:web:dev  never synced
+  myapp · v5 · 6 targets (3 synced, 2 pending, 1 unset)
+
+  Targets
+    ✓ env            ready
+    ✓ cloudflare     authenticated
+
+  Sync
+    ● 2 pending
+       STRIPE_SECRET_KEY:prod  → cloudflare:web:prod  last synced 3h ago
+       API_KEY:dev  → env:web:dev  never synced
+    ○ 1 unset
+       DATABASE_URL:dev  → env:web:dev
+    ✓ 3 synced  (--all to show)
+
+  Next steps
+    lockbox sync --env prod  deploy 1 pending change
+    lockbox sync --env dev   deploy 1 pending change
+    lockbox set DATABASE_URL --env dev  fill coverage gap
 
   Store version: 5
 ```

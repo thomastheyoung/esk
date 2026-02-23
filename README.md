@@ -45,14 +45,15 @@ lockbox set API_KEY --env dev
 lockbox sync
 ```
 
-`lockbox init` creates four files:
+`lockbox init` creates five files:
 
-| File                       | Purpose                                                         | Git           |
-| -------------------------- | --------------------------------------------------------------- | ------------- |
-| `lockbox.yaml`             | Project config (environments, apps, adapters, plugins, secrets) | Commit        |
-| `.lockbox/store.enc`       | Encrypted secret store                                          | Commit        |
-| `.lockbox/store.key`       | 32-byte encryption key (hex)                                    | **Gitignore** |
-| `.lockbox/sync-index.json` | Sync state tracker                                              | Optional      |
+| File                         | Purpose                                                         | Git           |
+| ---------------------------- | --------------------------------------------------------------- | ------------- |
+| `lockbox.yaml`               | Project config (environments, apps, adapters, plugins, secrets) | Commit        |
+| `.lockbox/store.enc`         | Encrypted secret store                                          | Commit        |
+| `.lockbox/store.key`         | 32-byte encryption key (hex)                                    | **Gitignore** |
+| `.lockbox/sync-index.json`   | Sync state tracker                                              | Optional      |
+| `.lockbox/plugin-index.json` | Plugin push state tracker                                       | Optional      |
 
 ## Configuration
 
@@ -150,12 +151,12 @@ Target format: `app:environment` (e.g., `web:prod`) or just `environment` for ad
 | Command                | Description                                        |
 | ---------------------- | -------------------------------------------------- |
 | `lockbox init`         | Initialize encrypted store and config              |
-| `lockbox set <KEY>`    | Set a secret value                                 |
+| `lockbox set <KEY>`    | Set a secret value (with optional config registration) |
 | `lockbox get <KEY>`    | Retrieve a secret value                            |
 | `lockbox delete <KEY>` | Delete a secret value                              |
-| `lockbox list`         | List all secrets and their status                  |
+| `lockbox list`         | List all secrets with per-environment sync status   |
 | `lockbox sync`         | Sync secrets to configured adapter targets         |
-| `lockbox status`       | Show sync status and drift                         |
+| `lockbox status`       | Show actionable sync dashboard                     |
 | `lockbox push`         | Push secrets to configured plugins                 |
 | `lockbox pull`         | Pull secrets from configured plugins and reconcile |
 
@@ -167,6 +168,7 @@ See [API.md](API.md) for the full command reference with all flags and behaviors
 # Set secrets (interactive prompt for value)
 lockbox set STRIPE_SECRET_KEY --env dev
 lockbox set STRIPE_SECRET_KEY --env prod --value sk_live_...
+lockbox set NEW_KEY --env dev --group Stripe  # Register in config under Stripe group
 
 # Retrieve a secret
 lockbox get STRIPE_SECRET_KEY --env dev
@@ -187,6 +189,7 @@ lockbox sync --dry-run        # Preview without writing
 # Check sync status
 lockbox status
 lockbox status --env dev
+lockbox status --all          # Include synced targets in output
 
 # Push/pull to storage plugins
 lockbox push --env prod                   # Push to all plugins
@@ -227,7 +230,7 @@ This means you can use 1Password for team sharing and Dropbox as a backup simult
 
 ### Auto-push
 
-The `set` and `delete` commands automatically push to all configured plugins and sync to adapter targets (unless `--no-sync` is used).
+The `set` and `delete` commands automatically push to all configured plugins and sync to adapter targets (unless `--no-sync` is used). Use `--strict` on either command to fail immediately if any plugin push fails, skipping adapter sync entirely.
 
 ## Troubleshooting
 

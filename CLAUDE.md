@@ -39,7 +39,7 @@ tests/
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (64)
+└── cli_integration.rs      # CLI command tests (75)
 ```
 
 ## Core design
@@ -164,7 +164,7 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 302 tests
+cargo test                    # Run all 331 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
@@ -175,7 +175,7 @@ cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-302 tests total: 223 unit (inline `#[cfg(test)]`) + 79 integration (`tests/`).
+331 tests total: 242 unit (inline `#[cfg(test)]`) + 89 integration (`tests/`).
 
 ### Test infrastructure
 
