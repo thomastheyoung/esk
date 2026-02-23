@@ -1,6 +1,6 @@
 # Plugins
 
-Plugins store and back up the entire secret list via `lockbox push` and `lockbox pull`. Unlike adapters (which deploy individual secrets to targets), plugins operate on the full store per environment.
+Plugins store and back up the entire secret list via `esk push` and `esk pull`. Unlike adapters (which deploy individual secrets to targets), plugins operate on the full store per environment.
 
 For sync adapters (env files, Cloudflare, Convex), see [ADAPTERS.md](ADAPTERS.md).
 
@@ -19,21 +19,21 @@ Uses the 1Password CLI (`op`) to push and pull entire environment snapshots as v
 
 ### How it works
 
-**Push** (`lockbox push --env <ENV>`):
+**Push** (`esk push --env <ENV>`):
 
 1. Collects all secrets for the environment from the local store.
-2. Groups them by vendor (using the `secrets` section of `lockbox.yaml`).
+2. Groups them by vendor (using the `secrets` section of `esk.yaml`).
 3. Creates or updates a 1Password item with concealed fields organized into vendor sections.
 4. Stores a `_Metadata.version` field for reconciliation.
 
-**Pull** (`lockbox pull --env <ENV>`):
+**Pull** (`esk pull --env <ENV>`):
 
 1. Fetches the 1Password item for the environment.
 2. Parses fields back into key-value pairs (section label = vendor, field label = key).
 3. Reads the version from `_Metadata`.
 4. Reconciles with the local store and other plugins using version comparison.
 
-**Auto-push**: The `set` command automatically pushes to all configured plugins after storing a secret.
+**Auto-push**: The `set` and `delete` commands automatically push to all configured plugins after modifying the store (unless `--no-sync` is used).
 
 ### Prerequisites
 
@@ -98,7 +98,7 @@ The version field enables conflict-free merging between team members:
 
 ## Cloud file
 
-Stores the secret payload in a local or cloud-synced folder (Dropbox, Google Drive, OneDrive, or any folder). The cloud sync itself is handled by the respective desktop app — lockbox just reads and writes files in the configured path.
+Stores the secret payload in a local or cloud-synced folder (Dropbox, Google Drive, OneDrive, or any folder). The cloud sync itself is handled by the respective desktop app — esk just reads and writes files in the configured path.
 
 ### How it works
 
@@ -107,7 +107,7 @@ Files are stored per environment (`secrets-{env}.enc` or `secrets-{env}.json`), 
 **Encrypted format** (`format: encrypted`):
 
 - **Push**: Encrypts the environment's secrets and writes to `{path}/secrets-{env}.enc`.
-- **Pull**: Reads `{path}/secrets-{env}.enc`, decrypts with the local `.lockbox/store.key`, returns the payload.
+- **Pull**: Reads `{path}/secrets-{env}.enc`, decrypts with the local `.esk/store.key`, returns the payload.
 - The cloud copy is encrypted — it's safe to store in shared or less-trusted locations.
 
 **Cleartext format** (`format: cleartext`):
@@ -164,12 +164,12 @@ Per-env files use bare keys (e.g., `KEY`) rather than composite keys (`KEY:env`)
 
 ### Path interpolation and expansion
 
-- `{project}` is replaced with the project name from `lockbox.yaml`
+- `{project}` is replaced with the project name from `esk.yaml`
 - `~` is expanded to the `$HOME` environment variable
 
 Examples:
 
-- `~/Dropbox/lockbox/{project}` → `/Users/alice/Dropbox/lockbox/myapp`
+- `~/Dropbox/esk/{project}` → `/Users/alice/Dropbox/esk/myapp`
 - `~/Dropbox/secrets/myproject` → `/Users/alice/Dropbox/secrets/myproject`
 - `/absolute/path` → unchanged
 
@@ -177,7 +177,7 @@ Examples:
 
 ## Multi-plugin reconciliation
 
-When multiple plugins are configured, `lockbox pull` reconciles across all of them:
+When multiple plugins are configured, `esk pull` reconciles across all of them:
 
 1. Pull from every configured plugin (or just `--only <name>`).
 2. Find the source with the highest version (including local).
@@ -193,6 +193,6 @@ This means you can use 1Password for team sharing and Dropbox as a backup — pu
 Use `--only` to push or pull from a single plugin:
 
 ```bash
-lockbox push --env prod --only onepassword
-lockbox pull --env dev --only dropbox
+esk push --env prod --only onepassword
+esk pull --env dev --only dropbox
 ```

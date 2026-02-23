@@ -12,6 +12,63 @@ pub struct CloudflareAdapter<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
+impl<'a> CloudflareAdapter<'a> {
+    fn sync_pages_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+        let project = self
+            .adapter_config
+            .pages_project
+            .as_deref()
+            .context("cloudflare pages_project is required when mode is 'pages'")?;
+
+        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["pages", "secret", "put", key, "--project", project];
+        append_env_flags(&mut args, &flag_parts);
+
+        let output = self
+            .runner
+            .run(
+                "wrangler",
+                &args,
+                CommandOpts {
+                    stdin: Some(value.as_bytes().to_vec()),
+                    ..Default::default()
+                },
+            )
+            .with_context(|| format!("failed to run wrangler pages for {key}"))?;
+
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("wrangler pages secret put failed for {key}: {stderr}");
+        }
+
+        Ok(())
+    }
+
+    fn delete_pages_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
+        let project = self
+            .adapter_config
+            .pages_project
+            .as_deref()
+            .context("cloudflare pages_project is required when mode is 'pages'")?;
+
+        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["pages", "secret", "delete", key, "--project", project, "--force"];
+        append_env_flags(&mut args, &flag_parts);
+
+        let output = self
+            .runner
+            .run("wrangler", &args, CommandOpts::default())
+            .with_context(|| format!("failed to run wrangler pages delete for {key}"))?;
+
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("wrangler pages secret delete failed for {key}: {stderr}");
+        }
+
+        Ok(())
+    }
+}
+
 impl<'a> SyncAdapter for CloudflareAdapter<'a> {
     fn name(&self) -> &str {
         "cloudflare"
@@ -38,6 +95,10 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+        if self.adapter_config.mode == "pages" {
+            return self.sync_pages_secret(key, value, target);
+        }
+
         let app = target
             .app
             .as_deref()
@@ -75,6 +136,10 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
+        if self.adapter_config.mode == "pages" {
+            return self.delete_pages_secret(key, target);
+        }
+
         let app = target
             .app
             .as_deref()
@@ -487,5 +552,126 @@ adapters:
             .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
+    }
+
+    // --- Pages mode tests ---
+
+    fn make_pages_config(dir: &std::path::Path) -> Config {
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+adapters:
+  cloudflare:
+    mode: pages
+    pages_project: my-pages-app
+    env_flags:
+      prod: "--env production"
+"#;
+        let path = dir.join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        Config::load(&path).unwrap()
+    }
+
+    #[test]
+    fn pages_sync_correct_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_pages_config(dir.path());
+        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = CloudflareAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("MY_KEY", "secret_val", &make_target(None, "dev"))
+            .unwrap();
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].0, "wrangler");
+        assert_eq!(
+            calls[0].1,
+            vec!["pages", "secret", "put", "MY_KEY", "--project", "my-pages-app"]
+        );
+        assert_eq!(calls[0].3.as_ref().unwrap(), b"secret_val");
+    }
+
+    #[test]
+    fn pages_sync_with_env_flags() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_pages_config(dir.path());
+        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = CloudflareAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "val", &make_target(None, "prod"))
+            .unwrap();
+        let calls = runner.take_calls();
+        assert_eq!(
+            calls[0].1,
+            vec!["pages", "secret", "put", "KEY", "--project", "my-pages-app", "--env", "production"]
+        );
+    }
+
+    #[test]
+    fn pages_delete_correct_args() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_pages_config(dir.path());
+        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = CloudflareAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        adapter
+            .delete_secret("MY_KEY", &make_target(None, "dev"))
+            .unwrap();
+        let calls = runner.take_calls();
+        assert_eq!(
+            calls[0].1,
+            vec!["pages", "secret", "delete", "MY_KEY", "--project", "my-pages-app", "--force"]
+        );
+    }
+
+    #[test]
+    fn pages_missing_project() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+adapters:
+  cloudflare:
+    mode: pages
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let runner = MockRunner::new(vec![]);
+        let adapter = CloudflareAdapter {
+            config: &config,
+            adapter_config,
+            runner: &runner,
+        };
+        let err = adapter
+            .sync_secret("KEY", "val", &make_target(None, "dev"))
+            .unwrap_err();
+        assert!(err.to_string().contains("pages_project is required"));
     }
 }

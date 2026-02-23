@@ -5,5 +5,5 @@ edition = "2021"
 publish = false
 
 [dependencies]
-lockbox = { path = ".." }
+esk = { path = ".." }
 anyhow = "1"

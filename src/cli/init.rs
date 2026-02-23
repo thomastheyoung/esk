@@ -7,15 +7,15 @@ use crate::store::SecretStore;
 use crate::tracker::SyncIndex;
 
 pub fn run(cwd: &Path) -> Result<()> {
-    let config_path = cwd.join("lockbox.yaml");
-    let lockbox_dir = cwd.join(".lockbox");
-    let store_path = lockbox_dir.join("store.enc");
-    let key_path = lockbox_dir.join("store.key");
-    let sync_index_path = lockbox_dir.join("sync-index.json");
+    let config_path = cwd.join("esk.yaml");
+    let esk_dir = cwd.join(".esk");
+    let store_path = esk_dir.join("store.enc");
+    let key_path = esk_dir.join("store.key");
+    let sync_index_path = esk_dir.join("sync-index.json");
 
-    cliclack::intro(style("lockbox init").bold())?;
+    cliclack::intro(style("esk init").bold())?;
 
-    // Scaffold lockbox.yaml if it doesn't exist
+    // Scaffold esk.yaml if it doesn't exist
     if !config_path.is_file() {
         let scaffold = r#"project: myapp
 
@@ -39,7 +39,7 @@ secrets:
     #   targets:
     #     env: [web:dev, web:prod]
 "#;
-        std::fs::write(&config_path, scaffold).context("failed to write lockbox.yaml")?;
+        std::fs::write(&config_path, scaffold).context("failed to write esk.yaml")?;
         cliclack::log::success(format!("Created {}", style(config_path.display()).dim()))?;
     } else {
         cliclack::log::remark(format!("Exists  {}", style(config_path.display()).dim()))?;
@@ -75,7 +75,7 @@ secrets:
     }
 
     // Create empty plugin index
-    let plugin_index_path = lockbox_dir.join("plugin-index.json");
+    let plugin_index_path = esk_dir.join("plugin-index.json");
     if !plugin_index_path.is_file() {
         let index = PluginIndex::new(&plugin_index_path);
         index.save()?;
@@ -94,17 +94,17 @@ secrets:
     let gitignore_path = cwd.join(".gitignore");
     if gitignore_path.is_file() {
         let contents = std::fs::read_to_string(&gitignore_path)?;
-        if !contents.contains(".lockbox/store.key") {
+        if !contents.contains(".esk/store.key") {
             cliclack::log::warning(format!(
                 "Add {} to your .gitignore",
-                style(".lockbox/store.key").bold()
+                style(".esk/store.key").bold()
             ))?;
         }
     }
 
     cliclack::outro(format!(
         "Run {} to add secrets",
-        style("lockbox set <KEY> --env <ENV>").cyan()
+        style("esk set <KEY> --env <ENV>").cyan()
     ))?;
     Ok(())
 }

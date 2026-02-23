@@ -420,7 +420,7 @@ plugins:
     vault: V
     item_pattern: test
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -465,7 +465,7 @@ plugins:
     vault: SecretVault
     item_pattern: test
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -518,7 +518,7 @@ plugins:
     vault: V
     item_pattern: test
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -549,7 +549,7 @@ plugins:
     vault: V
     item_pattern: "{project} - {Environment}"
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -581,7 +581,7 @@ plugins:
     vault: V
     item_pattern: "{environment}"
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -613,7 +613,7 @@ plugins:
     vault: V
     item_pattern: "{project} - {Environment}"
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -666,7 +666,7 @@ secrets:
     SECRET:
       targets: {}
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -731,7 +731,7 @@ secrets:
     API_KEY:
       targets: {}
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -786,7 +786,7 @@ plugins:
     vault: V
     item_pattern: test
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
@@ -843,7 +843,7 @@ plugins:
     vault: V
     item_pattern: test
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();

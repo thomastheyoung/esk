@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-REPO="thomastheyoung/lockbox"
-INSTALL_DIR="${LOCKBOX_INSTALL_DIR:-$HOME/.local/bin}"
+REPO="thomastheyoung/esk"
+INSTALL_DIR="${ESK_INSTALL_DIR:-$HOME/.local/bin}"
 
 # Detect OS
 case "$(uname -s)" in
@@ -21,8 +21,8 @@ esac
 target="${arch}-${os}"
 
 # Determine version
-if [ -n "${LOCKBOX_VERSION:-}" ]; then
-  tag="v${LOCKBOX_VERSION#v}"
+if [ -n "${ESK_VERSION:-}" ]; then
+  tag="v${ESK_VERSION#v}"
 else
   tag=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest" \
     | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p')
@@ -32,9 +32,9 @@ else
   fi
 fi
 
-url="https://github.com/${REPO}/releases/download/${tag}/lockbox-${target}.tar.gz"
+url="https://github.com/${REPO}/releases/download/${tag}/esk-${target}.tar.gz"
 
-echo "Installing lockbox ${tag} for ${target}..."
+echo "Installing esk ${tag} for ${target}..."
 
 # Download and extract
 tmpdir=$(mktemp -d)
@@ -44,10 +44,10 @@ curl -fsSL "$url" | tar xz -C "$tmpdir"
 
 # Install
 mkdir -p "$INSTALL_DIR"
-mv "$tmpdir/lockbox-${target}/lockbox" "$INSTALL_DIR/lockbox"
-chmod +x "$INSTALL_DIR/lockbox"
+mv "$tmpdir/esk-${target}/esk" "$INSTALL_DIR/esk"
+chmod +x "$INSTALL_DIR/esk"
 
-echo "Installed lockbox to ${INSTALL_DIR}/lockbox"
+echo "Installed esk to ${INSTALL_DIR}/esk"
 
 # Check PATH
 case ":${PATH}:" in

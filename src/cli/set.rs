@@ -48,13 +48,13 @@ pub fn run_with_runner(
 
     // If the key isn't in config, offer to register it
     if config.find_secret(key).is_none() {
-        let config_path = config.root.join("lockbox.yaml");
+        let config_path = config.root.join("esk.yaml");
         if let Some(group) = group {
             config::add_secret_to_config(&config_path, key, group)?;
-            cliclack::log::success(format!("Added '{}' to lockbox.yaml under {}", key, group))?;
+            cliclack::log::success(format!("Added '{}' to esk.yaml under {}", key, group))?;
         } else if atty::is(atty::Stream::Stdin) {
             let add =
-                cliclack::confirm(format!("Secret '{}' is not in lockbox.yaml. Add it?", key))
+                cliclack::confirm(format!("Secret '{}' is not in esk.yaml. Add it?", key))
                     .initial_value(true)
                     .interact()?;
 
@@ -85,14 +85,14 @@ pub fn run_with_runner(
 
                 config::add_secret_to_config(&config_path, key, &chosen_group)?;
                 cliclack::log::success(format!(
-                    "Added '{}' to lockbox.yaml under {}",
+                    "Added '{}' to esk.yaml under {}",
                     key, chosen_group
                 ))?;
             } else {
-                cliclack::log::warning(format!("Secret '{}' is not defined in lockbox.yaml", key))?;
+                cliclack::log::warning(format!("Secret '{}' is not defined in esk.yaml", key))?;
             }
         } else {
-            cliclack::log::warning(format!("Secret '{}' is not defined in lockbox.yaml", key))?;
+            cliclack::log::warning(format!("Secret '{}' is not defined in esk.yaml", key))?;
         }
     }
 
@@ -115,7 +115,7 @@ pub fn run_with_runner(
     // Auto-push to all configured plugins
     let mut plugin_failures = 0u32;
     if !config.plugins.is_empty() {
-        let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
+        let plugin_index_path = config.root.join(".esk/plugin-index.json");
         let mut plugin_index = PluginIndex::load(&plugin_index_path);
         let all_plugins = plugins::build_plugins(config, runner);
         for plugin in &all_plugins {
@@ -147,8 +147,8 @@ pub fn run_with_runner(
             bail!(
                 "{plugin_failures} plugin(s) failed to push (--strict). Adapter sync skipped.\n\
                  Fix the plugin issue, then run:\n  \
-                 lockbox push --env {env}\n  \
-                 lockbox sync --env {env}"
+                 esk push --env {env}\n  \
+                 esk sync --env {env}"
             );
         }
     }
@@ -158,7 +158,7 @@ pub fn run_with_runner(
 
     if plugin_failures > 0 {
         bail!(
-            "{plugin_failures} plugin(s) failed to push. Run `lockbox push --env {env}` to retry."
+            "{plugin_failures} plugin(s) failed to push. Run `esk push --env {env}` to retry."
         );
     }
 

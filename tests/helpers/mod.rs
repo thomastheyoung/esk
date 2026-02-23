@@ -341,6 +341,46 @@ secrets:
         railway: [dev, prod]
 "#;
 
+/// AWS SSM adapter config for integration testing.
+pub const AWS_SSM_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  aws_ssm:
+    path_prefix: "/{project}/{environment}/"
+    region: us-east-1
+    env_flags:
+      prod: "--no-paginate"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        aws_ssm: [dev, prod]
+"#;
+
+/// Kubernetes adapter config for integration testing.
+pub const KUBERNETES_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+adapters:
+  kubernetes:
+    namespace:
+      dev: testapp-dev
+      prod: testapp-prod
+    context:
+      prod: prod-cluster
+    env_flags: {}
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        kubernetes: [dev, prod]
+"#;
+
 /// GitLab adapter config for integration testing.
 pub const GITLAB_CONFIG: &str = r#"
 project: testapp

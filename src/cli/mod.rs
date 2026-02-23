@@ -12,7 +12,7 @@ use clap::{Parser, Subcommand};
 
 #[derive(Parser)]
 #[command(
-    name = "lockbox",
+    name = "esk",
     about = "Encrypted secrets management with multi-target sync"
 )]
 pub struct Cli {

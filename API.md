@@ -1,33 +1,33 @@
 # API reference
 
-Complete command reference for lockbox.
+Complete command reference for esk.
 
-## `lockbox init`
+## `esk init`
 
-Initialize a new lockbox project in the current directory.
+Initialize a new esk project in the current directory.
 
 ```bash
-lockbox init
+esk init
 ```
 
 Creates:
 
-- `lockbox.yaml` — scaffold config with example structure
-- `.lockbox/store.key` — random 32-byte encryption key (hex-encoded, `0600` permissions)
-- `.lockbox/store.enc` — empty encrypted store
-- `.lockbox/sync-index.json` — empty sync tracker
-- `.lockbox/plugin-index.json` — empty plugin push tracker
+- `esk.yaml` — scaffold config with example structure
+- `.esk/store.key` — random 32-byte encryption key (hex-encoded, `0600` permissions)
+- `.esk/store.enc` — empty encrypted store
+- `.esk/sync-index.json` — empty sync tracker
+- `.esk/plugin-index.json` — empty plugin push tracker
 
-Idempotent — skips files that already exist. Warns if `.lockbox/store.key` is not in `.gitignore`.
+Idempotent — skips files that already exist. Warns if `.esk/store.key` is not in `.gitignore`.
 
 ---
 
-## `lockbox delete`
+## `esk delete`
 
 Delete a secret value from an environment.
 
 ```bash
-lockbox delete <KEY> --env <ENV> [--no-sync] [--strict]
+esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 ```
 
 | Argument    | Required | Description                                                            |
@@ -40,7 +40,7 @@ lockbox delete <KEY> --env <ENV> [--no-sync] [--strict]
 **Behavior:**
 
 1. Validates the environment exists in config.
-2. Warns if the key isn't defined in `lockbox.yaml`.
+2. Warns if the key isn't defined in `esk.yaml`.
 3. Removes the value from the encrypted store and records a tombstone, incrementing the version counter.
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
 5. Unless `--no-sync`: runs `sync` for the affected environment (batch adapters regenerate without the deleted key; individual adapters call their delete command).
@@ -49,19 +49,19 @@ lockbox delete <KEY> --env <ENV> [--no-sync] [--strict]
 **Examples:**
 
 ```bash
-lockbox delete API_KEY --env dev                     # Delete + auto-sync
-lockbox delete API_KEY --env dev --no-sync           # Delete only, don't sync
-lockbox delete API_KEY --env dev --strict            # Fail hard on plugin errors
+esk delete API_KEY --env dev                     # Delete + auto-sync
+esk delete API_KEY --env dev --no-sync           # Delete only, don't sync
+esk delete API_KEY --env dev --strict            # Fail hard on plugin errors
 ```
 
 ---
 
-## `lockbox set`
+## `esk set`
 
 Set a secret value for an environment.
 
 ```bash
-lockbox set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--strict]
+esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--strict]
 ```
 
 | Argument    | Required | Description                                                                |
@@ -76,8 +76,8 @@ lockbox set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [-
 **Behavior:**
 
 1. Validates the environment exists in config.
-2. If the key isn't in `lockbox.yaml`:
-   - With `--group`: adds the secret to that group in `lockbox.yaml` non-interactively.
+2. If the key isn't in `esk.yaml`:
+   - With `--group`: adds the secret to that group in `esk.yaml` non-interactively.
    - Interactive mode (TTY, no `--group`): prompts "Add it?" with a group selector (existing groups or new).
    - Non-interactive mode (piped stdin, no `--group`): warns but proceeds.
 3. Stores the value in the encrypted store, incrementing the version counter.
@@ -88,21 +88,21 @@ lockbox set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [-
 **Examples:**
 
 ```bash
-lockbox set API_KEY --env dev                        # Interactive prompt for value
-lockbox set API_KEY --env dev --value sk_test_123    # Inline value
-lockbox set API_KEY --env dev --group Stripe          # Register under Stripe group
-lockbox set API_KEY --env dev --no-sync              # Store only, don't sync
-lockbox set API_KEY --env dev --strict               # Fail hard on plugin errors
+esk set API_KEY --env dev                        # Interactive prompt for value
+esk set API_KEY --env dev --value sk_test_123    # Inline value
+esk set API_KEY --env dev --group Stripe          # Register under Stripe group
+esk set API_KEY --env dev --no-sync              # Store only, don't sync
+esk set API_KEY --env dev --strict               # Fail hard on plugin errors
 ```
 
 ---
 
-## `lockbox get`
+## `esk get`
 
 Retrieve a secret value.
 
 ```bash
-lockbox get <KEY> --env <ENV>
+esk get <KEY> --env <ENV>
 ```
 
 | Argument | Required | Description                  |
@@ -115,18 +115,18 @@ Prints the raw value to stdout. Exits with an error if the key/environment combi
 **Examples:**
 
 ```bash
-lockbox get STRIPE_SECRET_KEY --env dev
-lockbox get DATABASE_URL --env prod | pbcopy  # Copy to clipboard
+esk get STRIPE_SECRET_KEY --env dev
+esk get DATABASE_URL --env prod | pbcopy  # Copy to clipboard
 ```
 
 ---
 
-## `lockbox list`
+## `esk list`
 
 List all secrets and their status.
 
 ```bash
-lockbox list [--env <ENV>]
+esk list [--env <ENV>]
 ```
 
 | Argument | Required | Description                    |
@@ -135,7 +135,7 @@ lockbox list [--env <ENV>]
 
 **Output:**
 
-- Secrets grouped by vendor (as defined in `lockbox.yaml`), displayed as tables.
+- Secrets grouped by vendor (as defined in `esk.yaml`), displayed as tables.
 - Column headers show each environment.
 - Per-cell status indicators reflect sync state across all targets for that key/environment:
   - `✓` (green) — synced: all targets up to date.
@@ -143,7 +143,7 @@ lockbox list [--env <ENV>]
   - `✗` (red) — failed: last sync attempt failed.
   - `○` (dim) — unset: key is targeted for this environment but has no stored value.
   - Blank — not targeted: key has no configured targets for this environment.
-- Keys in the store but not in config appear under "Uncategorized (not in lockbox.yaml)".
+- Keys in the store but not in config appear under "Uncategorized (not in esk.yaml)".
 
 **Example output:**
 
@@ -160,12 +160,12 @@ lockbox list [--env <ENV>]
 
 ---
 
-## `lockbox sync`
+## `esk sync`
 
 Sync secrets to configured adapter targets.
 
 ```bash
-lockbox sync [--env <ENV>] [--force] [--dry-run] [--verbose]
+esk sync [--env <ENV>] [--force] [--dry-run] [--verbose]
 ```
 
 | Argument           | Required | Description                                        |
@@ -184,7 +184,7 @@ Targets whose adapter name matches a plugin (not an adapter) are skipped — plu
 
 **Change detection:**
 
-SHA-256 hash of each secret value is tracked per (secret, adapter, app, environment) tuple in `.lockbox/sync-index.json`. Secrets are skipped when the hash matches unless `--force` is used. Failed syncs are always retried.
+SHA-256 hash of each secret value is tracked per (secret, adapter, app, environment) tuple in `.esk/sync-index.json`. Secrets are skipped when the hash matches unless `--force` is used. Failed syncs are always retried.
 
 **Example output:**
 
@@ -198,12 +198,12 @@ SHA-256 hash of each secret value is tracked per (secret, adapter, app, environm
 
 ---
 
-## `lockbox status`
+## `esk status`
 
 Show sync status as an actionable dashboard.
 
 ```bash
-lockbox status [--env <ENV>] [--all]
+esk status [--env <ENV>] [--all]
 ```
 
 | Argument | Required | Description                                    |
@@ -228,8 +228,8 @@ The dashboard closes with the current store version.
   myapp · v5 · 6 targets (3 synced, 2 pending, 1 unset)
 
   Targets
-    ✓ env            ready
-    ✓ cloudflare     authenticated
+    ✓ env            writable
+    ✓ cloudflare     wrangler authenticated
 
   Sync
     ● 2 pending
@@ -240,21 +240,21 @@ The dashboard closes with the current store version.
     ✓ 3 synced  (--all to show)
 
   Next steps
-    lockbox sync --env prod  deploy 1 pending change
-    lockbox sync --env dev   deploy 1 pending change
-    lockbox set DATABASE_URL --env dev  fill coverage gap
+    esk sync --env prod  deploy 1 pending change
+    esk sync --env dev   deploy 1 pending change
+    esk set DATABASE_URL --env dev  fill coverage gap
 
   Store version: 5
 ```
 
 ---
 
-## `lockbox push`
+## `esk push`
 
 Push secrets to configured storage plugins.
 
 ```bash
-lockbox push --env <ENV> [--only <PLUGIN>]
+esk push --env <ENV> [--only <PLUGIN>]
 ```
 
 | Argument | Required | Description                    |
@@ -262,26 +262,26 @@ lockbox push --env <ENV> [--only <PLUGIN>]
 | `--env`  | Yes      | Environment to push            |
 | `--only` | No       | Push to a specific plugin only |
 
-**Requires:** At least one plugin configured in `lockbox.yaml` and its dependencies available (e.g., `op` CLI for 1Password).
+**Requires:** At least one plugin configured in `esk.yaml` and its dependencies available (e.g., `op` CLI for 1Password).
 
 Uploads all secrets for the given environment to each configured plugin. Without `--only`, pushes to all plugins. With `--only`, pushes to just the named plugin.
 
 **Examples:**
 
 ```bash
-lockbox push --env prod                     # Push to all plugins
-lockbox push --env prod --only onepassword  # Push to 1Password only
-lockbox push --env dev --only dropbox       # Push to Dropbox only
+esk push --env prod                     # Push to all plugins
+esk push --env prod --only onepassword  # Push to 1Password only
+esk push --env dev --only dropbox       # Push to Dropbox only
 ```
 
 ---
 
-## `lockbox pull`
+## `esk pull`
 
 Pull secrets from configured storage plugins and reconcile with the local store.
 
 ```bash
-lockbox pull --env <ENV> [--only <PLUGIN>] [--sync] [--strict]
+esk pull --env <ENV> [--only <PLUGIN>] [--sync] [--strict]
 ```
 
 | Argument   | Required | Description                                                  |
@@ -291,7 +291,7 @@ lockbox pull --env <ENV> [--only <PLUGIN>] [--sync] [--strict]
 | `--sync`   | No       | Auto-run `sync` after pulling                                |
 | `--strict` | No       | Fail if any plugin is unreachable (no partial reconciliation) |
 
-**Requires:** At least one plugin configured in `lockbox.yaml` and its dependencies available.
+**Requires:** At least one plugin configured in `esk.yaml` and its dependencies available.
 
 Downloads secrets from all configured plugins (or just `--only <name>`) and reconciles with the local store using multi-plugin reconciliation:
 
@@ -301,14 +301,14 @@ Downloads secrets from all configured plugins (or just `--only <name>`) and reco
 4. Local store is updated with the merged result.
 5. Plugins that were behind are updated with the merged result.
 
-With `--sync`, automatically runs `lockbox sync --env <ENV>` after a successful pull.
+With `--sync`, automatically runs `esk sync --env <ENV>` after a successful pull.
 
 **Examples:**
 
 ```bash
-lockbox pull --env prod                   # Pull from all plugins + reconcile
-lockbox pull --env prod --only onepassword  # Pull from 1Password only
-lockbox pull --env prod --sync            # Pull + reconcile + sync targets
+esk pull --env prod                   # Pull from all plugins + reconcile
+esk pull --env prod --only onepassword  # Pull from 1Password only
+esk pull --env prod --sync            # Pull + reconcile + sync targets
 ```
 
 ---
@@ -317,11 +317,11 @@ lockbox pull --env prod --sync            # Pull + reconcile + sync targets
 
 | File                         | Description                               | Commit to git? |
 | ---------------------------- | ----------------------------------------- | -------------- |
-| `lockbox.yaml`               | Project configuration                     | Yes            |
-| `.lockbox/store.enc`         | AES-256-GCM encrypted secret store        | Yes            |
-| `.lockbox/store.key`         | 32-byte encryption key (hex)              | **No**         |
-| `.lockbox/sync-index.json`   | Sync state (hashes, timestamps, status)   | Optional       |
-| `.lockbox/plugin-index.json` | Plugin push state (versions, timestamps)  | Optional       |
+| `esk.yaml`               | Project configuration                     | Yes            |
+| `.esk/store.enc`         | AES-256-GCM encrypted secret store        | Yes            |
+| `.esk/store.key`         | 32-byte encryption key (hex)              | **No**         |
+| `.esk/sync-index.json`   | Sync state (hashes, timestamps, status)   | Optional       |
+| `.esk/plugin-index.json` | Plugin push state (versions, timestamps)  | Optional       |
 
 ## Exit codes
 

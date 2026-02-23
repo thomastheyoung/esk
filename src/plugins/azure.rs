@@ -1,0 +1,399 @@
+use anyhow::{Context, Result};
+use std::collections::BTreeMap;
+
+use crate::adapters::{CommandOpts, CommandRunner};
+use crate::config::{AzurePluginConfig, Config};
+use crate::store::StorePayload;
+
+use super::StoragePlugin;
+
+pub struct AzurePlugin<'a> {
+    config: &'a Config,
+    plugin_config: AzurePluginConfig,
+    runner: &'a dyn CommandRunner,
+}
+
+impl<'a> AzurePlugin<'a> {
+    pub fn new(
+        config: &'a Config,
+        plugin_config: AzurePluginConfig,
+        runner: &'a dyn CommandRunner,
+    ) -> Self {
+        Self {
+            config,
+            plugin_config,
+            runner,
+        }
+    }
+
+    /// Resolve the Azure secret name for an environment.
+    /// Azure secret names only allow alphanumeric characters and hyphens.
+    fn secret_name(&self, env: &str) -> String {
+        let raw = self
+            .plugin_config
+            .secret_name
+            .replace("{project}", &self.config.project)
+            .replace("{environment}", env);
+
+        // Replace non-alphanumeric, non-hyphen characters with hyphens
+        raw.chars()
+            .map(|c| if c.is_alphanumeric() || c == '-' { c } else { '-' })
+            .collect()
+    }
+}
+
+impl<'a> StoragePlugin for AzurePlugin<'a> {
+    fn name(&self) -> &str {
+        "azure"
+    }
+
+    fn preflight(&self) -> Result<()> {
+        crate::adapters::check_command(self.runner, "az").map_err(|_| {
+            anyhow::anyhow!(
+                "Azure CLI (az) is not installed or not in PATH. Install it from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli"
+            )
+        })?;
+
+        let output = self
+            .runner
+            .run("az", &["account", "show"], CommandOpts::default())
+            .context("failed to run az account show")?;
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("Azure CLI not authenticated: {stderr}");
+        }
+        Ok(())
+    }
+
+    fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
+        let suffix = format!(":{env}");
+        let env_secrets: BTreeMap<String, String> = payload
+            .secrets
+            .iter()
+            .filter_map(|(k, v)| {
+                k.strip_suffix(&suffix)
+                    .map(|bare| (bare.to_string(), v.clone()))
+            })
+            .collect();
+
+        if env_secrets.is_empty() {
+            return Ok(());
+        }
+
+        let version = payload
+            .env_versions
+            .get(env)
+            .copied()
+            .unwrap_or(payload.version);
+
+        // Build JSON payload with bare keys + version metadata
+        let mut json_map: BTreeMap<String, String> = env_secrets;
+        json_map.insert("_esk_version".to_string(), version.to_string());
+        let json = serde_json::to_string(&json_map).context("failed to serialize secrets")?;
+
+        let secret_name = self.secret_name(env);
+        let vault_name = &self.plugin_config.vault_name;
+
+        let output = self
+            .runner
+            .run(
+                "az",
+                &[
+                    "keyvault",
+                    "secret",
+                    "set",
+                    "--vault-name",
+                    vault_name,
+                    "--name",
+                    &secret_name,
+                    "--value",
+                    &json,
+                ],
+                CommandOpts::default(),
+            )
+            .context("failed to run az keyvault secret set")?;
+
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("az keyvault secret set failed: {stderr}");
+        }
+
+        Ok(())
+    }
+
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+        let secret_name = self.secret_name(env);
+        let vault_name = &self.plugin_config.vault_name;
+
+        let output = self
+            .runner
+            .run(
+                "az",
+                &[
+                    "keyvault",
+                    "secret",
+                    "show",
+                    "--vault-name",
+                    vault_name,
+                    "--name",
+                    &secret_name,
+                    "--output",
+                    "json",
+                ],
+                CommandOpts::default(),
+            )
+            .context("failed to run az keyvault secret show")?;
+
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("SecretNotFound") {
+                return Ok(None);
+            }
+            anyhow::bail!("az keyvault secret show failed: {stderr}");
+        }
+
+        // Parse outer Azure JSON to extract the .value field
+        let outer: serde_json::Value =
+            serde_json::from_slice(&output.stdout).context("failed to parse az output JSON")?;
+        let value_str = outer["value"]
+            .as_str()
+            .context("az output missing 'value' field")?;
+
+        // Parse the inner JSON (our payload)
+        let json_map: BTreeMap<String, String> =
+            serde_json::from_str(value_str).context("failed to parse secret value JSON")?;
+
+        let version: u64 = json_map
+            .get("_esk_version")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0);
+
+        let composite: BTreeMap<String, String> = json_map
+            .into_iter()
+            .filter(|(k, _)| k != "_esk_version")
+            .map(|(k, v)| (format!("{k}:{env}"), v))
+            .collect();
+
+        Ok(Some((composite, version)))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::adapters::{CommandOpts, CommandOutput};
+    use std::sync::Mutex;
+
+    struct MockRunner {
+        calls: Mutex<Vec<(String, Vec<String>)>>,
+        responses: Mutex<Vec<CommandOutput>>,
+    }
+
+    impl MockRunner {
+        fn new(responses: Vec<CommandOutput>) -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                responses: Mutex::new(responses),
+            }
+        }
+    }
+
+    impl CommandRunner for MockRunner {
+        fn run(&self, program: &str, args: &[&str], _opts: CommandOpts) -> Result<CommandOutput> {
+            self.calls.lock().unwrap().push((
+                program.to_string(),
+                args.iter().map(|s| s.to_string()).collect(),
+            ));
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            } else {
+                Ok(responses.remove(0))
+            }
+        }
+    }
+
+    fn make_config(yaml: &str) -> Config {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        std::mem::forget(dir);
+        config
+    }
+
+    fn azure_yaml() -> &'static str {
+        r#"
+project: myapp
+environments: [dev, prod]
+plugins:
+  azure:
+    vault_name: my-vault
+    secret_name: "{project}-{environment}"
+"#
+    }
+
+    fn make_payload(secrets: &[(&str, &str)], version: u64) -> StorePayload {
+        let mut map = BTreeMap::new();
+        for (k, v) in secrets {
+            map.insert(k.to_string(), v.to_string());
+        }
+        StorePayload {
+            secrets: map,
+            version,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
+        }
+    }
+
+    #[test]
+    fn secret_name_substitution() {
+        let config = make_config(azure_yaml());
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let runner = MockRunner::new(vec![]);
+        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        assert_eq!(plugin.secret_name("dev"), "myapp-dev");
+        assert_eq!(plugin.secret_name("prod"), "myapp-prod");
+    }
+
+    #[test]
+    fn secret_name_sanitizes_underscores() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: my_app
+environments: [dev]
+plugins:
+  azure:
+    vault_name: v
+    secret_name: "{project}_{environment}"
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        std::mem::forget(dir);
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let runner = MockRunner::new(vec![]);
+        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        // Underscores should be replaced with hyphens
+        assert_eq!(plugin.secret_name("dev"), "my-app-dev");
+    }
+
+    #[test]
+    fn preflight_success() {
+        let config = make_config(azure_yaml());
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let runner = MockRunner::new(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"2.50.0".to_vec(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"{}".to_vec(),
+                stderr: Vec::new(),
+            },
+        ]);
+        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        assert!(plugin.preflight().is_ok());
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[0].1, vec!["--version"]);
+        assert!(calls[1].1.contains(&"account".to_string()));
+    }
+
+    #[test]
+    fn preflight_missing_az() {
+        let config = make_config(azure_yaml());
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+
+        struct FailRunner;
+        impl CommandRunner for FailRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                anyhow::bail!("No such file or directory")
+            }
+        }
+        let plugin = AzurePlugin::new(&config, plugin_config, &FailRunner);
+        let err = plugin.preflight().unwrap_err();
+        assert!(err.to_string().contains("Azure CLI (az)"));
+        assert!(err.to_string().contains("not installed"));
+    }
+
+    #[test]
+    fn push_success() {
+        let config = make_config(azure_yaml());
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }]);
+        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
+        plugin.push(&payload, &config, "dev").unwrap();
+
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].0, "az");
+        assert!(calls[0].1.contains(&"keyvault".to_string()));
+        assert!(calls[0].1.contains(&"set".to_string()));
+        assert!(calls[0].1.contains(&"my-vault".to_string()));
+        assert!(calls[0].1.contains(&"myapp-dev".to_string()));
+    }
+
+    #[test]
+    fn push_skips_empty_env() {
+        let config = make_config(azure_yaml());
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let runner = MockRunner::new(vec![]);
+        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let payload = make_payload(&[("KEY:prod", "val")], 1);
+        plugin.push(&payload, &config, "dev").unwrap();
+
+        let calls = runner.calls.lock().unwrap();
+        assert!(calls.is_empty());
+    }
+
+    #[test]
+    fn pull_success() {
+        let config = make_config(azure_yaml());
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let inner = serde_json::json!({
+            "API_KEY": "sk_test",
+            "DB_URL": "postgres://localhost",
+            "_esk_version": "5"
+        });
+        let outer = serde_json::json!({
+            "value": inner.to_string()
+        });
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&outer).unwrap(),
+            stderr: Vec::new(),
+        }]);
+        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+
+        assert_eq!(version, 5);
+        assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
+        assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
+        assert!(!secrets.contains_key("_esk_version:dev"));
+    }
+
+    #[test]
+    fn pull_not_found_returns_none() {
+        let config = make_config(azure_yaml());
+        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let runner = MockRunner::new(vec![CommandOutput {
+            success: false,
+            stdout: Vec::new(),
+            stderr: b"SecretNotFound: secret not found".to_vec(),
+        }]);
+        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+    }
+}

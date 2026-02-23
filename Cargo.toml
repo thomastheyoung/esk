@@ -2,20 +2,21 @@
 members = [".", "xtask"]
 
 [package]
-name = "lockbox"
+name = "esk"
 version = "0.1.0"
 edition = "2021"
 description = "Encrypted secrets management with multi-target sync"
 authors = ["Thomas LE JEUNE"]
 license = "MIT"
-repository = "https://github.com/thomastheyoung/lockbox"
-homepage = "https://github.com/thomastheyoung/lockbox"
+repository = "https://github.com/thomastheyoung/esk"
+homepage = "https://github.com/thomastheyoung/esk"
 keywords = ["secrets", "encryption", "cli", "sync", "dotenv"]
 categories = ["command-line-utilities", "cryptography"]
 
 [dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
+base64 = "0.22"
 atty = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
@@ -33,10 +34,10 @@ thiserror = "1"
 zeroize = { version = "1", features = ["derive"] }
 
 [package.metadata.binstall]
-pkg-url = "{ repo }/releases/download/v{ version }/lockbox-{ target }.tar.gz"
+pkg-url = "{ repo }/releases/download/v{ version }/esk-{ target }.tar.gz"
 pkg-fmt = "tgz"
-bin-dir = "lockbox-{ target }/{ bin }{ binary-ext }"
+bin-dir = "esk-{ target }/{ bin }{ binary-ext }"
 
 [package.metadata.binstall.overrides.x86_64-pc-windows-msvc]
-pkg-url = "{ repo }/releases/download/v{ version }/lockbox-{ target }.zip"
+pkg-url = "{ repo }/releases/download/v{ version }/esk-{ target }.zip"
 pkg-fmt = "zip"

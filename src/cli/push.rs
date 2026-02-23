@@ -25,7 +25,7 @@ pub fn run_with_runner(
     }
 
     if config.plugins.is_empty() {
-        bail!("no plugins configured in lockbox.yaml");
+        bail!("no plugins configured in esk.yaml");
     }
 
     let store = SecretStore::open(&config.root)?;
@@ -35,7 +35,7 @@ pub fn run_with_runner(
 
     if all_plugins.is_empty() {
         if config.plugins.is_empty() {
-            bail!("no plugins configured in lockbox.yaml");
+            bail!("no plugins configured in esk.yaml");
         } else {
             cliclack::log::warning(
                 "No plugins available after preflight checks. Fix the issues above and try again.",
@@ -58,7 +58,7 @@ pub fn run_with_runner(
         all_plugins
     };
 
-    let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
+    let plugin_index_path = config.root.join(".esk/plugin-index.json");
     let mut plugin_index = PluginIndex::load(&plugin_index_path);
 
     let mut success_count = 0u32;

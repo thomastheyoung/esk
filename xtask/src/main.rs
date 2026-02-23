@@ -1,11 +1,11 @@
 use anyhow::{bail, Context, Result};
-use lockbox::store::SecretStore;
+use esk::store::SecretStore;
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-const SANDBOX_DIR: &str = "/private/tmp/lockbox-test";
+const SANDBOX_DIR: &str = "/private/tmp/esk-test";
 
 const CONFIG_YAML: &str = r#"project: demo
 environments: [dev, staging, prod]
@@ -152,9 +152,9 @@ fn workspace_root() -> PathBuf {
 }
 
 fn build_release() -> Result<()> {
-    eprintln!("Building lockbox...");
+    eprintln!("Building esk...");
     let status = Command::new("cargo")
-        .args(["build", "--release", "-p", "lockbox"])
+        .args(["build", "--release", "-p", "esk"])
         .status()
         .context("failed to run cargo build")?;
     if !status.success() {
@@ -172,7 +172,7 @@ pub fn setup(root: &Path, workspace: &Path) -> Result<()> {
     fs::create_dir_all(&bin_dir).context("failed to create .bin")?;
 
     // Write config
-    fs::write(root.join("lockbox.yaml"), CONFIG_YAML).context("failed to write lockbox.yaml")?;
+    fs::write(root.join("esk.yaml"), CONFIG_YAML).context("failed to write esk.yaml")?;
 
     // Write convex deployment source
     fs::write(
@@ -187,8 +187,8 @@ pub fn setup(root: &Path, workspace: &Path) -> Result<()> {
     write_executable(&bin_dir.join("op"), OP_SHIM)?;
 
     // Symlink release binary
-    let binary = workspace.join("target/release/lockbox");
-    let link = bin_dir.join("lockbox");
+    let binary = workspace.join("target/release/esk");
+    let link = bin_dir.join("esk");
     if link.exists() || link.symlink_metadata().is_ok() {
         fs::remove_file(&link).ok();
     }
@@ -236,14 +236,14 @@ fn print_instructions(root: &Path) {
     eprintln!("  export PATH=\"{}:$PATH\"", bin_dir.display());
     eprintln!();
     eprintln!("Try:");
-    eprintln!("  lockbox list");
-    eprintln!("  lockbox list --env dev");
-    eprintln!("  lockbox get STRIPE_KEY --env dev");
-    eprintln!("  lockbox status");
-    eprintln!("  lockbox status --env prod");
-    eprintln!("  lockbox sync --env dev");
-    eprintln!("  lockbox sync --env dev --dry-run --verbose");
-    eprintln!("  lockbox set NEW_SECRET --env dev --value test123");
-    eprintln!("  lockbox push --env dev");
+    eprintln!("  esk list");
+    eprintln!("  esk list --env dev");
+    eprintln!("  esk get STRIPE_KEY --env dev");
+    eprintln!("  esk status");
+    eprintln!("  esk status --env prod");
+    eprintln!("  esk sync --env dev");
+    eprintln!("  esk sync --env dev --dry-run --verbose");
+    eprintln!("  esk set NEW_SECRET --env dev --value test123");
+    eprintln!("  esk push --env dev");
     eprintln!();
 }

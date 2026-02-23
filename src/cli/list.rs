@@ -42,7 +42,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let all_secrets = store.list()?;
 
     if all_secrets.is_empty() {
-        cliclack::log::info("No secrets stored. Run `lockbox set <KEY> --env <ENV>` to add one.")?;
+        cliclack::log::info("No secrets stored. Run `esk set <KEY> --env <ENV>` to add one.")?;
         return Ok(());
     }
 
@@ -131,7 +131,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
             }
         });
 
-        cliclack::note("Uncategorized (not in lockbox.yaml)", body)?;
+        cliclack::note("Uncategorized (not in esk.yaml)", body)?;
     }
 
     cliclack::reset_theme();
@@ -146,7 +146,7 @@ fn build_cell_statuses(
 ) -> Result<BTreeMap<(String, String), CellStatus>> {
     let resolved = config.resolve_secrets()?;
     let adapter_names: Vec<&str> = config.adapter_names();
-    let index_path = config.root.join(".lockbox/sync-index.json");
+    let index_path = config.root.join(".esk/sync-index.json");
     let index = SyncIndex::load(&index_path);
 
     let mut statuses: BTreeMap<(String, String), CellStatus> = BTreeMap::new();

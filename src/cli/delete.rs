@@ -27,7 +27,7 @@ pub fn run_with_runner(
     }
 
     if config.find_secret(key).is_none() {
-        cliclack::log::warning(format!("Secret '{}' is not defined in lockbox.yaml", key))?;
+        cliclack::log::warning(format!("Secret '{}' is not defined in esk.yaml", key))?;
     }
 
     let store = SecretStore::open(&config.root)?;
@@ -42,7 +42,7 @@ pub fn run_with_runner(
     // Auto-push to all configured plugins
     let mut plugin_failures = 0u32;
     if !config.plugins.is_empty() {
-        let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
+        let plugin_index_path = config.root.join(".esk/plugin-index.json");
         let mut plugin_index = PluginIndex::load(&plugin_index_path);
         let all_plugins = plugins::build_plugins(config, runner);
         for plugin in &all_plugins {
@@ -74,8 +74,8 @@ pub fn run_with_runner(
             bail!(
                 "{plugin_failures} plugin(s) failed to push (--strict). Adapter sync skipped.\n\
                  Fix the plugin issue, then run:\n  \
-                 lockbox push --env {env}\n  \
-                 lockbox sync --env {env}"
+                 esk push --env {env}\n  \
+                 esk sync --env {env}"
             );
         }
     }
@@ -85,7 +85,7 @@ pub fn run_with_runner(
 
     if plugin_failures > 0 {
         bail!(
-            "{plugin_failures} plugin(s) failed to push. Run `lockbox push --env {env}` to retry."
+            "{plugin_failures} plugin(s) failed to push. Run `esk push --env {env}` to retry."
         );
     }
 

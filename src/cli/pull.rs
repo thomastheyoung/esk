@@ -35,7 +35,7 @@ pub fn run_with_runner(
     }
 
     if config.plugins.is_empty() {
-        bail!("no plugins configured in lockbox.yaml");
+        bail!("no plugins configured in esk.yaml");
     }
 
     let store = SecretStore::open(&config.root)?;
@@ -45,7 +45,7 @@ pub fn run_with_runner(
 
     if all_plugins.is_empty() {
         if config.plugins.is_empty() {
-            bail!("no plugins configured in lockbox.yaml");
+            bail!("no plugins configured in esk.yaml");
         } else {
             cliclack::log::warning(
                 "No plugins available after preflight checks. Fix the issues above and try again.",
@@ -144,7 +144,7 @@ pub fn run_with_runner(
         // Push merged result back to plugins that were behind
         if !result.sources_to_update.is_empty() {
             let updated_payload = &result.merged_payload;
-            let plugin_index_path = config.root.join(".lockbox/plugin-index.json");
+            let plugin_index_path = config.root.join(".esk/plugin-index.json");
             let mut plugin_index = PluginIndex::load(&plugin_index_path);
             let mut pushback_failures = 0u32;
             for plugin in &target_plugins {
@@ -187,7 +187,7 @@ pub fn run_with_runner(
             plugin_index.save()?;
             if pushback_failures > 0 {
                 bail!(
-                    "{pushback_failures} plugin(s) failed to receive merged data. Run `lockbox push --env {env}` to retry."
+                    "{pushback_failures} plugin(s) failed to receive merged data. Run `esk push --env {env}` to retry."
                 );
             }
         }

@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
-use lockbox::cli::{Cli, Commands};
-use lockbox::config::Config;
+use esk::cli::{Cli, Commands};
+use esk::config::Config;
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
@@ -16,11 +16,11 @@ fn main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::delete::run(&config, key, env, *no_sync, *strict)?;
+            esk::cli::delete::run(&config, key, env, *no_sync, *strict)?;
         }
         Commands::Init => {
             let cwd = std::env::current_dir()?;
-            lockbox::cli::init::run(&cwd)?;
+            esk::cli::init::run(&cwd)?;
         }
         Commands::Set {
             key,
@@ -33,7 +33,7 @@ fn main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::set::run(
+            esk::cli::set::run(
                 &config,
                 key,
                 env,
@@ -47,13 +47,13 @@ fn main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::get::run(&config, key, env)?;
+            esk::cli::get::run(&config, key, env)?;
         }
         Commands::List { env } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::list::run(&config, env.as_deref())?;
+            esk::cli::list::run(&config, env.as_deref())?;
         }
         Commands::Sync {
             env,
@@ -64,19 +64,19 @@ fn main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::sync::run(&config, env.as_deref(), *force, *dry_run, *verbose)?;
+            esk::cli::sync::run(&config, env.as_deref(), *force, *dry_run, *verbose)?;
         }
         Commands::Status { env, all } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::status::run(&config, env.as_deref(), *all)?;
+            esk::cli::status::run(&config, env.as_deref(), *all)?;
         }
         Commands::Push { env, only } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::push::run(&config, env, only.as_deref())?;
+            esk::cli::push::run(&config, env, only.as_deref())?;
         }
         Commands::Pull {
             env,
@@ -87,7 +87,7 @@ fn main() -> Result<()> {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            lockbox::cli::pull::run(&config, env, only.as_deref(), *sync, *strict)?;
+            esk::cli::pull::run(&config, env, only.as_deref(), *sync, *strict)?;
         }
     }
 

@@ -1,7 +1,7 @@
 mod helpers;
 
 use helpers::*;
-use lockbox::store::SecretStore;
+use esk::store::SecretStore;
 
 #[test]
 fn store_full_lifecycle() {

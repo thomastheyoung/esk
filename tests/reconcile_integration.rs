@@ -1,7 +1,7 @@
 mod helpers;
 
 use helpers::*;
-use lockbox::reconcile::{reconcile, ReconcileAction};
+use esk::reconcile::{reconcile, ReconcileAction};
 use std::collections::BTreeMap;
 
 #[test]

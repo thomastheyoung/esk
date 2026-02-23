@@ -49,6 +49,12 @@ pub struct AdaptersConfig {
     pub railway: Option<RailwayAdapterConfig>,
     #[serde(default)]
     pub gitlab: Option<GitlabAdapterConfig>,
+    // Phase 2: Cloud infrastructure
+    #[serde(default)]
+    pub aws_ssm: Option<AwsSsmAdapterConfig>,
+    // Phase 4: Full cloud coverage
+    #[serde(default)]
+    pub kubernetes: Option<KubernetesAdapterConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -60,8 +66,18 @@ pub struct EnvAdapterConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudflareAdapterConfig {
+    /// Mode: "workers" (default) or "pages".
+    #[serde(default = "default_cloudflare_mode")]
+    pub mode: String,
+    /// Pages project name (required when mode is "pages").
+    #[serde(default)]
+    pub pages_project: Option<String>,
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
+}
+
+fn default_cloudflare_mode() -> String {
+    "workers".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -135,6 +151,39 @@ pub struct GitlabAdapterConfig {
     pub env_flags: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AwsSsmAdapterConfig {
+    /// Path prefix with interpolation, e.g. "/{project}/{environment}/".
+    pub path_prefix: String,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Parameter type: SecureString (default), String, or StringList.
+    #[serde(default = "default_ssm_parameter_type")]
+    pub parameter_type: String,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+fn default_ssm_parameter_type() -> String {
+    "SecureString".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct KubernetesAdapterConfig {
+    /// Maps esk env → Kubernetes namespace.
+    pub namespace: BTreeMap<String, String>,
+    /// Secret resource name (default: "{project}-secrets").
+    #[serde(default)]
+    pub secret_name: Option<String>,
+    /// Maps esk env → kubectl context.
+    #[serde(default)]
+    pub context: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
 // --- Plugin config types ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -159,6 +208,80 @@ fn default_cloud_file_format() -> CloudFileFormat {
 pub enum CloudFileFormat {
     Encrypted,
     Cleartext,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AwsSecretsManagerPluginConfig {
+    /// Secret name pattern, e.g. "{project}/{environment}".
+    pub secret_name: String,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub profile: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BitwardenPluginConfig {
+    pub project_id: String,
+    /// Secret name pattern, e.g. "{project}-{environment}".
+    pub secret_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VaultPluginConfig {
+    /// KV path pattern, e.g. "secret/data/{project}/{environment}".
+    pub path: String,
+    #[serde(default)]
+    pub addr: Option<String>,
+    #[serde(default = "default_kv_version")]
+    pub kv_version: u8,
+}
+
+fn default_kv_version() -> u8 {
+    2
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct S3PluginConfig {
+    pub bucket: String,
+    #[serde(default)]
+    pub prefix: Option<String>,
+    /// Custom endpoint for S3-compatible services (R2, MinIO, DO Spaces).
+    #[serde(default)]
+    pub endpoint: Option<String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub profile: Option<String>,
+    #[serde(default = "default_cloud_file_format")]
+    pub format: CloudFileFormat,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GcpPluginConfig {
+    pub gcp_project: String,
+    /// Secret name pattern, e.g. "{project}-{environment}".
+    pub secret_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AzurePluginConfig {
+    pub vault_name: String,
+    /// Secret name pattern, e.g. "{project}-{environment}".
+    pub secret_name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DopplerPluginConfig {
+    pub project: String,
+    /// Maps esk env → Doppler config name.
+    pub config_map: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SopsPluginConfig {
+    /// File path pattern with {environment} interpolation.
+    pub path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -246,23 +369,16 @@ impl Config {
     }
 
     fn validate_adapter(&self, adapter: &str) -> Result<()> {
-        match adapter {
-            "env" if self.adapters.env.is_some() => Ok(()),
-            "cloudflare" if self.adapters.cloudflare.is_some() => Ok(()),
-            "convex" if self.adapters.convex.is_some() => Ok(()),
-            "fly" if self.adapters.fly.is_some() => Ok(()),
-            "netlify" if self.adapters.netlify.is_some() => Ok(()),
-            "vercel" if self.adapters.vercel.is_some() => Ok(()),
-            "github" if self.adapters.github.is_some() => Ok(()),
-            "heroku" if self.adapters.heroku.is_some() => Ok(()),
-            "supabase" if self.adapters.supabase.is_some() => Ok(()),
-            "railway" if self.adapters.railway.is_some() => Ok(()),
-            "gitlab" if self.adapters.gitlab.is_some() => Ok(()),
-            "onepassword" => bail!(
+        if adapter == "onepassword" {
+            bail!(
                 "'onepassword' should be configured under 'plugins:', not 'adapters:'. \
                  Move your onepassword config from adapters to plugins in esk.yaml."
-            ),
-            _ => bail!("adapter '{adapter}' is not configured"),
+            );
+        }
+        if self.adapter_names().contains(&adapter) {
+            Ok(())
+        } else {
+            bail!("adapter '{adapter}' is not configured")
         }
     }
 
@@ -272,6 +388,38 @@ impl Config {
                 "onepassword" => {
                     let _: OnePasswordPluginConfig = serde_yaml::from_value(value.clone())
                         .context("invalid onepassword plugin config")?;
+                }
+                "aws_secrets_manager" => {
+                    let _: AwsSecretsManagerPluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid aws_secrets_manager plugin config")?;
+                }
+                "bitwarden" => {
+                    let _: BitwardenPluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid bitwarden plugin config")?;
+                }
+                "vault" => {
+                    let _: VaultPluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid vault plugin config")?;
+                }
+                "s3" => {
+                    let _: S3PluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid s3 plugin config")?;
+                }
+                "gcp" => {
+                    let _: GcpPluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid gcp plugin config")?;
+                }
+                "azure" => {
+                    let _: AzurePluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid azure plugin config")?;
+                }
+                "doppler" => {
+                    let _: DopplerPluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid doppler plugin config")?;
+                }
+                "sops" => {
+                    let _: SopsPluginConfig = serde_yaml::from_value(value.clone())
+                        .context("invalid sops plugin config")?;
                 }
                 _ => {
                     // Check for type field to identify cloud_file plugins
@@ -392,6 +540,13 @@ impl Config {
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
     }
 
+    /// Get a typed plugin config by name.
+    pub fn plugin_config<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
+        self.plugins
+            .get(name)
+            .and_then(|v| serde_yaml::from_value(v.clone()).ok())
+    }
+
     /// Get all cloud_file plugin configs: (name, config) pairs.
     pub fn cloud_file_plugin_configs(&self) -> Vec<(String, CloudFilePluginConfig)> {
         self.plugins
@@ -445,6 +600,12 @@ impl Config {
         }
         if self.adapters.gitlab.is_some() {
             names.push("gitlab");
+        }
+        if self.adapters.aws_ssm.is_some() {
+            names.push("aws_ssm");
+        }
+        if self.adapters.kubernetes.is_some() {
+            names.push("kubernetes");
         }
         names
     }

@@ -1,5 +1,13 @@
+pub mod aws_secrets_manager;
+pub mod azure;
+pub mod bitwarden;
 pub mod cloud_file;
+pub mod doppler;
+pub mod gcp;
 pub mod onepassword;
+pub mod s3;
+pub mod sops;
+pub mod vault;
 
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -73,6 +81,134 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
         }
     }
 
+    if let Some(vault_config) = config.plugin_config::<crate::config::VaultPluginConfig>("vault") {
+        let plugin = vault::VaultPlugin::new(config, vault_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "vault".to_string(),
+                ok: true,
+                message: "authenticated".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "vault".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(bw_config) = config.plugin_config::<crate::config::BitwardenPluginConfig>("bitwarden") {
+        let plugin = bitwarden::BitwardenPlugin::new(config, bw_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "bitwarden".to_string(),
+                ok: true,
+                message: "authenticated".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "bitwarden".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(s3_config) = config.plugin_config::<crate::config::S3PluginConfig>("s3") {
+        let plugin = s3::S3Plugin::new(config, s3_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "s3".to_string(),
+                ok: true,
+                message: "CLI available".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "s3".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(gcp_config) = config.plugin_config::<crate::config::GcpPluginConfig>("gcp") {
+        let plugin = gcp::GcpPlugin::new(config, gcp_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "gcp".to_string(),
+                ok: true,
+                message: "authenticated".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "gcp".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(azure_config) = config.plugin_config::<crate::config::AzurePluginConfig>("azure") {
+        let plugin = azure::AzurePlugin::new(config, azure_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "azure".to_string(),
+                ok: true,
+                message: "authenticated".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "azure".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(doppler_config) = config.plugin_config::<crate::config::DopplerPluginConfig>("doppler") {
+        let plugin = doppler::DopplerPlugin::new(config, doppler_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "doppler".to_string(),
+                ok: true,
+                message: "authenticated".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "doppler".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(sops_config) = config.plugin_config::<crate::config::SopsPluginConfig>("sops") {
+        let plugin = sops::SopsPlugin::new(config, sops_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "sops".to_string(),
+                ok: true,
+                message: "CLI available".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "sops".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(asm_config) = config.plugin_config::<crate::config::AwsSecretsManagerPluginConfig>("aws_secrets_manager") {
+        let plugin = aws_secrets_manager::AwsSecretsManagerPlugin::new(config, asm_config, runner);
+        match plugin.preflight() {
+            Ok(()) => results.push(PluginHealth {
+                name: "aws_secrets_manager".to_string(),
+                ok: true,
+                message: "CLI available".to_string(),
+            }),
+            Err(e) => results.push(PluginHealth {
+                name: "aws_secrets_manager".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
     results
 }
 
@@ -97,6 +233,54 @@ pub fn build_plugins<'a>(
             name,
             config.project.clone(),
             cf_config,
+        )));
+    }
+
+    if let Some(vault_config) = config.plugin_config::<crate::config::VaultPluginConfig>("vault") {
+        candidates.push(Box::new(vault::VaultPlugin::new(
+            config, vault_config, runner,
+        )));
+    }
+
+    if let Some(bw_config) = config.plugin_config::<crate::config::BitwardenPluginConfig>("bitwarden") {
+        candidates.push(Box::new(bitwarden::BitwardenPlugin::new(
+            config, bw_config, runner,
+        )));
+    }
+
+    if let Some(s3_config) = config.plugin_config::<crate::config::S3PluginConfig>("s3") {
+        candidates.push(Box::new(s3::S3Plugin::new(
+            config, s3_config, runner,
+        )));
+    }
+
+    if let Some(gcp_config) = config.plugin_config::<crate::config::GcpPluginConfig>("gcp") {
+        candidates.push(Box::new(gcp::GcpPlugin::new(
+            config, gcp_config, runner,
+        )));
+    }
+
+    if let Some(azure_config) = config.plugin_config::<crate::config::AzurePluginConfig>("azure") {
+        candidates.push(Box::new(azure::AzurePlugin::new(
+            config, azure_config, runner,
+        )));
+    }
+
+    if let Some(doppler_config) = config.plugin_config::<crate::config::DopplerPluginConfig>("doppler") {
+        candidates.push(Box::new(doppler::DopplerPlugin::new(
+            config, doppler_config, runner,
+        )));
+    }
+
+    if let Some(sops_config) = config.plugin_config::<crate::config::SopsPluginConfig>("sops") {
+        candidates.push(Box::new(sops::SopsPlugin::new(
+            config, sops_config, runner,
+        )));
+    }
+
+    if let Some(asm_config) = config.plugin_config::<crate::config::AwsSecretsManagerPluginConfig>("aws_secrets_manager") {
+        candidates.push(Box::new(aws_secrets_manager::AwsSecretsManagerPlugin::new(
+            config, asm_config, runner,
         )));
     }
 
@@ -131,7 +315,7 @@ mod tests {
     #[test]
     fn build_plugins_empty_config() {
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, "project: x\nenvironments: [dev]").unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
@@ -150,7 +334,7 @@ plugins:
     vault: V
     item_pattern: test
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
@@ -175,7 +359,7 @@ plugins:
 "#,
             cloud_dir.path().display()
         );
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
@@ -204,7 +388,7 @@ plugins:
 "#,
             cloud_dir.path().display()
         );
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
 
@@ -233,7 +417,7 @@ plugins:
     path: /nonexistent/path/nowhere
     format: cleartext
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
@@ -252,7 +436,7 @@ plugins:
     vault: V
     item_pattern: test
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
 
@@ -273,7 +457,7 @@ plugins:
     vault: V
     item_pattern: test
 "#;
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
 
@@ -294,7 +478,7 @@ plugins:
     fn check_plugin_health_no_plugins() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "project: x\nenvironments: [dev]";
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
 
@@ -327,7 +511,7 @@ plugins:
             cloud_dir1.path().display(),
             cloud_dir2.path().display()
         );
-        let path = dir.path().join("lockbox.yaml");
+        let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;

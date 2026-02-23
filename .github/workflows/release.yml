@@ -52,24 +52,24 @@ jobs:
       - name: Package (Unix)
         if: runner.os != 'Windows'
         run: |
-          dir="lockbox-${{ matrix.target }}"
+          dir="esk-${{ matrix.target }}"
           mkdir "$dir"
-          cp "target/${{ matrix.target }}/release/lockbox" "$dir/"
+          cp "target/${{ matrix.target }}/release/esk" "$dir/"
           tar czf "$dir.tar.gz" "$dir"
 
       - name: Package (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $dir = "lockbox-${{ matrix.target }}"
+          $dir = "esk-${{ matrix.target }}"
           New-Item -ItemType Directory -Path $dir
-          Copy-Item "target/${{ matrix.target }}/release/lockbox.exe" "$dir/"
+          Copy-Item "target/${{ matrix.target }}/release/esk.exe" "$dir/"
           Compress-Archive -Path $dir -DestinationPath "$dir.zip"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: lockbox-${{ matrix.target }}
-          path: lockbox-${{ matrix.target }}.*
+          name: esk-${{ matrix.target }}
+          path: esk-${{ matrix.target }}.*
 
   release:
     name: Release

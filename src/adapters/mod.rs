@@ -1,3 +1,4 @@
+pub mod aws_ssm;
 pub mod cloudflare;
 pub mod convex;
 pub mod env_file;
@@ -5,6 +6,7 @@ pub mod fly;
 pub mod github;
 pub mod gitlab;
 pub mod heroku;
+pub mod kubernetes;
 pub mod netlify;
 pub mod railway;
 pub mod supabase;
@@ -390,6 +392,46 @@ pub fn check_adapter_health(config: &Config, runner: &dyn CommandRunner) -> Vec<
         }
     }
 
+    if let Some(adapter_config) = &config.adapters.aws_ssm {
+        let adapter = aws_ssm::AwsSsmAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "aws_ssm".to_string(),
+                ok: true,
+                message: "aws authenticated".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "aws_ssm".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
+    if let Some(adapter_config) = &config.adapters.kubernetes {
+        let adapter = kubernetes::KubernetesAdapter {
+            config,
+            adapter_config,
+            runner,
+        };
+        match adapter.preflight() {
+            Ok(()) => results.push(AdapterHealth {
+                name: "kubernetes".to_string(),
+                ok: true,
+                message: "kubectl available".to_string(),
+            }),
+            Err(e) => results.push(AdapterHealth {
+                name: "kubernetes".to_string(),
+                ok: false,
+                message: e.to_string(),
+            }),
+        }
+    }
+
     results
 }
 
@@ -481,6 +523,22 @@ pub fn build_sync_adapters<'a>(
 
     if let Some(adapter_config) = &config.adapters.gitlab {
         candidates.push(Box::new(gitlab::GitlabAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.aws_ssm {
+        candidates.push(Box::new(aws_ssm::AwsSsmAdapter {
+            config,
+            adapter_config,
+            runner,
+        }));
+    }
+
+    if let Some(adapter_config) = &config.adapters.kubernetes {
+        candidates.push(Box::new(kubernetes::KubernetesAdapter {
             config,
             adapter_config,
             runner,

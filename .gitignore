@@ -1,6 +1,7 @@
 # Build
 /target/
 /dist/
+.temp/
 
 # IDE
 .idea/
@@ -14,7 +15,7 @@
 Thumbs.db
 
 # Secrets (never commit the key)
-.lockbox/store.key
+.esk/store.key
 
 # Test fixtures with real values
 tests/fixtures/*.key

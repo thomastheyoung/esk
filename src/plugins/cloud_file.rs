@@ -102,7 +102,7 @@ impl StoragePlugin for CloudFilePlugin {
             );
         }
         // Verify write access
-        let probe = path.join(".lockbox-probe");
+        let probe = path.join(".esk-probe");
         std::fs::write(&probe, b"").map_err(|e| {
             anyhow::anyhow!(
                 "{} sync folder at {} is not writable: {e}",
@@ -157,7 +157,7 @@ impl StoragePlugin for CloudFilePlugin {
                         return Ok(None);
                     }
                     eprintln!(
-                        "Warning: reading legacy secrets.enc for {env}. Run `lockbox push --env {env}` to migrate to per-env files."
+                        "Warning: reading legacy secrets.enc for {env}. Run `esk push --env {env}` to migrate to per-env files."
                     );
                     legacy
                 };
@@ -193,7 +193,7 @@ impl StoragePlugin for CloudFilePlugin {
                         return Ok(None);
                     }
                     eprintln!(
-                        "Warning: reading legacy secrets.json for {env}. Run `lockbox push --env {env}` to migrate to per-env files."
+                        "Warning: reading legacy secrets.json for {env}. Run `esk push --env {env}` to migrate to per-env files."
                     );
                     legacy
                 };
@@ -222,7 +222,7 @@ mod tests {
 
     fn make_config_with_store(dir: &Path) -> Config {
         let yaml = "project: testapp\nenvironments: [dev, prod]";
-        let path = dir.join("lockbox.yaml");
+        let path = dir.join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         SecretStore::load_or_create(dir).unwrap();
         Config::load(&path).unwrap()
@@ -532,13 +532,13 @@ mod tests {
             "test".to_string(),
             "myapp".to_string(),
             CloudFilePluginConfig {
-                path: "/cloud/lockbox/{project}".to_string(),
+                path: "/cloud/esk/{project}".to_string(),
                 format: CloudFileFormat::Cleartext,
             },
         );
 
         let expanded = plugin.expand_path().unwrap();
-        assert_eq!(expanded, PathBuf::from("/cloud/lockbox/myapp"));
+        assert_eq!(expanded, PathBuf::from("/cloud/esk/myapp"));
     }
 
     #[test]
@@ -547,7 +547,7 @@ mod tests {
             "test".to_string(),
             "myapp".to_string(),
             CloudFilePluginConfig {
-                path: "~/Dropbox/lockbox/{project}".to_string(),
+                path: "~/Dropbox/esk/{project}".to_string(),
                 format: CloudFileFormat::Encrypted,
             },
         );
@@ -557,6 +557,6 @@ mod tests {
         assert!(!expanded.to_string_lossy().contains("{project}"));
         assert!(expanded
             .to_string_lossy()
-            .ends_with("/Dropbox/lockbox/myapp"));
+            .ends_with("/Dropbox/esk/myapp"));
     }
 }
