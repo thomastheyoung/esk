@@ -19,10 +19,12 @@ For storage/backup plugins (1Password, cloud files), see [PLUGINS.md](PLUGINS.md
 | [Supabase](#supabase)                     | `supabase`   | `supabase`   | Individual | No                   |
 | [Railway](#railway)                       | `railway`    | `railway`    | Individual | No                   |
 | [GitLab CI](#gitlab-ci)                   | `gitlab`     | `glab`       | Individual | No                   |
+| [AWS SSM](#aws-ssm)                       | `aws_ssm`    | `aws`        | Individual | No                   |
+| [Kubernetes](#kubernetes)                 | `kubernetes` | `kubectl`    | Batch      | No                   |
 
 **Sync modes:**
 
-- **Batch** — When any secret changes for a target group, the entire output is regenerated. Used by env file adapter.
+- **Batch** — When any secret changes for a target group, the entire output is regenerated. Used by env file and Kubernetes adapters.
 - **Individual** — Each changed secret is synced independently. Used by all other adapters.
 
 ---
@@ -575,4 +577,139 @@ secrets:
     API_KEY:
       targets:
         gitlab: [dev, prod]
+```
+
+---
+
+## AWS SSM
+
+Syncs secrets to AWS Systems Manager Parameter Store using `aws ssm put-parameter`. Values are sent via stdin (`--cli-input-json file:///dev/stdin`) to avoid exposing secrets in process listings.
+
+### Prerequisites
+
+- [AWS CLI](https://aws.amazon.com/cli/) installed and authenticated (`aws configure`).
+
+### Configuration
+
+```yaml
+adapters:
+  aws_ssm:
+    path_prefix: "/{project}/{environment}/"
+    region: us-east-1
+    profile: staging
+    parameter_type: SecureString
+    env_flags:
+      prod: "--no-paginate"
+```
+
+| Field            | Required | Default          | Description                                                                                              |
+| ---------------- | -------- | ---------------- | -------------------------------------------------------------------------------------------------------- |
+| `path_prefix`    | Yes      | —                | Path prefix with `{project}` and `{environment}` interpolation. The key name is appended.                |
+| `region`         | No       | —                | AWS region. Passed as `--region` flag.                                                                   |
+| `profile`        | No       | —                | AWS profile. Passed as `--profile` flag.                                                                 |
+| `parameter_type` | No       | `SecureString`   | SSM parameter type: `SecureString`, `String`, or `StringList`.                                           |
+| `env_flags`      | No       | —                | Map of environment name to extra CLI flags appended to the command.                                      |
+
+### Path resolution
+
+The parameter name is built by replacing `{project}` and `{environment}` in `path_prefix`, then appending the key name.
+
+**Example with `path_prefix: "/{project}/{environment}/"`:**
+
+| Project | Environment | Key        | Parameter name          |
+| ------- | ----------- | ---------- | ----------------------- |
+| `myapp` | `dev`       | `DB_PASS`  | `/myapp/dev/DB_PASS`    |
+| `myapp` | `prod`      | `API_KEY`  | `/myapp/prod/API_KEY`   |
+
+### Command executed
+
+```bash
+# Put parameter (value via stdin as JSON):
+echo '{"Name":"/myapp/dev/KEY","Value":"...","Type":"SecureString","Overwrite":true}' | \
+  aws ssm put-parameter --cli-input-json file:///dev/stdin [--region ...] [--profile ...] [env_flags...]
+
+# Delete parameter:
+aws ssm delete-parameter --name /myapp/dev/KEY [--region ...] [--profile ...] [env_flags...]
+```
+
+### Target format
+
+Targets are environment-only:
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        aws_ssm: [dev, prod]
+```
+
+---
+
+## Kubernetes
+
+Generates Kubernetes Secret manifests and applies them using `kubectl apply`. This is a **batch** adapter — when any secret changes, the entire Secret resource is regenerated and applied.
+
+### How it works
+
+1. Collects all secrets for the (environment) target group.
+2. Generates a YAML Secret manifest with base64-encoded values.
+3. Pipes the manifest to `kubectl apply -f -` via stdin.
+
+### Prerequisites
+
+- [kubectl](https://kubernetes.io/docs/tasks/tools/) installed and configured with access to the target cluster(s).
+
+### Configuration
+
+```yaml
+adapters:
+  kubernetes:
+    namespace:
+      dev: myapp-dev
+      prod: myapp-prod
+    secret_name: my-app-secrets
+    context:
+      prod: prod-cluster
+    env_flags:
+      prod: "--dry-run=client"
+```
+
+| Field         | Required | Default                | Description                                                               |
+| ------------- | -------- | ---------------------- | ------------------------------------------------------------------------- |
+| `namespace`   | Yes      | —                      | Maps esk environment names to Kubernetes namespaces.                      |
+| `secret_name` | No       | `{project}-secrets`    | Name of the Kubernetes Secret resource.                                   |
+| `context`     | No       | —                      | Maps esk environment names to kubectl contexts (`--context` flag).        |
+| `env_flags`   | No       | —                      | Map of environment name to extra CLI flags appended to the command.       |
+
+### Generated manifest
+
+```yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: myapp-secrets
+  namespace: myapp-dev
+type: Opaque
+data:
+  DB_HOST: bG9jYWxob3N0     # base64("localhost")
+  DB_PASS: czNjcmV0         # base64("s3cret")
+```
+
+### Command executed
+
+```bash
+echo "<manifest>" | kubectl apply -f - [--context <ctx>] [env_flags...]
+```
+
+### Target format
+
+Targets are environment-only:
+
+```yaml
+secrets:
+  General:
+    DB_HOST:
+      targets:
+        kubernetes: [dev, prod]
 ```

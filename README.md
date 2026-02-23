@@ -1,13 +1,13 @@
 # esk
 
-Encrypted secrets management with multi-target sync. Store secrets locally with AES-256-GCM encryption, then sync them to `.env` files, Cloudflare Workers, Convex, Fly.io, Netlify, Vercel, GitHub Actions, Heroku, Supabase, Railway, and GitLab CI from a single source of truth. Back up and share secrets across your team with 1Password or cloud file storage.
+Encrypted secrets management with multi-target sync. Store secrets locally with AES-256-GCM encryption, then sync them to `.env` files, Cloudflare Workers, Convex, Fly.io, Netlify, Vercel, GitHub Actions, Heroku, Supabase, Railway, GitLab CI, AWS SSM, and Kubernetes from a single source of truth. Back up and share secrets across your team with 1Password, cloud file storage, AWS Secrets Manager, HashiCorp Vault, Bitwarden, S3, GCP Secret Manager, Azure Key Vault, Doppler, or SOPS.
 
 ## Why esk
 
 - **One config, many targets** — Define a secret once, sync it to every service that needs it.
 - **Encrypted at rest** — Secrets are AES-256-GCM encrypted. The store file (`.esk/store.enc`) is safe to commit; the key file (`.esk/store.key`) stays local.
 - **Change detection** — SHA-256 hashing skips secrets that haven't changed. No unnecessary writes or API calls.
-- **Pluggable storage** — Push/pull secrets to 1Password, Dropbox, Google Drive, or OneDrive for team sharing, with version-based reconciliation.
+- **Pluggable storage** — Push/pull secrets to 1Password, Dropbox, Google Drive, OneDrive, AWS Secrets Manager, HashiCorp Vault, Bitwarden, S3, GCP Secret Manager, Azure Key Vault, Doppler, or SOPS for team sharing and backup, with version-based reconciliation.
 
 ## Installation
 
@@ -134,6 +134,8 @@ Adapters deploy secrets to targets via `esk sync`. Each secret declares which ad
 | `supabase`   | Runs `supabase secrets set` per secret                  | `supabase`   |
 | `railway`    | Runs `railway variables --set` per secret               | `railway`    |
 | `gitlab`     | Runs `glab variable set` per secret                     | `glab`       |
+| `aws_ssm`   | Runs `aws ssm put-parameter` per secret (stdin)         | `aws`        |
+| `kubernetes` | Generates and applies K8s Secret manifests              | `kubectl`    |
 
 See [ADAPTERS.md](ADAPTERS.md) for detailed configuration of each adapter.
 
@@ -145,6 +147,14 @@ Plugins store and back up the entire secret list via `esk push`/`pull`. They ope
 | -------------------------------------------------- | ---------------------------------------------------------- | ------------ |
 | `onepassword`                                      | Push/pull environment snapshots to 1Password items         | `op`         |
 | Cloud file (`dropbox`, `gdrive`, `onedrive`, etc.) | Sync encrypted or cleartext store to a cloud-synced folder | None         |
+| `aws_secrets_manager`                              | Store secrets as JSON in AWS Secrets Manager               | `aws`        |
+| `vault`                                            | Store secrets in HashiCorp Vault KV                        | `vault`      |
+| `bitwarden`                                        | Store secrets in Bitwarden Secrets Manager                 | `bws`        |
+| `s3`                                               | Store encrypted or cleartext files in S3-compatible storage| `aws`        |
+| `gcp`                                              | Store secrets in GCP Secret Manager                        | `gcloud`     |
+| `azure`                                            | Store secrets in Azure Key Vault                           | `az`         |
+| `doppler`                                          | Sync secrets to Doppler projects                           | `doppler`    |
+| `sops`                                             | Store as SOPS-encrypted files                              | `sops`       |
 
 See [PLUGINS.md](PLUGINS.md) for detailed configuration of each plugin.
 

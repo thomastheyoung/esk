@@ -25,11 +25,21 @@ src/
 │   ├── heroku.rs        # heroku config:set/unset (individual sync)
 │   ├── supabase.rs      # supabase secrets set/unset (individual sync)
 │   ├── railway.rs       # railway variables set/delete (individual sync)
-│   └── gitlab.rs        # glab variable set/delete (individual sync)
+│   ├── gitlab.rs        # glab variable set/delete (individual sync)
+│   ├── aws_ssm.rs       # aws ssm put-parameter/delete-parameter (individual sync, stdin)
+│   └── kubernetes.rs    # kubectl apply Secret manifest (batch sync)
 ├── plugins/
 │   ├── mod.rs           # StoragePlugin trait, build_plugins()
 │   ├── onepassword.rs   # 1Password op CLI
-│   └── cloud_file.rs    # Cloud file storage (Dropbox, Google Drive, OneDrive)
+│   ├── cloud_file.rs    # Cloud file storage (Dropbox, Google Drive, OneDrive)
+│   ├── aws_secrets_manager.rs  # AWS Secrets Manager
+│   ├── vault.rs         # HashiCorp Vault KV
+│   ├── bitwarden.rs     # Bitwarden Secrets Manager (bws CLI)
+│   ├── s3.rs            # S3-compatible storage (AWS S3, R2, MinIO, DO Spaces)
+│   ├── gcp.rs           # GCP Secret Manager
+│   ├── azure.rs         # Azure Key Vault
+│   ├── doppler.rs       # Doppler secrets management
+│   └── sops.rs          # Mozilla SOPS encrypted files
 ├── cli/
 │   ├── mod.rs           # Command routing
 │   ├── init.rs          # esk init
@@ -47,7 +57,7 @@ tests/
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (75)
+└── cli_integration.rs      # CLI command tests (115)
 ```
 
 ## Core design
@@ -85,9 +95,9 @@ pub trait SyncAdapter {
 }
 ```
 
-Batch adapters handle deletion by regenerating the full output without the deleted key. Individual adapters (cloudflare, convex) override `delete_secret` to call the external CLI's delete/unset command.
+Batch adapters handle deletion by regenerating the full output without the deleted key. Individual adapters override `delete_secret` to call the external CLI's delete/unset command.
 
-`SyncMode::Batch` adapters (env) regenerate the full output when any secret changes. `SyncMode::Individual` adapters (cloudflare, convex) sync one secret at a time. The `build_sync_adapters()` factory constructs all configured adapters from config, running preflight checks and filtering out adapters that fail.
+`SyncMode::Batch` adapters (env, kubernetes) regenerate the full output when any secret changes. `SyncMode::Individual` adapters sync one secret at a time. The `build_sync_adapters()` factory constructs all configured adapters from config, running preflight checks and filtering out adapters that fail.
 
 ### Storage plugin trait
 
@@ -138,6 +148,7 @@ Version-counter-based reconciliation between local store and remote plugins. Two
 | `aes-gcm`                           | Authenticated encryption              |
 | `sha2`                              | Change detection hashing              |
 | `hex`                               | Hex encoding for keys, nonces, hashes |
+| `base64`                            | Base64 encoding for K8s secrets       |
 | `rand`                              | Random key and nonce generation       |
 | `atty`                              | TTY detection for interactive prompts |
 | `chrono`                            | Timestamps in sync records            |
@@ -173,7 +184,7 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 445 tests
+cargo test                    # Run all 543 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
@@ -184,12 +195,12 @@ cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-445 tests total: 316 unit (inline `#[cfg(test)]`) + 129 integration (`tests/`).
+543 tests total: 414 unit (inline `#[cfg(test)]`) + 129 integration (`tests/`).
 
 ### Test infrastructure
 
 - **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `sync_index_path()`, `plugin_index_path()`.
-- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `GITLAB_CONFIG` — reusable YAML for tests.
+- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for adapter/plugin tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.
