@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::plugin_tracker::PluginIndex;
 use crate::store::SecretStore;
-use crate::tracker::SyncIndex;
+use crate::adapter_tracker::SyncIndex;
 
 pub fn run(cwd: &Path) -> Result<()> {
     let config_path = cwd.join("esk.yaml");

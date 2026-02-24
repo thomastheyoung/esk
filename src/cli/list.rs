@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::Config;
 use crate::store::SecretStore;
-use crate::tracker::{SyncIndex, SyncStatus};
+use crate::adapter_tracker::{SyncIndex, SyncStatus};
 
 /// Custom theme that renders note body text without dim styling.
 ///

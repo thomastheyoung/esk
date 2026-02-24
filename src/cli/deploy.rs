@@ -7,7 +7,7 @@ use crate::adapters::{
 };
 use crate::config::Config;
 use crate::store::SecretStore;
-use crate::tracker::SyncIndex;
+use crate::adapter_tracker::SyncIndex;
 
 /// A single sync result entry for display.
 struct SyncEntry {
