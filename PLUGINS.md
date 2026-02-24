@@ -43,6 +43,8 @@ Uses the 1Password CLI (`op`) to push and pull entire environment snapshots as v
 
 **Auto-push**: The `set` and `delete` commands automatically push to all configured plugins after modifying the store (unless `--no-sync` is used).
 
+> **Security note**: `op item create/edit` requires secret field assignments as CLI arguments, so values are visible in process listings (`ps aux`).
+
 ### Prerequisites
 
 - [1Password CLI](https://developer.1password.com/docs/cli/) (`op`) installed and authenticated.
@@ -275,6 +277,8 @@ vault kv get -format=json secret/data/myapp/dev
 ## Bitwarden
 
 Uses the Bitwarden Secrets Manager CLI (`bws`) to store environment snapshots as JSON-valued secrets in a Bitwarden project.
+
+> **Security note**: `bws secret create/edit` passes secret payloads via CLI arguments, so values are visible in process listings (`ps aux`).
 
 ### How it works
 
@@ -568,7 +572,7 @@ When multiple plugins are configured, `esk sync` reconciles across all of them:
 3. Start with that as the base.
 4. Merge unique secrets from lower-version sources.
 5. Write the merged result to the local store.
-6. If reconciliation changed the local store, push the merged result back to plugins that were behind.
+6. Push merged/current data back to stale plugins, including equal-version drift repair (even when local content was already current).
 
 This means you can use 1Password for team sharing and Dropbox as a backup — sync reconciles them when changes are merged.
 

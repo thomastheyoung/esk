@@ -140,7 +140,8 @@ When you need cloud targets or shared sync, add adapter/plugin blocks. See [ADAP
 | `esk list [--env <ENV>]`       | List secrets and deploy status                |
 | `esk deploy [--env <ENV>]`     | Deploy to adapter targets                     |
 | `esk status [--env <ENV>]`     | Show drift/sync dashboard                     |
-| `esk sync --env <ENV>`         | Pull, reconcile, and push plugin state        |
+| `esk sync [--env <ENV>]`       | Pull, reconcile, and push plugin state        |
+| `esk generate [--runtime]`     | Generate TypeScript env declarations/validator |
 
 Full flags and behavior: [API.md](API.md).
 

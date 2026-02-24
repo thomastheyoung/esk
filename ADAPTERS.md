@@ -39,6 +39,8 @@ Generates `.env` files from the encrypted store. The output path is computed fro
 2. Secrets are grouped by vendor with `# === Vendor ===` section headers and sorted alphabetically within each group.
 3. The file includes a header comment with instructions for updating and regenerating.
 4. Parent directories are created automatically if they don't exist.
+5. Generated files are marked read-only to discourage manual edits (for example `0400` on Unix).
+6. Multiline values are rejected for `.env` output safety.
 
 ### Configuration
 
@@ -65,6 +67,7 @@ The pattern is resolved by replacing:
 - `{env_suffix}` with the value from `env_suffix` for the current environment (or empty string if not mapped)
 
 The result is relative to the project root (where `esk.yaml` lives).
+Resolved paths must stay within the project root; traversal/symlink escape paths are rejected.
 
 **Examples with `pattern: "{app_path}/.env{env_suffix}.local"`:**
 
@@ -246,6 +249,8 @@ secrets:
 ## Fly.io
 
 Syncs secrets to Fly.io apps using `fly secrets import`. Values are piped via stdin to avoid exposing them in process listings.
+
+Values containing newlines are rejected (the adapter sends `KEY=VALUE` over stdin, and newlines would inject additional variables).
 
 ### Prerequisites
 
@@ -481,6 +486,8 @@ secrets:
 ## Supabase
 
 Syncs secrets to Supabase edge functions using `supabase secrets set`. Values are piped via stdin to avoid exposing them in process listings.
+
+Values containing newlines are rejected (the adapter sends `KEY=VALUE` over stdin, and newlines would inject additional variables).
 
 ### Prerequisites
 

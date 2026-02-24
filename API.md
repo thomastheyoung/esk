@@ -45,6 +45,7 @@ esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
 5. Unless `--no-sync`: runs `deploy` for the affected environment (batch adapters regenerate without the deleted key; individual adapters call their delete command).
 6. With `--strict`: if any plugin push fails, exits with an error and skips adapter deploy entirely.
+7. Without `--strict`: adapter deploy still runs, but the command exits non-zero if any plugin push failed (to surface retry work).
 
 **Examples:**
 
@@ -73,10 +74,10 @@ esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose]
 
 **Adapter behavior:**
 
-- **Batch adapters** (env): Regenerate the entire output atomically when any secret in a target group changes.
-- **Individual adapters** (cloudflare, convex): Deploy one secret at a time via external CLI calls.
+- **Batch adapters** (`env`, `kubernetes`): Regenerate the entire output atomically when any secret in a target group changes.
+- **Individual adapters** (for example `cloudflare`, `convex`): Deploy one secret at a time via external CLI calls.
 
-Targets whose adapter name matches a plugin (not an adapter) are skipped — plugins use `sync` instead.
+Adapters that fail preflight checks are skipped with warnings (or all deploy work is skipped if no adapters remain available).
 
 **Change detection:**
 
@@ -122,6 +123,7 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--str
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
 5. Unless `--no-sync`: runs `deploy` for the affected environment.
 6. With `--strict`: if any plugin push fails, exits with an error and skips adapter deploy entirely.
+7. Without `--strict`: adapter deploy still runs, but the command exits non-zero if any plugin push failed (to surface retry work).
 
 **Examples:**
 
@@ -175,7 +177,7 @@ esk list [--env <ENV>]
 
 - Secrets grouped by vendor (as defined in `esk.yaml`), displayed as tables.
 - Column headers show each environment.
-- Per-cell status indicators reflect deploy state across all targets for that key/environment:
+- Per-cell status indicators reflect deploy state across configured adapter targets for that key/environment:
   - `✓` (green) — synced: all targets up to date.
   - `●` (yellow) — pending: value changed since last deploy.
   - `✗` (red) — failed: last deploy attempt failed.
@@ -249,43 +251,77 @@ The dashboard closes with the current store version.
 
 ---
 
-## `esk sync`
+## `esk generate`
 
-Sync secrets with configured storage plugins. Pulls from all plugins, reconciles with the local store, and, when reconciliation changes local data, pushes the merged result to stale plugins.
+Generate TypeScript declarations (or a runtime validator) for configured secret keys.
 
 ```bash
-esk sync --env <ENV> [--only <PLUGIN>] [--dry-run] [--no-partial] [--force] [--with-deploy]
+esk generate [--runtime] [--output <PATH>]
+```
+
+| Argument              | Required | Description                                       |
+| --------------------- | -------- | ------------------------------------------------- |
+| `--runtime`           | No       | Generate `env.ts` runtime validator instead of `.d.ts` declarations |
+| `--output` / `-o`     | No       | Output path (defaults to `env.d.ts` or `env.ts`) |
+
+**Behavior:**
+
+1. Collects unique secret keys from the `secrets` section in `esk.yaml`.
+2. Writes `env.d.ts` by default with `NodeJS.ProcessEnv` declarations.
+3. With `--runtime`, writes `env.ts` containing a `requireEnv` helper and typed `env` object.
+4. Creates parent directories for the output path if needed.
+5. Warns when no secrets are defined, and warns if the output path does not appear in `.gitignore`.
+
+**Examples:**
+
+```bash
+esk generate
+esk generate --runtime
+esk generate --runtime --output src/env.ts
+```
+
+---
+
+## `esk sync`
+
+Sync secrets with configured storage plugins. Pulls from plugins, reconciles with the local store, then pushes merged data to stale or drifted plugins.
+
+```bash
+esk sync [--env <ENV>] [--only <PLUGIN>] [--dry-run] [--no-partial] [--force] [--with-deploy] [--prefer <local|remote>]
 ```
 
 | Argument        | Required | Description                                                                |
 | --------------- | -------- | -------------------------------------------------------------------------- |
-| `--env`         | Yes      | Environment to sync                                                        |
+| `--env`         | No       | Environment to sync (omit to sync all configured environments)             |
 | `--only`        | No       | Sync a specific plugin only                                                |
 | `--dry-run`     | No       | Show what would change without modifying anything                          |
 | `--no-partial`  | No       | Fail if any plugin is unreachable (no partial reconciliation)              |
 | `--force`       | No       | Bypass version jump protection — skip interactive prompt (use with caution)|
 | `--with-deploy` | No       | Auto-run `deploy` after syncing                                            |
+| `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)        |
 
 Compatibility aliases: `--strict` for `--no-partial`, and `--deploy` for `--with-deploy`.
 
-**Requires:** At least one plugin configured in `esk.yaml` and its dependencies available (e.g., `op` CLI for 1Password).
+**Requires:** At least one plugin configured in `esk.yaml`. Plugins that fail preflight are skipped; if none remain, sync exits with a warning and no changes.
 
 **Behavior:**
 
-1. Pulls secrets and versions from all configured plugins (or just `--only <name>`).
-2. The highest-version source becomes the base.
-3. Unique secrets from lower-version sources are merged in.
-4. Local store is updated with the merged result.
-5. If reconciliation changes local store state, stale plugins are automatically pushed the merged result (no interactive prompt).
-6. With `--with-deploy`, `esk deploy --env <ENV>` runs after a successful sync that changed local store state.
-7. With `--dry-run`, shows what would change without modifying the store or pushing to plugins.
+1. Syncs the selected environment(s): `--env` limits to one; omitted means all configured environments.
+2. Pulls secrets and versions from all available plugins (or just `--only <name>`).
+3. Uses the highest version as the base and merges unique keys from lower versions.
+4. Updates local store state when reconciliation changes it.
+5. Pushes merged/current data to stale plugins, including equal-version drift repair (no interactive push prompt).
+6. With `--with-deploy`, runs `esk deploy --env <ENV>` only for environments where local store state changed.
+7. With `--dry-run`, shows what would change without modifying store or plugin state.
 
 **Examples:**
 
 ```bash
-esk sync --env prod                     # Sync all plugins
+esk sync                                # Sync all environments and plugins
+esk sync --env prod                     # Sync one environment
 esk sync --env prod --only 1password    # Sync specific plugin
 esk sync --env prod --with-deploy       # Sync + auto-deploy targets
+esk sync --env prod --prefer remote     # At equal versions, prefer remote content
 esk sync --env prod --dry-run           # Preview changes
 ```
 
