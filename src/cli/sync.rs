@@ -220,14 +220,12 @@ pub fn run_with_runner(
         }
     }
 
-    if !pull_failures.is_empty() {
-        if no_partial {
-            bail!(
-                "{} plugin(s) failed to respond: {}. Use without --no-partial to reconcile with partial data.",
-                pull_failures.len(),
-                pull_failures.join(", ")
-            );
-        }
+    if !pull_failures.is_empty() && no_partial {
+        bail!(
+            "{} plugin(s) failed to respond: {}. Use without --no-partial to reconcile with partial data.",
+            pull_failures.len(),
+            pull_failures.join(", ")
+        );
     }
 
     if remote_data.is_empty() {

@@ -7,7 +7,11 @@ use crate::plugin_tracker::PluginIndex;
 use crate::store::SecretStore;
 
 const ESK_GITIGNORE_COMMENT: &str = "# esk (store.enc is safe to commit)";
-const ESK_GITIGNORE_ENTRIES: &[&str] = &[".esk/store.key", ".esk/sync-index.json", ".esk/plugin-index.json"];
+const ESK_GITIGNORE_ENTRIES: &[&str] = &[
+    ".esk/store.key",
+    ".esk/sync-index.json",
+    ".esk/plugin-index.json",
+];
 
 pub fn run(cwd: &Path) -> Result<()> {
     let config_path = cwd.join("esk.yaml");
@@ -95,10 +99,7 @@ secrets:
 
     let gitignore_path = cwd.join(".gitignore");
     if ensure_esk_gitignore_entries(&gitignore_path)? {
-        cliclack::log::success(format!(
-            "Updated {}",
-            style(gitignore_path.display()).dim(),
-        ))?;
+        cliclack::log::success(format!("Updated {}", style(gitignore_path.display()).dim(),))?;
     }
 
     cliclack::outro(format!(
