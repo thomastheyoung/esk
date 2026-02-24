@@ -963,7 +963,7 @@ mod tests {
         local.env_versions.insert("dev".to_string(), 5);
 
         // Remote plugin has prod secrets at v2
-        let remote = make_remote(&[("DB_URL", "postgres://prod")]);
+        let remote = make_composite(&[("DB_URL:prod", "postgres://prod")]);
         let result =
             reconcile_multi(&local, &[("plugin1", &remote, 2)], Some("prod"), ConflictPreference::Local).unwrap();
 
