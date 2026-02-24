@@ -6,18 +6,18 @@ For deploy adapters (env files, Cloudflare, Convex, etc.), see [ADAPTERS.md](ADA
 
 ## Overview
 
-| Plugin                                            | Config key              | External CLI | Storage location              |
-| ------------------------------------------------- | ----------------------- | ------------ | ----------------------------- |
-| [1Password](#1password)                           | `1password`             | `op`         | 1Password vault item          |
-| [Cloud file](#cloud-file)                         | Any name + `type: cloud_file` | None   | Local/cloud-synced folder     |
-| [AWS Secrets Manager](#aws-secrets-manager)       | `aws_secrets_manager`   | `aws`        | AWS Secrets Manager           |
-| [HashiCorp Vault](#hashicorp-vault)               | `vault`                 | `vault`      | Vault KV store                |
-| [Bitwarden](#bitwarden)                           | `bitwarden`             | `bws`        | Bitwarden Secrets Manager     |
-| [S3](#s3)                                         | `s3`                    | `aws`        | S3-compatible bucket          |
-| [GCP Secret Manager](#gcp-secret-manager)         | `gcp`                   | `gcloud`     | GCP Secret Manager            |
-| [Azure Key Vault](#azure-key-vault)               | `azure`                 | `az`         | Azure Key Vault               |
-| [Doppler](#doppler)                               | `doppler`               | `doppler`    | Doppler project               |
-| [SOPS](#sops)                                     | `sops`                  | `sops`       | SOPS-encrypted files          |
+| Plugin                                      | Config key                    | External CLI | Storage location          |
+| ------------------------------------------- | ----------------------------- | ------------ | ------------------------- |
+| [1Password](#1password)                     | `1password`                   | `op`         | 1Password vault item      |
+| [Cloud file](#cloud-file)                   | Any name + `type: cloud_file` | None         | Local/cloud-synced folder |
+| [AWS Secrets Manager](#aws-secrets-manager) | `aws_secrets_manager`         | `aws`        | AWS Secrets Manager       |
+| [HashiCorp Vault](#hashicorp-vault)         | `vault`                       | `vault`      | Vault KV store            |
+| [Bitwarden](#bitwarden)                     | `bitwarden`                   | `bws`        | Bitwarden Secrets Manager |
+| [S3](#s3)                                   | `s3`                          | `aws`        | S3-compatible bucket      |
+| [GCP Secret Manager](#gcp-secret-manager)   | `gcp`                         | `gcloud`     | GCP Secret Manager        |
+| [Azure Key Vault](#azure-key-vault)         | `azure`                       | `az`         | Azure Key Vault           |
+| [Doppler](#doppler)                         | `doppler`                     | `doppler`    | Doppler project           |
+| [SOPS](#sops)                               | `sops`                        | `sops`       | SOPS-encrypted files      |
 
 ---
 
@@ -148,11 +148,11 @@ plugins:
     format: cleartext
 ```
 
-| Field    | Required | Default     | Description                                                                                        |
-| -------- | -------- | ----------- | -------------------------------------------------------------------------------------------------- |
-| `type`   | Yes      | —           | Must be `cloud_file`.                                                                              |
+| Field    | Required | Default     | Description                                                                                           |
+| -------- | -------- | ----------- | ----------------------------------------------------------------------------------------------------- |
+| `type`   | Yes      | —           | Must be `cloud_file`.                                                                                 |
 | `path`   | Yes      | —           | Directory to store files in. Supports `{project}` interpolation and tilde (`~`) expansion to `$HOME`. |
-| `format` | No       | `encrypted` | Storage format: `encrypted` (binary, needs key) or `cleartext` (JSON).                             |
+| `format` | No       | `encrypted` | Storage format: `encrypted` (binary, needs key) or `cleartext` (JSON).                                |
 
 ### File layout
 
@@ -213,18 +213,18 @@ plugins:
     profile: staging
 ```
 
-| Field         | Required | Description                                                                                 |
-| ------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `secret_name` | Yes      | Secret name pattern. Supports `{project}` and `{environment}` interpolation.                |
-| `region`      | No       | AWS region. Passed as `--region` flag.                                                      |
-| `profile`     | No       | AWS profile. Passed as `--profile` flag.                                                    |
+| Field         | Required | Description                                                                  |
+| ------------- | -------- | ---------------------------------------------------------------------------- |
+| `secret_name` | Yes      | Secret name pattern. Supports `{project}` and `{environment}` interpolation. |
+| `region`      | No       | AWS region. Passed as `--region` flag.                                       |
+| `profile`     | No       | AWS profile. Passed as `--profile` flag.                                     |
 
 ### Secret naming
 
-| Pattern                     | Project | Environment | Result         |
-| --------------------------- | ------- | ----------- | -------------- |
-| `{project}/{environment}`   | `myapp` | `dev`       | `myapp/dev`    |
-| `{project}/{environment}`   | `myapp` | `prod`      | `myapp/prod`   |
+| Pattern                   | Project | Environment | Result       |
+| ------------------------- | ------- | ----------- | ------------ |
+| `{project}/{environment}` | `myapp` | `dev`       | `myapp/dev`  |
+| `{project}/{environment}` | `myapp` | `prod`      | `myapp/prod` |
 
 ---
 
@@ -254,11 +254,11 @@ plugins:
     kv_version: 2
 ```
 
-| Field        | Required | Default | Description                                                                                 |
-| ------------ | -------- | ------- | ------------------------------------------------------------------------------------------- |
-| `path`       | Yes      | —       | KV path pattern. Supports `{project}` and `{environment}` interpolation.                    |
-| `addr`       | No       | —       | Vault server address. Set as `VAULT_ADDR` environment variable.                             |
-| `kv_version` | No       | `2`     | KV secret engine version (`1` or `2`). Determines the JSON response parsing path.           |
+| Field        | Required | Default | Description                                                                       |
+| ------------ | -------- | ------- | --------------------------------------------------------------------------------- |
+| `path`       | Yes      | —       | KV path pattern. Supports `{project}` and `{environment}` interpolation.          |
+| `addr`       | No       | —       | Vault server address. Set as `VAULT_ADDR` environment variable.                   |
+| `kv_version` | No       | `2`     | KV secret engine version (`1` or `2`). Determines the JSON response parsing path. |
 
 ### Command executed
 
@@ -298,10 +298,10 @@ plugins:
     secret_name: "{project}-{environment}"
 ```
 
-| Field         | Required | Description                                                                                 |
-| ------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `project_id`  | Yes      | Bitwarden Secrets Manager project ID.                                                       |
-| `secret_name` | Yes      | Secret name pattern. Supports `{project}` and `{environment}` interpolation.                |
+| Field         | Required | Description                                                                  |
+| ------------- | -------- | ---------------------------------------------------------------------------- |
+| `project_id`  | Yes      | Bitwarden Secrets Manager project ID.                                        |
+| `secret_name` | Yes      | Secret name pattern. Supports `{project}` and `{environment}` interpolation. |
 
 ### Command executed
 
@@ -349,14 +349,14 @@ plugins:
     endpoint: "https://r2.example.com"
 ```
 
-| Field      | Required | Default     | Description                                                                                 |
-| ---------- | -------- | ----------- | ------------------------------------------------------------------------------------------- |
-| `bucket`   | Yes      | —           | S3 bucket name.                                                                             |
-| `prefix`   | No       | —           | Key prefix within the bucket (e.g., `esk/myapp`).                                           |
-| `format`   | No       | `encrypted` | Storage format: `encrypted` (needs key) or `cleartext` (JSON).                              |
-| `region`   | No       | —           | AWS region. Passed as `--region`.                                                            |
-| `profile`  | No       | —           | AWS profile. Passed as `--profile`.                                                          |
-| `endpoint` | No       | —           | Custom endpoint URL for S3-compatible services. Passed as `--endpoint-url`.                  |
+| Field      | Required | Default     | Description                                                                 |
+| ---------- | -------- | ----------- | --------------------------------------------------------------------------- |
+| `bucket`   | Yes      | —           | S3 bucket name.                                                             |
+| `prefix`   | No       | —           | Key prefix within the bucket (e.g., `esk/myapp`).                           |
+| `format`   | No       | `encrypted` | Storage format: `encrypted` (needs key) or `cleartext` (JSON).              |
+| `region`   | No       | —           | AWS region. Passed as `--region`.                                           |
+| `profile`  | No       | —           | AWS profile. Passed as `--profile`.                                         |
+| `endpoint` | No       | —           | Custom endpoint URL for S3-compatible services. Passed as `--endpoint-url`. |
 
 ### File layout
 
@@ -403,10 +403,10 @@ plugins:
     secret_name: "{project}-{environment}"
 ```
 
-| Field         | Required | Description                                                                                 |
-| ------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `gcp_project` | Yes      | GCP project ID.                                                                             |
-| `secret_name` | Yes      | Secret name pattern. Supports `{project}` and `{environment}` interpolation.                |
+| Field         | Required | Description                                                                  |
+| ------------- | -------- | ---------------------------------------------------------------------------- |
+| `gcp_project` | Yes      | GCP project ID.                                                              |
+| `secret_name` | Yes      | Secret name pattern. Supports `{project}` and `{environment}` interpolation. |
 
 ### Command executed
 
@@ -447,9 +447,9 @@ plugins:
     secret_name: "{project}-{environment}"
 ```
 
-| Field         | Required | Description                                                                                 |
-| ------------- | -------- | ------------------------------------------------------------------------------------------- |
-| `vault_name`  | Yes      | Azure Key Vault name.                                                                       |
+| Field         | Required | Description                                                                                                       |
+| ------------- | -------- | ----------------------------------------------------------------------------------------------------------------- |
+| `vault_name`  | Yes      | Azure Key Vault name.                                                                                             |
 | `secret_name` | Yes      | Secret name pattern. Supports `{project}` and `{environment}` interpolation. Sanitized to alphanumeric + hyphens. |
 
 ### Command executed
@@ -491,10 +491,10 @@ plugins:
       prod: prd
 ```
 
-| Field        | Required | Description                                                                                 |
-| ------------ | -------- | ------------------------------------------------------------------------------------------- |
-| `project`    | Yes      | Doppler project name.                                                                       |
-| `config_map` | Yes      | Maps esk environment names to Doppler config names.                                         |
+| Field        | Required | Description                                         |
+| ------------ | -------- | --------------------------------------------------- |
+| `project`    | Yes      | Doppler project name.                               |
+| `config_map` | Yes      | Maps esk environment names to Doppler config names. |
 
 ### Command executed
 
@@ -535,9 +535,9 @@ plugins:
     path: "secrets/{environment}.enc.json"
 ```
 
-| Field  | Required | Description                                                                                 |
-| ------ | -------- | ------------------------------------------------------------------------------------------- |
-| `path` | Yes      | File path pattern. Supports `{environment}` interpolation. Relative to project root.        |
+| Field  | Required | Description                                                                          |
+| ------ | -------- | ------------------------------------------------------------------------------------ |
+| `path` | Yes      | File path pattern. Supports `{environment}` interpolation. Relative to project root. |
 
 ### File layout
 

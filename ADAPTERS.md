@@ -6,21 +6,21 @@ For storage/backup plugins (1Password, cloud files), see [PLUGINS.md](PLUGINS.md
 
 ## Overview
 
-| Adapter                                   | Config key   | External CLI | Sync mode  | Targets require app? |
-| ----------------------------------------- | ------------ | ------------ | ---------- | -------------------- |
-| [Env file](#env-file)                     | `env`        | None         | Batch      | Yes                  |
+| Adapter                                   | Config key   | External CLI | Sync mode  | Targets require app?      |
+| ----------------------------------------- | ------------ | ------------ | ---------- | ------------------------- |
+| [Env file](#env-file)                     | `env`        | None         | Batch      | Yes                       |
 | [Cloudflare Workers](#cloudflare-workers) | `cloudflare` | `wrangler`   | Individual | Yes (Workers); No (Pages) |
-| [Convex](#convex)                         | `convex`     | `npx`        | Individual | No                   |
-| [Fly.io](#flyio)                          | `fly`        | `fly`        | Individual | Yes                  |
-| [Netlify](#netlify)                       | `netlify`    | `netlify`    | Individual | No                   |
-| [Vercel](#vercel)                         | `vercel`     | `vercel`     | Individual | No                   |
-| [GitHub Actions](#github-actions)         | `github`     | `gh`         | Individual | No                   |
-| [Heroku](#heroku)                         | `heroku`     | `heroku`     | Individual | Yes                  |
-| [Supabase](#supabase)                     | `supabase`   | `supabase`   | Individual | No                   |
-| [Railway](#railway)                       | `railway`    | `railway`    | Individual | No                   |
-| [GitLab CI](#gitlab-ci)                   | `gitlab`     | `glab`       | Individual | No                   |
-| [AWS SSM](#aws-ssm)                       | `aws_ssm`    | `aws`        | Individual | No                   |
-| [Kubernetes](#kubernetes)                 | `kubernetes` | `kubectl`    | Batch      | No                   |
+| [Convex](#convex)                         | `convex`     | `npx`        | Individual | No                        |
+| [Fly.io](#flyio)                          | `fly`        | `fly`        | Individual | Yes                       |
+| [Netlify](#netlify)                       | `netlify`    | `netlify`    | Individual | No                        |
+| [Vercel](#vercel)                         | `vercel`     | `vercel`     | Individual | No                        |
+| [GitHub Actions](#github-actions)         | `github`     | `gh`         | Individual | No                        |
+| [Heroku](#heroku)                         | `heroku`     | `heroku`     | Individual | Yes                       |
+| [Supabase](#supabase)                     | `supabase`   | `supabase`   | Individual | No                        |
+| [Railway](#railway)                       | `railway`    | `railway`    | Individual | No                        |
+| [GitLab CI](#gitlab-ci)                   | `gitlab`     | `glab`       | Individual | No                        |
+| [AWS SSM](#aws-ssm)                       | `aws_ssm`    | `aws`        | Individual | No                        |
+| [Kubernetes](#kubernetes)                 | `kubernetes` | `kubectl`    | Batch      | No                        |
 
 **Sync modes:**
 
@@ -124,18 +124,18 @@ Syncs secrets to Cloudflare Workers using `wrangler secret put`.
 ```yaml
 adapters:
   cloudflare:
-    mode: workers            # "workers" (default) or "pages"
-    pages_project: my-pages  # required when mode is "pages"
+    mode: workers # "workers" (default) or "pages"
+    pages_project: my-pages # required when mode is "pages"
     env_flags:
       dev: ""
       prod: "--env production"
 ```
 
-| Field           | Required    | Default     | Description                                                                                                                                      |
-| --------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `mode`          | No          | `workers`   | Secrets API to use: `workers` (wrangler secret) or `pages` (wrangler pages secret).                                                             |
-| `pages_project` | Conditional | —           | Cloudflare Pages project name. Required when `mode` is `pages`.                                                                                  |
-| `env_flags`     | No          | —           | Map of environment name to extra CLI flags passed to `wrangler secret put`. Flags are split on whitespace and appended as separate arguments.    |
+| Field           | Required    | Default   | Description                                                                                                                                   |
+| --------------- | ----------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`          | No          | `workers` | Secrets API to use: `workers` (wrangler secret) or `pages` (wrangler pages secret).                                                           |
+| `pages_project` | Conditional | —         | Cloudflare Pages project name. Required when `mode` is `pages`.                                                                               |
+| `env_flags`     | No          | —         | Map of environment name to extra CLI flags passed to `wrangler secret put`. Flags are split on whitespace and appended as separate arguments. |
 
 ### Command executed
 
@@ -263,10 +263,10 @@ adapters:
       prod: "--stage"
 ```
 
-| Field       | Required | Description                                                               |
-| ----------- | -------- | ------------------------------------------------------------------------- |
-| `app_names` | Yes      | Maps esk app names to Fly app names.                                      |
-| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command.        |
+| Field       | Required | Description                                                         |
+| ----------- | -------- | ------------------------------------------------------------------- |
+| `app_names` | Yes      | Maps esk app names to Fly app names.                                |
+| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command. |
 
 ### Command executed
 
@@ -310,15 +310,15 @@ Preflight runs `netlify status` to verify CLI installation and site linkage.
 ```yaml
 adapters:
   netlify:
-    site: my-site-id          # optional
+    site: my-site-id # optional
     env_flags:
       prod: "--context production"
 ```
 
-| Field       | Required | Description                                                               |
-| ----------- | -------- | ------------------------------------------------------------------------- |
-| `site`      | No       | Netlify site ID or name. Passed as `--site` flag if set.                  |
-| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command.        |
+| Field       | Required | Description                                                         |
+| ----------- | -------- | ------------------------------------------------------------------- |
+| `site`      | No       | Netlify site ID or name. Passed as `--site` flag if set.            |
+| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command. |
 
 ### Command executed
 
@@ -361,10 +361,10 @@ adapters:
       prod: "--scope my-team"
 ```
 
-| Field       | Required | Description                                                               |
-| ----------- | -------- | ------------------------------------------------------------------------- |
-| `env_names` | Yes      | Maps esk environment names to Vercel environment names.                   |
-| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command.        |
+| Field       | Required | Description                                                         |
+| ----------- | -------- | ------------------------------------------------------------------- |
+| `env_names` | Yes      | Maps esk environment names to Vercel environment names.             |
+| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command. |
 
 ### Command executed
 
@@ -400,15 +400,15 @@ Syncs repository secrets using `gh secret set` with the value piped via stdin to
 ```yaml
 adapters:
   github:
-    repo: owner/repo           # optional — defaults to current repo
+    repo: owner/repo # optional — defaults to current repo
     env_flags:
       prod: "--env production"
 ```
 
-| Field       | Required | Description                                                               |
-| ----------- | -------- | ------------------------------------------------------------------------- |
-| `repo`      | No       | GitHub repo in `owner/repo` format. Passed as `-R` flag if set.          |
-| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command.        |
+| Field       | Required | Description                                                         |
+| ----------- | -------- | ------------------------------------------------------------------- |
+| `repo`      | No       | GitHub repo in `owner/repo` format. Passed as `-R` flag if set.     |
+| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command. |
 
 ### Command executed
 
@@ -452,10 +452,10 @@ adapters:
       prod: "--remote staging"
 ```
 
-| Field       | Required | Description                                                               |
-| ----------- | -------- | ------------------------------------------------------------------------- |
-| `app_names` | Yes      | Maps esk app names to Heroku app names.                                   |
-| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command.        |
+| Field       | Required | Description                                                         |
+| ----------- | -------- | ------------------------------------------------------------------- |
+| `app_names` | Yes      | Maps esk app names to Heroku app names.                             |
+| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command. |
 
 ### Command executed
 
@@ -496,10 +496,10 @@ adapters:
       prod: "--experimental"
 ```
 
-| Field         | Required | Description                                                               |
-| ------------- | -------- | ------------------------------------------------------------------------- |
-| `project_ref` | Yes      | Supabase project reference ID.                                            |
-| `env_flags`   | No       | Map of environment name to extra CLI flags appended to the command.        |
+| Field         | Required | Description                                                         |
+| ------------- | -------- | ------------------------------------------------------------------- |
+| `project_ref` | Yes      | Supabase project reference ID.                                      |
+| `env_flags`   | No       | Map of environment name to extra CLI flags appended to the command. |
 
 ### Command executed
 
@@ -544,9 +544,9 @@ adapters:
       prod: "--environment production"
 ```
 
-| Field       | Required | Description                                                               |
-| ----------- | -------- | ------------------------------------------------------------------------- |
-| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command.        |
+| Field       | Required | Description                                                         |
+| ----------- | -------- | ------------------------------------------------------------------- |
+| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command. |
 
 ### Command executed
 
@@ -586,9 +586,9 @@ adapters:
       prod: "--masked"
 ```
 
-| Field       | Required | Description                                                               |
-| ----------- | -------- | ------------------------------------------------------------------------- |
-| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command.        |
+| Field       | Required | Description                                                         |
+| ----------- | -------- | ------------------------------------------------------------------- |
+| `env_flags` | No       | Map of environment name to extra CLI flags appended to the command. |
 
 ### Command executed
 
@@ -637,13 +637,13 @@ adapters:
       prod: "--no-paginate"
 ```
 
-| Field            | Required | Default          | Description                                                                                              |
-| ---------------- | -------- | ---------------- | -------------------------------------------------------------------------------------------------------- |
-| `path_prefix`    | Yes      | —                | Path prefix with `{project}` and `{environment}` interpolation. The key name is appended.                |
-| `region`         | No       | —                | AWS region. Passed as `--region` flag.                                                                   |
-| `profile`        | No       | —                | AWS profile. Passed as `--profile` flag.                                                                 |
-| `parameter_type` | No       | `SecureString`   | SSM parameter type: `SecureString`, `String`, or `StringList`.                                           |
-| `env_flags`      | No       | —                | Map of environment name to extra CLI flags appended to the command.                                      |
+| Field            | Required | Default        | Description                                                                               |
+| ---------------- | -------- | -------------- | ----------------------------------------------------------------------------------------- |
+| `path_prefix`    | Yes      | —              | Path prefix with `{project}` and `{environment}` interpolation. The key name is appended. |
+| `region`         | No       | —              | AWS region. Passed as `--region` flag.                                                    |
+| `profile`        | No       | —              | AWS profile. Passed as `--profile` flag.                                                  |
+| `parameter_type` | No       | `SecureString` | SSM parameter type: `SecureString`, `String`, or `StringList`.                            |
+| `env_flags`      | No       | —              | Map of environment name to extra CLI flags appended to the command.                       |
 
 ### Path resolution
 
@@ -651,10 +651,10 @@ The parameter name is built by replacing `{project}` and `{environment}` in `pat
 
 **Example with `path_prefix: "/{project}/{environment}/"`:**
 
-| Project | Environment | Key        | Parameter name          |
-| ------- | ----------- | ---------- | ----------------------- |
-| `myapp` | `dev`       | `DB_PASS`  | `/myapp/dev/DB_PASS`    |
-| `myapp` | `prod`      | `API_KEY`  | `/myapp/prod/API_KEY`   |
+| Project | Environment | Key       | Parameter name        |
+| ------- | ----------- | --------- | --------------------- |
+| `myapp` | `dev`       | `DB_PASS` | `/myapp/dev/DB_PASS`  |
+| `myapp` | `prod`      | `API_KEY` | `/myapp/prod/API_KEY` |
 
 ### Command executed
 
@@ -712,12 +712,12 @@ adapters:
       prod: "--dry-run=client"
 ```
 
-| Field         | Required | Default                | Description                                                               |
-| ------------- | -------- | ---------------------- | ------------------------------------------------------------------------- |
-| `namespace`   | Yes      | —                      | Maps esk environment names to Kubernetes namespaces.                      |
-| `secret_name` | No       | `{project}-secrets`    | Name of the Kubernetes Secret resource.                                   |
-| `context`     | No       | —                      | Maps esk environment names to kubectl contexts (`--context` flag).        |
-| `env_flags`   | No       | —                      | Map of environment name to extra CLI flags appended to the command.       |
+| Field         | Required | Default             | Description                                                         |
+| ------------- | -------- | ------------------- | ------------------------------------------------------------------- |
+| `namespace`   | Yes      | —                   | Maps esk environment names to Kubernetes namespaces.                |
+| `secret_name` | No       | `{project}-secrets` | Name of the Kubernetes Secret resource.                             |
+| `context`     | No       | —                   | Maps esk environment names to kubectl contexts (`--context` flag).  |
+| `env_flags`   | No       | —                   | Map of environment name to extra CLI flags appended to the command. |
 
 ### Generated manifest
 
@@ -729,8 +729,8 @@ metadata:
   namespace: myapp-dev
 type: Opaque
 data:
-  DB_HOST: bG9jYWxob3N0     # base64("localhost")
-  DB_PASS: czNjcmV0         # base64("s3cret")
+  DB_HOST: bG9jYWxob3N0 # base64("localhost")
+  DB_PASS: czNjcmV0 # base64("s3cret")
 ```
 
 ### Command executed
