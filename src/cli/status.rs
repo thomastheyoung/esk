@@ -7,7 +7,7 @@ use crate::adapters::{check_adapter_health, AdapterHealth, CommandRunner, RealCo
 use crate::config::{Config, ResolvedTarget};
 use crate::plugin_tracker::{PluginIndex, PushStatus};
 use crate::plugins::{check_plugin_health, PluginHealth};
-use crate::store::{SecretStore, StorePayload};
+use crate::store::SecretStore;
 use crate::tracker::{SyncIndex, SyncStatus};
 
 // ---------------------------------------------------------------------------

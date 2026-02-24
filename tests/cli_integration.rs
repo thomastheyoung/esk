@@ -466,13 +466,15 @@ fn plugin_sync_unknown_env_errors() {
     let config = project.config().unwrap();
     let err = cli::sync::run(
         &config,
-        "staging",
-        None,
-        false,
-        false,
-        false,
-        false,
-        ConflictPreference::Local,
+        cli::sync::SyncOptions {
+            env: "staging",
+            only: None,
+            dry_run: false,
+            no_partial: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
     )
     .unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
@@ -484,13 +486,15 @@ fn plugin_sync_no_plugins() {
     let config = project.config().unwrap();
     let err = cli::sync::run(
         &config,
-        "dev",
-        None,
-        false,
-        false,
-        false,
-        false,
-        ConflictPreference::Local,
+        cli::sync::SyncOptions {
+            env: "dev",
+            only: None,
+            dry_run: false,
+            no_partial: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
     )
     .unwrap_err();
     assert!(err.to_string().contains("no plugins configured"));

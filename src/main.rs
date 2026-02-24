@@ -100,13 +100,15 @@ fn run() -> Result<()> {
             let config = Config::load(&config_path)?;
             esk::cli::sync::run(
                 &config,
-                env,
-                only.as_deref(),
-                *dry_run,
-                *no_partial,
-                *force,
-                *with_deploy,
-                *prefer,
+                esk::cli::sync::SyncOptions {
+                    env,
+                    only: only.as_deref(),
+                    dry_run: *dry_run,
+                    no_partial: *no_partial,
+                    force: *force,
+                    auto_deploy: *with_deploy,
+                    prefer: *prefer,
+                },
             )?;
         }
     }

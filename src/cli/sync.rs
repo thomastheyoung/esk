@@ -11,6 +11,16 @@ use crate::reconcile::{self, ConflictPreference};
 use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
 
+pub struct SyncOptions<'a> {
+    pub env: &'a str,
+    pub only: Option<&'a str>,
+    pub dry_run: bool,
+    pub no_partial: bool,
+    pub force: bool,
+    pub auto_deploy: bool,
+    pub prefer: ConflictPreference,
+}
+
 /// Push a payload to the given plugins, recording results in the plugin index.
 /// Returns the number of failures.
 pub fn push_to_plugins(
@@ -51,25 +61,16 @@ pub fn push_to_plugins(
     Ok(fail_count)
 }
 
-pub fn run(
-    config: &Config,
-    env: &str,
-    only: Option<&str>,
-    dry_run: bool,
-    no_partial: bool,
-    force: bool,
-    auto_deploy: bool,
-    prefer: ConflictPreference,
-) -> Result<()> {
+pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
     run_with_runner(
         config,
-        env,
-        only,
-        dry_run,
-        no_partial,
-        force,
-        auto_deploy,
-        prefer,
+        options.env,
+        options.only,
+        options.dry_run,
+        options.no_partial,
+        options.force,
+        options.auto_deploy,
+        options.prefer,
         &RealCommandRunner,
     )
 }
