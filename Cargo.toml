@@ -10,7 +10,7 @@ authors = ["Thomas LE JEUNE"]
 license = "MIT"
 repository = "https://github.com/thomastheyoung/esk"
 homepage = "https://github.com/thomastheyoung/esk"
-keywords = ["secrets", "api key", "encryption", "cli", "sync", "dotenv", "1password", "dropbox"]
+keywords = ["secrets", "api", "keys", "encryption", "cli", "sync", "dotenv", "1password", "dropbox"]
 categories = ["command-line-utilities", "cryptography"]
 
 [dependencies]
