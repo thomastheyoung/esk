@@ -561,7 +561,17 @@ pub fn build_sync_adapters<'a>(
 
     for adapter in candidates {
         match adapter.preflight() {
-            Ok(()) => adapters.push(adapter),
+            Ok(()) => {
+                if ["convex", "netlify", "heroku", "railway"]
+                    .contains(&adapter.name())
+                {
+                    let _ = cliclack::log::warning(format!(
+                        "{}: secrets passed via CLI arguments (visible in process listings)",
+                        adapter.name()
+                    ));
+                }
+                adapters.push(adapter);
+            }
             Err(e) => {
                 let _ =
                     cliclack::log::warning(format!("Skipping {} adapter: {}", adapter.name(), e));

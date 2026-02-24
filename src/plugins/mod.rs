@@ -14,7 +14,7 @@ use std::collections::BTreeMap;
 
 use crate::adapters::CommandRunner;
 use crate::config::Config;
-use crate::store::StorePayload;
+use crate::store::{validate_key, StorePayload};
 
 /// The key used to store version metadata in plugin payloads.
 pub const ESK_VERSION_KEY: &str = "_esk_version";
@@ -77,6 +77,16 @@ pub fn parse_pulled_secrets(
     let composite: BTreeMap<String, String> = data
         .into_iter()
         .filter(|(k, _)| k != ESK_VERSION_KEY)
+        .filter(|(k, _)| {
+            if validate_key(k).is_err() {
+                let _ = cliclack::log::warning(format!(
+                    "Skipping invalid key from remote: '{k}'"
+                ));
+                false
+            } else {
+                true
+            }
+        })
         .map(|(k, v)| (format!("{k}:{env}"), v))
         .collect();
 
@@ -365,7 +375,15 @@ pub fn build_plugins<'a>(
 
     for plugin in candidates {
         match plugin.preflight() {
-            Ok(()) => plugins.push(plugin),
+            Ok(()) => {
+                if ["onepassword", "bitwarden"].contains(&plugin.name()) {
+                    let _ = cliclack::log::warning(format!(
+                        "{}: secrets passed via CLI arguments (visible in process listings)",
+                        plugin.name()
+                    ));
+                }
+                plugins.push(plugin);
+            }
             Err(e) => {
                 let _ = cliclack::log::warning(format!("Skipping {} plugin: {}", plugin.name(), e));
             }
@@ -389,6 +407,35 @@ mod tests {
                 stderr: Vec::new(),
             })
         }
+    }
+
+    #[test]
+    fn parse_pulled_secrets_filters_invalid_keys() {
+        let mut data = BTreeMap::new();
+        data.insert("VALID_KEY".to_string(), "val1".to_string());
+        data.insert("invalid-key".to_string(), "val2".to_string());
+        data.insert("also invalid!".to_string(), "val3".to_string());
+        data.insert("ANOTHER_VALID".to_string(), "val4".to_string());
+        data.insert(ESK_VERSION_KEY.to_string(), "5".to_string());
+
+        let (composite, version) = parse_pulled_secrets(data, "dev");
+        assert_eq!(version, 5);
+        assert_eq!(composite.len(), 2);
+        assert!(composite.contains_key("VALID_KEY:dev"));
+        assert!(composite.contains_key("ANOTHER_VALID:dev"));
+        assert!(!composite.contains_key("invalid-key:dev"));
+        assert!(!composite.contains_key("also invalid!:dev"));
+    }
+
+    #[test]
+    fn parse_pulled_secrets_all_invalid_keys() {
+        let mut data = BTreeMap::new();
+        data.insert("bad-key".to_string(), "val".to_string());
+        data.insert(ESK_VERSION_KEY.to_string(), "1".to_string());
+
+        let (composite, version) = parse_pulled_secrets(data, "dev");
+        assert_eq!(version, 1);
+        assert!(composite.is_empty());
     }
 
     #[test]

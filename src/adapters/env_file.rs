@@ -128,9 +128,17 @@ impl<'a> EnvFileAdapter<'a> {
             .with_context(|| format!("failed to write {}", path.display()))?;
 
         // Mark read-only to discourage manual edits
-        let mut perms = std::fs::metadata(&path)?.permissions();
-        perms.set_readonly(true);
-        std::fs::set_permissions(&path, perms)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o400))?;
+        }
+        #[cfg(not(unix))]
+        {
+            let mut perms = std::fs::metadata(&path)?.permissions();
+            perms.set_readonly(true);
+            std::fs::set_permissions(&path, perms)?;
+        }
 
         Ok(())
     }
@@ -335,6 +343,22 @@ adapters:
         assert!(content.contains("CERT=\"line1\nline2\""));
         // The raw value should NOT appear unquoted
         assert!(!content.contains("CERT=line1\nline2\n"));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn env_file_has_restricted_permissions() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
+        let config = make_config(dir.path());
+        let adapter = EnvFileAdapter { config: &config };
+        let secrets = vec![make_secret("KEY", "value", "General")];
+        let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
+        assert!(results.iter().all(|r| r.success));
+        let metadata = std::fs::metadata(dir.path().join("apps/web/.env.local")).unwrap();
+        let mode = metadata.permissions().mode() & 0o777;
+        assert_eq!(mode, 0o400);
     }
 
     #[test]

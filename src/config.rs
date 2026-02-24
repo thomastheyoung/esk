@@ -310,6 +310,21 @@ pub struct ResolvedSecret {
     pub targets: Vec<ResolvedTarget>,
 }
 
+/// Check whether `target` stays within `root` after normalizing `..` components.
+/// Does not require paths to exist on disk.
+fn is_within_root(root: &Path, target: &Path) -> bool {
+    let mut normalized = PathBuf::new();
+    for component in target.components() {
+        match component {
+            std::path::Component::ParentDir => {
+                normalized.pop();
+            }
+            c => normalized.push(c),
+        }
+    }
+    normalized.starts_with(root)
+}
+
 impl Config {
     /// Walk up from `start` looking for `esk.yaml`.
     pub fn find(start: &Path) -> Result<PathBuf> {
@@ -352,6 +367,21 @@ impl Config {
         }
         for app_name in self.apps.keys() {
             validate_app(app_name)?;
+        }
+        // Validate env adapter pattern and env_suffix for unsafe path characters
+        if let Some(env_config) = &self.adapters.env {
+            if env_config.pattern.contains("..") {
+                bail!("env adapter pattern must not contain '..'");
+            }
+            for (env, suffix) in &env_config.env_suffix {
+                if suffix.contains("..")
+                    || suffix.contains('/')
+                    || suffix.contains('\\')
+                    || suffix.contains('\0')
+                {
+                    bail!("env_suffix for '{env}' contains unsafe path characters");
+                }
+            }
         }
         self.validate_plugins()?;
         // Validate secret targets reference known adapters, apps, and environments
@@ -541,7 +571,17 @@ impl Config {
             .replace("{app_path}", &app_config.path)
             .replace("{env_suffix}", &suffix);
 
-        Ok(self.root.join(path))
+        let resolved = self.root.join(&path);
+
+        // Defence-in-depth: ensure resolved path stays within project root
+        if !is_within_root(&self.root, &resolved) {
+            bail!(
+                "env path '{}' resolves outside project root",
+                resolved.display()
+            );
+        }
+
+        Ok(resolved)
     }
 
     /// Get the parsed 1Password plugin config, if configured.
@@ -1416,6 +1456,114 @@ adapters:
             environment: "prod".to_string(),
         };
         assert_eq!(t.to_string(), "cloudflare:prod");
+    }
+
+    #[test]
+    fn validate_env_pattern_rejects_dotdot() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+adapters:
+  env:
+    pattern: "../../../etc/{env_suffix}"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("must not contain '..'"));
+    }
+
+    #[test]
+    fn validate_env_suffix_rejects_dotdot() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}"
+    env_suffix:
+      dev: "../../etc/passwd"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("unsafe path characters"));
+    }
+
+    #[test]
+    fn validate_env_suffix_rejects_slash() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}"
+    env_suffix:
+      dev: "/etc/passwd"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("unsafe path characters"));
+    }
+
+    #[test]
+    fn validate_env_suffix_allows_safe_values() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}"
+    env_suffix:
+      dev: ""
+      prod: ".production"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        assert!(Config::load(&path).is_ok());
+    }
+
+    #[test]
+    fn resolve_env_path_rejects_traversal_via_app_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: "../../../etc"
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}"
+    env_suffix:
+      dev: ""
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let err = config.resolve_env_path("web", "dev").unwrap_err();
+        assert!(err.to_string().contains("resolves outside project root"));
+    }
+
+    #[test]
+    fn resolve_env_path_allows_normal_paths() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}"
+    env_suffix:
+      dev: ".local"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let result = config.resolve_env_path("web", "dev");
+        assert!(result.is_ok());
     }
 
     // --- add_secret_to_config tests ---

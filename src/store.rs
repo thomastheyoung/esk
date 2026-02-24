@@ -289,13 +289,14 @@ impl SecretStore {
             .context("store path has no parent")?;
         let tmp = NamedTempFile::new_in(dir)?;
         std::fs::write(tmp.path(), &encrypted)?;
-        tmp.persist(&self.store_path)
-            .with_context(|| format!("failed to persist store to {}", self.store_path.display()))?;
+        // Restrict permissions before persisting so the file is never world-readable
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(&self.store_path, std::fs::Permissions::from_mode(0o600))?;
+            std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
         }
+        tmp.persist(&self.store_path)
+            .with_context(|| format!("failed to persist store to {}", self.store_path.display()))?;
         Ok(())
     }
 
