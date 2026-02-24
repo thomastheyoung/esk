@@ -81,6 +81,8 @@ pub struct StorePayload {
     pub tombstones: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env_versions: BTreeMap<String, u64>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub env_last_changed_at: BTreeMap<String, String>,
 }
 
 impl StorePayload {
@@ -96,6 +98,12 @@ impl StorePayload {
             None => 0,
         }
     }
+
+    /// Returns the RFC3339 timestamp for when the environment's version
+    /// last changed, if known.
+    pub fn env_last_changed_at(&self, env: &str) -> Option<&str> {
+        self.env_last_changed_at.get(env).map(String::as_str)
+    }
 }
 
 impl std::fmt::Debug for StorePayload {
@@ -105,6 +113,7 @@ impl std::fmt::Debug for StorePayload {
             .field("version", &self.version)
             .field("tombstones", &self.tombstones)
             .field("env_versions", &self.env_versions)
+            .field("env_last_changed_at", &self.env_last_changed_at)
             .finish()
     }
 }
@@ -167,6 +176,7 @@ impl SecretStore {
                 version: 0,
                 tombstones: BTreeMap::new(),
                 env_versions: BTreeMap::new(),
+                env_last_changed_at: BTreeMap::new(),
             };
             store.write_payload(&payload)?;
         }
@@ -236,6 +246,7 @@ impl SecretStore {
                 version: 0,
                 tombstones: BTreeMap::new(),
                 env_versions: BTreeMap::new(),
+                env_last_changed_at: BTreeMap::new(),
             });
         }
         self.decrypt(ciphertext)
@@ -262,6 +273,9 @@ impl SecretStore {
             payload.version += 1;
             let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
             *env_v += 1;
+            payload
+                .env_last_changed_at
+                .insert(env.to_string(), chrono::Utc::now().to_rfc3339());
             self.write_payload(&payload)?;
             Ok(payload)
         })
@@ -279,6 +293,9 @@ impl SecretStore {
             payload.version += 1;
             let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
             *env_v += 1;
+            payload
+                .env_last_changed_at
+                .insert(env.to_string(), chrono::Utc::now().to_rfc3339());
             payload.tombstones.insert(composite, payload.version);
             self.write_payload(&payload)?;
             Ok(payload)
@@ -861,6 +878,23 @@ mod tests {
     }
 
     #[test]
+    fn set_and_delete_update_env_last_changed_at() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+
+        let p1 = store.set("A", "dev", "1").unwrap();
+        assert!(p1.env_last_changed_at("dev").is_some());
+
+        let p2 = store.set("B", "prod", "2").unwrap();
+        assert!(p2.env_last_changed_at("dev").is_some());
+        assert!(p2.env_last_changed_at("prod").is_some());
+
+        let p3 = store.delete("A", "dev").unwrap();
+        assert!(p3.env_last_changed_at("dev").is_some());
+        assert!(p3.env_last_changed_at("prod").is_some());
+    }
+
+    #[test]
     fn env_versions_absent_from_old_payloads() {
         let dir = tmp_root();
         let store = SecretStore::load_or_create(dir.path()).unwrap();
@@ -869,6 +903,17 @@ mod tests {
         std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
         let payload = store.payload().unwrap();
         assert!(payload.env_versions.is_empty());
+    }
+
+    #[test]
+    fn env_last_changed_at_absent_from_old_payloads() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":1}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+        let payload = store.payload().unwrap();
+        assert!(payload.env_last_changed_at.is_empty());
     }
 
     #[test]
@@ -987,6 +1032,7 @@ mod tests {
             version: 1,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
         let debug = format!("{:?}", payload);
         assert!(!debug.contains("super_secret_value"));
@@ -1093,6 +1139,7 @@ mod tests {
             version: 10,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
         payload.env_versions.insert("dev".to_string(), 3);
         assert_eq!(payload.env_version("dev"), 3);
@@ -1105,6 +1152,7 @@ mod tests {
             version: 7,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
         assert_eq!(payload.env_version("dev"), 7);
     }
@@ -1116,6 +1164,7 @@ mod tests {
             version: 10,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
         payload.env_versions.insert("dev".to_string(), 3);
         assert_eq!(payload.env_version("prod"), 0);

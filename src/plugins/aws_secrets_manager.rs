@@ -100,12 +100,17 @@ impl<'a> StoragePlugin for AwsSecretsManagerPlugin<'a> {
             .get(env)
             .copied()
             .unwrap_or(payload.version);
+        let mut env_last_changed_at = BTreeMap::new();
+        if let Some(ts) = payload.env_last_changed_at(env) {
+            env_last_changed_at.insert(env.to_string(), ts.to_string());
+        }
 
         let env_payload = StorePayload {
             secrets: env_secrets,
             version,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at,
         };
 
         let json =
@@ -470,6 +475,7 @@ plugins:
             version: 3,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
@@ -514,6 +520,7 @@ plugins:
             version: 5,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
@@ -550,6 +557,7 @@ plugins:
             version: 1,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
@@ -582,6 +590,7 @@ plugins:
             version: 7,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
         let secret_string = serde_json::to_string(&remote_payload).unwrap();
         let aws_response = json!({
@@ -661,6 +670,7 @@ plugins:
             version: 5,
             tombstones: BTreeMap::new(),
             env_versions,
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();

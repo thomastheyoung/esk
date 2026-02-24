@@ -1,9 +1,9 @@
 mod helpers;
 
+use esk::adapter_tracker::SyncIndex;
 use esk::cli;
 use esk::plugin_tracker::PluginIndex;
 use esk::reconcile::ConflictPreference;
-use esk::adapter_tracker::SyncIndex;
 use helpers::*;
 use serde_json::json;
 
@@ -1724,7 +1724,10 @@ fn sync_records_tombstone_delete_success() {
     let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Success);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Success
+    );
 }
 
 #[test]
@@ -1748,7 +1751,10 @@ fn sync_records_tombstone_delete_failure() {
     let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]
@@ -1777,7 +1783,10 @@ fn sync_retries_failed_tombstone_delete() {
     let index = SyncIndex::load(&project.sync_index_path());
     let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Success);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Success
+    );
 }
 
 #[test]
@@ -1937,7 +1946,10 @@ fn sync_fly_failure_tracked() {
         .values()
         .find(|r| r.target.contains("fly"))
         .unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]
@@ -2061,7 +2073,10 @@ fn sync_netlify_failure_tracked() {
         .values()
         .find(|r| r.target.contains("netlify"))
         .unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]
@@ -2184,7 +2199,10 @@ fn sync_vercel_failure_tracked() {
         .values()
         .find(|r| r.target.contains("vercel"))
         .unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]
@@ -2307,7 +2325,10 @@ fn sync_github_failure_tracked() {
         .values()
         .find(|r| r.target.contains("github"))
         .unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]
@@ -2428,7 +2449,10 @@ fn sync_heroku_failure_tracked() {
         .values()
         .find(|r| r.target.contains("heroku"))
         .unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]
@@ -2553,7 +2577,10 @@ fn sync_supabase_failure_tracked() {
         .values()
         .find(|r| r.target.contains("supabase"))
         .unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]
@@ -2673,7 +2700,10 @@ fn sync_railway_failure_tracked() {
         .values()
         .find(|r| r.target.contains("railway"))
         .unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]
@@ -2792,7 +2822,10 @@ fn sync_gitlab_failure_tracked() {
         .values()
         .find(|r| r.target.contains("gitlab"))
         .unwrap();
-    assert_eq!(record.last_sync_status, esk::adapter_tracker::SyncStatus::Failed);
+    assert_eq!(
+        record.last_sync_status,
+        esk::adapter_tracker::SyncStatus::Failed
+    );
 }
 
 #[test]

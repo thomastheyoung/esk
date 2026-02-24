@@ -3,12 +3,12 @@ use chrono::Utc;
 use console::style;
 use std::collections::BTreeSet;
 
+use crate::adapter_tracker::{SyncIndex, SyncStatus};
 use crate::adapters::{check_adapter_health, AdapterHealth, CommandRunner, RealCommandRunner};
 use crate::config::{Config, ResolvedTarget};
 use crate::plugin_tracker::{PluginIndex, PushStatus};
 use crate::plugins::{check_plugin_health, PluginHealth};
 use crate::store::SecretStore;
-use crate::adapter_tracker::{SyncIndex, SyncStatus};
 
 // ---------------------------------------------------------------------------
 // Custom theme (same as list.rs — prevents dim from clobbering inline ANSI)

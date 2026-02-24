@@ -2,12 +2,12 @@ use anyhow::Result;
 use console::style;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
+use crate::adapter_tracker::SyncIndex;
 use crate::adapters::{
     build_sync_adapters, CommandRunner, RealCommandRunner, SecretValue, SyncMode,
 };
 use crate::config::Config;
 use crate::store::SecretStore;
-use crate::adapter_tracker::SyncIndex;
 
 /// A single sync result entry for display.
 struct SyncEntry {

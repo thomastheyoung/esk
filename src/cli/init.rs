@@ -2,9 +2,9 @@ use anyhow::{Context, Result};
 use console::style;
 use std::path::Path;
 
+use crate::adapter_tracker::SyncIndex;
 use crate::plugin_tracker::PluginIndex;
 use crate::store::SecretStore;
-use crate::adapter_tracker::SyncIndex;
 
 pub fn run(cwd: &Path) -> Result<()> {
     let config_path = cwd.join("esk.yaml");

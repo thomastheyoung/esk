@@ -75,6 +75,14 @@ impl cliclack::Theme for SyncTheme {
     }
 }
 
+fn env_version_label(payload: &StorePayload, env: &str) -> String {
+    let version = payload.env_version(env);
+    match payload.env_last_changed_at(env) {
+        Some(ts) => format!("v{version}, last changed {ts}"),
+        None => format!("v{version}"),
+    }
+}
+
 /// Push a payload to the given plugins, recording results in the plugin index.
 /// Returns the number of failures.
 pub fn push_to_plugins(
@@ -93,11 +101,7 @@ pub fn push_to_plugins(
 
         match plugin.push(payload, config, env) {
             Ok(()) => {
-                spinner.stop(format!(
-                    "↑ {}  {}",
-                    plugin.name(),
-                    style("done").green()
-                ));
+                spinner.stop(format!("↑ {}  {}", plugin.name(), style("done").green()));
                 plugin_index.record_success(plugin.name(), env, pushed_version);
             }
             Err(e) => {
@@ -249,11 +253,7 @@ pub fn run_with_runner(
                 remote_data.push((plugin.name().to_string(), secrets, version));
             }
             Ok(None) => {
-                spinner.stop(format!(
-                    "↓ {}  {}",
-                    plugin.name(),
-                    style("no data").dim()
-                ));
+                spinner.stop(format!("↓ {}  {}", plugin.name(), style("no data").dim()));
             }
             Err(e) => {
                 spinner.error(format!(
@@ -329,13 +329,11 @@ pub fn run_with_runner(
     // Dry-run exit point
     if dry_run {
         if result.local_changed {
-            cliclack::log::info(format!(
-                "Would merge → v{}",
-                result.merged_payload.version
-            ))?;
+            let label = env_version_label(&result.merged_payload, env);
+            cliclack::log::info(format!("Would merge → {label}"))?;
         } else if result.sources_to_update.is_empty() {
-            let current = payload.env_version(env);
-            cliclack::log::info(format!("Up to date (v{current})"))?;
+            let label = env_version_label(&payload, env);
+            cliclack::log::info(format!("Up to date ({label})"))?;
         }
 
         if !result.sources_to_update.is_empty() {
@@ -343,10 +341,8 @@ pub fn run_with_runner(
                 cliclack::log::info(format!("Would push → {name}"))?;
             }
             if result.has_drift {
-                let current = payload.env_version(env);
-                cliclack::log::info(format!(
-                    "Current (v{current}), would repair remote drift"
-                ))?;
+                let label = env_version_label(&payload, env);
+                cliclack::log::info(format!("Current ({label}), would repair remote drift"))?;
             }
         }
         return Ok(());
@@ -354,18 +350,14 @@ pub fn run_with_runner(
 
     if result.local_changed {
         store.set_payload(&result.merged_payload)?;
-        cliclack::log::success(format!(
-            "Merged → v{}",
-            result.merged_payload.version
-        ))?;
+        let label = env_version_label(&result.merged_payload, env);
+        cliclack::log::success(format!("Merged → {label}"))?;
     } else {
-        let current = payload.env_version(env);
+        let label = env_version_label(&payload, env);
         if result.has_drift {
-            cliclack::log::info(format!(
-                "Current (v{current}), repairing stale plugins..."
-            ))?;
+            cliclack::log::info(format!("Current ({label}), repairing stale plugins..."))?;
         } else {
-            cliclack::log::success(format!("Up to date (v{current})"))?;
+            cliclack::log::success(format!("Up to date ({label})"))?;
         }
     }
 
@@ -391,11 +383,7 @@ pub fn run_with_runner(
             spinner.start(format!("↑ {}...", plugin.name()));
             match plugin.push(updated_payload, config, env) {
                 Ok(()) => {
-                    spinner.stop(format!(
-                        "↑ {}  {}",
-                        plugin.name(),
-                        style("done").green()
-                    ));
+                    spinner.stop(format!("↑ {}  {}", plugin.name(), style("done").green()));
                     plugin_index.record_success(plugin.name(), env, pushed_version);
                 }
                 Err(e) => {

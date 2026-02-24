@@ -1,3 +1,4 @@
+pub mod adapter_tracker;
 pub mod adapters;
 pub mod cli;
 pub mod config;
@@ -8,4 +9,3 @@ pub mod store;
 pub mod suggest;
 #[cfg(test)]
 pub mod test_support;
-pub mod adapter_tracker;

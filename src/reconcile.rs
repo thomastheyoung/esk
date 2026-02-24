@@ -164,12 +164,17 @@ pub fn reconcile_with_jump_limit(
 
             let mut merged_env_versions = local.env_versions.clone();
             merged_env_versions.insert(env.to_string(), merged_version);
+            let mut merged_env_last_changed_at = local.env_last_changed_at.clone();
+            if merged_version != local_version {
+                merged_env_last_changed_at.insert(env.to_string(), chrono::Utc::now().to_rfc3339());
+            }
 
             let merged_payload = StorePayload {
                 secrets: merged,
                 version: merged_version.max(local.version),
                 tombstones: merged_tombstones,
                 env_versions: merged_env_versions,
+                env_last_changed_at: merged_env_last_changed_at,
             };
 
             ReconcileResult {
@@ -464,8 +469,12 @@ pub fn reconcile_multi_with_jump_limit(
     let local_changed = local_version != final_version || merged != local.secrets;
 
     let mut merged_env_versions = local.env_versions.clone();
+    let mut merged_env_last_changed_at = local.env_last_changed_at.clone();
     if let Some(e) = env {
         merged_env_versions.insert(e.to_string(), final_version);
+        if final_version != local_version {
+            merged_env_last_changed_at.insert(e.to_string(), chrono::Utc::now().to_rfc3339());
+        }
     }
 
     Ok(MultiReconcileResult {
@@ -474,6 +483,7 @@ pub fn reconcile_multi_with_jump_limit(
             version: final_version.max(local.version),
             tombstones: merged_tombstones,
             env_versions: merged_env_versions,
+            env_last_changed_at: merged_env_last_changed_at,
         },
         sources_to_update,
         local_changed,
@@ -512,6 +522,7 @@ mod tests {
             version,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         }
     }
 
@@ -706,6 +717,7 @@ mod tests {
             version,
             tombstones: tomb_map,
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         }
     }
 

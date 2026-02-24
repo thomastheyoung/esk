@@ -78,11 +78,16 @@ impl<'a> S3Plugin<'a> {
             .get(env)
             .copied()
             .unwrap_or(payload.version);
+        let mut env_last_changed_at = BTreeMap::new();
+        if let Some(ts) = payload.env_last_changed_at(env) {
+            env_last_changed_at.insert(env.to_string(), ts.to_string());
+        }
         StorePayload {
             secrets: bare,
             version,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at,
         }
     }
 
@@ -469,6 +474,7 @@ plugins:
             version: 3,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
@@ -503,6 +509,7 @@ plugins:
             version: 1,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
@@ -532,6 +539,7 @@ plugins:
             version: 7,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
         let json = serde_json::to_string(&payload).unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(json.as_bytes())]);
@@ -607,6 +615,7 @@ plugins:
             version: 1,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();

@@ -2,9 +2,9 @@ use anyhow::Result;
 use console::style;
 use std::collections::{BTreeMap, BTreeSet};
 
+use crate::adapter_tracker::{SyncIndex, SyncStatus};
 use crate::config::Config;
 use crate::store::SecretStore;
-use crate::adapter_tracker::{SyncIndex, SyncStatus};
 
 /// Custom theme that renders note body text without dim styling.
 ///

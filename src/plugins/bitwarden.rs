@@ -346,6 +346,7 @@ plugins:
             version: 3,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
@@ -387,6 +388,7 @@ plugins:
             version: 5,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
@@ -421,6 +423,7 @@ plugins:
             version: 1,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         };
 
         plugin.push(&payload, &config, "dev").unwrap();

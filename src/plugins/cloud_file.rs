@@ -58,11 +58,16 @@ impl CloudFilePlugin {
             .get(env)
             .copied()
             .unwrap_or(payload.version);
+        let mut env_last_changed_at = BTreeMap::new();
+        if let Some(ts) = payload.env_last_changed_at(env) {
+            env_last_changed_at.insert(env.to_string(), ts.to_string());
+        }
         StorePayload {
             secrets: bare,
             version,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at,
         }
     }
 
@@ -238,6 +243,7 @@ mod tests {
             version,
             tombstones: BTreeMap::new(),
             env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
         }
     }
 
