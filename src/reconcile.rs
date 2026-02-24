@@ -8,12 +8,15 @@ use crate::store::StorePayload;
 /// compromised plugin from overwriting all local secrets.
 pub const MAX_VERSION_JUMP: u64 = 1000;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReconcileAction {
     /// Remote is newer — pull remote secrets into local
     PullRemote,
     /// Local is newer — push local diffs to remote
     PushLocal,
+    /// Versions are equal but content has drifted — push local to repair remote.
+    /// Unlike `PushLocal`, this does NOT indicate a version advancement.
+    RepairDrift,
     /// Versions are equal — no action needed
     NoOp,
 }
@@ -157,7 +160,7 @@ pub fn reconcile(
 
             if drift {
                 ReconcileResult {
-                    action: ReconcileAction::PushLocal,
+                    action: ReconcileAction::RepairDrift,
                     pulled: Vec::new(),
                     pushed,
                     merged_payload: None,
@@ -202,6 +205,9 @@ pub struct MultiReconcileResult {
     pub sources_to_update: Vec<String>,
     /// Whether anything changed compared to local.
     pub local_changed: bool,
+    /// Whether any source had equal version but different content (drift repair).
+    /// Unlike version-behind sources, drift sources don't require a local update.
+    pub has_drift: bool,
 }
 
 /// Reconcile local store against N remote sources.
@@ -296,12 +302,17 @@ pub fn reconcile_multi(
 
     // Determine which sources need updating (version-behind or equal-version drift).
     let merged_scope = scoped_composite_secrets(&merged, env);
+    let mut has_drift = false;
     for (name, secrets, version) in remotes {
         let needs_update = if *version < final_version {
             true
         } else if *version == final_version {
             let remote_scope = scoped_composite_secrets(secrets, env);
-            remote_scope != merged_scope
+            let drifted = remote_scope != merged_scope;
+            if drifted {
+                has_drift = true;
+            }
+            drifted
         } else {
             false
         };
@@ -327,6 +338,7 @@ pub fn reconcile_multi(
         },
         sources_to_update,
         local_changed,
+        has_drift,
     })
 }
 
@@ -376,18 +388,18 @@ mod tests {
         let local = make_payload(&[("KEY:dev", "val")], 5);
         let remote = make_remote(&[("KEY", "val")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::NoOp));
+        assert_eq!(result.action, ReconcileAction::NoOp);
         assert!(result.pulled.is_empty());
         assert!(result.pushed.is_empty());
         assert!(result.merged_payload.is_none());
     }
 
     #[test]
-    fn equal_versions_value_drift_pushes_local_repair() {
+    fn equal_versions_value_drift_returns_repair_drift() {
         let local = make_payload(&[("KEY:dev", "local")], 5);
         let remote = make_remote(&[("KEY", "remote")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PushLocal));
+        assert_eq!(result.action, ReconcileAction::RepairDrift);
         assert_eq!(result.pushed, vec!["KEY"]);
     }
 
@@ -396,7 +408,7 @@ mod tests {
         let local = make_payload(&[], 5);
         let remote = make_remote(&[("EXTRA", "x")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PushLocal));
+        assert_eq!(result.action, ReconcileAction::RepairDrift);
     }
 
     #[test]
@@ -404,7 +416,7 @@ mod tests {
         let local = make_payload(&[("KEY:dev", "new_val")], 5);
         let remote = make_remote(&[("KEY", "old_val")]);
         let result = reconcile(&local, &remote, 3, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PushLocal));
+        assert_eq!(result.action, ReconcileAction::PushLocal);
         assert!(result.pulled.is_empty());
         assert_eq!(result.pushed, vec!["KEY"]);
     }
@@ -414,7 +426,7 @@ mod tests {
         let local = make_payload(&[("KEY:dev", "old_val")], 3);
         let remote = make_remote(&[("KEY", "new_val")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
         assert_eq!(result.pulled, vec!["KEY"]);
         assert!(result.pushed.is_empty());
     }
@@ -424,7 +436,7 @@ mod tests {
         let local = make_payload(&[("A:dev", "a_val")], 3);
         let remote = make_remote(&[("A", "a_val"), ("B", "b_val")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
         assert_eq!(result.pulled, vec!["B"]);
         let merged = result.merged_payload.unwrap();
         assert_eq!(merged.secrets.get("B:dev").unwrap(), "b_val");
@@ -496,7 +508,7 @@ mod tests {
         let local = make_payload(&[], 0);
         let remote = make_remote(&[]);
         let result = reconcile(&local, &remote, 0, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::NoOp));
+        assert_eq!(result.action, ReconcileAction::NoOp);
     }
 
     #[test]
@@ -504,7 +516,7 @@ mod tests {
         let local = make_payload(&[], 0);
         let remote = make_remote(&[("A", "a"), ("B", "b")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
         assert_eq!(result.pulled.len(), 2);
     }
 
@@ -513,7 +525,7 @@ mod tests {
         let local = make_payload(&[("A:dev", "a"), ("B:dev", "b")], 5);
         let remote = make_remote(&[]);
         let result = reconcile(&local, &remote, 3, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PushLocal));
+        assert_eq!(result.action, ReconcileAction::PushLocal);
         assert_eq!(result.pushed.len(), 2);
     }
 
@@ -565,7 +577,7 @@ mod tests {
         let remote = make_remote(&[("KEY", "old_val")]);
         let result = reconcile(&local, &remote, 3, "dev").unwrap();
         // Local is newer: PushLocal, KEY stays deleted
-        assert!(matches!(result.action, ReconcileAction::PushLocal));
+        assert_eq!(result.action, ReconcileAction::PushLocal);
     }
 
     #[test]
@@ -574,7 +586,7 @@ mod tests {
         let local = make_payload_with_tombstones(&[], &[("KEY:dev", 3)], 3);
         let remote = make_remote(&[("KEY", "new_val")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
         let merged = result.merged_payload.unwrap();
         // Remote value wins — key is resurrected
         assert_eq!(merged.secrets.get("KEY:dev").unwrap(), "new_val");
@@ -589,7 +601,7 @@ mod tests {
         let local = make_payload_with_tombstones(&[("OTHER:dev", "x")], &[("KEY:dev", 4)], 4);
         let remote = make_remote(&[("KEY", "resurrected"), ("OTHER", "x")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
         let merged = result.merged_payload.unwrap();
         assert_eq!(merged.secrets.get("KEY:dev").unwrap(), "resurrected");
     }
@@ -624,7 +636,7 @@ mod tests {
         let remote = make_remote(&[("KEY", "new")]);
         // Remote at v4 — with env version 3 local is behind
         let result = reconcile(&local, &remote, 4, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
     }
 
     #[test]
@@ -634,7 +646,7 @@ mod tests {
         let remote = make_remote(&[("KEY", "old")]);
         // Remote at v4 — with env version 5 local is newer
         let result = reconcile(&local, &remote, 4, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PushLocal));
+        assert_eq!(result.action, ReconcileAction::PushLocal);
     }
 
     #[test]
@@ -653,7 +665,7 @@ mod tests {
         let local = make_payload(&[("A:dev", "a")], 0);
         let remote = make_remote(&[("A", "a")]);
         let result = reconcile(&local, &remote, 0, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::NoOp));
+        assert_eq!(result.action, ReconcileAction::NoOp);
     }
 
     #[test]
@@ -661,7 +673,7 @@ mod tests {
         let local = make_payload(&[], 0);
         let remote = make_remote(&[("A", "a")]);
         let result = reconcile(&local, &remote, 1, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
         assert_eq!(result.pulled, vec!["A"]);
     }
 
@@ -680,6 +692,7 @@ mod tests {
         let remote = make_composite(&[("A:dev", "a")]);
         let result = reconcile_multi(&local, &[("op", &remote, 3)], None).unwrap();
         assert!(!result.local_changed);
+        assert!(!result.has_drift);
         assert_eq!(result.merged_payload.version, 5);
         assert!(result.sources_to_update.contains(&"op".to_string()));
     }
@@ -722,6 +735,7 @@ mod tests {
         let remote = make_composite(&[("A:dev", "a")]);
         let result = reconcile_multi(&local, &[("op", &remote, 5)], None).unwrap();
         assert!(!result.local_changed);
+        assert!(!result.has_drift);
         assert_eq!(result.merged_payload.version, 5);
         assert!(result.sources_to_update.is_empty());
     }
@@ -732,6 +746,7 @@ mod tests {
         let remote = make_composite(&[("A:dev", "remote")]);
         let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev")).unwrap();
         assert!(!result.local_changed);
+        assert!(result.has_drift);
         assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "local");
         assert_eq!(result.merged_payload.version, 5);
         assert_eq!(result.sources_to_update, vec!["op"]);
@@ -743,6 +758,7 @@ mod tests {
         let remote = make_composite(&[("A:dev", "a"), ("B:prod", "remote_prod")]);
         let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev")).unwrap();
         assert!(!result.local_changed);
+        assert!(!result.has_drift);
         assert!(result.sources_to_update.is_empty());
     }
 
@@ -776,7 +792,7 @@ mod tests {
         local.env_versions.insert("dev".to_string(), 3);
         let remote = make_remote(&[("KEY", "new")]);
         let result = reconcile(&local, &remote, 5, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
         let merged = result.merged_payload.unwrap();
         // Global version must not drop below 10
         assert!(merged.version >= 10);
@@ -808,7 +824,7 @@ mod tests {
         let local = make_payload(&[], 0);
         let remote = make_remote(&[("A", "a")]);
         let result = reconcile(&local, &remote, MAX_VERSION_JUMP, "dev").unwrap();
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
     }
 
     #[test]
@@ -852,7 +868,7 @@ mod tests {
         let result = reconcile(&local, &remote, 2, "prod").unwrap();
 
         // prod has no env version -> 0, so remote v2 wins
-        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.action, ReconcileAction::PullRemote);
         assert_eq!(result.pulled, vec!["DB_URL"]);
     }
 

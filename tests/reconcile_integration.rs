@@ -18,7 +18,7 @@ fn reconcile_pull_then_push_flow() {
     remote.insert("API_KEY".to_string(), "remote_val".to_string());
     let result = reconcile(&payload, &remote, 3, "dev").unwrap();
 
-    assert!(matches!(result.action, ReconcileAction::PullRemote));
+    assert_eq!(result.action, ReconcileAction::PullRemote);
     assert_eq!(result.pulled, vec!["API_KEY"]);
 
     // Write merged payload
@@ -32,7 +32,7 @@ fn reconcile_pull_then_push_flow() {
 
     // Reconcile again: local is newer
     let result2 = reconcile(&updated, &remote, 3, "dev").unwrap();
-    assert!(matches!(result2.action, ReconcileAction::PushLocal));
+    assert_eq!(result2.action, ReconcileAction::PushLocal);
     assert!(result2.pushed.contains(&"NEW_KEY".to_string()));
 }
 
@@ -52,7 +52,7 @@ fn reconcile_bidirectional_merge() {
     remote.insert("B".to_string(), "b_remote".to_string());
 
     let result = reconcile(&payload, &remote, 5, "dev").unwrap();
-    assert!(matches!(result.action, ReconcileAction::PullRemote));
+    assert_eq!(result.action, ReconcileAction::PullRemote);
 
     // A and B pulled from remote
     assert!(result.pulled.contains(&"A".to_string()));

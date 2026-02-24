@@ -248,7 +248,7 @@ pub fn run_with_runner(
                 result.sources_to_update.len(),
                 result.sources_to_update.join(", ")
             ))?;
-            if !result.local_changed {
+            if result.has_drift {
                 let current = payload.env_version(env);
                 cliclack::log::info(format!(
                     "Local store is current (v{current}); this would repair remote drift."
@@ -266,12 +266,12 @@ pub fn run_with_runner(
         ))?;
     } else {
         let current = payload.env_version(env);
-        if result.sources_to_update.is_empty() {
-            cliclack::log::success(format!("Up to date — already in sync (v{current})"))?;
-        } else {
+        if result.has_drift {
             cliclack::log::info(format!(
                 "Local store is current (v{current}); repairing stale plugin data..."
             ))?;
+        } else {
+            cliclack::log::success(format!("Up to date — already in sync (v{current})"))?;
         }
     }
 
