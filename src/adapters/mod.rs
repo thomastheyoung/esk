@@ -193,260 +193,183 @@ pub struct AdapterHealth {
     pub message: String,
 }
 
-/// Check the health of all configured adapters without filtering.
-/// Returns one entry per configured adapter with preflight pass/fail.
-pub fn check_adapter_health(config: &Config, runner: &dyn CommandRunner) -> Vec<AdapterHealth> {
-    let mut results = Vec::new();
+struct AdapterCandidate<'a> {
+    adapter: Box<dyn SyncAdapter + 'a>,
+    ok_message: &'static str,
+}
+
+fn adapter_candidates<'a>(
+    config: &'a Config,
+    runner: &'a dyn CommandRunner,
+) -> Vec<AdapterCandidate<'a>> {
+    let mut candidates: Vec<AdapterCandidate<'a>> = Vec::new();
 
     if config.adapters.env.is_some() {
-        results.push(AdapterHealth {
-            name: "env".to_string(),
-            ok: true,
-            message: "writable".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(env_file::EnvFileAdapter { config }),
+            ok_message: "writable",
         });
     }
 
     if let Some(adapter_config) = &config.adapters.cloudflare {
-        let adapter = cloudflare::CloudflareAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "cloudflare".to_string(),
-                ok: true,
-                message: "wrangler authenticated".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(cloudflare::CloudflareAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "cloudflare".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "wrangler authenticated",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.convex {
-        let adapter = convex::ConvexAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "convex".to_string(),
-                ok: true,
-                message: "deployment accessible".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(convex::ConvexAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "convex".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "deployment accessible",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.fly {
-        let adapter = fly::FlyAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "fly".to_string(),
-                ok: true,
-                message: "fly authenticated".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(fly::FlyAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "fly".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "fly authenticated",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.netlify {
-        let adapter = netlify::NetlifyAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "netlify".to_string(),
-                ok: true,
-                message: "netlify linked".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(netlify::NetlifyAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "netlify".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "netlify linked",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.vercel {
-        let adapter = vercel::VercelAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "vercel".to_string(),
-                ok: true,
-                message: "vercel authenticated".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(vercel::VercelAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "vercel".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "vercel authenticated",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.github {
-        let adapter = github::GithubAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "github".to_string(),
-                ok: true,
-                message: "gh authenticated".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(github::GithubAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "github".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "gh authenticated",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.heroku {
-        let adapter = heroku::HerokuAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "heroku".to_string(),
-                ok: true,
-                message: "heroku authenticated".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(heroku::HerokuAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "heroku".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "heroku authenticated",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.supabase {
-        let adapter = supabase::SupabaseAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "supabase".to_string(),
-                ok: true,
-                message: "supabase available".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(supabase::SupabaseAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "supabase".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "supabase available",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.railway {
-        let adapter = railway::RailwayAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "railway".to_string(),
-                ok: true,
-                message: "railway authenticated".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(railway::RailwayAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "railway".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "railway authenticated",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.gitlab {
-        let adapter = gitlab::GitlabAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "gitlab".to_string(),
-                ok: true,
-                message: "glab authenticated".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(gitlab::GitlabAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "gitlab".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "glab authenticated",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.aws_ssm {
-        let adapter = aws_ssm::AwsSsmAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "aws_ssm".to_string(),
-                ok: true,
-                message: "aws authenticated".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(aws_ssm::AwsSsmAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "aws_ssm".to_string(),
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+            ok_message: "aws authenticated",
+        });
     }
 
     if let Some(adapter_config) = &config.adapters.kubernetes {
-        let adapter = kubernetes::KubernetesAdapter {
-            config,
-            adapter_config,
-            runner,
-        };
-        match adapter.preflight() {
-            Ok(()) => results.push(AdapterHealth {
-                name: "kubernetes".to_string(),
-                ok: true,
-                message: "kubectl available".to_string(),
+        candidates.push(AdapterCandidate {
+            adapter: Box::new(kubernetes::KubernetesAdapter {
+                config,
+                adapter_config,
+                runner,
             }),
-            Err(e) => results.push(AdapterHealth {
-                name: "kubernetes".to_string(),
+            ok_message: "kubectl available",
+        });
+    }
+
+    candidates
+}
+
+fn needs_cli_secret_arg_warning(name: &str) -> bool {
+    matches!(name, "convex" | "netlify" | "heroku" | "railway")
+}
+
+/// Check the health of all configured adapters without filtering.
+/// Returns one entry per configured adapter with preflight pass/fail.
+pub fn check_adapter_health(config: &Config, runner: &dyn CommandRunner) -> Vec<AdapterHealth> {
+    let mut health = Vec::new();
+    for candidate in adapter_candidates(config, runner) {
+        let name = candidate.adapter.name().to_string();
+        match candidate.adapter.preflight() {
+            Ok(()) => health.push(AdapterHealth {
+                name,
+                ok: true,
+                message: candidate.ok_message.to_string(),
+            }),
+            Err(e) => health.push(AdapterHealth {
+                name,
                 ok: false,
                 message: e.to_string(),
             }),
         }
     }
-
-    results
+    health
 }
 
 /// Build all configured sync adapters from the config.
@@ -457,112 +380,11 @@ pub fn build_sync_adapters<'a>(
 ) -> Vec<Box<dyn SyncAdapter + 'a>> {
     let mut adapters: Vec<Box<dyn SyncAdapter + 'a>> = Vec::new();
 
-    let mut candidates: Vec<Box<dyn SyncAdapter + 'a>> = Vec::new();
-
-    if config.adapters.env.is_some() {
-        candidates.push(Box::new(env_file::EnvFileAdapter { config }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.cloudflare {
-        candidates.push(Box::new(cloudflare::CloudflareAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.convex {
-        candidates.push(Box::new(convex::ConvexAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.fly {
-        candidates.push(Box::new(fly::FlyAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.netlify {
-        candidates.push(Box::new(netlify::NetlifyAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.vercel {
-        candidates.push(Box::new(vercel::VercelAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.github {
-        candidates.push(Box::new(github::GithubAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.heroku {
-        candidates.push(Box::new(heroku::HerokuAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.supabase {
-        candidates.push(Box::new(supabase::SupabaseAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.railway {
-        candidates.push(Box::new(railway::RailwayAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.gitlab {
-        candidates.push(Box::new(gitlab::GitlabAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.aws_ssm {
-        candidates.push(Box::new(aws_ssm::AwsSsmAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    if let Some(adapter_config) = &config.adapters.kubernetes {
-        candidates.push(Box::new(kubernetes::KubernetesAdapter {
-            config,
-            adapter_config,
-            runner,
-        }));
-    }
-
-    for adapter in candidates {
+    for candidate in adapter_candidates(config, runner) {
+        let adapter = candidate.adapter;
         match adapter.preflight() {
             Ok(()) => {
-                if ["convex", "netlify", "heroku", "railway"].contains(&adapter.name()) {
+                if needs_cli_secret_arg_warning(adapter.name()) {
                     let _ = cliclack::log::warning(format!(
                         "{}: secrets passed via CLI arguments (visible in process listings)",
                         adapter.name()
