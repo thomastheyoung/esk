@@ -306,7 +306,7 @@ adapters:
   env:
     pattern: "{app_path}/.env.local"
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 secrets:
@@ -355,7 +355,7 @@ adapters:
   env:
     pattern: "{app_path}/.env.local"
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 secrets:
@@ -745,7 +745,7 @@ fn plugin_sync_only_flag() {
 project: testapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: Test
     item_pattern: test
 "#;
@@ -1326,8 +1326,8 @@ fn push_records_plugin_index() {
 
     let index = PluginIndex::load(&project.plugin_index_path());
     assert_eq!(index.records.len(), 1);
-    let record = &index.records["onepassword:dev"];
-    assert_eq!(record.plugin, "onepassword");
+    let record = &index.records["1password:dev"];
+    assert_eq!(record.plugin, "1password");
     assert_eq!(record.environment, "dev");
     assert_eq!(record.pushed_version, 1);
     assert_eq!(
@@ -1342,7 +1342,7 @@ fn push_records_failure_in_plugin_index() {
 project: testapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: Test
     item_pattern: test
 "#;
@@ -1367,7 +1367,7 @@ plugins:
 
     let index = PluginIndex::load(&project.plugin_index_path());
     assert_eq!(index.records.len(), 1);
-    let record = &index.records["onepassword:dev"];
+    let record = &index.records["1password:dev"];
     assert_eq!(
         record.last_push_status,
         esk::plugin_tracker::PushStatus::Failed
@@ -1380,7 +1380,7 @@ fn status_shows_plugin_section() {
     let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    // No push yet — should show "never pushed"
+    // No sync yet — should show "never synced"
     cli::status::run(&config, None, false).unwrap();
 }
 
@@ -1393,7 +1393,7 @@ fn status_shows_pushed_plugin() {
 
     // Manually write a plugin index with a pushed record
     let mut index = PluginIndex::new(&project.plugin_index_path());
-    index.record_success("onepassword", "dev", payload.version);
+    index.record_success("1password", "dev", payload.version);
     index.save().unwrap();
 
     cli::status::run(&config, Some("dev"), false).unwrap();
@@ -1407,7 +1407,7 @@ fn status_shows_stale_plugin() {
 
     // Push at v0, then bump store version
     let mut index = PluginIndex::new(&project.plugin_index_path());
-    index.record_success("onepassword", "dev", 0);
+    index.record_success("1password", "dev", 0);
     index.save().unwrap();
 
     store.set("KEY", "dev", "val").unwrap(); // bumps to v1
@@ -1421,8 +1421,8 @@ fn status_plugin_env_filter() {
     let config = project.config().unwrap();
 
     let mut index = PluginIndex::new(&project.plugin_index_path());
-    index.record_success("onepassword", "dev", 1);
-    index.record_success("onepassword", "prod", 1);
+    index.record_success("1password", "dev", 1);
+    index.record_success("1password", "prod", 1);
     index.save().unwrap();
 
     // Filter to dev only — should not error
@@ -1524,7 +1524,7 @@ fn set_auto_push_records_plugin_index() {
 
     let index = PluginIndex::load(&project.plugin_index_path());
     assert_eq!(index.records.len(), 1);
-    let record = &index.records["onepassword:dev"];
+    let record = &index.records["1password:dev"];
     assert_eq!(
         record.last_push_status,
         esk::plugin_tracker::PushStatus::Success

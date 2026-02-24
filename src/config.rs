@@ -411,10 +411,10 @@ impl Config {
     }
 
     fn validate_adapter(&self, adapter: &str) -> Result<()> {
-        if adapter == "onepassword" {
+        if adapter == "1password" {
             bail!(
-                "'onepassword' should be configured under 'plugins:', not 'adapters:'. \
-                 Move your onepassword config from adapters to plugins in esk.yaml."
+                "'1password' should be configured under 'plugins:', not 'adapters:'. \
+                 Move your 1password config from adapters to plugins in esk.yaml."
             );
         }
         let names = self.adapter_names();
@@ -428,9 +428,9 @@ impl Config {
     fn validate_plugins(&self) -> Result<()> {
         for (name, value) in &self.plugins {
             match name.as_str() {
-                "onepassword" => {
+                "1password" => {
                     let _: OnePasswordPluginConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid onepassword plugin config")?;
+                        .context("invalid 1password plugin config")?;
                 }
                 "aws_secrets_manager" => {
                     let _: AwsSecretsManagerPluginConfig = serde_yaml::from_value(value.clone())
@@ -593,7 +593,7 @@ impl Config {
     /// Get the parsed 1Password plugin config, if configured.
     pub fn onepassword_plugin_config(&self) -> Option<OnePasswordPluginConfig> {
         self.plugins
-            .get("onepassword")
+            .get("1password")
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
     }
 
@@ -609,7 +609,7 @@ impl Config {
         self.plugins
             .iter()
             .filter_map(|(name, value)| {
-                if name == "onepassword" {
+                if name == "1password" {
                     return None;
                 }
                 let type_val = value.get("type")?.as_str()?;
@@ -886,7 +886,7 @@ adapters:
   convex:
     path: apps/api
 plugins:
-  onepassword:
+  1password:
     vault: Eng
     item_pattern: "{project} - {Environment}"
 secrets:
@@ -1093,7 +1093,7 @@ secrets:
   G:
     KEY:
       targets:
-        onepassword: [dev]
+        1password: [dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
@@ -1108,7 +1108,7 @@ secrets:
 project: x
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 "#;

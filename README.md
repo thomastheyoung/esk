@@ -85,7 +85,7 @@ adapters:
     deployment_source: apps/api/.env.local
 
 plugins:
-  onepassword:
+  1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
   dropbox:
@@ -145,7 +145,7 @@ Plugins sync the entire secret list via `esk sync`. They pull from remote, recon
 
 | Plugin                                             | What it does                                               | External CLI |
 | -------------------------------------------------- | ---------------------------------------------------------- | ------------ |
-| `onepassword`                                      | Push/pull environment snapshots to 1Password items         | `op`         |
+| `1password`                                        | Push/pull environment snapshots to 1Password items         | `op`         |
 | Cloud file (`dropbox`, `gdrive`, `onedrive`, etc.) | Sync encrypted or cleartext store to a cloud-synced folder | None         |
 | `aws_secrets_manager`                              | Store secrets as JSON in AWS Secrets Manager               | `aws`        |
 | `vault`                                            | Store secrets in HashiCorp Vault KV                        | `vault`      |
@@ -211,7 +211,7 @@ esk status --all          # Include synced targets in output
 
 # Sync with storage plugins (pull + reconcile + push)
 esk sync --env prod                     # Sync all plugins
-esk sync --env prod --only onepassword  # Sync specific plugin
+esk sync --env prod --only 1password    # Sync specific plugin
 esk sync --env prod --deploy            # Sync + auto-deploy targets
 esk sync --env prod --strict            # Fail if any plugin is unreachable
 esk sync --env prod --force             # Bypass version jump protection
@@ -324,7 +324,7 @@ These errors appear when running `esk sync`, or during auto-push from `esk set`/
 | `adapter '{name}' is not configured`                                   | Secret references an adapter that's not in the `adapters:` block | Add the adapter to `esk.yaml` or remove the target reference |
 | `unknown environment '{env}' in target '{target}'`                     | Target references an env not in `environments`                   | Add the environment or fix the target                            |
 | `unknown app '{app}' in target '{target}'`                             | Target references an app not in `apps`                           | Add the app or fix the target                                    |
-| `'onepassword' should be configured under 'plugins:', not 'adapters:'` | 1Password placed in the wrong config section                     | Move the `onepassword` block from `adapters:` to `plugins:`      |
+| `'1password' should be configured under 'plugins:', not 'adapters:'`   | 1Password placed in the wrong config section                     | Move the `1password` block from `adapters:` to `plugins:`        |
 
 ## Development
 

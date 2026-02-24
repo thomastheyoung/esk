@@ -221,17 +221,17 @@ mod tests {
     #[test]
     fn unknown_plugin_with_suggestion() {
         let msg = strip(&unknown_plugin(
-            "onpassword",
-            &envs(&["onepassword", "s3", "vault"]),
+            "1pasword",
+            &envs(&["1password", "s3", "vault"]),
         ));
-        assert!(msg.contains("unknown plugin 'onpassword'"));
-        assert!(msg.contains("did you mean onepassword"));
+        assert!(msg.contains("unknown plugin '1pasword'"));
+        assert!(msg.contains("did you mean 1password"));
         assert!(msg.contains("available:"));
     }
 
     #[test]
     fn unknown_plugin_no_suggestion() {
-        let msg = strip(&unknown_plugin("xyz", &envs(&["onepassword", "s3"])));
+        let msg = strip(&unknown_plugin("xyz", &envs(&["1password", "s3"])));
         assert!(msg.contains("unknown plugin 'xyz'"));
         assert!(!msg.contains("did you mean"));
         assert!(msg.contains("available:"));

@@ -194,7 +194,7 @@ impl<'a> OnePasswordPlugin<'a> {
 
 impl<'a> StoragePlugin for OnePasswordPlugin<'a> {
     fn name(&self) -> &str {
-        "onepassword"
+        "1password"
     }
 
     fn preflight(&self) -> Result<()> {
@@ -420,7 +420,7 @@ mod tests {
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 "#;
@@ -465,7 +465,7 @@ plugins:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: SecretVault
     item_pattern: test
 "#;
@@ -518,7 +518,7 @@ plugins:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 "#;
@@ -549,7 +549,7 @@ plugins:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: "{project} - {Environment}"
 "#;
@@ -581,7 +581,7 @@ plugins:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: "{environment}"
 "#;
@@ -613,7 +613,7 @@ plugins:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: "{project} - {Environment}"
 "#;
@@ -659,7 +659,7 @@ plugins:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 secrets:
@@ -727,7 +727,7 @@ secrets:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 secrets:
@@ -786,7 +786,7 @@ secrets:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 "#;
@@ -843,7 +843,7 @@ plugins:
 project: myapp
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 "#;

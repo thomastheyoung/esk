@@ -127,12 +127,12 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
         let plugin = onepassword::OnePasswordPlugin::new(config, op_config, runner);
         match plugin.preflight() {
             Ok(()) => results.push(PluginHealth {
-                name: "onepassword".to_string(),
+                name: "1password".to_string(),
                 ok: true,
                 message: "vault accessible".to_string(),
             }),
             Err(e) => results.push(PluginHealth {
-                name: "onepassword".to_string(),
+                name: "1password".to_string(),
                 ok: false,
                 message: e.to_string(),
             }),
@@ -374,7 +374,7 @@ pub fn build_plugins<'a>(
     for plugin in candidates {
         match plugin.preflight() {
             Ok(()) => {
-                if ["onepassword", "bitwarden"].contains(&plugin.name()) {
+                if ["1password", "bitwarden"].contains(&plugin.name()) {
                     let _ = cliclack::log::warning(format!(
                         "{}: secrets passed via CLI arguments (visible in process listings)",
                         plugin.name()
@@ -454,7 +454,7 @@ mod tests {
 project: x
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 "#;
@@ -464,7 +464,7 @@ plugins:
         let runner = DummyRunner;
         let plugins = build_plugins(&config, &runner);
         assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name(), "onepassword");
+        assert_eq!(plugins[0].name(), "1password");
     }
 
     #[test]
@@ -502,7 +502,7 @@ plugins:
 project: x
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
   testcloud:
@@ -556,7 +556,7 @@ plugins:
 project: x
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 "#;
@@ -567,7 +567,7 @@ plugins:
         let health = check_plugin_health(&config, &DummyRunner);
         assert_eq!(health.len(), 1);
         assert!(health[0].ok);
-        assert_eq!(health[0].name, "onepassword");
+        assert_eq!(health[0].name, "1password");
     }
 
     #[test]
@@ -577,7 +577,7 @@ plugins:
 project: x
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
 "#;
@@ -620,7 +620,7 @@ plugins:
 project: x
 environments: [dev]
 plugins:
-  onepassword:
+  1password:
     vault: V
     item_pattern: test
   dropbox:

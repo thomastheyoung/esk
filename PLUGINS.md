@@ -8,7 +8,7 @@ For deploy adapters (env files, Cloudflare, Convex, etc.), see [ADAPTERS.md](ADA
 
 | Plugin                                            | Config key              | External CLI | Storage location              |
 | ------------------------------------------------- | ----------------------- | ------------ | ----------------------------- |
-| [1Password](#1password)                           | `onepassword`           | `op`         | 1Password vault item          |
+| [1Password](#1password)                           | `1password`             | `op`         | 1Password vault item          |
 | [Cloud file](#cloud-file)                         | Any name + `type: cloud_file` | None   | Local/cloud-synced folder     |
 | [AWS Secrets Manager](#aws-secrets-manager)       | `aws_secrets_manager`   | `aws`        | AWS Secrets Manager           |
 | [HashiCorp Vault](#hashicorp-vault)               | `vault`                 | `vault`      | Vault KV store                |
@@ -54,7 +54,7 @@ Preflight verifies both CLI installation and vault accessibility by running `op 
 
 ```yaml
 plugins:
-  onepassword:
+  1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
 ```
@@ -577,6 +577,6 @@ This means you can use 1Password for team sharing and Dropbox as a backup — sy
 Use `--only` to sync with a single plugin:
 
 ```bash
-esk sync --env prod --only onepassword
+esk sync --env prod --only 1password
 esk sync --env dev --only dropbox
 ```

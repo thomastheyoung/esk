@@ -134,12 +134,12 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.json");
         let mut index = PluginIndex::new(&path);
-        index.record_success("onepassword", "dev", 3);
+        index.record_success("1password", "dev", 3);
         index.save().unwrap();
 
         let loaded = PluginIndex::load(&path);
         assert_eq!(loaded.records.len(), 1);
-        assert!(loaded.records.contains_key("onepassword:dev"));
+        assert!(loaded.records.contains_key("1password:dev"));
     }
 
     #[test]
@@ -156,14 +156,14 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.json");
         let mut index = PluginIndex::new(&path);
-        index.record_success("onepassword", "dev", 5);
+        index.record_success("1password", "dev", 5);
         index.record_failure("dropbox", "prod", 3, "timeout".to_string());
         index.save().unwrap();
 
         let loaded = PluginIndex::load(&path);
         assert_eq!(loaded.records.len(), 2);
         assert_eq!(
-            loaded.records["onepassword:dev"].last_push_status,
+            loaded.records["1password:dev"].last_push_status,
             PushStatus::Success
         );
         assert_eq!(
@@ -184,8 +184,8 @@ mod tests {
     #[test]
     fn tracker_key_format() {
         assert_eq!(
-            PluginIndex::tracker_key("onepassword", "dev"),
-            "onepassword:dev"
+            PluginIndex::tracker_key("1password", "dev"),
+            "1password:dev"
         );
         assert_eq!(PluginIndex::tracker_key("dropbox", "prod"), "dropbox:prod");
     }
@@ -193,9 +193,9 @@ mod tests {
     #[test]
     fn record_success_sets_fields() {
         let mut index = PluginIndex::new(Path::new("/tmp/test.json"));
-        index.record_success("onepassword", "dev", 5);
-        let record = &index.records["onepassword:dev"];
-        assert_eq!(record.plugin, "onepassword");
+        index.record_success("1password", "dev", 5);
+        let record = &index.records["1password:dev"];
+        assert_eq!(record.plugin, "1password");
         assert_eq!(record.environment, "dev");
         assert_eq!(record.pushed_version, 5);
         assert_eq!(record.last_push_status, PushStatus::Success);
@@ -217,9 +217,9 @@ mod tests {
     #[test]
     fn record_overwrites_previous() {
         let mut index = PluginIndex::new(Path::new("/tmp/test.json"));
-        index.record_failure("onepassword", "dev", 3, "err".to_string());
-        index.record_success("onepassword", "dev", 5);
-        let record = &index.records["onepassword:dev"];
+        index.record_failure("1password", "dev", 3, "err".to_string());
+        index.record_success("1password", "dev", 5);
+        let record = &index.records["1password:dev"];
         assert_eq!(record.last_push_status, PushStatus::Success);
         assert_eq!(record.pushed_version, 5);
     }

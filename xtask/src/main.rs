@@ -38,7 +38,7 @@ adapters:
       api: demo-api
 
 plugins:
-  onepassword:
+  1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
 

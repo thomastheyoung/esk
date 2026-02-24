@@ -282,7 +282,7 @@ esk sync --env <ENV> [--only <PLUGIN>] [--dry-run] [--strict] [--force] [--deplo
 
 ```bash
 esk sync --env prod                     # Sync all plugins
-esk sync --env prod --only onepassword  # Sync specific plugin
+esk sync --env prod --only 1password    # Sync specific plugin
 esk sync --env prod --deploy            # Sync + auto-deploy targets
 esk sync --env prod --dry-run           # Preview changes
 ```

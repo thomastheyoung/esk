@@ -83,7 +83,7 @@ adapters:
       prod: "--prod"
 
 plugins:
-  onepassword:
+  1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
 
@@ -183,7 +183,7 @@ project: testapp
 environments: [dev, prod]
 
 plugins:
-  onepassword:
+  1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
 
@@ -199,7 +199,7 @@ project: testapp
 environments: [dev, prod]
 
 plugins:
-  onepassword:
+  1password:
     vault: Test
     item_pattern: "{project} - {Environment}"
 "#;
