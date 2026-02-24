@@ -73,7 +73,7 @@ enum PluginStatus {
     Current,
     Stale { pushed: u64, local: u64 },
     Failed { version: u64, error: String },
-    NeverPushed,
+    NeverSynced,
 }
 
 struct PluginState {
@@ -267,7 +267,7 @@ impl Dashboard {
                         pushed: record.pushed_version,
                         local: payload.version,
                     },
-                    None => PluginStatus::NeverPushed,
+                    None => PluginStatus::NeverSynced,
                 };
                 plugin_states.push(PluginState {
                     name: plugin_name.to_string(),
@@ -284,7 +284,7 @@ impl Dashboard {
         for entry in &failed {
             next_steps.push(NextStep {
                 command: format!("esk deploy --env {}", entry.env),
-                description: format!("retry failed sync for {}:{}", entry.key, entry.env),
+                description: format!("retry failed deploy for {}:{}", entry.key, entry.env),
             });
         }
 
@@ -326,10 +326,10 @@ impl Dashboard {
                     ),
                 });
             }
-            if let PluginStatus::NeverPushed = &ps.status {
+            if let PluginStatus::NeverSynced = &ps.status {
                 next_steps.push(NextStep {
                     command: format!("esk sync --env {}", ps.env),
-                    description: "plugin never pushed".to_string(),
+                    description: "plugin never synced".to_string(),
                 });
             }
         }
@@ -376,7 +376,7 @@ impl Dashboard {
         } else {
             let mut parts = Vec::new();
             if !self.synced.is_empty() {
-                parts.push(format!("{} synced", self.synced.len()));
+                parts.push(format!("{} deployed", self.synced.len()));
             }
             if !self.pending.is_empty() {
                 parts.push(format!("{} pending", self.pending.len()));
@@ -393,7 +393,7 @@ impl Dashboard {
 
             if all_synced {
                 format!(
-                    "{} · {} · {}, all synced",
+                    "{} · {} · {}, all deployed",
                     style(&self.project).bold(),
                     style(format!("v{}", self.version)).dim(),
                     style(format!(
@@ -441,7 +441,7 @@ impl Dashboard {
             cliclack::log::step(format!("Targets\n{}", lines.join("\n")))?;
         }
 
-        // Sync section
+        // Deploy section
         let has_problems =
             !self.failed.is_empty() || !self.pending.is_empty() || !self.unset.is_empty();
 
@@ -488,12 +488,12 @@ impl Dashboard {
                         Some(t) => {
                             let ago = relative_time(t);
                             if ago.is_empty() {
-                                "never synced".to_string()
+                                "never deployed".to_string()
                             } else {
-                                format!("last synced {ago}")
+                                format!("last deployed {ago}")
                             }
                         }
-                        None => "never synced".to_string(),
+                        None => "never deployed".to_string(),
                     };
                     sync_lines.push(format!(
                         "     {}  → {}  {}",
@@ -524,7 +524,7 @@ impl Dashboard {
                     sync_lines.push(format!(
                         "  {} {}",
                         style("✓").green(),
-                        style(format!("{} synced", self.synced.len()))
+                        style(format!("{} deployed", self.synced.len()))
                             .green()
                             .bold()
                     ));
@@ -545,14 +545,14 @@ impl Dashboard {
                     sync_lines.push(format!(
                         "  {} {}  {}",
                         style("✓").green(),
-                        style(format!("{} synced", self.synced.len())).green(),
+                        style(format!("{} deployed", self.synced.len())).green(),
                         style("(--all to show)").dim()
                     ));
                 }
             }
 
             if !sync_lines.is_empty() {
-                cliclack::log::step(format!("Sync\n{}", sync_lines.join("\n")))?;
+                cliclack::log::step(format!("Deploy (adapters)\n{}", sync_lines.join("\n")))?;
             }
         }
 
@@ -597,7 +597,7 @@ impl Dashboard {
             cliclack::log::step(format!("Coverage\n{}", cov_lines.join("\n")))?;
         }
 
-        // Plugins section
+        // Sync section (plugins)
         if !self.plugin_states.is_empty() {
             let lines: Vec<String> = self
                 .plugin_states
@@ -622,15 +622,15 @@ impl Dashboard {
                         style(format!("v{version}")).dim(),
                         style(format!("({error})")).dim()
                     ),
-                    PluginStatus::NeverPushed => format!(
+                    PluginStatus::NeverSynced => format!(
                         "  {} {}  {}",
                         style("○").dim(),
                         style(format!("{}:{}", ps.name, ps.env)),
-                        style("never pushed").dim()
+                        style("never synced").dim()
                     ),
                 })
                 .collect();
-            cliclack::log::step(format!("Plugins\n{}", lines.join("\n")))?;
+            cliclack::log::step(format!("Sync (plugins)\n{}", lines.join("\n")))?;
         }
 
         // Next steps section
