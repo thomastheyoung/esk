@@ -12,7 +12,7 @@ use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
 
 pub struct SyncOptions<'a> {
-    pub env: &'a str,
+    pub env: Option<&'a str>,
     pub only: Option<&'a str>,
     pub dry_run: bool,
     pub no_partial: bool,
@@ -62,17 +62,62 @@ pub fn push_to_plugins(
 }
 
 pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
-    run_with_runner(
-        config,
-        options.env,
-        options.only,
-        options.dry_run,
-        options.no_partial,
-        options.force,
-        options.auto_deploy,
-        options.prefer,
-        &RealCommandRunner,
-    )
+    let runner = RealCommandRunner;
+    let envs: Vec<&str> = match options.env {
+        Some(e) => {
+            if !config.environments.contains(&e.to_string()) {
+                bail!("{}", suggest::unknown_env(e, &config.environments));
+            }
+            vec![e]
+        }
+        None => config.environments.iter().map(|s| s.as_str()).collect(),
+    };
+
+    if envs.len() == 1 {
+        return run_with_runner(
+            config,
+            envs[0],
+            options.only,
+            options.dry_run,
+            options.no_partial,
+            options.force,
+            options.auto_deploy,
+            options.prefer,
+            &runner,
+        );
+    }
+
+    let mut failures: Vec<String> = Vec::new();
+    for env in &envs {
+        cliclack::log::step(format!("Syncing environment: {env}"))?;
+        if let Err(e) = run_with_runner(
+            config,
+            env,
+            options.only,
+            options.dry_run,
+            options.no_partial,
+            options.force,
+            options.auto_deploy,
+            options.prefer,
+            &runner,
+        ) {
+            if options.no_partial {
+                bail!("sync failed for environment '{env}': {e}");
+            }
+            cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
+            failures.push(env.to_string());
+        }
+    }
+
+    if !failures.is_empty() {
+        bail!(
+            "{} environment(s) failed to sync: {}",
+            failures.len(),
+            failures.join(", ")
+        );
+    }
+
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]

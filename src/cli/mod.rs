@@ -109,9 +109,9 @@ pub enum Commands {
     },
     /// Sync secrets with storage plugins (pull, reconcile, push)
     Sync {
-        /// Environment to sync
+        /// Environment to sync (omit to sync all)
         #[arg(long)]
-        env: String,
+        env: Option<String>,
         /// Sync a specific plugin only
         #[arg(long)]
         only: Option<String>,

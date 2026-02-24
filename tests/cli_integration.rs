@@ -467,7 +467,7 @@ fn plugin_sync_unknown_env_errors() {
     let err = cli::sync::run(
         &config,
         cli::sync::SyncOptions {
-            env: "staging",
+            env: Some("staging"),
             only: None,
             dry_run: false,
             no_partial: false,
@@ -487,7 +487,7 @@ fn plugin_sync_no_plugins() {
     let err = cli::sync::run(
         &config,
         cli::sync::SyncOptions {
-            env: "dev",
+            env: Some("dev"),
             only: None,
             dry_run: false,
             no_partial: false,

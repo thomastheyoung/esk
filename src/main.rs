@@ -101,7 +101,7 @@ fn run() -> Result<()> {
             esk::cli::sync::run(
                 &config,
                 esk::cli::sync::SyncOptions {
-                    env,
+                    env: env.as_deref(),
                     only: only.as_deref(),
                     dry_run: *dry_run,
                     no_partial: *no_partial,
