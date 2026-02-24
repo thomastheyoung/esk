@@ -353,7 +353,11 @@ adapters:
         let secrets = vec![make_secret("CERT", "line1\nline2", "General")];
         let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results.iter().all(|r| !r.success));
-        assert!(results[0].error.as_ref().unwrap().contains("contains newlines"));
+        assert!(results[0]
+            .error
+            .as_ref()
+            .unwrap()
+            .contains("contains newlines"));
         assert!(!dir.path().join("apps/web/.env.local").exists());
     }
 

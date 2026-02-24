@@ -464,7 +464,17 @@ fn list_uncategorized_secrets() {
 fn plugin_sync_unknown_env_errors() {
     let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::sync::run(&config, "staging", None, false, false, false, false, ConflictPreference::Local).unwrap_err();
+    let err = cli::sync::run(
+        &config,
+        "staging",
+        None,
+        false,
+        false,
+        false,
+        false,
+        ConflictPreference::Local,
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
@@ -472,7 +482,17 @@ fn plugin_sync_unknown_env_errors() {
 fn plugin_sync_no_plugins() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::sync::run(&config, "dev", None, false, false, false, false, ConflictPreference::Local).unwrap_err();
+    let err = cli::sync::run(
+        &config,
+        "dev",
+        None,
+        false,
+        false,
+        false,
+        false,
+        ConflictPreference::Local,
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("no plugins configured"));
 }
 
@@ -1198,7 +1218,18 @@ fn plugin_sync_onepassword_merges_remote() {
     runner.push_success(serde_json::to_vec(&item_json2).unwrap().as_slice(), b"");
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, "dev", None, false, false, false, false, ConflictPreference::Local, &runner).unwrap();
+    cli::sync::run_with_runner(
+        &config,
+        "dev",
+        None,
+        false,
+        false,
+        false,
+        false,
+        ConflictPreference::Local,
+        &runner,
+    )
+    .unwrap();
 
     // Local store should be updated with remote value
     let store = project.store().unwrap();
@@ -1222,7 +1253,18 @@ fn plugin_sync_onepassword_no_item() {
     runner.push_failure(b"isn't an item in vault");
 
     // Should succeed — no remote data, nothing to reconcile
-    cli::sync::run_with_runner(&config, "dev", None, false, false, false, false, ConflictPreference::Local, &runner).unwrap();
+    cli::sync::run_with_runner(
+        &config,
+        "dev",
+        None,
+        false,
+        false,
+        false,
+        false,
+        ConflictPreference::Local,
+        &runner,
+    )
+    .unwrap();
 
     // Local value unchanged
     let store = project.store().unwrap();
@@ -1253,7 +1295,18 @@ fn plugin_sync_dry_run_no_mutation() {
     runner.push_success(serde_json::to_vec(&item_json).unwrap().as_slice(), b"");
     // No push-back responses needed — dry-run exits before pushing
 
-    cli::sync::run_with_runner(&config, "dev", None, true, false, false, false, ConflictPreference::Local, &runner).unwrap();
+    cli::sync::run_with_runner(
+        &config,
+        "dev",
+        None,
+        true,
+        false,
+        false,
+        false,
+        ConflictPreference::Local,
+        &runner,
+    )
+    .unwrap();
 
     // Local store should NOT be updated (dry-run)
     let store = project.store().unwrap();

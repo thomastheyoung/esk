@@ -29,9 +29,7 @@ pub fn run(config: &Config, runtime: bool, output: Option<&str>) -> Result<()> {
     }
     std::fs::write(&out_path, content)?;
 
-    let relative = out_path
-        .strip_prefix(&config.root)
-        .unwrap_or(&out_path);
+    let relative = out_path.strip_prefix(&config.root).unwrap_or(&out_path);
 
     cliclack::log::success(format!(
         "Wrote {} secrets to {}",
@@ -119,7 +117,9 @@ mod tests {
     use super::*;
     use std::collections::BTreeMap;
 
-    fn config_with_secrets(secrets: BTreeMap<String, BTreeMap<String, crate::config::SecretDef>>) -> Config {
+    fn config_with_secrets(
+        secrets: BTreeMap<String, BTreeMap<String, crate::config::SecretDef>>,
+    ) -> Config {
         Config {
             project: "test".to_string(),
             environments: vec!["dev".to_string(), "prod".to_string()],

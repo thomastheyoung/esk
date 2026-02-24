@@ -599,8 +599,12 @@ impl Config {
         }
 
         // Additional defence: reject symlink escapes (e.g. apps -> /tmp/outside).
-        let root_real = std::fs::canonicalize(&self.root)
-            .with_context(|| format!("failed to canonicalize project root {}", self.root.display()))?;
+        let root_real = std::fs::canonicalize(&self.root).with_context(|| {
+            format!(
+                "failed to canonicalize project root {}",
+                self.root.display()
+            )
+        })?;
         let existing = nearest_existing_ancestor(&resolved)
             .context("env path has no existing ancestor to validate")?;
         let existing_real = std::fs::canonicalize(existing)
@@ -1621,7 +1625,9 @@ adapters:
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let err = config.resolve_env_path("web", "dev").unwrap_err();
-        assert!(err.to_string().contains("escapes project root via symlinked components"));
+        assert!(err
+            .to_string()
+            .contains("escapes project root via symlinked components"));
     }
 
     // --- add_secret_to_config tests ---
