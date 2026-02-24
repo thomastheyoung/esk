@@ -23,8 +23,21 @@ fn format_env_value(value: &str) -> String {
         return value.to_string();
     }
 
-    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    let escaped = value
+        .replace('\\', "\\\\")
+        .replace('\n', "\\n")
+        .replace('\r', "\\r")
+        .replace('"', "\\\"");
     format!("\"{}\"", escaped)
+}
+
+fn validate_env_file_value(key: &str, value: &str) -> Result<()> {
+    if value.contains('\n') || value.contains('\r') {
+        anyhow::bail!(
+            "env: secret '{key}' contains newlines, refusing to write multiline values to .env files"
+        );
+    }
+    Ok(())
 }
 
 pub struct EnvFileAdapter<'a> {
@@ -93,6 +106,7 @@ impl<'a> EnvFileAdapter<'a> {
         // Group secrets by vendor, maintaining sorted order
         let mut by_vendor: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
         for secret in secrets {
+            validate_env_file_value(&secret.key, &secret.value)?;
             by_vendor
                 .entry(&secret.vendor)
                 .or_default()
@@ -302,7 +316,7 @@ adapters:
 
     #[test]
     fn format_env_value_with_newline() {
-        assert_eq!(format_env_value("line1\nline2"), "\"line1\nline2\"");
+        assert_eq!(format_env_value("line1\nline2"), "\"line1\\nline2\"");
     }
 
     #[test]
@@ -331,18 +345,16 @@ adapters:
     }
 
     #[test]
-    fn sync_batch_newline_value_is_quoted() {
+    fn sync_batch_newline_value_is_rejected() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
         let adapter = EnvFileAdapter { config: &config };
         let secrets = vec![make_secret("CERT", "line1\nline2", "General")];
         let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
-        assert!(results.iter().all(|r| r.success));
-        let content = std::fs::read_to_string(dir.path().join("apps/web/.env.local")).unwrap();
-        assert!(content.contains("CERT=\"line1\nline2\""));
-        // The raw value should NOT appear unquoted
-        assert!(!content.contains("CERT=line1\nline2\n"));
+        assert!(results.iter().all(|r| !r.success));
+        assert!(results[0].error.as_ref().unwrap().contains("contains newlines"));
+        assert!(!dir.path().join("apps/web/.env.local").exists());
     }
 
     #[test]

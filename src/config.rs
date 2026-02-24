@@ -326,6 +326,17 @@ fn is_within_root(root: &Path, target: &Path) -> bool {
     normalized.starts_with(root)
 }
 
+/// Return the closest existing ancestor (including `path` itself).
+fn nearest_existing_ancestor(path: &Path) -> Option<&Path> {
+    let mut cur = path;
+    loop {
+        if cur.exists() {
+            return Some(cur);
+        }
+        cur = cur.parent()?;
+    }
+}
+
 impl Config {
     /// Walk up from `start` looking for `esk.yaml`.
     pub fn find(start: &Path) -> Result<PathBuf> {
@@ -583,6 +594,20 @@ impl Config {
         if !is_within_root(&self.root, &resolved) {
             bail!(
                 "env path '{}' resolves outside project root",
+                resolved.display()
+            );
+        }
+
+        // Additional defence: reject symlink escapes (e.g. apps -> /tmp/outside).
+        let root_real = std::fs::canonicalize(&self.root)
+            .with_context(|| format!("failed to canonicalize project root {}", self.root.display()))?;
+        let existing = nearest_existing_ancestor(&resolved)
+            .context("env path has no existing ancestor to validate")?;
+        let existing_real = std::fs::canonicalize(existing)
+            .with_context(|| format!("failed to canonicalize {}", existing.display()))?;
+        if !existing_real.starts_with(&root_real) {
+            bail!(
+                "env path '{}' escapes project root via symlinked components",
                 resolved.display()
             );
         }
@@ -1570,6 +1595,33 @@ adapters:
         let config = Config::load(&path).unwrap();
         let result = config.resolve_env_path("web", "dev");
         assert!(result.is_ok());
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_env_path_rejects_symlink_escape() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), dir.path().join("apps")).unwrap();
+
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+adapters:
+  env:
+    pattern: "{app_path}/.env{env_suffix}"
+    env_suffix:
+      dev: ""
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let err = config.resolve_env_path("web", "dev").unwrap_err();
+        assert!(err.to_string().contains("escapes project root via symlinked components"));
     }
 
     // --- add_secret_to_config tests ---

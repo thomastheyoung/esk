@@ -5,19 +5,18 @@ members = [".", "xtask"]
 name = "esk"
 version = "0.1.0"
 edition = "2021"
-description = "Encrypted secrets management with multi-target sync"
+description = "Encrypted Secrets Keeper with multi-target sync"
 authors = ["Thomas LE JEUNE"]
 license = "MIT"
 repository = "https://github.com/thomastheyoung/esk"
 homepage = "https://github.com/thomastheyoung/esk"
-keywords = ["secrets", "encryption", "cli", "sync", "dotenv"]
+keywords = ["secrets", "api key", "encryption", "cli", "sync", "dotenv", "1password", "dropbox"]
 categories = ["command-line-utilities", "cryptography"]
 
 [dependencies]
 aes-gcm = "0.10"
 anyhow = "1"
 base64 = "0.22"
-atty = "0.2"
 chrono = { version = "0.4", features = ["serde"] }
 clap = { version = "4", features = ["derive"] }
 cliclack = "0.3"

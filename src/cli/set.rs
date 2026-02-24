@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use std::io::IsTerminal;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::{self, Config};
@@ -49,7 +50,7 @@ pub fn run_with_runner(
         if let Some(group) = group {
             config::add_secret_to_config(&config_path, key, group)?;
             cliclack::log::success(format!("Added '{}' to esk.yaml under {}", key, group))?;
-        } else if atty::is(atty::Stream::Stdin) {
+        } else if std::io::stdin().is_terminal() {
             let add = cliclack::confirm(format!("Secret '{}' is not in esk.yaml. Add it?", key))
                 .initial_value(true)
                 .interact()?;

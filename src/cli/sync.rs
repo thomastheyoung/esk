@@ -1,6 +1,7 @@
 use anyhow::{bail, Result};
 use console::style;
 use std::collections::BTreeMap;
+use std::io::IsTerminal;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
@@ -187,7 +188,7 @@ pub fn run_with_runner(
     let result = match reconcile::reconcile_multi(&payload, &remotes, Some(env)) {
         Ok(r) => r,
         Err(e) if e.to_string().contains("version jump too large") && !force => {
-            if atty::is(atty::Stream::Stdin) {
+            if std::io::stdin().is_terminal() {
                 cliclack::log::warning(format!("{e}"))?;
                 let accept = cliclack::confirm(
                     "Accept the large version jump? This may indicate a compromised plugin.",

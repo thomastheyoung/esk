@@ -1,7 +1,10 @@
 # Build
+CLAUDE.md
 /target/
 /dist/
 .temp/
+.cargo-home/
+.cargo-tools/
 
 # IDE
 .idea/
