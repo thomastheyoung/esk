@@ -3,8 +3,10 @@ CLAUDE.md
 /target/
 /dist/
 .temp/
+.cargo/
 .cargo-home/
 .cargo-tools/
+.beads/
 
 # IDE
 .idea/
