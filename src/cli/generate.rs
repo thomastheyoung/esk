@@ -94,11 +94,24 @@ fn is_gitignored(root: &Path, relative: &Path) -> bool {
     let Ok(content) = std::fs::read_to_string(&gitignore_path) else {
         return false;
     };
-    let filename = relative.to_string_lossy();
+    let filename = relative.file_name().unwrap_or_default().to_string_lossy();
+    let full_path = relative.to_string_lossy();
     content.lines().any(|line| {
         let trimmed = line.trim();
-        !trimmed.is_empty() && !trimmed.starts_with('#') && filename.contains(trimmed)
+        !trimmed.is_empty()
+            && !trimmed.starts_with('#')
+            && (pattern_matches(trimmed, &filename) || pattern_matches(trimmed, &full_path))
     })
+}
+
+fn pattern_matches(pattern: &str, path: &str) -> bool {
+    if let Some(suffix) = pattern.strip_prefix('*') {
+        path.ends_with(suffix)
+    } else if let Some(prefix) = pattern.strip_suffix('*') {
+        path.starts_with(prefix)
+    } else {
+        pattern == path
+    }
 }
 
 #[cfg(test)]
@@ -207,5 +220,28 @@ mod tests {
     fn gitignore_missing() {
         let dir = tempfile::tempdir().unwrap();
         assert!(!is_gitignored(dir.path(), Path::new("env.d.ts")));
+    }
+
+    #[test]
+    fn gitignore_glob_patterns() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "*.d.ts\n").unwrap();
+        assert!(is_gitignored(dir.path(), Path::new("env.d.ts")));
+        assert!(!is_gitignored(dir.path(), Path::new("env.ts")));
+    }
+
+    #[test]
+    fn gitignore_matches_filename_in_subpath() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "env.d.ts\n").unwrap();
+        assert!(is_gitignored(dir.path(), Path::new("types/env.d.ts")));
+    }
+
+    #[test]
+    fn gitignore_comments_and_blanks_ignored() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join(".gitignore"), "# comment\n\nenv.d.ts\n").unwrap();
+        assert!(is_gitignored(dir.path(), Path::new("env.d.ts")));
+        assert!(!is_gitignored(dir.path(), Path::new("# comment")));
     }
 }
