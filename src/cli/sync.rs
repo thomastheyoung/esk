@@ -21,6 +21,60 @@ pub struct SyncOptions<'a> {
     pub prefer: ConflictPreference,
 }
 
+/// Compact theme — removes the │ connector lines between steps.
+struct SyncTheme;
+
+impl cliclack::Theme for SyncTheme {
+    fn format_log(&self, text: &str, symbol: &str) -> String {
+        self.format_log_with_spacing(text, symbol, false)
+    }
+
+    fn format_progress_with_state(
+        &self,
+        msg: &str,
+        grouped: bool,
+        last: bool,
+        state: &cliclack::ThemeState,
+    ) -> String {
+        let prefix = if grouped {
+            self.bar_color(state).apply_to("│").to_string() + "  "
+        } else {
+            match state {
+                cliclack::ThemeState::Active => String::new(),
+                _ => self.state_symbol(state).to_string() + "  ",
+            }
+        };
+
+        let suffix = if grouped && last {
+            format!("\n{}", self.format_footer(state))
+        } else {
+            String::new()
+        };
+
+        if !msg.is_empty() {
+            format!("{prefix}{msg}{suffix}")
+        } else {
+            suffix
+        }
+    }
+
+    fn format_footer_with_message(&self, state: &cliclack::ThemeState, message: &str) -> String {
+        let color = self.bar_color(state);
+        match state {
+            cliclack::ThemeState::Submit => String::new(),
+            cliclack::ThemeState::Active => {
+                format!("{}\n", color.apply_to(format!("└  {message}")))
+            }
+            cliclack::ThemeState::Cancel => {
+                format!("{}\n", color.apply_to("└  Operation cancelled."))
+            }
+            cliclack::ThemeState::Error(err) => {
+                format!("{}\n", color.apply_to(format!("└  {err}")))
+            }
+        }
+    }
+}
+
 /// Push a payload to the given plugins, recording results in the plugin index.
 /// Returns the number of failures.
 pub fn push_to_plugins(
@@ -62,62 +116,67 @@ pub fn push_to_plugins(
 }
 
 pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
-    let runner = RealCommandRunner;
-    let envs: Vec<&str> = match options.env {
-        Some(e) => {
-            if !config.environments.contains(&e.to_string()) {
-                bail!("{}", suggest::unknown_env(e, &config.environments));
+    cliclack::set_theme(SyncTheme);
+    let result = (|| -> Result<()> {
+        let runner = RealCommandRunner;
+        let envs: Vec<&str> = match options.env {
+            Some(e) => {
+                if !config.environments.contains(&e.to_string()) {
+                    bail!("{}", suggest::unknown_env(e, &config.environments));
+                }
+                vec![e]
             }
-            vec![e]
+            None => config.environments.iter().map(|s| s.as_str()).collect(),
+        };
+
+        if envs.len() == 1 {
+            return run_with_runner(
+                config,
+                envs[0],
+                options.only,
+                options.dry_run,
+                options.no_partial,
+                options.force,
+                options.auto_deploy,
+                options.prefer,
+                &runner,
+            );
         }
-        None => config.environments.iter().map(|s| s.as_str()).collect(),
-    };
 
-    if envs.len() == 1 {
-        return run_with_runner(
-            config,
-            envs[0],
-            options.only,
-            options.dry_run,
-            options.no_partial,
-            options.force,
-            options.auto_deploy,
-            options.prefer,
-            &runner,
-        );
-    }
-
-    let mut failures: Vec<String> = Vec::new();
-    for env in &envs {
-        eprintln!("\n━━ {} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", style(env).bold());
-        if let Err(e) = run_with_runner(
-            config,
-            env,
-            options.only,
-            options.dry_run,
-            options.no_partial,
-            options.force,
-            options.auto_deploy,
-            options.prefer,
-            &runner,
-        ) {
-            if options.no_partial {
-                bail!("sync failed for environment '{env}': {e}");
+        let mut failures: Vec<String> = Vec::new();
+        for env in &envs {
+            eprintln!("\n━━ {} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", style(env).bold());
+            if let Err(e) = run_with_runner(
+                config,
+                env,
+                options.only,
+                options.dry_run,
+                options.no_partial,
+                options.force,
+                options.auto_deploy,
+                options.prefer,
+                &runner,
+            ) {
+                if options.no_partial {
+                    bail!("sync failed for environment '{env}': {e}");
+                }
+                cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
+                failures.push(env.to_string());
             }
-            cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
-            failures.push(env.to_string());
         }
-    }
 
-    if !failures.is_empty() {
-        bail!(
-            "{} environment(s) failed to sync: {}",
-            failures.len(),
-            failures.join(", ")
-        );
-    }
+        if !failures.is_empty() {
+            bail!(
+                "{} environment(s) failed to sync: {}",
+                failures.len(),
+                failures.join(", ")
+            );
+        }
 
-    Ok(())
+        Ok(())
+    })();
+    cliclack::reset_theme();
+    result
 }
 
 #[allow(clippy::too_many_arguments)]
