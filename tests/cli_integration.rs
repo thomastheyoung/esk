@@ -258,7 +258,7 @@ fn delete_auto_syncs_env_file() {
 
     // Sync first to write both secrets
     let runner = MockCommandRunner::new();
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let env_path = project.root().join("apps/web/.env.local");
     let contents = std::fs::read_to_string(&env_path).unwrap();
@@ -336,7 +336,7 @@ secrets:
     )
     .unwrap_err();
     assert!(err.to_string().contains("--strict"));
-    assert!(err.to_string().contains("Adapter sync skipped"));
+    assert!(err.to_string().contains("Adapter deploy skipped"));
 
     // Env file should NOT have been written
     let env_path = project.root().join("apps/web/.env.local");
@@ -375,7 +375,7 @@ secrets:
     store.set("OTHER", "dev", "other_val").unwrap();
 
     // First sync to write the env file
-    cli::sync::run_with_runner(
+    cli::deploy::run_with_runner(
         &config,
         Some("dev"),
         false,
@@ -397,7 +397,7 @@ secrets:
     let err = cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, true, &runner)
         .unwrap_err();
     assert!(err.to_string().contains("--strict"));
-    assert!(err.to_string().contains("Adapter sync skipped"));
+    assert!(err.to_string().contains("Adapter deploy skipped"));
 
     // Env file should still contain MY_SECRET (sync was skipped)
     let after = std::fs::read_to_string(&env_path).unwrap();
@@ -436,39 +436,21 @@ fn list_uncategorized_secrets() {
     cli::list::run(&config, None).unwrap(); // Should show "Uncategorized"
 }
 
-// === push ===
+// === plugin-sync ===
 
 #[test]
-fn push_unknown_env_errors() {
+fn plugin_sync_unknown_env_errors() {
     let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::push::run(&config, "staging", None).unwrap_err();
+    let err = cli::sync::run(&config, "staging", None, false, false, false, false).unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
 #[test]
-fn push_no_plugins() {
+fn plugin_sync_no_plugins() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::push::run(&config, "dev", None).unwrap_err();
-    assert!(err.to_string().contains("no plugins configured"));
-}
-
-// === pull ===
-
-#[test]
-fn pull_unknown_env_errors() {
-    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
-    let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "staging", None, false, false, false).unwrap_err();
-    assert!(err.to_string().contains("unknown environment"));
-}
-
-#[test]
-fn pull_no_plugins() {
-    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
-    let config = project.config().unwrap();
-    let err = cli::pull::run(&config, "dev", None, false, false, false).unwrap_err();
+    let err = cli::sync::run(&config, "dev", None, false, false, false, false).unwrap_err();
     assert!(err.to_string().contains("no plugins configured"));
 }
 
@@ -484,7 +466,7 @@ fn sync_env_filter() {
     store.set("MY_SECRET", "prod", "pv").unwrap();
 
     // Sync only dev
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     // dev env file should exist
     assert!(project.root().join("apps/web/.env.local").is_file());
@@ -503,7 +485,7 @@ fn sync_dry_run_no_side_effects() {
     store.set("MY_SECRET", "dev", "dv").unwrap();
     store.set("OTHER_SECRET", "dev", "ov").unwrap();
 
-    cli::sync::run(&config, None, false, true, false).unwrap();
+    cli::deploy::run(&config, None, false, true, false).unwrap();
 
     // No env file should be created
     assert!(!project.root().join("apps/web/.env.local").is_file());
@@ -521,7 +503,7 @@ fn sync_force_resyncs_unchanged() {
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
     // First sync
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
     let mtime1 = std::fs::metadata(project.root().join("apps/web/.env.local"))
         .unwrap()
         .modified()
@@ -531,7 +513,7 @@ fn sync_force_resyncs_unchanged() {
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Force sync — should regenerate even though hashes match
-    cli::sync::run(&config, Some("dev"), true, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), true, false, false).unwrap();
     let mtime2 = std::fs::metadata(project.root().join("apps/web/.env.local"))
         .unwrap()
         .modified()
@@ -569,7 +551,7 @@ secrets:
     store.set("MY_SECRET", "dev", "val").unwrap();
 
     // Sync should succeed — only hitting env adapter
-    cli::sync::run(&config, None, false, false, false).unwrap();
+    cli::deploy::run(&config, None, false, false, false).unwrap();
     assert!(project.root().join("apps/web/.env.local").is_file());
 }
 
@@ -579,7 +561,7 @@ fn sync_skips_no_value_secrets() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
     // Don't set any values — sync should still work, just skip everything
-    cli::sync::run(&config, None, false, false, true).unwrap();
+    cli::deploy::run(&config, None, false, false, true).unwrap();
 }
 
 #[test]
@@ -605,7 +587,7 @@ secrets:
     let store = project.store().unwrap();
     store.set("KEY", "dev", "val").unwrap();
 
-    let err = cli::sync::run(&config, None, false, false, false).unwrap_err();
+    let err = cli::deploy::run(&config, None, false, false, false).unwrap_err();
     assert!(err.to_string().contains("failed"));
 }
 
@@ -619,13 +601,13 @@ fn sync_env_dirty_pair_regens_all() {
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
     // First sync
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     // Change only MY_SECRET
     store.set("MY_SECRET", "dev", "val1_changed").unwrap();
 
     // Sync again — should regenerate entire file including OTHER_SECRET
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
     assert!(content.contains("MY_SECRET=val1_changed"));
@@ -646,7 +628,7 @@ fn status_shows_all_states() {
     // Don't set OTHER_SECRET → "no value"
 
     // Sync to create "synced" state
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     // Change MY_SECRET → "pending" state for dev
     store.set("MY_SECRET", "dev", "changed").unwrap();
@@ -674,7 +656,7 @@ fn sync_records_to_tracker() {
     store.set("MY_SECRET", "dev", "val").unwrap();
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(!index.records.is_empty());
@@ -757,7 +739,7 @@ fn cloud_file_push_pull_encrypted() {
 }
 
 #[test]
-fn push_only_flag() {
+fn plugin_sync_only_flag() {
     // Test that --only filters to a specific plugin
     let yaml = r#"
 project: testapp
@@ -772,35 +754,7 @@ plugins:
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    let err = cli::push::run_with_runner(&config, "dev", Some("nonexistent"), &runner).unwrap_err();
-    assert!(err.to_string().contains("unknown plugin"));
-}
-
-#[test]
-fn pull_only_flag() {
-    let yaml = r#"
-project: testapp
-environments: [dev]
-plugins:
-  onepassword:
-    vault: Test
-    item_pattern: test
-"#;
-    let project = TestProject::with_store(yaml).unwrap();
-    let config = project.config().unwrap();
-    let runner = MockCommandRunner::new();
-    runner.push_success(b"", b""); // preflight: op --version
-    runner.push_success(b"", b""); // preflight: op vault get
-    let err = cli::pull::run_with_runner(
-        &config,
-        "dev",
-        Some("nonexistent"),
-        false,
-        false,
-        false,
-        &runner,
-    )
-    .unwrap_err();
+    let err = cli::sync::run_with_runner(&config, "dev", Some("nonexistent"), false, false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
 }
 
@@ -819,7 +773,7 @@ fn sync_cloudflare_calls_wrangler() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -845,7 +799,7 @@ fn sync_cloudflare_prod_env_flags() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -868,7 +822,7 @@ fn sync_cloudflare_records_tracker() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(!index.records.is_empty());
@@ -892,7 +846,7 @@ fn sync_cloudflare_failure_tracked() {
     runner.push_failure(b"auth error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -919,7 +873,7 @@ fn sync_cloudflare_multiple_secrets() {
     runner.push_success(b"", b"");
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -943,11 +897,11 @@ fn sync_cloudflare_skip_unchanged() {
     runner.push_success(b"", b"");
 
     // First sync
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
     assert_eq!(runner.take_calls().len(), 3); // preflight (2) + sync
 
     // Second sync — same value, should skip (only preflight calls)
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
     assert_eq!(runner.take_calls().len(), 2); // preflight only
 }
 
@@ -968,7 +922,7 @@ fn sync_convex_calls_npx() {
     runner.push_success(b"", b""); // preflight: convex env list
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1004,7 +958,7 @@ fn sync_convex_prod_env_flags() {
     runner.push_success(b"", b""); // preflight: convex env list
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1041,7 +995,7 @@ fn sync_convex_reads_deployment_source() {
     runner.push_success(b"", b""); // preflight: convex env list
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1067,7 +1021,7 @@ fn sync_convex_failure_tracked() {
     runner.push_failure(b"deploy error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1087,6 +1041,7 @@ fn push_onepassword_creates_item() {
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "sk_test_999").unwrap();
+    let payload = store.payload().unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
@@ -1096,7 +1051,9 @@ fn push_onepassword_creates_item() {
     // op item create → success
     runner.push_success(b"", b"");
 
-    cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
+    let plugins = esk::plugins::build_plugins(&config, &runner);
+    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
+    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1122,6 +1079,7 @@ fn push_onepassword_edits_existing() {
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "sk_test_999").unwrap();
+    let payload = store.payload().unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
@@ -1137,7 +1095,9 @@ fn push_onepassword_edits_existing() {
     // op item edit → success
     runner.push_success(b"", b"");
 
-    cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
+    let plugins = esk::plugins::build_plugins(&config, &runner);
+    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
+    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1154,6 +1114,7 @@ fn push_onepassword_version_metadata() {
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "val").unwrap();
+    let payload = store.payload().unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
@@ -1163,7 +1124,9 @@ fn push_onepassword_version_metadata() {
     // op item create → success
     runner.push_success(b"", b"");
 
-    cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
+    let plugins = esk::plugins::build_plugins(&config, &runner);
+    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
+    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
 
     let calls = runner.take_calls();
     // The create call should include version metadata
@@ -1174,7 +1137,7 @@ fn push_onepassword_version_metadata() {
 }
 
 #[test]
-fn pull_onepassword_merges_remote() {
+fn plugin_sync_onepassword_merges_remote() {
     let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1184,7 +1147,7 @@ fn pull_onepassword_merges_remote() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // op item get → returns higher version with different value
+                                   // pull: op item get → returns higher version with different value
     let item_json = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "remote_val"},
@@ -1202,7 +1165,7 @@ fn pull_onepassword_merges_remote() {
     runner.push_success(serde_json::to_vec(&item_json2).unwrap().as_slice(), b"");
     runner.push_success(b"", b"");
 
-    cli::pull::run_with_runner(&config, "dev", None, false, false, false, &runner).unwrap();
+    cli::sync::run_with_runner(&config, "dev", None, false, false, false, false, &runner).unwrap();
 
     // Local store should be updated with remote value
     let store = project.store().unwrap();
@@ -1213,7 +1176,7 @@ fn pull_onepassword_merges_remote() {
 }
 
 #[test]
-fn pull_onepassword_no_item() {
+fn plugin_sync_onepassword_no_item() {
     let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1222,11 +1185,11 @@ fn pull_onepassword_no_item() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // op item get → not found
+                                   // pull: op item get → not found
     runner.push_failure(b"isn't an item in vault");
 
     // Should succeed — no remote data, nothing to reconcile
-    cli::pull::run_with_runner(&config, "dev", None, false, false, false, &runner).unwrap();
+    cli::sync::run_with_runner(&config, "dev", None, false, false, false, false, &runner).unwrap();
 
     // Local value unchanged
     let store = project.store().unwrap();
@@ -1234,6 +1197,41 @@ fn pull_onepassword_no_item() {
         store.get("STRIPE_KEY", "dev").unwrap(),
         Some("local_val".to_string())
     );
+}
+
+#[test]
+fn plugin_sync_dry_run_no_mutation() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "local_val").unwrap();
+    // Local is now v1
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    runner.push_success(b"", b""); // preflight: op vault get
+                                   // pull: op item get → returns higher version
+    let item_json = json!({
+        "fields": [
+            {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "remote_val"},
+            {"section": {"label": "_Metadata"}, "label": "version", "value": "5"},
+        ]
+    });
+    runner.push_success(serde_json::to_vec(&item_json).unwrap().as_slice(), b"");
+    // No push-back responses needed — dry-run exits before pushing
+
+    cli::sync::run_with_runner(&config, "dev", None, true, false, false, false, &runner).unwrap();
+
+    // Local store should NOT be updated (dry-run)
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("STRIPE_KEY", "dev").unwrap(),
+        Some("local_val".to_string())
+    );
+
+    // Only 3 calls: preflight (2) + pull (1). No push calls.
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
 }
 
 // === mixed adapter integration ===
@@ -1260,7 +1258,7 @@ fn sync_full_config_cloudflare_and_convex() {
     runner.push_success(b"", b""); // cloudflare: STRIPE_KEY
     runner.push_success(b"", b""); // convex: CONVEX_URL
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 6);
@@ -1284,14 +1282,14 @@ fn sync_cloudflare_force_resyncs() {
     runner.push_success(b"", b"");
 
     // First sync
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
     assert_eq!(runner.take_calls().len(), 3); // preflight (2) + sync
 
     // Force sync — should re-run despite unchanged hash
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), true, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), true, false, false, &runner).unwrap();
     assert_eq!(runner.take_calls().len(), 3); // preflight (2) + sync
 }
 
@@ -1303,6 +1301,7 @@ fn push_records_plugin_index() {
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
+    let payload = store.payload().unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
@@ -1310,7 +1309,10 @@ fn push_records_plugin_index() {
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_success(b"", b""); // op item create
 
-    cli::push::run_with_runner(&config, "dev", None, &runner).unwrap();
+    let plugins = esk::plugins::build_plugins(&config, &runner);
+    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
+    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
+    plugin_index.save().unwrap();
 
     let index = PluginIndex::load(&project.plugin_index_path());
     assert_eq!(index.records.len(), 1);
@@ -1338,6 +1340,7 @@ plugins:
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("KEY", "dev", "val").unwrap();
+    let payload = store.payload().unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
@@ -1345,8 +1348,11 @@ plugins:
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_failure(b"op create failed"); // op item create fails
 
-    // push will bail because of failure
-    let _ = cli::push::run_with_runner(&config, "dev", None, &runner);
+    let plugins = esk::plugins::build_plugins(&config, &runner);
+    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
+    let failures = cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
+    plugin_index.save().unwrap();
+    assert!(failures > 0);
 
     let index = PluginIndex::load(&project.plugin_index_path());
     assert_eq!(index.records.len(), 1);
@@ -1421,7 +1427,7 @@ fn status_dashboard_healthy() {
 
     store.set("MY_SECRET", "dev", "val").unwrap();
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     // All synced — dashboard should render without error
     cli::status::run(&config, Some("dev"), false).unwrap();
@@ -1474,7 +1480,7 @@ fn status_dashboard_next_steps() {
 
     // Set and sync, then change to create pending state
     store.set("MY_SECRET", "dev", "val").unwrap();
-    cli::sync::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
     store.set("MY_SECRET", "dev", "changed").unwrap();
 
     // Should render with next steps (pending sync)
@@ -1528,7 +1534,7 @@ fn sync_records_tombstone_delete_success() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // sync_secret STRIPE_KEY
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Delete the key (creates tombstone)
     store.delete("STRIPE_KEY", "dev").unwrap();
@@ -1538,7 +1544,7 @@ fn sync_records_tombstone_delete_success() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // delete_secret STRIPE_KEY
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
@@ -1561,7 +1567,7 @@ fn sync_records_tombstone_delete_failure() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_failure(b"delete failed"); // delete_secret fails
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1585,14 +1591,14 @@ fn sync_retries_failed_tombstone_delete() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_failure(b"delete failed");
-    let _ = cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner);
+    let _ = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner);
 
     // Second sync: delete succeeds — should retry because previous was failed
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // delete_secret succeeds
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
@@ -1614,13 +1620,13 @@ fn sync_skips_already_deleted_tombstone() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // delete_secret
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Second sync: should skip (already successfully deleted)
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Verify no additional calls were made beyond preflight
     let calls = runner.take_calls();
@@ -1641,7 +1647,7 @@ fn delete_then_recreate_same_value_syncs() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // sync_secret
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Delete and sync (tombstone processed)
     store.delete("STRIPE_KEY", "dev").unwrap();
@@ -1649,7 +1655,7 @@ fn delete_then_recreate_same_value_syncs() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // delete_secret
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Recreate with same value
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
@@ -1657,7 +1663,7 @@ fn delete_then_recreate_same_value_syncs() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // sync_secret — must NOT be skipped
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Verify sync_secret was called (3 calls: preflight x2 + sync)
     let calls = runner.take_calls();
@@ -1680,7 +1686,7 @@ fn sync_fly_calls_cli() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_success(b"", b""); // fly secrets set
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1703,7 +1709,7 @@ fn sync_fly_prod_env_flags() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_success(b"", b""); // fly secrets import
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -1726,7 +1732,7 @@ fn sync_fly_records_tracker() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(index
@@ -1748,7 +1754,7 @@ fn sync_fly_failure_tracked() {
     runner.push_failure(b"deploy error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1772,13 +1778,13 @@ fn sync_fly_skip_unchanged() {
     runner.push_success(b"", b""); // fly --version
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Second sync (unchanged)
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // fly --version
     runner.push_success(b"", b""); // fly auth whoami
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2); // only preflight, no sync
@@ -1798,7 +1804,7 @@ fn sync_netlify_calls_cli() {
     runner.push_success(b"", b""); // netlify status
     runner.push_success(b"", b""); // netlify env:set
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1821,7 +1827,7 @@ fn sync_netlify_prod_env_flags() {
     runner.push_success(b"", b""); // netlify status
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -1850,7 +1856,7 @@ fn sync_netlify_records_tracker() {
     runner.push_success(b"", b""); // netlify status
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(index
@@ -1872,7 +1878,7 @@ fn sync_netlify_failure_tracked() {
     runner.push_failure(b"auth error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1895,12 +1901,12 @@ fn sync_netlify_skip_unchanged() {
     runner.push_success(b"", b""); // netlify --version
     runner.push_success(b"", b""); // netlify status
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // netlify --version
     runner.push_success(b"", b""); // netlify status
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -1920,7 +1926,7 @@ fn sync_vercel_calls_cli() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_success(b"", b""); // vercel env add
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1944,7 +1950,7 @@ fn sync_vercel_prod_env_flags() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -1973,7 +1979,7 @@ fn sync_vercel_records_tracker() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(index
@@ -1995,7 +2001,7 @@ fn sync_vercel_failure_tracked() {
     runner.push_failure(b"auth error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2018,12 +2024,12 @@ fn sync_vercel_skip_unchanged() {
     runner.push_success(b"", b""); // vercel --version
     runner.push_success(b"", b""); // vercel whoami
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // vercel --version
     runner.push_success(b"", b""); // vercel whoami
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2043,7 +2049,7 @@ fn sync_github_calls_cli() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_success(b"", b""); // gh secret set
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2067,7 +2073,7 @@ fn sync_github_prod_env_flags() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2096,7 +2102,7 @@ fn sync_github_records_tracker() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(index
@@ -2118,7 +2124,7 @@ fn sync_github_failure_tracked() {
     runner.push_failure(b"auth error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2141,12 +2147,12 @@ fn sync_github_skip_unchanged() {
     runner.push_success(b"", b""); // gh --version
     runner.push_success(b"", b""); // gh auth status
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // gh --version
     runner.push_success(b"", b""); // gh auth status
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2166,7 +2172,7 @@ fn sync_heroku_calls_cli() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_success(b"", b""); // heroku config:set
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2189,7 +2195,7 @@ fn sync_heroku_prod_env_flags() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2217,7 +2223,7 @@ fn sync_heroku_records_tracker() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(index
@@ -2239,7 +2245,7 @@ fn sync_heroku_failure_tracked() {
     runner.push_failure(b"auth error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2262,12 +2268,12 @@ fn sync_heroku_skip_unchanged() {
     runner.push_success(b"", b""); // heroku --version
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // heroku --version
     runner.push_success(b"", b""); // heroku auth:whoami
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2287,7 +2293,7 @@ fn sync_supabase_calls_cli() {
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b""); // supabase secrets set
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2313,7 +2319,7 @@ fn sync_supabase_prod_env_flags() {
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2342,7 +2348,7 @@ fn sync_supabase_records_tracker() {
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(index
@@ -2364,7 +2370,7 @@ fn sync_supabase_failure_tracked() {
     runner.push_failure(b"api error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2387,12 +2393,12 @@ fn sync_supabase_skip_unchanged() {
     runner.push_success(b"", b""); // supabase --version
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // supabase --version
     runner.push_success(b"", b""); // supabase secrets list (preflight)
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2); // only preflight (version check + secrets list)
@@ -2412,7 +2418,7 @@ fn sync_railway_calls_cli() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_success(b"", b""); // railway variables --set
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2435,7 +2441,7 @@ fn sync_railway_prod_env_flags() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2462,7 +2468,7 @@ fn sync_railway_records_tracker() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(index
@@ -2484,7 +2490,7 @@ fn sync_railway_failure_tracked() {
     runner.push_failure(b"api error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2507,12 +2513,12 @@ fn sync_railway_skip_unchanged() {
     runner.push_success(b"", b""); // railway --version
     runner.push_success(b"", b""); // railway whoami
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // railway --version
     runner.push_success(b"", b""); // railway whoami
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2532,7 +2538,7 @@ fn sync_gitlab_calls_cli() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_success(b"", b""); // glab variable set
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2558,7 +2564,7 @@ fn sync_gitlab_prod_env_flags() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2581,7 +2587,7 @@ fn sync_gitlab_records_tracker() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_success(b"", b"");
 
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert!(index
@@ -2603,7 +2609,7 @@ fn sync_gitlab_failure_tracked() {
     runner.push_failure(b"api error");
 
     let err =
-        cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2626,12 +2632,12 @@ fn sync_gitlab_skip_unchanged() {
     runner.push_success(b"", b""); // glab --version
     runner.push_success(b"", b""); // glab auth status
     runner.push_success(b"", b"");
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // glab --version
     runner.push_success(b"", b""); // glab auth status
-    cli::sync::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);

@@ -1,8 +1,8 @@
 # Plugins
 
-Plugins store and back up the entire secret list via `esk push` and `esk pull`. Unlike adapters (which deploy individual secrets to targets), plugins operate on the full store per environment.
+Plugins sync the entire secret list via `esk sync`. Unlike adapters (which deploy individual secrets to targets), plugins operate on the full store per environment — pulling from remote, reconciling, and pushing merged results back.
 
-For sync adapters (env files, Cloudflare, Convex, etc.), see [ADAPTERS.md](ADAPTERS.md).
+For deploy adapters (env files, Cloudflare, Convex, etc.), see [ADAPTERS.md](ADAPTERS.md).
 
 ## Overview
 
@@ -27,14 +27,14 @@ Uses the 1Password CLI (`op`) to push and pull entire environment snapshots as v
 
 ### How it works
 
-**Push** (`esk push --env <ENV>`):
+**Push** (during `esk sync` or auto-push from `esk set`/`delete`):
 
 1. Collects all secrets for the environment from the local store.
 2. Groups them by vendor (using the `secrets` section of `esk.yaml`).
 3. Creates or updates a 1Password item with concealed fields organized into vendor sections. On update, fields present in 1Password but absent from the local store are deleted using `[delete]` field assignments.
 4. Stores a `_Metadata.version` field for reconciliation.
 
-**Pull** (`esk pull --env <ENV>`):
+**Pull** (during `esk sync`):
 
 1. Fetches the 1Password item for the environment.
 2. Parses fields back into key-value pairs (section label = vendor, field label = key).
@@ -100,9 +100,9 @@ Fields use the `[concealed]` type so values are hidden by default in the 1Passwo
 The version field enables conflict-free merging between team members:
 
 1. Alice sets a secret locally (version goes to 5), pushes to 1Password.
-2. Bob pulls from 1Password — his local store is at version 3, remote is 5.
+2. Bob syncs from 1Password — his local store is at version 3, remote is 5.
 3. Remote wins: Bob's store is updated with remote secrets. Any keys Bob has that Alice doesn't are merged in.
-4. If Bob's local version were higher, pull would advise him to push instead.
+4. If Bob's local version were higher, his secrets win and the merged result is pushed back.
 
 ---
 
@@ -561,22 +561,22 @@ sops -d secrets/dev.enc.json
 
 ## Multi-plugin reconciliation
 
-When multiple plugins are configured, `esk pull` reconciles across all of them:
+When multiple plugins are configured, `esk sync` reconciles across all of them:
 
 1. Pull from every configured plugin (or just `--only <name>`).
 2. Find the source with the highest version (including local).
 3. Start with that as the base.
 4. Merge unique secrets from lower-version sources.
 5. Write the merged result to the local store.
-6. In interactive mode, prompts whether to push the merged result back to any plugins that were behind; in non-interactive mode, skips pushback and warns to run `esk push` manually.
+6. Push the merged result back to any plugins that were behind.
 
-This means you can use 1Password for team sharing and Dropbox as a backup — pull keeps them all in sync.
+This means you can use 1Password for team sharing and Dropbox as a backup — sync keeps them all in sync.
 
 ### Targeting a specific plugin
 
-Use `--only` to push or pull from a single plugin:
+Use `--only` to sync with a single plugin:
 
 ```bash
-esk push --env prod --only onepassword
-esk pull --env dev --only dropbox
+esk sync --env prod --only onepassword
+esk sync --env dev --only dropbox
 ```

@@ -283,7 +283,7 @@ impl Dashboard {
         // Failed syncs
         for entry in &failed {
             next_steps.push(NextStep {
-                command: format!("esk sync --env {}", entry.env),
+                command: format!("esk deploy --env {}", entry.env),
                 description: format!("retry failed sync for {}:{}", entry.key, entry.env),
             });
         }
@@ -296,7 +296,7 @@ impl Dashboard {
         for env_name in &pending_envs {
             let count = pending.iter().filter(|e| e.env == **env_name).count();
             next_steps.push(NextStep {
-                command: format!("esk sync --env {env_name}"),
+                command: format!("esk deploy --env {env_name}"),
                 description: format!(
                     "deploy {count} pending change{}",
                     if count == 1 { "" } else { "s" }
@@ -318,7 +318,7 @@ impl Dashboard {
         for ps in &plugin_states {
             if let PluginStatus::Stale { pushed, local } = &ps.status {
                 next_steps.push(NextStep {
-                    command: format!("esk push --env {}", ps.env),
+                    command: format!("esk sync --env {}", ps.env),
                     description: format!(
                         "plugin is {} version{} behind",
                         local - pushed,
@@ -328,7 +328,7 @@ impl Dashboard {
             }
             if let PluginStatus::NeverPushed = &ps.status {
                 next_steps.push(NextStep {
-                    command: format!("esk push --env {}", ps.env),
+                    command: format!("esk sync --env {}", ps.env),
                     description: "plugin never pushed".to_string(),
                 });
             }

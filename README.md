@@ -1,13 +1,13 @@
 # esk
 
-Encrypted secrets management with multi-target sync. Store secrets locally with AES-256-GCM encryption, then sync them to `.env` files, Cloudflare Workers, Convex, Fly.io, Netlify, Vercel, GitHub Actions, Heroku, Supabase, Railway, GitLab CI, AWS SSM, and Kubernetes from a single source of truth. Back up and share secrets across your team with 1Password, cloud file storage, AWS Secrets Manager, HashiCorp Vault, Bitwarden, S3, GCP Secret Manager, Azure Key Vault, Doppler, or SOPS.
+Encrypted secrets management with multi-target deploy. Store secrets locally with AES-256-GCM encryption, then deploy them to `.env` files, Cloudflare Workers, Convex, Fly.io, Netlify, Vercel, GitHub Actions, Heroku, Supabase, Railway, GitLab CI, AWS SSM, and Kubernetes from a single source of truth. Back up and share secrets across your team with 1Password, cloud file storage, AWS Secrets Manager, HashiCorp Vault, Bitwarden, S3, GCP Secret Manager, Azure Key Vault, Doppler, or SOPS.
 
 ## Why esk
 
-- **One config, many targets** — Define a secret once, sync it to every service that needs it.
+- **One config, many targets** — Define a secret once, deploy it to every service that needs it.
 - **Encrypted at rest** — Secrets are AES-256-GCM encrypted. The store file (`.esk/store.enc`) is safe to commit; the key file (`.esk/store.key`) stays local.
 - **Change detection** — SHA-256 hashing skips secrets that haven't changed. No unnecessary writes or API calls.
-- **Pluggable storage** — Push/pull secrets to 1Password, Dropbox, Google Drive, OneDrive, AWS Secrets Manager, HashiCorp Vault, Bitwarden, S3, GCP Secret Manager, Azure Key Vault, Doppler, or SOPS for team sharing and backup, with version-based reconciliation.
+- **Pluggable storage** — Sync secrets with 1Password, Dropbox, Google Drive, OneDrive, AWS Secrets Manager, HashiCorp Vault, Bitwarden, S3, GCP Secret Manager, Azure Key Vault, Doppler, or SOPS for team sharing and backup, with version-based reconciliation.
 
 ## Installation
 
@@ -41,8 +41,8 @@ esk init
 # Set a secret
 esk set API_KEY --env dev
 
-# Sync to configured targets
-esk sync
+# Deploy to configured targets
+esk deploy
 ```
 
 `esk init` creates five files:
@@ -52,7 +52,7 @@ esk sync
 | `esk.yaml`               | Project config (environments, apps, adapters, plugins, secrets) | Commit        |
 | `.esk/store.enc`         | Encrypted secret store                                          | Commit        |
 | `.esk/store.key`         | 32-byte encryption key (hex)                                    | **Gitignore** |
-| `.esk/sync-index.json`   | Sync state tracker                                              | Optional      |
+| `.esk/sync-index.json`   | Deploy state tracker                                            | Optional      |
 | `.esk/plugin-index.json` | Plugin push state tracker                                       | Optional      |
 
 ## Configuration
@@ -119,7 +119,7 @@ Named paths relative to the project root. Used by adapters that need to know whe
 
 ### Adapters
 
-Adapters deploy secrets to targets via `esk sync`. Each secret declares which adapters it targets.
+Adapters deploy secrets to targets via `esk deploy`. Each secret declares which adapters it targets.
 
 | Adapter      | What it does                                            | External CLI |
 | ------------ | ------------------------------------------------------- | ------------ |
@@ -141,7 +141,7 @@ See [ADAPTERS.md](ADAPTERS.md) for detailed configuration of each adapter.
 
 ### Plugins
 
-Plugins store and back up the entire secret list via `esk push`/`pull`. They operate on the full store per environment — no per-secret routing.
+Plugins sync the entire secret list via `esk sync`. They pull from remote, reconcile with the local store, and push merged results back — all in one bidirectional operation. Used for team sharing and backup.
 
 | Plugin                                             | What it does                                               | External CLI |
 | -------------------------------------------------- | ---------------------------------------------------------- | ------------ |
@@ -160,7 +160,7 @@ See [PLUGINS.md](PLUGINS.md) for detailed configuration of each plugin.
 
 ### Secrets
 
-Organized by vendor (Stripe, AWS, etc.) for readability. Each secret declares which adapters and targets it syncs to.
+Organized by vendor (Stripe, AWS, etc.) for readability. Each secret declares which adapters and targets it deploys to.
 
 Target format: `app:environment` (e.g., `web:prod`) or just `environment` for adapters that don't need an app context.
 
@@ -172,11 +172,10 @@ Target format: `app:environment` (e.g., `web:prod`) or just `environment` for ad
 | `esk set <KEY>`    | Set a secret value (with optional config registration) |
 | `esk get <KEY>`    | Retrieve a secret value                            |
 | `esk delete <KEY>` | Delete a secret value                              |
-| `esk list`         | List all secrets with per-environment sync status   |
-| `esk sync`         | Sync secrets to configured adapter targets         |
-| `esk status`       | Show actionable sync dashboard                     |
-| `esk push`         | Push secrets to configured plugins                 |
-| `esk pull`         | Pull secrets from configured plugins and reconcile |
+| `esk list`         | List all secrets with per-environment deploy status |
+| `esk deploy`       | Deploy secrets to configured adapter targets       |
+| `esk status`       | Show actionable deploy/sync dashboard              |
+| `esk sync`         | Sync secrets with configured plugins (pull, reconcile, push) |
 
 See [API.md](API.md) for the full command reference with all flags and behaviors.
 
@@ -198,26 +197,25 @@ esk delete STRIPE_SECRET_KEY --env dev
 esk list
 esk list --env prod
 
-# Sync to all configured adapter targets
-esk sync
-esk sync --env prod
-esk sync --force          # Ignore change detection
-esk sync --dry-run        # Preview without writing
-esk sync --verbose        # Show skipped secrets too
+# Deploy to all configured adapter targets
+esk deploy
+esk deploy --env prod
+esk deploy --force          # Ignore change detection
+esk deploy --dry-run        # Preview without writing
+esk deploy --verbose        # Show skipped secrets too
 
-# Check sync status
+# Check status
 esk status
 esk status --env dev
 esk status --all          # Include synced targets in output
 
-# Push/pull to storage plugins
-esk push --env prod                   # Push to all plugins
-esk push --env prod --only onepassword  # Push to specific plugin
-esk pull --env prod                   # Pull from all plugins + reconcile
-esk pull --env prod --only dropbox    # Pull from specific plugin
-esk pull --env prod --sync            # Pull + auto-sync targets
-esk pull --env prod --strict          # Fail if any plugin is unreachable
-esk pull --env prod --force           # Bypass version jump protection
+# Sync with storage plugins (pull + reconcile + push)
+esk sync --env prod                     # Sync all plugins
+esk sync --env prod --only onepassword  # Sync specific plugin
+esk sync --env prod --deploy            # Sync + auto-deploy targets
+esk sync --env prod --strict            # Fail if any plugin is unreachable
+esk sync --env prod --force             # Bypass version jump protection
+esk sync --env prod --dry-run           # Preview without modifying anything
 ```
 
 ## Security model
@@ -232,26 +230,25 @@ The encrypted store is safe to commit to git. The key file must never be committ
 
 ## Plugin workflow
 
-Esk plugins act as team remotes. Secrets are pushed to and pulled from one or more storage backends, with version-based reconciliation to handle concurrent edits.
+Esk plugins act as team remotes. Secrets are synced with one or more storage backends, with version-based reconciliation to handle concurrent edits.
 
 ```bash
-esk push --env prod    # Upload local secrets to all plugins
-esk pull --env prod    # Download from all plugins and reconcile
+esk sync --env prod    # Pull from all plugins, reconcile, push merged result back
 ```
 
 ### Multi-plugin reconciliation
 
-When pulling from multiple plugins, esk reconciles across all sources:
+When syncing with multiple plugins, esk reconciles across all sources:
 
 1. The source with the highest version becomes the base.
 2. Unique secrets from lower-version sources are merged in.
 3. Sources that were behind are updated with the merged result.
 
-This means you can use 1Password for team sharing and Dropbox as a backup simultaneously — pull reconciles them all.
+This means you can use 1Password for team sharing and Dropbox as a backup simultaneously — sync reconciles them all.
 
 ### Auto-push
 
-The `set` and `delete` commands automatically push to all configured plugins and sync to adapter targets (unless `--no-sync` is used). Use `--strict` on either command to fail immediately if any plugin push fails, skipping adapter sync entirely.
+The `set` and `delete` commands automatically push to all configured plugins and deploy to adapter targets (unless `--no-sync` is used). Use `--strict` on either command to fail immediately if any plugin push fails, skipping adapter deploy entirely.
 
 ## Troubleshooting
 
@@ -266,7 +263,7 @@ The `set` and `delete` commands automatically push to all configured plugins and
 
 ### Adapter preflight
 
-These errors appear when running `esk sync` or `esk status`. Preflight checks verify that external CLIs are installed and authenticated before syncing.
+These errors appear when running `esk deploy` or `esk status`. Preflight checks verify that external CLIs are installed and authenticated before deploying.
 
 | Error                                                | Cause                                                                                 | Fix                                                                                                                          |
 | ---------------------------------------------------- | ------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
@@ -274,12 +271,12 @@ These errors appear when running `esk sync` or `esk status`. Preflight checks ve
 | `wrangler is not authenticated. Run: wrangler login` | `wrangler whoami` failed                                                              | Run `wrangler login`                                                                                                         |
 | `npx is not installed or not in PATH`                | Node.js not found                                                                     | Install Node.js                                                                                                              |
 | `convex deployment not accessible: …`                | `convex env list` failed — bad auth, missing deployment, or wrong `deployment_source` | Check `convex` auth and that `deployment_source` in `esk.yaml` points to a valid `.env.local` with `CONVEX_DEPLOYMENT=…` |
-| `Skipping {adapter} adapter: …`                      | Preflight failed — adapter excluded from sync                                         | Fix the underlying issue (see error detail); remaining adapters still sync                                                   |
+| `Skipping {adapter} adapter: …`                      | Preflight failed — adapter excluded from deploy                                       | Fix the underlying issue (see error detail); remaining adapters still deploy                                                 |
 | `No adapters available after preflight checks`       | All adapters failed preflight                                                         | Fix the errors printed above this message                                                                                    |
 
 ### Plugin preflight
 
-These errors appear when running `esk push`, `esk pull`, or during auto-push from `esk set`/`delete`.
+These errors appear when running `esk sync`, or during auto-push from `esk set`/`delete`.
 
 | Error                                                | Cause                                                                    | Fix                                                                                              |
 | ---------------------------------------------------- | ------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------ |
@@ -290,7 +287,7 @@ These errors appear when running `esk push`, `esk pull`, or during auto-push fro
 | `Skipping {plugin} plugin: …`                        | Preflight failed — plugin excluded                                       | Fix the underlying issue; remaining plugins still run                                            |
 | `No plugins available after preflight checks`        | All plugins failed preflight                                             | Fix the errors printed above this message                                                        |
 
-### Sync failures
+### Deploy failures
 
 | Error                                        | Cause                                                                                                              | Fix                                                                             |
 | -------------------------------------------- | ------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------- |
@@ -299,24 +296,24 @@ These errors appear when running `esk push`, `esk pull`, or during auto-push fro
 | `convex env set failed for {KEY}: …`         | Convex deployment rejected the env var write                                                                       | Check convex auth, deployment name, and `--prod` flag mapping in `env_flags`    |
 | `convex env unset failed for {KEY}: …`       | Convex deployment rejected the env var deletion                                                                    | Same as above                                                                   |
 | `cloudflare adapter requires an app`         | Secret targets cloudflare without specifying an app (e.g., `cloudflare: [dev]` instead of `cloudflare: [web:dev]`) | Use `app:env` format in `targets`                                               |
-| `{N} sync(s) failed`                         | One or more secrets failed to sync                                                                                 | Scroll up for per-secret errors; fix and re-run `esk sync`                  |
+| `{N} sync(s) failed`                         | One or more secrets failed to deploy                                                                               | Scroll up for per-secret errors; fix and re-run `esk deploy`                |
 
-### Push and pull failures
+### Sync failures
 
 | Error                                                 | Cause                                                               | Fix                                                            |
 | ----------------------------------------------------- | ------------------------------------------------------------------- | -------------------------------------------------------------- |
 | `no plugins configured in esk.yaml`               | No `plugins:` section in config                                     | Add a plugin to `esk.yaml` (see [PLUGINS.md](PLUGINS.md))  |
 | `unknown plugin '{name}'`                             | `--only` references a plugin that doesn't exist or failed preflight | Check the plugin name matches what's in `esk.yaml`         |
 | `op item create failed: …` / `op item edit failed: …` | 1Password rejected the item write                                   | Check vault permissions and that the `op` session is active    |
-| `{N} plugin push(es) failed`                          | One or more plugins failed during push                              | Run `esk push --env {env}` to retry after fixing the issue |
-| `{N} plugin(s) failed to receive merged data`         | Push-back after pull reconciliation failed                          | Run `esk push --env {env}` to retry                        |
+| `{N} plugin push(es) failed`                          | One or more plugins failed during push                              | Run `esk sync --env {env}` to retry after fixing the issue |
+| `{N} plugin(s) failed to receive merged data`         | Push-back after reconciliation failed                               | Run `esk sync --env {env}` to retry                        |
 
 ### Store and encryption
 
 | Error                                                 | Cause                                                            | Fix                                                                                       |
 | ----------------------------------------------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| `decryption failed — wrong key or corrupted store`    | Key file doesn't match the encrypted store                       | Restore the correct `.esk/store.key` for this store, or pull from a plugin to recover |
-| `invalid store format: expected nonce:ciphertext:tag` | `.esk/store.enc` is corrupt or was edited manually           | Restore from git or pull from a plugin                                                    |
+| `decryption failed — wrong key or corrupted store`    | Key file doesn't match the encrypted store                       | Restore the correct `.esk/store.key` for this store, or sync from a plugin to recover |
+| `invalid store format: expected nonce:ciphertext:tag` | `.esk/store.enc` is corrupt or was edited manually           | Restore from git or sync from a plugin                                                    |
 | `secret '{KEY}' has no value for environment '{env}'` | Trying to delete a secret that doesn't exist in this environment | Check `esk list --env {env}` for current state                                        |
 
 ### Config validation

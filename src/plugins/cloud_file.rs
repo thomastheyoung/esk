@@ -157,7 +157,7 @@ impl StoragePlugin for CloudFilePlugin {
                         return Ok(None);
                     }
                     eprintln!(
-                        "Warning: reading legacy secrets.enc for {env}. Run `esk push --env {env}` to migrate to per-env files."
+                        "Warning: reading legacy secrets.enc for {env}. Run `esk sync --env {env}` to migrate to per-env files."
                     );
                     legacy
                 };
@@ -193,7 +193,7 @@ impl StoragePlugin for CloudFilePlugin {
                         return Ok(None);
                     }
                     eprintln!(
-                        "Warning: reading legacy secrets.json for {env}. Run `esk push --env {env}` to migrate to per-env files."
+                        "Warning: reading legacy secrets.json for {env}. Run `esk sync --env {env}` to migrate to per-env files."
                     );
                     legacy
                 };

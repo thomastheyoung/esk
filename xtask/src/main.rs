@@ -331,13 +331,12 @@ fn print_instructions(root: &Path) {
     eprintln!("  esk status");
     eprintln!("  esk status --env dev");
     eprintln!("  esk status --env prod");
-    eprintln!("  esk sync --env dev");
-    eprintln!("  esk sync --env dev --dry-run --verbose");
-    eprintln!("  esk sync --env prod                    # cloudflare + convex + fly shims");
+    eprintln!("  esk deploy --env dev");
+    eprintln!("  esk deploy --env dev --dry-run --verbose");
+    eprintln!("  esk deploy --env prod                  # cloudflare + convex + fly shims");
     eprintln!("  esk set NEW_SECRET --env dev --value test123");
     eprintln!("  esk delete SESSION_KEY --env dev       # then esk list to verify");
-    eprintln!("  esk push --env dev                     # push to 1password shim");
-    eprintln!("  esk pull --env dev                     # reconcile with remote (local wins)");
+    eprintln!("  esk sync --env dev                     # sync with 1password shim");
     eprintln!();
     eprintln!("Re-seed without rebuilding:");
     eprintln!("  cargo xtask sandbox --reset");

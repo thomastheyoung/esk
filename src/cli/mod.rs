@@ -1,9 +1,8 @@
 pub mod delete;
+pub mod deploy;
 pub mod get;
 pub mod init;
 pub mod list;
-pub mod pull;
-pub mod push;
 pub mod set;
 pub mod status;
 pub mod sync;
@@ -35,6 +34,21 @@ pub enum Commands {
         /// Fail if any plugin push fails (skip adapter sync)
         #[arg(long)]
         strict: bool,
+    },
+    /// Deploy secrets to configured targets
+    Deploy {
+        /// Filter by environment
+        #[arg(long)]
+        env: Option<String>,
+        /// Force deploy even if hashes match
+        #[arg(long)]
+        force: bool,
+        /// Show what would be deployed without deploying
+        #[arg(long)]
+        dry_run: bool,
+        /// Show detailed output
+        #[arg(long, short)]
+        verbose: bool,
     },
     /// Initialize encrypted store and config
     Init,
@@ -72,21 +86,6 @@ pub enum Commands {
         #[arg(long)]
         env: Option<String>,
     },
-    /// Sync secrets to configured targets
-    Sync {
-        /// Filter by environment
-        #[arg(long)]
-        env: Option<String>,
-        /// Force sync even if hashes match
-        #[arg(long)]
-        force: bool,
-        /// Show what would be synced without syncing
-        #[arg(long)]
-        dry_run: bool,
-        /// Show detailed output
-        #[arg(long, short)]
-        verbose: bool,
-    },
     /// Show sync status and drift
     Status {
         /// Filter by environment
@@ -96,31 +95,25 @@ pub enum Commands {
         #[arg(long)]
         all: bool,
     },
-    /// Push secrets to storage plugins
-    Push {
-        /// Environment to push
+    /// Sync secrets with storage plugins (pull, reconcile, push)
+    Sync {
+        /// Environment to sync
         #[arg(long)]
         env: String,
-        /// Push to a specific plugin only
+        /// Sync a specific plugin only
         #[arg(long)]
         only: Option<String>,
-    },
-    /// Pull secrets from storage plugins
-    Pull {
-        /// Environment to pull
+        /// Show what would change without modifying anything
         #[arg(long)]
-        env: String,
-        /// Pull from a specific plugin only
-        #[arg(long)]
-        only: Option<String>,
-        /// Auto-sync after pulling
-        #[arg(long)]
-        sync: bool,
+        dry_run: bool,
         /// Fail if any plugin is unreachable (no partial reconciliation)
         #[arg(long)]
         strict: bool,
         /// Bypass version jump protection (use with caution)
         #[arg(long)]
         force: bool,
+        /// Auto-deploy adapters after syncing
+        #[arg(long)]
+        deploy: bool,
     },
 }

@@ -1,6 +1,6 @@
 # esk
 
-Rust CLI for encrypted secrets management with multi-target sync.
+Rust CLI for encrypted secrets management with multi-target deploy.
 
 ## Architecture
 
@@ -10,24 +10,24 @@ src/
 ├── lib.rs               # Library root (re-exports all modules)
 ├── config.rs            # YAML config parsing + validation
 ├── store.rs             # Encrypted secret store (AES-256-GCM)
-├── tracker.rs           # Sync tracking (SHA-256 change detection)
+├── tracker.rs           # Deploy tracking (SHA-256 change detection)
 ├── plugin_tracker.rs    # Plugin push tracking (version + status per plugin/env)
 ├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
 ├── adapters/
 │   ├── mod.rs           # SyncAdapter + CommandRunner traits, build_sync_adapters()
-│   ├── env_file.rs      # .env file generation (batch sync)
-│   ├── cloudflare.rs    # wrangler secret put/delete (individual sync)
-│   ├── convex.rs        # convex env set/unset (individual sync)
-│   ├── fly.rs           # fly secrets import/unset (individual sync, stdin)
-│   ├── netlify.rs       # netlify env:set/unset (individual sync)
-│   ├── vercel.rs        # vercel env add/rm (individual sync, stdin)
-│   ├── github.rs        # gh secret set/delete (individual sync, stdin)
-│   ├── heroku.rs        # heroku config:set/unset (individual sync)
-│   ├── supabase.rs      # supabase secrets set/unset (individual sync, stdin)
-│   ├── railway.rs       # railway variables --set/delete (individual sync)
-│   ├── gitlab.rs        # glab variable set/delete (individual sync, stdin)
-│   ├── aws_ssm.rs       # aws ssm put-parameter/delete-parameter (individual sync, stdin)
-│   └── kubernetes.rs    # kubectl apply Secret manifest (batch sync)
+│   ├── env_file.rs      # .env file generation (batch deploy)
+│   ├── cloudflare.rs    # wrangler secret put/delete (individual deploy)
+│   ├── convex.rs        # convex env set/unset (individual deploy)
+│   ├── fly.rs           # fly secrets import/unset (individual deploy, stdin)
+│   ├── netlify.rs       # netlify env:set/unset (individual deploy)
+│   ├── vercel.rs        # vercel env add/rm (individual deploy, stdin)
+│   ├── github.rs        # gh secret set/delete (individual deploy, stdin)
+│   ├── heroku.rs        # heroku config:set/unset (individual deploy)
+│   ├── supabase.rs      # supabase secrets set/unset (individual deploy, stdin)
+│   ├── railway.rs       # railway variables --set/delete (individual deploy)
+│   ├── gitlab.rs        # glab variable set/delete (individual deploy, stdin)
+│   ├── aws_ssm.rs       # aws ssm put-parameter/delete-parameter (individual deploy, stdin)
+│   └── kubernetes.rs    # kubectl apply Secret manifest (batch deploy)
 ├── plugins/
 │   ├── mod.rs           # StoragePlugin trait, build_plugins()
 │   ├── onepassword.rs   # 1Password op CLI
@@ -47,17 +47,16 @@ src/
 │   ├── get.rs           # esk get
 │   ├── delete.rs        # esk delete
 │   ├── list.rs          # esk list
-│   ├── sync.rs          # esk sync (adapter-agnostic)
+│   ├── deploy.rs        # esk deploy (adapter-agnostic)
 │   ├── status.rs        # esk status (adapter-agnostic)
-│   ├── push.rs          # esk push (plugin-agnostic)
-│   └── pull.rs          # esk pull (plugin-agnostic + multi-reconciliation)
+│   └── sync.rs          # esk sync (plugin-agnostic, bidirectional)
 tests/
 ├── helpers/
 │   └── mod.rs              # TestProject, fixtures, MockCommandRunner
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (115)
+└── cli_integration.rs      # CLI command tests (113)
 ```
 
 ## Core design
@@ -66,8 +65,8 @@ tests/
 
 esk distinguishes between two extension types:
 
-- **Adapters** deploy secrets to targets via `esk sync`. Secrets declare which adapters they target in `targets:`. Each adapter syncs individual secrets or batches.
-- **Plugins** store/backup the entire secret list via `esk push`/`pull`. Plugins receive the full store payload per environment — no per-secret routing. Used for team sharing and backup.
+- **Adapters** deploy secrets to targets via `esk deploy`. Secrets declare which adapters they target in `targets:`. Each adapter deploys individual secrets or batches.
+- **Plugins** sync the entire secret list via `esk sync`. Plugins pull from remote, reconcile with local, and push merged results back — all in one bidirectional operation. Used for team sharing and backup.
 
 ### Config (`esk.yaml`)
 
@@ -97,7 +96,7 @@ pub trait SyncAdapter {
 
 Batch adapters handle deletion by regenerating the full output without the deleted key. Individual adapters override `delete_secret` to call the external CLI's delete/unset command.
 
-`SyncMode::Batch` adapters (env, kubernetes) regenerate the full output when any secret changes. `SyncMode::Individual` adapters sync one secret at a time. The `build_sync_adapters()` factory constructs all configured adapters from config, running preflight checks and filtering out adapters that fail.
+`SyncMode::Batch` adapters (env, kubernetes) regenerate the full output when any secret changes. `SyncMode::Individual` adapters deploy one secret at a time. The `build_sync_adapters()` factory constructs all configured adapters from config, running preflight checks and filtering out adapters that fail.
 
 ### Storage plugin trait
 
@@ -124,8 +123,8 @@ pub trait CommandRunner: Send + Sync {
 
 ### Change tracking (`.esk/sync-index.json`)
 
-SHA-256 hash per (secret, adapter, app, environment) tuple. Skip sync when hash matches.
-Records include target, value hash, timestamp, sync status (success/failed), and optional error.
+SHA-256 hash per (secret, adapter, app, environment) tuple. Skip deploy when hash matches.
+Records include target, value hash, timestamp, deploy status (success/failed), and optional error.
 Atomic writes via temp file + rename.
 
 ### Plugin push tracking (`.esk/plugin-index.json`)
@@ -184,7 +183,7 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 611 tests
+cargo test                    # Run all 625 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
@@ -195,7 +194,7 @@ cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-611 tests total: 482 unit (inline `#[cfg(test)]`) + 129 integration (`tests/`).
+625 tests total: 498 unit (inline `#[cfg(test)]`) + 127 integration (`tests/`).
 
 ### Test infrastructure
 

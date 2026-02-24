@@ -1,12 +1,11 @@
 use anyhow::{bail, Result};
-use console::style;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::{self, Config};
-use crate::suggest;
 use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::store::SecretStore;
+use crate::suggest;
 
 pub fn run(
     config: &Config,
@@ -121,46 +120,25 @@ pub fn run_with_runner(
         let plugin_index_path = config.root.join(".esk/plugin-index.json");
         let mut plugin_index = PluginIndex::load(&plugin_index_path);
         let all_plugins = plugins::build_plugins(config, runner);
-        for plugin in &all_plugins {
-            let spinner = cliclack::spinner();
-            spinner.start(format!("Pushing → {}...", plugin.name()));
-            match plugin.push(&payload, config, env) {
-                Ok(()) => {
-                    spinner.stop(format!(
-                        "Pushed → {} {}",
-                        plugin.name(),
-                        style("done").green()
-                    ));
-                    plugin_index.record_success(plugin.name(), env, payload.version);
-                }
-                Err(e) => {
-                    spinner.error(format!(
-                        "Pushed → {} {} — {e}",
-                        plugin.name(),
-                        style("failed").red()
-                    ));
-                    plugin_index.record_failure(plugin.name(), env, payload.version, e.to_string());
-                    plugin_failures += 1;
-                }
-            }
-        }
+        plugin_failures =
+            super::sync::push_to_plugins(&all_plugins, &payload, config, env, &mut plugin_index)?;
         plugin_index.save()?;
 
         if plugin_failures > 0 && strict {
             bail!(
-                "{plugin_failures} plugin(s) failed to push (--strict). Adapter sync skipped.\n\
+                "{plugin_failures} plugin(s) failed to push (--strict). Adapter deploy skipped.\n\
                  Fix the plugin issue, then run:\n  \
-                 esk push --env {env}\n  \
-                 esk sync --env {env}"
+                 esk sync --env {env}\n  \
+                 esk deploy --env {env}"
             );
         }
     }
 
-    // Auto-sync affected targets
-    crate::cli::sync::run_with_runner(config, Some(env), false, false, false, runner)?;
+    // Auto-deploy affected targets
+    crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, runner)?;
 
     if plugin_failures > 0 {
-        bail!("{plugin_failures} plugin(s) failed to push. Run `esk push --env {env}` to retry.");
+        bail!("{plugin_failures} plugin(s) failed to push. Run `esk sync --env {env}` to retry.");
     }
 
     Ok(())

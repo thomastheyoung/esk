@@ -26,6 +26,17 @@ fn run() -> Result<()> {
             let config = Config::load(&config_path)?;
             esk::cli::delete::run(&config, key, env, *no_sync, *strict)?;
         }
+        Commands::Deploy {
+            env,
+            force,
+            dry_run,
+            verbose,
+        } => {
+            let cwd = std::env::current_dir()?;
+            let config_path = Config::find(&cwd)?;
+            let config = Config::load(&config_path)?;
+            esk::cli::deploy::run(&config, env.as_deref(), *force, *dry_run, *verbose)?;
+        }
         Commands::Init => {
             let cwd = std::env::current_dir()?;
             esk::cli::init::run(&cwd)?;
@@ -63,40 +74,32 @@ fn run() -> Result<()> {
             let config = Config::load(&config_path)?;
             esk::cli::list::run(&config, env.as_deref())?;
         }
-        Commands::Sync {
-            env,
-            force,
-            dry_run,
-            verbose,
-        } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
-            esk::cli::sync::run(&config, env.as_deref(), *force, *dry_run, *verbose)?;
-        }
         Commands::Status { env, all } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
             esk::cli::status::run(&config, env.as_deref(), *all)?;
         }
-        Commands::Push { env, only } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
-            esk::cli::push::run(&config, env, only.as_deref())?;
-        }
-        Commands::Pull {
+        Commands::Sync {
             env,
             only,
-            sync,
+            dry_run,
             strict,
             force,
+            deploy,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            esk::cli::pull::run(&config, env, only.as_deref(), *sync, *strict, *force)?;
+            esk::cli::sync::run(
+                &config,
+                env,
+                only.as_deref(),
+                *dry_run,
+                *strict,
+                *force,
+                *deploy,
+            )?;
         }
     }
 
