@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
+use crate::suggest;
 use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::reconcile;
@@ -39,10 +40,7 @@ pub fn run_with_runner(
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
-        bail!(
-            "unknown environment '{env}'. Valid: {}",
-            config.environments.join(", ")
-        );
+        bail!("{}", suggest::unknown_env(env, &config.environments));
     }
 
     if config.plugins.is_empty() {
@@ -67,12 +65,13 @@ pub fn run_with_runner(
 
     // Filter by --only if provided
     let target_plugins: Vec<_> = if let Some(name) = only {
+        let plugin_names: Vec<String> = all_plugins.iter().map(|p| p.name().to_string()).collect();
         let filtered: Vec<_> = all_plugins
             .into_iter()
             .filter(|p| p.name() == name)
             .collect();
         if filtered.is_empty() {
-            bail!("unknown plugin '{name}'");
+            bail!("{}", suggest::unknown_plugin(name, &plugin_names));
         }
         filtered
     } else {

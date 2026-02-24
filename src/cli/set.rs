@@ -3,6 +3,7 @@ use console::style;
 
 use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::{self, Config};
+use crate::suggest;
 use crate::plugin_tracker::PluginIndex;
 use crate::plugins;
 use crate::store::SecretStore;
@@ -40,10 +41,7 @@ pub fn run_with_runner(
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
-        bail!(
-            "unknown environment '{env}'. Valid: {}",
-            config.environments.join(", ")
-        );
+        bail!("{}", suggest::unknown_env(env, &config.environments));
     }
 
     // If the key isn't in config, offer to register it

@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use crate::store::{validate_app, validate_environment, validate_key, validate_project};
+use crate::suggest;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
@@ -416,10 +417,11 @@ impl Config {
                  Move your onepassword config from adapters to plugins in esk.yaml."
             );
         }
-        if self.adapter_names().contains(&adapter) {
+        let names = self.adapter_names();
+        if names.contains(&adapter) {
             Ok(())
         } else {
-            bail!("adapter '{adapter}' is not configured")
+            bail!("{}", suggest::unknown_adapter(adapter, &names))
         }
     }
 
@@ -490,13 +492,21 @@ impl Config {
         let resolved = self.parse_target(adapter, target)?;
         if !self.environments.contains(&resolved.environment) {
             bail!(
-                "unknown environment '{}' in target '{target}'",
-                resolved.environment
+                "{}",
+                suggest::unknown_env_in_target(
+                    &resolved.environment,
+                    target,
+                    &self.environments
+                )
             );
         }
         if let Some(app) = &resolved.app {
             if !self.apps.contains_key(app) {
-                bail!("unknown app '{app}' in target '{target}'");
+                let app_names: Vec<String> = self.apps.keys().cloned().collect();
+                bail!(
+                    "{}",
+                    suggest::unknown_app_in_target(app, target, &app_names)
+                );
             }
         }
         Ok(())
@@ -980,7 +990,7 @@ secrets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
-        let chain = format!("{err:?}");
+        let chain = console::strip_ansi_codes(&format!("{err:?}")).to_string();
         assert!(chain.contains("adapter 'cloudflare' is not configured"));
     }
 
@@ -998,7 +1008,7 @@ secrets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
-        let chain = format!("{err:?}");
+        let chain = console::strip_ansi_codes(&format!("{err:?}")).to_string();
         assert!(chain.contains("adapter 'env' is not configured"));
     }
 
@@ -1022,7 +1032,7 @@ secrets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
-        let chain = format!("{err:?}");
+        let chain = console::strip_ansi_codes(&format!("{err:?}")).to_string();
         assert!(chain.contains("unknown environment 'staging'"));
     }
 
@@ -1046,7 +1056,7 @@ secrets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
-        let chain = format!("{err:?}");
+        let chain = console::strip_ansi_codes(&format!("{err:?}")).to_string();
         assert!(chain.contains("unknown app 'api'"));
     }
 

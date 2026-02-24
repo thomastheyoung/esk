@@ -5,4 +5,5 @@ pub mod plugin_tracker;
 pub mod plugins;
 pub mod reconcile;
 pub mod store;
+pub mod suggest;
 pub mod tracker;

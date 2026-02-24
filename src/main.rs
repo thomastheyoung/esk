@@ -1,9 +1,17 @@
 use anyhow::Result;
 use clap::Parser;
+use console::style;
 use esk::cli::{Cli, Commands};
 use esk::config::Config;
 
-fn main() -> Result<()> {
+fn main() {
+    if let Err(e) = run() {
+        eprintln!("\n {} {:#}\n", style("✖").red().bold(), e);
+        std::process::exit(1);
+    }
+}
+
+fn run() -> Result<()> {
     let cli = Cli::parse();
 
     match &cli.command {
