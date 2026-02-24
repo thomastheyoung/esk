@@ -10,6 +10,8 @@ pub mod sync;
 
 use clap::{Parser, Subcommand};
 
+use crate::reconcile::ConflictPreference;
+
 #[derive(Parser)]
 #[command(
     name = "esk",
@@ -125,5 +127,8 @@ pub enum Commands {
         /// Auto-deploy adapters after syncing
         #[arg(long = "with-deploy", alias = "deploy")]
         with_deploy: bool,
+        /// When versions match but content differs, prefer this side
+        #[arg(long, value_enum, default_value_t = ConflictPreference::Local)]
+        prefer: ConflictPreference,
     },
 }

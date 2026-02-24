@@ -93,6 +93,7 @@ fn run() -> Result<()> {
             no_partial,
             force,
             with_deploy,
+            prefer,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
@@ -105,6 +106,7 @@ fn run() -> Result<()> {
                 *no_partial,
                 *force,
                 *with_deploy,
+                *prefer,
             )?;
         }
     }

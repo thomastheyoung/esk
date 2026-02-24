@@ -7,7 +7,7 @@ use crate::adapters::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
 use crate::plugin_tracker::PluginIndex;
 use crate::plugins::{self, StoragePlugin};
-use crate::reconcile;
+use crate::reconcile::{self, ConflictPreference};
 use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
 
@@ -59,6 +59,7 @@ pub fn run(
     no_partial: bool,
     force: bool,
     auto_deploy: bool,
+    prefer: ConflictPreference,
 ) -> Result<()> {
     run_with_runner(
         config,
@@ -68,6 +69,7 @@ pub fn run(
         no_partial,
         force,
         auto_deploy,
+        prefer,
         &RealCommandRunner,
     )
 }
@@ -81,6 +83,7 @@ pub fn run_with_runner(
     no_partial: bool,
     force: bool,
     auto_deploy: bool,
+    prefer: ConflictPreference,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
@@ -186,7 +189,7 @@ pub fn run_with_runner(
         .map(|(name, secrets, version)| (name.as_str(), secrets, *version))
         .collect();
 
-    let result = match reconcile::reconcile_multi(&payload, &remotes, Some(env)) {
+    let result = match reconcile::reconcile_multi(&payload, &remotes, Some(env), prefer) {
         Ok(r) => r,
         Err(e) if e.to_string().contains("version jump too large") && !force => {
             if std::io::stdin().is_terminal() {
@@ -212,7 +215,7 @@ pub fn run_with_runner(
                     max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP),
                 );
             }
-            reconcile::reconcile_multi(&adjusted_payload, &remotes, Some(env))?
+            reconcile::reconcile_multi(&adjusted_payload, &remotes, Some(env), prefer)?
         }
         Err(e) if e.to_string().contains("version jump too large") && force => {
             let mut adjusted_payload = payload.clone();
@@ -225,7 +228,7 @@ pub fn run_with_runner(
                     max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP),
                 );
             }
-            reconcile::reconcile_multi(&adjusted_payload, &remotes, Some(env))?
+            reconcile::reconcile_multi(&adjusted_payload, &remotes, Some(env), prefer)?
         }
         Err(e) => return Err(e),
     };
