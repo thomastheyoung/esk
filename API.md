@@ -18,7 +18,7 @@ Creates:
 - `.esk/sync-index.json` — empty sync tracker
 - `.esk/plugin-index.json` — empty plugin push tracker
 
-Idempotent — skips files that already exist. Warns if `.esk/store.key` is not in `.gitignore`.
+Idempotent — skips files that already exist. Warns if `.gitignore` exists but does not contain `.esk/store.key`.
 
 ---
 
@@ -190,8 +190,8 @@ SHA-256 hash of each secret value is tracked per (secret, adapter, app, environm
 
 ```
   ✓ 2 synced
-    STRIPE_SECRET_KEY:prod  → cloudflare:web:prod
-    STRIPE_WEBHOOK_SECRET:dev  → env:web:dev
+    STRIPE_SECRET_KEY:prod  → cloudflare:web
+    STRIPE_WEBHOOK_SECRET:dev  → env:web
 
   3 up to date  (use --verbose to show)
 ```
@@ -233,8 +233,8 @@ The dashboard closes with the current store version.
 
   Sync
     ● 2 pending
-       STRIPE_SECRET_KEY:prod  → cloudflare:web:prod  last synced 3h ago
-       API_KEY:dev  → env:web:dev  never synced
+       STRIPE_SECRET_KEY:prod  → cloudflare:web  last synced 3h ago
+       API_KEY:dev  → env:web  never synced
     ○ 1 unset
        DATABASE_URL:dev  → env:web:dev
     ✓ 3 synced  (--all to show)
@@ -281,15 +281,16 @@ esk push --env dev --only dropbox       # Push to Dropbox only
 Pull secrets from configured storage plugins and reconcile with the local store.
 
 ```bash
-esk pull --env <ENV> [--only <PLUGIN>] [--sync] [--strict]
+esk pull --env <ENV> [--only <PLUGIN>] [--sync] [--strict] [--force]
 ```
 
-| Argument   | Required | Description                                                  |
-| ---------- | -------- | ------------------------------------------------------------ |
-| `--env`    | Yes      | Environment to pull                                          |
-| `--only`   | No       | Pull from a specific plugin only                             |
-| `--sync`   | No       | Auto-run `sync` after pulling                                |
+| Argument   | Required | Description                                                   |
+| ---------- | -------- | ------------------------------------------------------------- |
+| `--env`    | Yes      | Environment to pull                                           |
+| `--only`   | No       | Pull from a specific plugin only                              |
+| `--sync`   | No       | Auto-run `sync` after pulling                                 |
 | `--strict` | No       | Fail if any plugin is unreachable (no partial reconciliation) |
+| `--force`  | No       | Bypass version jump protection — skip interactive prompt (use with caution) |
 
 **Requires:** At least one plugin configured in `esk.yaml` and its dependencies available.
 
@@ -299,7 +300,7 @@ Downloads secrets from all configured plugins (or just `--only <name>`) and reco
 2. The highest-version source becomes the base.
 3. Unique secrets from lower-version sources are merged in.
 4. Local store is updated with the merged result.
-5. Plugins that were behind are updated with the merged result.
+5. If any plugins were behind: in interactive mode, prompts whether to push the merged result back to those plugins; in non-interactive mode, skips pushback and warns to run `esk push` manually.
 
 With `--sync`, automatically runs `esk sync --env <ENV>` after a successful pull.
 

@@ -18,14 +18,14 @@ src/
 │   ├── env_file.rs      # .env file generation (batch sync)
 │   ├── cloudflare.rs    # wrangler secret put/delete (individual sync)
 │   ├── convex.rs        # convex env set/unset (individual sync)
-│   ├── fly.rs           # fly secrets set/unset (individual sync)
+│   ├── fly.rs           # fly secrets import/unset (individual sync, stdin)
 │   ├── netlify.rs       # netlify env:set/unset (individual sync)
 │   ├── vercel.rs        # vercel env add/rm (individual sync, stdin)
 │   ├── github.rs        # gh secret set/delete (individual sync, stdin)
 │   ├── heroku.rs        # heroku config:set/unset (individual sync)
-│   ├── supabase.rs      # supabase secrets set/unset (individual sync)
-│   ├── railway.rs       # railway variables set/delete (individual sync)
-│   ├── gitlab.rs        # glab variable set/delete (individual sync)
+│   ├── supabase.rs      # supabase secrets set/unset (individual sync, stdin)
+│   ├── railway.rs       # railway variables --set/delete (individual sync)
+│   ├── gitlab.rs        # glab variable set/delete (individual sync, stdin)
 │   ├── aws_ssm.rs       # aws ssm put-parameter/delete-parameter (individual sync, stdin)
 │   └── kubernetes.rs    # kubectl apply Secret manifest (batch sync)
 ├── plugins/
@@ -184,7 +184,7 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 543 tests
+cargo test                    # Run all 611 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
@@ -195,7 +195,7 @@ cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-543 tests total: 414 unit (inline `#[cfg(test)]`) + 129 integration (`tests/`).
+611 tests total: 482 unit (inline `#[cfg(test)]`) + 129 integration (`tests/`).
 
 ### Test infrastructure
 

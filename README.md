@@ -126,7 +126,7 @@ Adapters deploy secrets to targets via `esk sync`. Each secret declares which ad
 | `env`        | Generates `.env` files from a configurable path pattern | None         |
 | `cloudflare` | Runs `wrangler secret put` per secret                   | `wrangler`   |
 | `convex`     | Runs `npx convex env set` per secret                    | `npx`        |
-| `fly`        | Runs `fly secrets set` per secret                       | `fly`        |
+| `fly`        | Runs `fly secrets import` per secret (stdin)            | `fly`        |
 | `netlify`    | Runs `netlify env:set` per secret                       | `netlify`    |
 | `vercel`     | Runs `vercel env add` per secret (stdin)                | `vercel`     |
 | `github`     | Runs `gh secret set` per secret (stdin)                 | `gh`         |
@@ -203,6 +203,7 @@ esk sync
 esk sync --env prod
 esk sync --force          # Ignore change detection
 esk sync --dry-run        # Preview without writing
+esk sync --verbose        # Show skipped secrets too
 
 # Check sync status
 esk status
@@ -215,12 +216,14 @@ esk push --env prod --only onepassword  # Push to specific plugin
 esk pull --env prod                   # Pull from all plugins + reconcile
 esk pull --env prod --only dropbox    # Pull from specific plugin
 esk pull --env prod --sync            # Pull + auto-sync targets
+esk pull --env prod --strict          # Fail if any plugin is unreachable
+esk pull --env prod --force           # Bypass version jump protection
 ```
 
 ## Security model
 
 - **Encryption**: AES-256-GCM with a random 12-byte nonce per write. Authenticated encryption prevents tampering.
-- **Key file**: Random 32-byte key, hex-encoded, written with `0600` permissions on Unix.
+- **Key file**: Random 32-byte key, hex-encoded. The `.esk/` directory is created with `0700` permissions; the key file and encrypted store are both written with `0600` permissions on Unix.
 - **Storage format**: `nonce:ciphertext:tag` (all hex-encoded). Nonce is never reused.
 - **Memory**: Secret key bytes are zeroized on drop.
 - **Atomic writes**: Store and sync index use temp file + rename to prevent corruption.

@@ -31,7 +31,7 @@ Uses the 1Password CLI (`op`) to push and pull entire environment snapshots as v
 
 1. Collects all secrets for the environment from the local store.
 2. Groups them by vendor (using the `secrets` section of `esk.yaml`).
-3. Creates or updates a 1Password item with concealed fields organized into vendor sections.
+3. Creates or updates a 1Password item with concealed fields organized into vendor sections. On update, fields present in 1Password but absent from the local store are deleted using `[delete]` field assignments.
 4. Stores a `_Metadata.version` field for reconciliation.
 
 **Pull** (`esk pull --env <ENV>`):
@@ -47,6 +47,8 @@ Uses the 1Password CLI (`op`) to push and pull entire environment snapshots as v
 
 - [1Password CLI](https://developer.1password.com/docs/cli/) (`op`) installed and authenticated.
 - A vault accessible to the authenticated user.
+
+Preflight verifies both CLI installation and vault accessibility by running `op vault get <vault>`.
 
 ### Configuration
 
@@ -126,6 +128,8 @@ Files are stored per environment (`secrets-{env}.enc` or `secrets-{env}.json`), 
 
 Both formats use atomic writes (temp file + rename) and create parent directories automatically.
 
+Preflight checks that the configured path is an existing, writable directory. Fails if the path doesn't exist or isn't writable.
+
 **Backward compatibility**: On pull, if a per-env file doesn't exist, the plugin falls back to the legacy global file (`secrets.enc` or `secrets.json`) and prints a migration warning. On push, legacy global files are automatically removed after the per-env file is written.
 
 ### Configuration
@@ -189,13 +193,15 @@ Uses the AWS CLI to store and retrieve entire environment snapshots as JSON in A
 
 ### How it works
 
-**Push**: Serializes the environment's secrets and version as JSON, then stores it as the secret value. Creates the secret on first push; updates it on subsequent pushes.
+**Push**: Serializes the environment's secrets and version as JSON, then stores it as the secret value via `--secret-string file:///dev/stdin` (JSON piped via stdin to avoid exposing secrets in process arguments). Creates the secret on first push; updates it on subsequent pushes.
 
-**Pull**: Retrieves the secret value, parses the JSON, and returns composite keys with the version.
+**Pull**: Retrieves the secret value via `aws secretsmanager get-secret-value`, parses the JSON, and returns composite keys with the version.
 
 ### Prerequisites
 
 - [AWS CLI](https://aws.amazon.com/cli/) installed and authenticated (`aws configure`).
+
+Preflight runs `aws sts get-caller-identity` to verify credentials and connectivity.
 
 ### Configuration
 
@@ -235,6 +241,8 @@ Uses the Vault CLI to push and pull environment snapshots to a Vault KV store. S
 ### Prerequisites
 
 - [Vault CLI](https://developer.hashicorp.com/vault/install) installed and authenticated (`vault login`).
+
+Preflight runs `vault token lookup` to verify the current token is valid.
 
 ### Configuration
 
@@ -279,6 +287,8 @@ Uses the Bitwarden Secrets Manager CLI (`bws`) to store environment snapshots as
 - [Bitwarden Secrets Manager CLI](https://bitwarden.com/help/secrets-manager-cli/) (`bws`) installed.
 - `BWS_ACCESS_TOKEN` environment variable set.
 
+Preflight runs `bws secret list --project-id <id>` to verify `BWS_ACCESS_TOKEN` is set and valid.
+
 ### Configuration
 
 ```yaml
@@ -322,7 +332,9 @@ Files are stored per environment (`secrets-{env}.enc` or `secrets-{env}.json`). 
 
 ### Prerequisites
 
-- [AWS CLI](https://aws.amazon.com/cli/) installed (no auth check — S3 errors surface at push/pull time).
+- [AWS CLI](https://aws.amazon.com/cli/) installed and authenticated (`aws configure`).
+
+Preflight runs `aws sts get-caller-identity` to verify credentials and connectivity.
 
 ### Configuration
 
@@ -380,6 +392,8 @@ Uses the `gcloud` CLI to store and retrieve environment snapshots as JSON in GCP
 
 - [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`) installed and authenticated.
 
+Preflight runs `gcloud auth print-access-token --project <gcp_project>` to verify authentication and project access.
+
 ### Configuration
 
 ```yaml
@@ -422,6 +436,8 @@ Secret names are automatically sanitized — non-alphanumeric characters (except
 
 - [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (`az`) installed and authenticated (`az login`).
 
+Preflight runs `az account show` to verify the CLI is authenticated.
+
 ### Configuration
 
 ```yaml
@@ -439,8 +455,8 @@ plugins:
 ### Command executed
 
 ```bash
-# Push:
-az keyvault secret set --vault-name my-vault --name myapp-dev --value '<json>'
+# Push (JSON written to temp file to avoid process argument exposure):
+az keyvault secret set --vault-name my-vault --name myapp-dev --file /tmp/esk-XXXXXX
 
 # Pull:
 az keyvault secret show --vault-name my-vault --name myapp-dev --output json
@@ -450,17 +466,19 @@ az keyvault secret show --vault-name my-vault --name myapp-dev --output json
 
 ## Doppler
 
-Uses the Doppler CLI to sync secrets individually to Doppler projects. Each esk environment maps to a Doppler config via `config_map`.
+Uses the Doppler CLI to sync secrets to Doppler projects. Each esk environment maps to a Doppler config via `config_map`.
 
 ### How it works
 
-**Push**: Sets each secret individually via `doppler secrets set KEY=VALUE`, plus a `_ESK_VERSION` metadata key for reconciliation.
+**Push**: Uploads all secrets for the environment as a single JSON payload via `doppler secrets upload --json` (piped via stdin), plus a `_esk_version` metadata key for reconciliation.
 
 **Pull**: Downloads all secrets via `doppler secrets download --format json`.
 
 ### Prerequisites
 
 - [Doppler CLI](https://docs.doppler.com/docs/install-cli) installed and authenticated (`doppler login`).
+
+Preflight runs `doppler me` to verify the CLI is authenticated.
 
 ### Configuration
 
@@ -481,8 +499,8 @@ plugins:
 ### Command executed
 
 ```bash
-# Push (per secret):
-doppler secrets set KEY=VALUE -p myapp-doppler -c dev_config --silent
+# Push (all secrets as JSON piped via stdin):
+doppler secrets upload --json -p myapp-doppler -c dev_config --silent
 
 # Pull:
 doppler secrets download -p myapp-doppler -c dev_config --format json --no-file
@@ -506,6 +524,8 @@ Files are stored per environment using the `{environment}` placeholder in the pa
 
 - [SOPS](https://github.com/getsops/sops) installed.
 - SOPS configured with a `.sops.yaml` creation rule or appropriate KMS/age/PGP keys.
+
+Preflight checks that a `.sops.yaml` file exists in the project root — fails immediately if absent rather than surfacing an error at push time.
 
 ### Configuration
 
@@ -548,7 +568,7 @@ When multiple plugins are configured, `esk pull` reconciles across all of them:
 3. Start with that as the base.
 4. Merge unique secrets from lower-version sources.
 5. Write the merged result to the local store.
-6. Push the merged result back to any plugin that was behind.
+6. In interactive mode, prompts whether to push the merged result back to any plugins that were behind; in non-interactive mode, skips pushback and warns to run `esk push` manually.
 
 This means you can use 1Password for team sharing and Dropbox as a backup — pull keeps them all in sync.
 

@@ -9,7 +9,7 @@ For storage/backup plugins (1Password, cloud files), see [PLUGINS.md](PLUGINS.md
 | Adapter                                   | Config key   | External CLI | Sync mode  | Targets require app? |
 | ----------------------------------------- | ------------ | ------------ | ---------- | -------------------- |
 | [Env file](#env-file)                     | `env`        | None         | Batch      | Yes                  |
-| [Cloudflare Workers](#cloudflare-workers) | `cloudflare` | `wrangler`   | Individual | Yes                  |
+| [Cloudflare Workers](#cloudflare-workers) | `cloudflare` | `wrangler`   | Individual | Yes (Workers); No (Pages) |
 | [Convex](#convex)                         | `convex`     | `npx`        | Individual | No                   |
 | [Fly.io](#flyio)                          | `fly`        | `fly`        | Individual | Yes                  |
 | [Netlify](#netlify)                       | `netlify`    | `netlify`    | Individual | No                   |
@@ -124,20 +124,29 @@ Syncs secrets to Cloudflare Workers using `wrangler secret put`.
 ```yaml
 adapters:
   cloudflare:
+    mode: workers            # "workers" (default) or "pages"
+    pages_project: my-pages  # required when mode is "pages"
     env_flags:
       dev: ""
       prod: "--env production"
 ```
 
-| Field       | Required | Description                                                                                                                                   |
-| ----------- | -------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `env_flags` | No       | Map of environment name to extra CLI flags passed to `wrangler secret put`. Flags are split on whitespace and appended as separate arguments. |
+| Field           | Required    | Default     | Description                                                                                                                                      |
+| --------------- | ----------- | ----------- | ------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `mode`          | No          | `workers`   | Secrets API to use: `workers` (wrangler secret) or `pages` (wrangler pages secret).                                                             |
+| `pages_project` | Conditional | —           | Cloudflare Pages project name. Required when `mode` is `pages`.                                                                                  |
+| `env_flags`     | No          | —           | Map of environment name to extra CLI flags passed to `wrangler secret put`. Flags are split on whitespace and appended as separate arguments.    |
 
 ### Command executed
 
 ```bash
-# In the app's directory:
+# Workers mode (default) — in the app's directory:
 echo "<value>" | wrangler secret put <KEY> [env_flags...]
+wrangler secret delete <KEY> --force [env_flags...]
+
+# Pages mode:
+echo "<value>" | wrangler pages secret put <KEY> --project <pages_project>
+wrangler pages secret delete <KEY> --project <pages_project> --force
 ```
 
 For a secret `API_KEY` targeting `web:prod` with `env_flags.prod: "--env production"`:
@@ -148,7 +157,9 @@ cd apps/web && echo "sk_live_..." | wrangler secret put API_KEY --env production
 
 ### Target format
 
-Targets must include an app: `app:environment`.
+**Workers mode**: targets must include an app: `app:environment`.
+
+**Pages mode**: targets are environment-only (no app prefix needed).
 
 ```yaml
 secrets:
@@ -211,7 +222,12 @@ If the file doesn't exist or doesn't contain the variable, the command runs with
 ```bash
 # In the convex path, with CONVEX_DEPLOYMENT set:
 CONVEX_DEPLOYMENT=dev:my-app-123 npx convex env set <KEY> <VALUE> [env_flags...]
+
+# Delete:
+CONVEX_DEPLOYMENT=dev:my-app-123 npx convex env unset <KEY> [env_flags...]
 ```
+
+> **Security note**: `npx convex env set` has no stdin support. Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). This is a known limitation of the Convex CLI. A warning is printed at sync time.
 
 ### Target format
 
@@ -229,7 +245,7 @@ secrets:
 
 ## Fly.io
 
-Syncs secrets to Fly.io apps using `fly secrets set`.
+Syncs secrets to Fly.io apps using `fly secrets import`. Values are piped via stdin to avoid exposing them in process listings.
 
 ### Prerequisites
 
@@ -255,7 +271,10 @@ adapters:
 ### Command executed
 
 ```bash
-fly secrets set KEY=VALUE -a <fly-app> [env_flags...]
+# Value piped via stdin as KEY=VALUE:
+echo "KEY=VALUE" | fly secrets import -a <fly-app> [env_flags...]
+
+# Delete:
 fly secrets unset KEY -a <fly-app> [env_flags...]
 ```
 
@@ -277,10 +296,14 @@ secrets:
 
 Syncs environment variables to Netlify sites using `netlify env:set`.
 
+> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at sync time.
+
 ### Prerequisites
 
 - [Netlify CLI](https://docs.netlify.com/cli/get-started/) installed (`npm install -g netlify-cli`).
 - Site linked (`netlify link`) or `site` specified in config.
+
+Preflight runs `netlify status` to verify CLI installation and site linkage.
 
 ### Configuration
 
@@ -412,6 +435,8 @@ secrets:
 
 Syncs config vars to Heroku apps using `heroku config:set`.
 
+> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at sync time.
+
 ### Prerequisites
 
 - [Heroku CLI](https://devcenter.heroku.com/articles/heroku-cli) installed and authenticated (`heroku login`).
@@ -455,7 +480,7 @@ secrets:
 
 ## Supabase
 
-Syncs secrets to Supabase edge functions using `supabase secrets set`.
+Syncs secrets to Supabase edge functions using `supabase secrets set`. Values are piped via stdin to avoid exposing them in process listings.
 
 ### Prerequisites
 
@@ -479,7 +504,10 @@ adapters:
 ### Command executed
 
 ```bash
-supabase secrets set KEY=VALUE --project-ref <ref> [env_flags...]
+# Value piped via stdin as KEY=VALUE:
+echo "KEY=VALUE" | supabase secrets set --project-ref <ref> [env_flags...]
+
+# Delete:
 supabase secrets unset KEY --project-ref <ref> [env_flags...]
 ```
 
@@ -500,6 +528,8 @@ secrets:
 ## Railway
 
 Syncs environment variables to Railway projects using `railway variables --set`.
+
+> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at sync time.
 
 ### Prerequisites
 
@@ -563,7 +593,10 @@ adapters:
 ### Command executed
 
 ```bash
-glab variable set KEY VALUE --scope <env> [env_flags...]
+# Value piped via stdin (not a positional argument):
+echo -n "<value>" | glab variable set KEY --scope <env> [env_flags...]
+
+# Delete:
 glab variable delete KEY --scope <env> [env_flags...]
 ```
 
@@ -588,6 +621,8 @@ Syncs secrets to AWS Systems Manager Parameter Store using `aws ssm put-paramete
 ### Prerequisites
 
 - [AWS CLI](https://aws.amazon.com/cli/) installed and authenticated (`aws configure`).
+
+Preflight runs `aws sts get-caller-identity` to verify credentials and connectivity.
 
 ### Configuration
 
@@ -659,6 +694,8 @@ Generates Kubernetes Secret manifests and applies them using `kubectl apply`. Th
 ### Prerequisites
 
 - [kubectl](https://kubernetes.io/docs/tasks/tools/) installed and configured with access to the target cluster(s).
+
+Preflight runs `kubectl cluster-info` to verify cluster connectivity.
 
 ### Configuration
 
