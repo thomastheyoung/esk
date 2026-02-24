@@ -11,6 +11,14 @@ use crate::reconcile;
 use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
 
+fn env_payload_version(payload: &StorePayload, env: &str) -> u64 {
+    match payload.env_versions.get(env).copied() {
+        Some(v) => v,
+        None if payload.env_versions.is_empty() => payload.version,
+        None => 0,
+    }
+}
+
 /// Push a payload to the given plugins, recording results in the plugin index.
 /// Returns the number of failures.
 pub fn push_to_plugins(
@@ -21,6 +29,7 @@ pub fn push_to_plugins(
     plugin_index: &mut PluginIndex,
 ) -> Result<u32> {
     let mut fail_count = 0u32;
+    let pushed_version = env_payload_version(payload, env);
 
     for plugin in plugins {
         let spinner = cliclack::spinner();
@@ -33,7 +42,7 @@ pub fn push_to_plugins(
                     plugin.name(),
                     style("done").green()
                 ));
-                plugin_index.record_success(plugin.name(), env, payload.version);
+                plugin_index.record_success(plugin.name(), env, pushed_version);
             }
             Err(e) => {
                 spinner.error(format!(
@@ -41,7 +50,7 @@ pub fn push_to_plugins(
                     plugin.name(),
                     style("failed").red()
                 ));
-                plugin_index.record_failure(plugin.name(), env, payload.version, e.to_string());
+                plugin_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
                 fail_count += 1;
             }
         }
@@ -269,6 +278,7 @@ pub fn run_with_runner(
                 .iter()
                 .filter(|p| result.sources_to_update.contains(&p.name().to_string()))
                 .collect();
+            let pushed_version = env_payload_version(updated_payload, env);
 
             let mut pushback_failures = 0u32;
             for plugin in &stale_plugins {
@@ -281,7 +291,7 @@ pub fn run_with_runner(
                             plugin.name(),
                             style("done").green()
                         ));
-                        plugin_index.record_success(plugin.name(), env, updated_payload.version);
+                        plugin_index.record_success(plugin.name(), env, pushed_version);
                     }
                     Err(e) => {
                         spinner.error(format!(
@@ -292,7 +302,7 @@ pub fn run_with_runner(
                         plugin_index.record_failure(
                             plugin.name(),
                             env,
-                            updated_payload.version,
+                            pushed_version,
                             e.to_string(),
                         );
                         pushback_failures += 1;

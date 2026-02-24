@@ -1358,6 +1358,33 @@ fn push_records_plugin_index() {
 }
 
 #[test]
+fn push_records_env_scoped_version_when_global_is_higher() {
+    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "prod", "sk_prod").unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_dev").unwrap();
+    let payload = store.payload().unwrap();
+    assert_eq!(payload.version, 2);
+    assert_eq!(payload.env_versions.get("dev"), Some(&1));
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    runner.push_success(b"", b""); // preflight: op vault get
+    runner.push_failure(b"isn't an item in vault"); // op item get
+    runner.push_success(b"", b""); // op item create
+
+    let plugins = esk::plugins::build_plugins(&config, &runner);
+    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
+    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
+    plugin_index.save().unwrap();
+
+    let index = PluginIndex::load(&project.plugin_index_path());
+    let record = &index.records["1password:dev"];
+    assert_eq!(record.pushed_version, 1);
+}
+
+#[test]
 fn push_records_failure_in_plugin_index() {
     let yaml = r#"
 project: testapp

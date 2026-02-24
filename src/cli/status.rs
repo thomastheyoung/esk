@@ -7,7 +7,7 @@ use crate::adapters::{check_adapter_health, AdapterHealth, CommandRunner, RealCo
 use crate::config::{Config, ResolvedTarget};
 use crate::plugin_tracker::{PluginIndex, PushStatus};
 use crate::plugins::{check_plugin_health, PluginHealth};
-use crate::store::SecretStore;
+use crate::store::{SecretStore, StorePayload};
 use crate::tracker::{SyncIndex, SyncStatus};
 
 // ---------------------------------------------------------------------------
@@ -70,7 +70,7 @@ struct Orphan {
 
 #[derive(Clone)]
 enum PluginStatus {
-    Current,
+    Current { version: u64 },
     Stale { pushed: u64, local: u64 },
     Failed { version: u64, error: String },
     NeverSynced,
@@ -248,6 +248,7 @@ impl Dashboard {
         let mut plugin_states = Vec::new();
         for plugin_name in &plugin_names {
             for &env_name in &envs {
+                let local_version = local_env_version(&payload, env_name);
                 let key = PluginIndex::tracker_key(plugin_name, env_name);
                 let status = match plugin_index.records.get(&key) {
                     Some(record) if record.last_push_status == PushStatus::Failed => {
@@ -260,12 +261,14 @@ impl Dashboard {
                                 .to_string(),
                         }
                     }
-                    Some(record) if record.pushed_version >= payload.version => {
-                        PluginStatus::Current
+                    Some(record) if record.pushed_version >= local_version => {
+                        PluginStatus::Current {
+                            version: local_version,
+                        }
                     }
                     Some(record) => PluginStatus::Stale {
                         pushed: record.pushed_version,
-                        local: payload.version,
+                        local: local_version,
                     },
                     None => PluginStatus::NeverSynced,
                 };
@@ -603,11 +606,11 @@ impl Dashboard {
                 .plugin_states
                 .iter()
                 .map(|ps| match &ps.status {
-                    PluginStatus::Current => format!(
+                    PluginStatus::Current { version } => format!(
                         "  {} {}  {}",
                         style("✓").green(),
                         style(format!("{}:{}", ps.name, ps.env)),
-                        style(format!("v{}", self.version)).dim()
+                        style(format!("v{version}")).dim()
                     ),
                     PluginStatus::Stale { pushed, local } => format!(
                         "  {} {}  {}",
@@ -681,6 +684,14 @@ fn format_target(target: &ResolvedTarget) -> String {
     s
 }
 
+fn local_env_version(payload: &StorePayload, env: &str) -> u64 {
+    match payload.env_versions.get(env).copied() {
+        Some(v) => v,
+        None if payload.env_versions.is_empty() => payload.version,
+        None => 0,
+    }
+}
+
 /// Convert an RFC3339 timestamp to a human-readable relative time string.
 fn relative_time(timestamp: &str) -> String {
     let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
@@ -710,6 +721,8 @@ fn relative_time(timestamp: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
+    use crate::store::SecretStore;
 
     #[test]
     fn relative_time_days() {
@@ -738,5 +751,86 @@ mod tests {
     #[test]
     fn relative_time_invalid() {
         assert_eq!(relative_time("not-a-timestamp"), "");
+    }
+
+    struct OkRunner;
+    impl CommandRunner for OkRunner {
+        fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
+            Ok(CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            })
+        }
+    }
+
+    #[test]
+    fn plugin_status_uses_env_scoped_version_for_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: testapp
+environments: [dev, prod]
+plugins:
+  1password:
+    vault: Test
+    item_pattern: "{project} - {Environment}"
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        let config = Config::load(&path).unwrap();
+        let store = SecretStore::open(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap(); // dev v1, prod v0 (implicit)
+
+        let plugin_index_path = dir.path().join(".esk/plugin-index.json");
+        let mut index = PluginIndex::new(&plugin_index_path);
+        index.record_success("1password", "dev", 0);
+        index.save().unwrap();
+
+        let dashboard = Dashboard::build(&config, Some("dev"), &OkRunner).unwrap();
+        let dev = dashboard
+            .plugin_states
+            .iter()
+            .find(|ps| ps.name == "1password" && ps.env == "dev")
+            .unwrap();
+        assert!(matches!(
+            dev.status,
+            PluginStatus::Stale {
+                pushed: 0,
+                local: 1
+            }
+        ));
+    }
+
+    #[test]
+    fn plugin_status_does_not_mark_other_env_stale() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: testapp
+environments: [dev, prod]
+plugins:
+  1password:
+    vault: Test
+    item_pattern: "{project} - {Environment}"
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        let config = Config::load(&path).unwrap();
+        let store = SecretStore::open(dir.path()).unwrap();
+        store.set("KEY", "dev", "val").unwrap(); // global v1, prod env version remains 0
+
+        let plugin_index_path = dir.path().join(".esk/plugin-index.json");
+        let mut index = PluginIndex::new(&plugin_index_path);
+        index.record_success("1password", "prod", 0);
+        index.save().unwrap();
+
+        let dashboard = Dashboard::build(&config, None, &OkRunner).unwrap();
+        let prod = dashboard
+            .plugin_states
+            .iter()
+            .find(|ps| ps.name == "1password" && ps.env == "prod")
+            .unwrap();
+        assert!(matches!(prod.status, PluginStatus::Current { version: 0 }));
     }
 }
