@@ -140,12 +140,42 @@ pub fn reconcile(
                 merged_payload: None,
             }
         }
-        std::cmp::Ordering::Equal => ReconcileResult {
-            action: ReconcileAction::NoOp,
-            pulled: Vec::new(),
-            pushed: Vec::new(),
-            merged_payload: None,
-        },
+        std::cmp::Ordering::Equal => {
+            // Equal version should still verify content to detect silent drift.
+            // Prefer local as source-of-truth at equal version and push repair.
+            let mut pushed = Vec::new();
+            let mut drift = false;
+
+            for (key, value) in &local_env_secrets {
+                let remote_val = remote_secrets.get(key);
+                if remote_val.map(|v| v.as_str()) != Some(value.as_str()) {
+                    pushed.push(key.clone());
+                    drift = true;
+                }
+            }
+            if remote_secrets
+                .keys()
+                .any(|key| !local_env_secrets.contains_key(key))
+            {
+                drift = true;
+            }
+
+            if drift {
+                ReconcileResult {
+                    action: ReconcileAction::PushLocal,
+                    pulled: Vec::new(),
+                    pushed,
+                    merged_payload: None,
+                }
+            } else {
+                ReconcileResult {
+                    action: ReconcileAction::NoOp,
+                    pulled: Vec::new(),
+                    pushed: Vec::new(),
+                    merged_payload: None,
+                }
+            }
+        }
     })
 }
 
@@ -170,7 +200,10 @@ pub fn extract_env_secrets(
 pub struct MultiReconcileResult {
     /// The merged payload to write locally.
     pub merged_payload: StorePayload,
-    /// Names of sources that need updating (their version was behind the merged result).
+    /// Names of sources that need updating.
+    /// A source is marked stale if:
+    /// - its version is behind the merged result, or
+    /// - it reports the same version as merged but different content (drift).
     pub sources_to_update: Vec<String>,
     /// Whether anything changed compared to local.
     pub local_changed: bool,
@@ -266,9 +299,19 @@ pub fn reconcile_multi(
         max_version
     };
 
-    // Determine which sources need updating
-    for (name, _, version) in remotes {
-        if *version < final_version {
+    // Determine which sources need updating (version-behind or equal-version drift).
+    let merged_scope = scoped_composite_secrets(&merged, env);
+    for (name, secrets, version) in remotes {
+        let needs_update = if *version < final_version {
+            true
+        } else if *version == final_version {
+            let remote_scope = scoped_composite_secrets(secrets, env);
+            remote_scope != merged_scope
+        } else {
+            false
+        };
+
+        if needs_update {
             sources_to_update.push(name.to_string());
         }
     }
@@ -290,6 +333,23 @@ pub fn reconcile_multi(
         sources_to_update,
         local_changed,
     })
+}
+
+fn scoped_composite_secrets(
+    secrets: &BTreeMap<String, String>,
+    env: Option<&str>,
+) -> BTreeMap<String, String> {
+    match env {
+        Some(e) => {
+            let suffix = format!(":{e}");
+            secrets
+                .iter()
+                .filter(|(k, _)| k.ends_with(&suffix))
+                .map(|(k, v)| (k.clone(), v.clone()))
+                .collect()
+        }
+        None => secrets.clone(),
+    }
 }
 
 #[cfg(test)]
@@ -325,6 +385,23 @@ mod tests {
         assert!(result.pulled.is_empty());
         assert!(result.pushed.is_empty());
         assert!(result.merged_payload.is_none());
+    }
+
+    #[test]
+    fn equal_versions_value_drift_pushes_local_repair() {
+        let local = make_payload(&[("KEY:dev", "local")], 5);
+        let remote = make_remote(&[("KEY", "remote")]);
+        let result = reconcile(&local, &remote, 5, "dev").unwrap();
+        assert!(matches!(result.action, ReconcileAction::PushLocal));
+        assert_eq!(result.pushed, vec!["KEY"]);
+    }
+
+    #[test]
+    fn equal_versions_remote_extra_key_detected_as_drift() {
+        let local = make_payload(&[], 5);
+        let remote = make_remote(&[("EXTRA", "x")]);
+        let result = reconcile(&local, &remote, 5, "dev").unwrap();
+        assert!(matches!(result.action, ReconcileAction::PushLocal));
     }
 
     #[test]
@@ -651,6 +728,26 @@ mod tests {
         let result = reconcile_multi(&local, &[("op", &remote, 5)], None).unwrap();
         assert!(!result.local_changed);
         assert_eq!(result.merged_payload.version, 5);
+        assert!(result.sources_to_update.is_empty());
+    }
+
+    #[test]
+    fn multi_equal_version_content_drift_marks_source_stale() {
+        let local = make_payload(&[("A:dev", "local")], 5);
+        let remote = make_composite(&[("A:dev", "remote")]);
+        let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev")).unwrap();
+        assert!(!result.local_changed);
+        assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "local");
+        assert_eq!(result.merged_payload.version, 5);
+        assert_eq!(result.sources_to_update, vec!["op"]);
+    }
+
+    #[test]
+    fn multi_equal_version_drift_outside_env_is_ignored() {
+        let local = make_payload(&[("A:dev", "a"), ("B:prod", "local_prod")], 5);
+        let remote = make_composite(&[("A:dev", "a"), ("B:prod", "remote_prod")]);
+        let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev")).unwrap();
+        assert!(!result.local_changed);
         assert!(result.sources_to_update.is_empty());
     }
 

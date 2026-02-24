@@ -1385,6 +1385,61 @@ fn push_records_env_scoped_version_when_global_is_higher() {
 }
 
 #[test]
+fn sync_repairs_equal_version_plugin_drift() {
+    let cloud_sync = tempfile::tempdir().unwrap();
+    let yaml = format!(
+        r#"
+project: testapp
+environments: [dev]
+plugins:
+  dropbox:
+    type: cloud_file
+    path: "{}"
+    format: cleartext
+"#,
+        cloud_sync.path().display()
+    );
+    let project = TestProject::with_store(&yaml).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("KEY", "dev", "local_val").unwrap(); // v1
+
+    // Seed remote with equal version but divergent content.
+    let remote_path = cloud_sync.path().join("secrets-dev.json");
+    std::fs::write(
+        &remote_path,
+        serde_json::to_string_pretty(&json!({
+            "secrets": { "KEY": "remote_val" },
+            "version": 1
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+
+    cli::sync::run_with_runner(
+        &config,
+        "dev",
+        None,
+        false,
+        false,
+        false,
+        false,
+        &MockCommandRunner::new(),
+    )
+    .unwrap();
+
+    let repaired: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&remote_path).unwrap()).unwrap();
+    assert_eq!(repaired["secrets"]["KEY"], "local_val");
+    assert_eq!(repaired["version"], 1);
+
+    let plugin_index = PluginIndex::load(&project.plugin_index_path());
+    let record = plugin_index.records.get("dropbox:dev").unwrap();
+    assert_eq!(record.pushed_version, 1);
+}
+
+#[test]
 fn push_records_failure_in_plugin_index() {
     let yaml = r#"
 project: testapp

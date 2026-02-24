@@ -245,18 +245,23 @@ pub fn run_with_runner(
                 "Would update local store to v{}",
                 result.merged_payload.version
             ))?;
-            if !result.sources_to_update.is_empty() {
+        } else if result.sources_to_update.is_empty() {
+            let current = env_payload_version(&payload, env);
+            cliclack::log::info(format!("Up to date — already in sync (v{current})"))?;
+        }
+
+        if !result.sources_to_update.is_empty() {
+            cliclack::log::info(format!(
+                "Would push to {} stale plugin(s): {}",
+                result.sources_to_update.len(),
+                result.sources_to_update.join(", ")
+            ))?;
+            if !result.local_changed {
+                let current = env_payload_version(&payload, env);
                 cliclack::log::info(format!(
-                    "Would push to {} stale plugin(s): {}",
-                    result.sources_to_update.len(),
-                    result.sources_to_update.join(", ")
+                    "Local store is current (v{current}); this would repair remote drift."
                 ))?;
             }
-        } else {
-            cliclack::log::info(format!(
-                "Up to date — already in sync (v{})",
-                payload.version
-            ))?;
         }
         return Ok(());
     }
@@ -267,60 +272,63 @@ pub fn run_with_runner(
             "Merged — local store updated to v{}",
             result.merged_payload.version
         ))?;
+    } else {
+        let current = env_payload_version(&payload, env);
+        if result.sources_to_update.is_empty() {
+            cliclack::log::success(format!("Up to date — already in sync (v{current})"))?;
+        } else {
+            cliclack::log::info(format!(
+                "Local store is current (v{current}); repairing stale plugin data..."
+            ))?;
+        }
+    }
 
-        // Push merged result back to stale plugins (no interactive prompt)
-        if !result.sources_to_update.is_empty() {
-            let updated_payload = &result.merged_payload;
-            let plugin_index_path = config.root.join(".esk/plugin-index.json");
-            let mut plugin_index = PluginIndex::load(&plugin_index_path);
+    // Push merged/current result back to stale plugins (no interactive prompt)
+    if !result.sources_to_update.is_empty() {
+        let updated_payload = if result.local_changed {
+            &result.merged_payload
+        } else {
+            &payload
+        };
+        let plugin_index_path = config.root.join(".esk/plugin-index.json");
+        let mut plugin_index = PluginIndex::load(&plugin_index_path);
 
-            let stale_plugins: Vec<_> = target_plugins
-                .iter()
-                .filter(|p| result.sources_to_update.contains(&p.name().to_string()))
-                .collect();
-            let pushed_version = env_payload_version(updated_payload, env);
+        let stale_plugins: Vec<_> = target_plugins
+            .iter()
+            .filter(|p| result.sources_to_update.contains(&p.name().to_string()))
+            .collect();
+        let pushed_version = env_payload_version(updated_payload, env);
 
-            let mut pushback_failures = 0u32;
-            for plugin in &stale_plugins {
-                let spinner = cliclack::spinner();
-                spinner.start(format!("Pushing merged → {}...", plugin.name()));
-                match plugin.push(updated_payload, config, env) {
-                    Ok(()) => {
-                        spinner.stop(format!(
-                            "Pushed merged → {} {}",
-                            plugin.name(),
-                            style("done").green()
-                        ));
-                        plugin_index.record_success(plugin.name(), env, pushed_version);
-                    }
-                    Err(e) => {
-                        spinner.error(format!(
-                            "Pushed merged → {} {} — {e}",
-                            plugin.name(),
-                            style("failed").red()
-                        ));
-                        plugin_index.record_failure(
-                            plugin.name(),
-                            env,
-                            pushed_version,
-                            e.to_string(),
-                        );
-                        pushback_failures += 1;
-                    }
+        let mut pushback_failures = 0u32;
+        for plugin in &stale_plugins {
+            let spinner = cliclack::spinner();
+            spinner.start(format!("Pushing merged → {}...", plugin.name()));
+            match plugin.push(updated_payload, config, env) {
+                Ok(()) => {
+                    spinner.stop(format!(
+                        "Pushed merged → {} {}",
+                        plugin.name(),
+                        style("done").green()
+                    ));
+                    plugin_index.record_success(plugin.name(), env, pushed_version);
+                }
+                Err(e) => {
+                    spinner.error(format!(
+                        "Pushed merged → {} {} — {e}",
+                        plugin.name(),
+                        style("failed").red()
+                    ));
+                    plugin_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
+                    pushback_failures += 1;
                 }
             }
-            plugin_index.save()?;
-            if pushback_failures > 0 {
-                bail!(
-                    "{pushback_failures} plugin(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
-                );
-            }
         }
-    } else {
-        cliclack::log::success(format!(
-            "Up to date — already in sync (v{})",
-            payload.version
-        ))?;
+        plugin_index.save()?;
+        if pushback_failures > 0 {
+            bail!(
+                "{pushback_failures} plugin(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
+            );
+        }
     }
 
     if auto_deploy && result.local_changed {
