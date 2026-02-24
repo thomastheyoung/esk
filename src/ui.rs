@@ -15,9 +15,10 @@ impl cliclack::Theme for EskTheme {
         }
     }
 
-    /// Customize log symbol colors.
     fn format_log(&self, text: &str, symbol: &str) -> String {
-        format!("{}  {}", symbol, text)
+        // Keep compact one-line log rows while preserving cliclack's newline
+        // handling, so sequential logs don't get concatenated.
+        self.format_log_with_spacing(text, symbol, false)
     }
 }
 
