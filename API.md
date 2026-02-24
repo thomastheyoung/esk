@@ -18,7 +18,12 @@ Creates:
 - `.esk/sync-index.json` — empty deploy tracker
 - `.esk/plugin-index.json` — empty plugin push tracker
 
-Idempotent — skips files that already exist. Warns if `.gitignore` exists but does not contain `.esk/store.key`.
+Idempotent — skips files that already exist. Updates `.gitignore` to include:
+
+```gitignore
+# esk
+.esk/
+```
 
 ---
 

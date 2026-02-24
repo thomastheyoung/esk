@@ -6,6 +6,9 @@ use crate::adapter_tracker::SyncIndex;
 use crate::plugin_tracker::PluginIndex;
 use crate::store::SecretStore;
 
+const ESK_GITIGNORE_COMMENT: &str = "# esk";
+const ESK_GITIGNORE_ENTRY: &str = ".esk/";
+
 pub fn run(cwd: &Path) -> Result<()> {
     let config_path = cwd.join("esk.yaml");
     let esk_dir = cwd.join(".esk");
@@ -90,16 +93,13 @@ secrets:
         ))?;
     }
 
-    // Remind about .gitignore
     let gitignore_path = cwd.join(".gitignore");
-    if gitignore_path.is_file() {
-        let contents = std::fs::read_to_string(&gitignore_path)?;
-        if !contents.contains(".esk/store.key") {
-            cliclack::log::warning(format!(
-                "Add {} to your .gitignore",
-                style(".esk/store.key").bold()
-            ))?;
-        }
+    if ensure_esk_gitignore_entry(&gitignore_path)? {
+        cliclack::log::success(format!(
+            "Updated {} with {}",
+            style(gitignore_path.display()).dim(),
+            style(ESK_GITIGNORE_ENTRY).bold()
+        ))?;
     }
 
     cliclack::outro(format!(
@@ -107,4 +107,31 @@ secrets:
         style("esk set <KEY> --env <ENV>").cyan()
     ))?;
     Ok(())
+}
+
+fn ensure_esk_gitignore_entry(gitignore_path: &Path) -> Result<bool> {
+    let mut contents = if gitignore_path.is_file() {
+        std::fs::read_to_string(gitignore_path)?
+    } else {
+        String::new()
+    };
+
+    if contents.lines().any(|line| line.trim() == ESK_GITIGNORE_ENTRY) {
+        return Ok(false);
+    }
+
+    if !contents.is_empty() {
+        if !contents.ends_with('\n') {
+            contents.push('\n');
+        }
+        contents.push('\n');
+    }
+    contents.push_str(ESK_GITIGNORE_COMMENT);
+    contents.push('\n');
+    contents.push_str(ESK_GITIGNORE_ENTRY);
+    contents.push('\n');
+
+    std::fs::write(gitignore_path, contents)
+        .with_context(|| format!("failed to update {}", gitignore_path.display()))?;
+    Ok(true)
 }

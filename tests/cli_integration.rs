@@ -31,12 +31,37 @@ fn init_idempotent() {
 }
 
 #[test]
-fn init_gitignore_warning() {
+fn init_updates_gitignore_with_esk_entry() {
     let dir = tempfile::tempdir().unwrap();
-    // Create .gitignore without .esk/store.key
+    // Create .gitignore without .esk/
     std::fs::write(dir.path().join(".gitignore"), "node_modules\n").unwrap();
-    // Should not error (just warns)
     cli::init::run(dir.path()).unwrap();
+
+    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+    assert_eq!(gitignore, "node_modules\n\n# esk\n.esk/\n");
+}
+
+#[test]
+fn init_gitignore_update_is_idempotent() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join(".gitignore"), "node_modules\n\n# esk\n.esk/\n").unwrap();
+
+    cli::init::run(dir.path()).unwrap();
+    cli::init::run(dir.path()).unwrap();
+
+    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+    assert_eq!(gitignore.matches(".esk/").count(), 1);
+}
+
+#[test]
+fn init_creates_gitignore_when_missing() {
+    let dir = tempfile::tempdir().unwrap();
+    assert!(!dir.path().join(".gitignore").exists());
+
+    cli::init::run(dir.path()).unwrap();
+
+    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
+    assert_eq!(gitignore, "# esk\n.esk/\n");
 }
 
 // === get ===
