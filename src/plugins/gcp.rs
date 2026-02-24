@@ -188,41 +188,19 @@ impl<'a> StoragePlugin for GcpPlugin<'a> {
 mod tests {
     use super::*;
     use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use std::sync::Mutex;
 
     type StdinCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
+    type RunnerCall = (String, Vec<String>);
 
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(&self, program: &str, args: &[&str], _opts: CommandOpts) -> Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .calls()
+            .into_iter()
+            .map(|call| (call.program, call.args))
+            .collect()
     }
 
     fn make_config(yaml: &str) -> Config {
@@ -263,7 +241,7 @@ plugins:
     fn secret_name_substitution() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = GcpPlugin::new(&config, plugin_config, &runner);
         assert_eq!(plugin.secret_name("dev"), "myapp-dev");
         assert_eq!(plugin.secret_name("prod"), "myapp-prod");
@@ -273,7 +251,7 @@ plugins:
     fn preflight_success() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"gcloud 400.0.0".to_vec(),
@@ -287,7 +265,7 @@ plugins:
         ]);
         let plugin = GcpPlugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert!(calls[1].1.contains(&"auth".to_string()));
@@ -297,14 +275,8 @@ plugins:
     fn preflight_missing_gcloud() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
-
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-        let plugin = GcpPlugin::new(&config, plugin_config, &FailRunner);
+        let runner = ErrorCommandRunner::missing_command();
+        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("gcloud"));
         assert!(err.to_string().contains("not installed"));
@@ -314,7 +286,7 @@ plugins:
     fn preflight_auth_failure() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"gcloud 400.0.0".to_vec(),
@@ -335,7 +307,7 @@ plugins:
     fn push_success() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: Vec::new(),
             stderr: Vec::new(),
@@ -344,7 +316,7 @@ plugins:
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "gcloud");
         assert!(calls[0].1.contains(&"versions".to_string()));
@@ -356,7 +328,7 @@ plugins:
     fn push_creates_secret_on_not_found() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             // First versions add fails with NOT_FOUND
             CommandOutput {
                 success: false,
@@ -380,7 +352,7 @@ plugins:
         let payload = make_payload(&[("KEY:dev", "val")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 3);
         assert!(calls[1].1.contains(&"create".to_string()));
     }
@@ -389,13 +361,13 @@ plugins:
     fn push_skips_empty_env() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = GcpPlugin::new(&config, plugin_config, &runner);
         // Only prod secrets, pushing dev — should skip
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert!(calls.is_empty());
     }
 
@@ -408,7 +380,7 @@ plugins:
             "DB_URL": "postgres://localhost",
             crate::plugins::ESK_VERSION_KEY: "5"
         });
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: serde_json::to_vec(&json).unwrap(),
             stderr: Vec::new(),
@@ -426,7 +398,7 @@ plugins:
     fn pull_not_found_returns_none() {
         let config = make_config(gcp_yaml());
         let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: Vec::new(),
             stderr: b"NOT_FOUND: Secret not found".to_vec(),

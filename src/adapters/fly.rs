@@ -104,56 +104,8 @@ impl<'a> SyncAdapter for FlyAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
-    use std::sync::Mutex;
-
-    struct RecordedCall {
-        program: String,
-        args: Vec<String>,
-        stdin: Option<Vec<u8>>,
-    }
-
-    struct MockRunner {
-        calls: Mutex<Vec<RecordedCall>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
-
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-        fn take_calls(&self) -> Vec<RecordedCall> {
-            std::mem::take(&mut *self.calls.lock().unwrap())
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(
-            &self,
-            program: &str,
-            args: &[&str],
-            opts: CommandOpts,
-        ) -> anyhow::Result<CommandOutput> {
-            self.calls.lock().unwrap().push(RecordedCall {
-                program: program.to_string(),
-                args: args.iter().map(|s| s.to_string()).collect(),
-                stdin: opts.stdin,
-            });
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
-    }
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     fn make_config(dir: &std::path::Path) -> Config {
         let yaml = r#"
@@ -187,7 +139,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"1.0.0".to_vec(),
@@ -216,7 +168,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"1.0.0".to_vec(),
@@ -242,16 +194,11 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
+        let runner = ErrorCommandRunner::missing_command();
         let adapter = FlyAdapter {
             config: &config,
             adapter_config,
-            runner: &FailRunner,
+            runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("fly is not installed"));
@@ -262,7 +209,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -291,7 +238,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -317,7 +264,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let adapter = FlyAdapter {
             config: &config,
             adapter_config,
@@ -334,7 +281,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let adapter = FlyAdapter {
             config: &config,
             adapter_config,
@@ -351,7 +298,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -376,7 +323,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
@@ -397,7 +344,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let adapter = FlyAdapter {
             config: &config,
             adapter_config,
@@ -414,7 +361,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let adapter = FlyAdapter {
             config: &config,
             adapter_config,
@@ -431,7 +378,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.fly.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"deploy error".to_vec(),

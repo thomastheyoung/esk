@@ -134,8 +134,8 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
-    use std::sync::Mutex;
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (
         String,
@@ -144,47 +144,12 @@ mod tests {
         Vec<(String, String)>,
     );
 
-    struct MockRunner {
-        calls: Mutex<Vec<RunnerCall>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
-
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-        fn take_calls(&self) -> Vec<RunnerCall> {
-            std::mem::take(&mut *self.calls.lock().unwrap())
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(
-            &self,
-            program: &str,
-            args: &[&str],
-            opts: CommandOpts,
-        ) -> anyhow::Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-                opts.cwd,
-                opts.env,
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .take_calls()
+            .into_iter()
+            .map(|call| (call.program, call.args, call.cwd, call.env))
+            .collect()
     }
 
     fn make_config(dir: &std::path::Path, deployment_source: Option<&str>) -> Config {
@@ -220,7 +185,7 @@ adapters:
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"10.0.0".to_vec(),
@@ -238,7 +203,7 @@ adapters:
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert_eq!(calls[1].1, vec!["convex", "env", "list"]);
@@ -250,7 +215,7 @@ adapters:
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"10.0.0".to_vec(),
@@ -277,18 +242,12 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), None);
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
+        let runner = ErrorCommandRunner::missing_command();
 
         let adapter = ConvexAdapter {
             config: &config,
             adapter_config,
-            runner: &FailRunner,
+            runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("npx is not installed"));
@@ -301,7 +260,7 @@ adapters:
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -315,7 +274,7 @@ adapters:
             .sync_secret("MY_KEY", "my_value", &make_target("dev"))
             .unwrap();
 
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "npx");
         assert_eq!(
             calls[0].1,
@@ -332,7 +291,7 @@ adapters:
         std::fs::write(&source, "CONVEX_DEPLOYMENT=dev:my-deploy-123\n").unwrap();
         let config = make_config(dir.path(), Some("apps/api/.env.local"));
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -346,7 +305,7 @@ adapters:
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert!(calls[0].3.contains(&(
             "CONVEX_DEPLOYMENT".to_string(),
             "dev:my-deploy-123".to_string()
@@ -359,7 +318,7 @@ adapters:
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), Some("apps/api/.env.local"));
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -373,7 +332,7 @@ adapters:
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert!(calls[0].3.is_empty()); // no env vars set
     }
 
@@ -385,7 +344,7 @@ adapters:
         std::fs::write(&source, "OTHER_VAR=foo\nSOMETHING=bar\n").unwrap();
         let config = make_config(dir.path(), Some("apps/api/.env.local"));
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -399,7 +358,7 @@ adapters:
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert!(calls[0].3.is_empty());
     }
 
@@ -411,7 +370,7 @@ adapters:
         std::fs::write(&source, "CONVEX_DEPLOYMENT=\"my-deploy\"\n").unwrap();
         let config = make_config(dir.path(), Some("apps/api/.env.local"));
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -425,7 +384,7 @@ adapters:
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert!(calls[0]
             .3
             .contains(&("CONVEX_DEPLOYMENT".to_string(), "my-deploy".to_string())));
@@ -437,7 +396,7 @@ adapters:
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -451,7 +410,7 @@ adapters:
             .delete_secret("MY_KEY", &make_target("prod"))
             .unwrap();
 
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "npx");
         assert_eq!(
@@ -466,7 +425,7 @@ adapters:
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
@@ -488,7 +447,7 @@ adapters:
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
         let adapter_config = config.adapters.convex.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"deploy error".to_vec(),

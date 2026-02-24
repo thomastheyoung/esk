@@ -133,41 +133,19 @@ impl<'a> StoragePlugin for SopsPlugin<'a> {
 mod tests {
     use super::*;
     use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use std::sync::Mutex;
 
     type StdinCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
+    type RunnerCall = (String, Vec<String>);
 
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(&self, program: &str, args: &[&str], _opts: CommandOpts) -> Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .calls()
+            .into_iter()
+            .map(|call| (call.program, call.args))
+            .collect()
     }
 
     fn make_config(yaml: &str) -> Config {
@@ -206,7 +184,7 @@ plugins:
     fn resolve_path_substitution() {
         let config = make_config(sops_yaml());
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = SopsPlugin::new(&config, plugin_config, &runner);
         assert_eq!(plugin.resolve_path("dev"), "secrets/dev.enc.json");
         assert_eq!(plugin.resolve_path("prod"), "secrets/prod.enc.json");
@@ -230,14 +208,14 @@ plugins:
         .unwrap();
         let config = make_config_in(dir.path(), sops_yaml());
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: b"sops 3.8.0".to_vec(),
             stderr: Vec::new(),
         }]);
         let plugin = SopsPlugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1, vec!["--version"]);
     }
@@ -247,7 +225,7 @@ plugins:
         // Config root has no .sops.yaml
         let config = make_config(sops_yaml());
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: b"sops 3.8.0".to_vec(),
             stderr: Vec::new(),
@@ -268,14 +246,8 @@ plugins:
         .unwrap();
         let config = make_config_in(dir.path(), sops_yaml());
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
-
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-        let plugin = SopsPlugin::new(&config, plugin_config, &FailRunner);
+        let runner = ErrorCommandRunner::missing_command();
+        let plugin = SopsPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("SOPS"));
         assert!(err.to_string().contains("not installed"));
@@ -299,7 +271,7 @@ plugins:
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
 
         let encrypted = b"ENCRYPTED_CONTENT";
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: encrypted.to_vec(),
             stderr: Vec::new(),
@@ -308,7 +280,7 @@ plugins:
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, "sops");
         assert_eq!(calls[0].1, vec!["-e", "/dev/stdin"]);
@@ -323,12 +295,12 @@ plugins:
     fn push_skips_empty_env() {
         let config = make_config(sops_yaml());
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = SopsPlugin::new(&config, plugin_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert!(calls.is_empty());
     }
 
@@ -357,7 +329,7 @@ plugins:
             "DB_URL": "postgres://localhost",
             crate::plugins::ESK_VERSION_KEY: "5"
         });
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: serde_json::to_vec(&decrypted).unwrap(),
             stderr: Vec::new(),
@@ -375,12 +347,12 @@ plugins:
     fn pull_missing_file_returns_none() {
         let config = make_config(sops_yaml());
         let plugin_config: SopsPluginConfig = config.plugin_config("sops").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = SopsPlugin::new(&config, plugin_config, &runner);
         // Path "secrets/dev.enc.json" doesn't exist
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert!(calls.is_empty());
     }
 

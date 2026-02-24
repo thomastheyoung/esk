@@ -221,45 +221,18 @@ impl<'a> StoragePlugin for BitwardenPlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
-    use std::sync::Mutex;
 
-    struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
+    type RunnerCall = (String, Vec<String>);
 
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-
-        fn calls(&self) -> Vec<(String, Vec<String>)> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(&self, program: &str, args: &[&str], _opts: CommandOpts) -> Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .calls()
+            .into_iter()
+            .map(|call| (call.program, call.args))
+            .collect()
     }
 
     fn make_config(yaml: &str) -> Config {
@@ -300,10 +273,11 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"bws 0.4.0"), ok_output(b"[]")]);
+        let runner =
+            MockCommandRunner::from_outputs(vec![ok_output(b"bws 0.4.0"), ok_output(b"[]")]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert!(calls[1].1.contains(&"secret".to_string()));
@@ -321,15 +295,8 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
-
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &FailRunner);
+        let runner = ErrorCommandRunner::missing_command();
+        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("bws) is not installed"));
     }
@@ -346,7 +313,10 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"bws 0.4.0"), fail_output(b"Unauthorized")]);
+        let runner = MockCommandRunner::from_outputs(vec![
+            ok_output(b"bws 0.4.0"),
+            fail_output(b"Unauthorized"),
+        ]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("Bitwarden authentication failed"));
@@ -366,7 +336,7 @@ plugins:
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
 
         // list returns empty array (no existing secret), then create succeeds
-        let runner = MockRunner::new(vec![ok_output(b"[]"), ok_output(b"{}")]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(b"[]"), ok_output(b"{}")]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -380,7 +350,7 @@ plugins:
 
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         // Second call is create
         assert_eq!(calls[1].1[0], "secret");
@@ -404,7 +374,7 @@ plugins:
         let existing = json!([
             {"id": "secret-456", "key": "myapp-dev", "value": "{}"}
         ]);
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             ok_output(&serde_json::to_vec(&existing).unwrap()),
             ok_output(b"{}"),
         ]);
@@ -421,7 +391,7 @@ plugins:
 
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         // Second call is edit
         assert_eq!(calls[1].1[0], "secret");
@@ -441,7 +411,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -454,7 +424,7 @@ plugins:
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
-        assert!(runner.calls().is_empty());
+        assert!(calls(&runner).is_empty());
     }
 
     #[test]
@@ -475,7 +445,8 @@ plugins:
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()},
             {"id": "s2", "key": "myapp-prod", "value": "{}"}
         ]);
-        let runner = MockRunner::new(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
+        let runner =
+            MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
@@ -497,7 +468,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"[]")]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(b"[]")]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
 
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
@@ -549,7 +520,8 @@ plugins:
         let items = json!([
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()}
         ]);
-        let runner = MockRunner::new(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
+        let runner =
+            MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();

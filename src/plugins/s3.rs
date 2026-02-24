@@ -228,44 +228,17 @@ impl<'a> StoragePlugin for S3Plugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput};
-    use std::sync::Mutex;
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
-    struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>)>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
+    type RunnerCall = (String, Vec<String>);
 
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-
-        fn calls(&self) -> Vec<(String, Vec<String>)> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(&self, program: &str, args: &[&str], _opts: CommandOpts) -> Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .calls()
+            .into_iter()
+            .map(|call| (call.program, call.args))
+            .collect()
     }
 
     fn make_config(yaml: &str) -> Config {
@@ -304,13 +277,13 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             ok_output(b"{\"Account\": \"123456789012\"}"),
         ]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert_eq!(calls[1].1, vec!["sts", "get-caller-identity"]);
@@ -329,13 +302,13 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             ok_output(b"{\"Account\": \"123456789012\"}"),
         ]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         let sts_args = &calls[1].1;
         assert!(sts_args.contains(&"sts".to_string()));
@@ -357,7 +330,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             fail_output(b"Unable to locate credentials"),
         ]);
@@ -377,15 +350,8 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-
-        let plugin = S3Plugin::new(&config, plugin_config, &FailRunner);
+        let runner = ErrorCommandRunner::missing_command();
+        let plugin = S3Plugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
     }
@@ -493,7 +459,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"")]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -507,7 +473,7 @@ plugins:
 
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1[0], "s3");
         assert_eq!(calls[0].1[1], "cp");
@@ -527,7 +493,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -540,7 +506,7 @@ plugins:
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
-        assert!(runner.calls().is_empty());
+        assert!(calls(&runner).is_empty());
     }
 
     #[test]
@@ -568,7 +534,7 @@ plugins:
             env_versions: BTreeMap::new(),
         };
         let json = serde_json::to_string(&payload).unwrap();
-        let runner = MockRunner::new(vec![ok_output(json.as_bytes())]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(json.as_bytes())]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
@@ -589,7 +555,8 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![fail_output(b"An error occurred (NoSuchKey)")]);
+        let runner =
+            MockCommandRunner::from_outputs(vec![fail_output(b"An error occurred (NoSuchKey)")]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
 
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
@@ -607,7 +574,8 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![fail_output(b"Unable to locate credentials")]);
+        let runner =
+            MockCommandRunner::from_outputs(vec![fail_output(b"Unable to locate credentials")]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
 
         let err = plugin.pull(&config, "dev").unwrap_err();
@@ -629,7 +597,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"")]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
         let plugin = S3Plugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -643,7 +611,7 @@ plugins:
 
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls();
+        let calls = calls(&runner);
         let args = &calls[0].1;
         assert!(args.contains(&"--region".to_string()));
         assert!(args.contains(&"us-west-2".to_string()));

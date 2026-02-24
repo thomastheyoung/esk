@@ -98,51 +98,17 @@ impl<'a> SyncAdapter for VercelAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
-    use std::sync::Mutex;
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    struct MockRunner {
-        calls: Mutex<Vec<RunnerCall>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
-
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-        fn take_calls(&self) -> Vec<RunnerCall> {
-            std::mem::take(&mut *self.calls.lock().unwrap())
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(
-            &self,
-            program: &str,
-            args: &[&str],
-            opts: CommandOpts,
-        ) -> anyhow::Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-                opts.stdin,
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .take_calls()
+            .into_iter()
+            .map(|call| (call.program, call.args, call.stdin))
+            .collect()
     }
 
     fn make_config(dir: &std::path::Path) -> Config {
@@ -175,7 +141,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"1.0.0".to_vec(),
@@ -200,7 +166,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"1.0.0".to_vec(),
@@ -226,16 +192,11 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
+        let runner = ErrorCommandRunner::missing_command();
         let adapter = VercelAdapter {
             config: &config,
             adapter_config,
-            runner: &FailRunner,
+            runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("vercel is not installed"));
@@ -246,7 +207,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -259,7 +220,7 @@ adapters:
         adapter
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "vercel");
         assert_eq!(
             calls[0].1,
@@ -272,7 +233,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -285,7 +246,7 @@ adapters:
         adapter
             .sync_secret("KEY", "my_secret", &make_target("dev"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls[0].2.as_ref().unwrap(), b"my_secret");
     }
 
@@ -294,7 +255,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -307,7 +268,7 @@ adapters:
         adapter
             .sync_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
             vec![
@@ -327,7 +288,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let adapter = VercelAdapter {
             config: &config,
             adapter_config,
@@ -344,7 +305,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -357,7 +318,7 @@ adapters:
         adapter
             .delete_secret("MY_KEY", &make_target("prod"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
             vec![
@@ -377,7 +338,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
@@ -398,7 +359,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.vercel.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"auth error".to_vec(),

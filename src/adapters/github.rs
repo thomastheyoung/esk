@@ -92,54 +92,20 @@ impl<'a> SyncAdapter for GithubAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
-    use std::sync::Mutex;
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    struct MockRunner {
-        calls: Mutex<Vec<RunnerCall>>,
-        responses: Mutex<Vec<CommandOutput>>,
+    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .take_calls()
+            .into_iter()
+            .map(|call| (call.program, call.args, call.stdin))
+            .collect()
     }
 
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-        fn take_calls(&self) -> Vec<RunnerCall> {
-            std::mem::take(&mut *self.calls.lock().unwrap())
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(
-            &self,
-            program: &str,
-            args: &[&str],
-            opts: CommandOpts,
-        ) -> anyhow::Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-                opts.stdin,
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
-    }
-
-    fn make_config(dir: &std::path::Path, with_repo: bool) -> Config {
+    fn make_config(with_repo: bool) -> ConfigFixture {
         let yaml = if with_repo {
             r#"
 project: x
@@ -160,9 +126,7 @@ adapters:
       prod: "--env production"
 "#
         };
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).unwrap()
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -175,10 +139,10 @@ adapters:
 
     #[test]
     fn github_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_config(true);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"2.0.0".to_vec(),
@@ -191,21 +155,21 @@ adapters:
             },
         ]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls[1].1, vec!["auth", "status"]);
     }
 
     #[test]
     fn github_preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_config(true);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"2.0.0".to_vec(),
@@ -218,7 +182,7 @@ adapters:
             },
         ]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };
@@ -228,19 +192,14 @@ adapters:
 
     #[test]
     fn github_preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_config(false);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
+        let runner = ErrorCommandRunner::missing_command();
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
-            runner: &FailRunner,
+            runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("gh is not installed"));
@@ -248,23 +207,23 @@ adapters:
 
     #[test]
     fn github_sync_correct_args_with_repo() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_config(true);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };
         adapter
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "gh");
         assert_eq!(
             calls[0].1,
@@ -274,67 +233,67 @@ adapters:
 
     #[test]
     fn github_passes_value_via_stdin() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_config(true);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };
         adapter
             .sync_secret("KEY", "my_secret", &make_target("dev"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls[0].2.as_ref().unwrap(), b"my_secret");
     }
 
     #[test]
     fn github_sync_without_repo() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_config(false);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };
         adapter
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls[0].1, vec!["secret", "set", "KEY"]);
     }
 
     #[test]
     fn github_sync_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_config(true);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };
         adapter
             .sync_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
             vec![
@@ -351,23 +310,23 @@ adapters:
 
     #[test]
     fn github_delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_config(true);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };
         adapter
             .delete_secret("MY_KEY", &make_target("dev"))
             .unwrap();
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
             vec!["secret", "delete", "MY_KEY", "-R", "owner/repo"]
@@ -376,16 +335,16 @@ adapters:
 
     #[test]
     fn github_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_config(true);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };
@@ -397,16 +356,16 @@ adapters:
 
     #[test]
     fn github_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_config(false);
+        let config = fixture.config();
         let adapter_config = config.adapters.github.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"auth error".to_vec(),
         }]);
         let adapter = GithubAdapter {
-            config: &config,
+            config,
             adapter_config,
             runner: &runner,
         };

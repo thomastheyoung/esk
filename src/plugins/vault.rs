@@ -172,48 +172,18 @@ impl<'a> StoragePlugin for VaultPlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
-    use std::sync::Mutex;
 
     type RunnerCall = (String, Vec<String>, Vec<(String, String)>);
 
-    struct MockRunner {
-        calls: Mutex<Vec<RunnerCall>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
-
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-
-        fn calls(&self) -> Vec<RunnerCall> {
-            self.calls.lock().unwrap().clone()
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(&self, program: &str, args: &[&str], opts: CommandOpts) -> Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-                opts.env.clone(),
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .calls()
+            .into_iter()
+            .map(|call| (call.program, call.args, call.env))
+            .collect()
     }
 
     fn make_config(yaml: &str) -> Config {
@@ -253,10 +223,11 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"vault 1.15.0"), ok_output(b"{}")]);
+        let runner =
+            MockCommandRunner::from_outputs(vec![ok_output(b"vault 1.15.0"), ok_output(b"{}")]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert_eq!(calls[1].1, vec!["token", "lookup"]);
@@ -273,15 +244,8 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-
-        let plugin = VaultPlugin::new(&config, plugin_config, &FailRunner);
+        let runner = ErrorCommandRunner::missing_command();
+        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err
             .to_string()
@@ -299,7 +263,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"vault 1.15.0"),
             fail_output(b"permission denied"),
         ]);
@@ -319,7 +283,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"")]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -335,7 +299,7 @@ plugins:
 
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1[0], "kv");
         assert_eq!(calls[0].1[1], "put");
@@ -354,7 +318,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b"")]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -371,7 +335,7 @@ plugins:
         plugin.push(&payload, &config, "dev").unwrap();
 
         // Verify the stdin payload contains version 10 (env-specific), not 5
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
     }
 
@@ -386,7 +350,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -399,7 +363,7 @@ plugins:
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
-        assert!(runner.calls().is_empty());
+        assert!(calls(&runner).is_empty());
     }
 
     #[test]
@@ -424,7 +388,9 @@ plugins:
                 }
             }
         });
-        let runner = MockRunner::new(vec![ok_output(&serde_json::to_vec(&response).unwrap())]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(
+            &serde_json::to_vec(&response).unwrap(),
+        )]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
@@ -453,7 +419,9 @@ plugins:
                 crate::plugins::ESK_VERSION_KEY: 3
             }
         });
-        let runner = MockRunner::new(vec![ok_output(&serde_json::to_vec(&response).unwrap())]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(
+            &serde_json::to_vec(&response).unwrap(),
+        )]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
@@ -472,7 +440,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![fail_output(
+        let runner = MockCommandRunner::from_outputs(vec![fail_output(
             b"No value found at secret/data/myapp/dev",
         )]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
@@ -491,7 +459,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![fail_output(b"permission denied")]);
+        let runner = MockCommandRunner::from_outputs(vec![fail_output(b"permission denied")]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
 
         let err = plugin.pull(&config, "dev").unwrap_err();
@@ -510,12 +478,12 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
-        let runner = MockRunner::new(vec![ok_output(b""), ok_output(b"")]);
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(b""), ok_output(b"")]);
         let plugin = VaultPlugin::new(&config, plugin_config, &runner);
 
         plugin.preflight().unwrap();
 
-        let calls = runner.calls();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         // First call is --version (check_command), no env vars
         // Second call is token lookup, should have VAULT_ADDR
