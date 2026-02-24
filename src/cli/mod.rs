@@ -1,5 +1,6 @@
 pub mod delete;
 pub mod deploy;
+pub mod generate;
 pub mod get;
 pub mod init;
 pub mod list;
@@ -94,6 +95,15 @@ pub enum Commands {
         /// Show all targets including synced ones
         #[arg(long)]
         all: bool,
+    },
+    /// Generate TypeScript type declarations for secrets
+    Generate {
+        /// Generate runtime validator instead of .d.ts
+        #[arg(long)]
+        runtime: bool,
+        /// Output file path (defaults to env.d.ts or env.ts)
+        #[arg(long, short)]
+        output: Option<String>,
     },
     /// Sync secrets with storage plugins (pull, reconcile, push)
     Sync {

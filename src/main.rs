@@ -68,6 +68,12 @@ fn run() -> Result<()> {
             let config = Config::load(&config_path)?;
             esk::cli::get::run(&config, key, env)?;
         }
+        Commands::Generate { runtime, output } => {
+            let cwd = std::env::current_dir()?;
+            let config_path = Config::find(&cwd)?;
+            let config = Config::load(&config_path)?;
+            esk::cli::generate::run(&config, *runtime, output.as_deref())?;
+        }
         Commands::List { env } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
