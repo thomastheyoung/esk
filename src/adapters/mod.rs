@@ -386,7 +386,7 @@ pub fn build_sync_adapters<'a>(
             Ok(()) => {
                 if needs_cli_secret_arg_warning(adapter.name()) {
                     let _ = cliclack::log::warning(format!(
-                        "{}: secrets passed via CLI arguments (visible in process listings)",
+                        "{}: security note: secret values are passed as CLI args and may be visible in local process listings",
                         adapter.name()
                     ));
                 }

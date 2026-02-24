@@ -10,6 +10,7 @@ use crate::plugins::{self, StoragePlugin};
 use crate::reconcile::{self, ConflictPreference};
 use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
+use crate::ui;
 
 pub struct SyncOptions<'a> {
     pub env: Option<&'a str>,
@@ -21,66 +22,22 @@ pub struct SyncOptions<'a> {
     pub prefer: ConflictPreference,
 }
 
-/// Compact theme — removes the │ connector lines between steps.
-struct SyncTheme;
-
-impl cliclack::Theme for SyncTheme {
-    fn format_log(&self, text: &str, symbol: &str) -> String {
-        self.format_log_with_spacing(text, symbol, false)
-    }
-
-    fn format_progress_with_state(
-        &self,
-        msg: &str,
-        grouped: bool,
-        last: bool,
-        state: &cliclack::ThemeState,
-    ) -> String {
-        let prefix = if grouped {
-            self.bar_color(state).apply_to("│").to_string() + "  "
-        } else {
-            match state {
-                cliclack::ThemeState::Active => String::new(),
-                _ => self.state_symbol(state).to_string() + "  ",
-            }
-        };
-
-        let suffix = if grouped && last {
-            format!("\n{}", self.format_footer(state))
-        } else {
-            String::new()
-        };
-
-        if !msg.is_empty() {
-            format!("{prefix}{msg}{suffix}")
-        } else {
-            suffix
-        }
-    }
-
-    fn format_footer_with_message(&self, state: &cliclack::ThemeState, message: &str) -> String {
-        let color = self.bar_color(state);
-        match state {
-            cliclack::ThemeState::Submit => String::new(),
-            cliclack::ThemeState::Active => {
-                format!("{}\n", color.apply_to(format!("└  {message}")))
-            }
-            cliclack::ThemeState::Cancel => {
-                format!("{}\n", color.apply_to("└  Operation cancelled."))
-            }
-            cliclack::ThemeState::Error(err) => {
-                format!("{}\n", color.apply_to(format!("└  {err}")))
-            }
-        }
-    }
-}
-
 fn env_version_label(payload: &StorePayload, env: &str) -> String {
     let version = payload.env_version(env);
     match payload.env_last_changed_at(env) {
-        Some(ts) => format!("v{version}, last changed {ts}"),
-        None => format!("v{version}"),
+        Some(ts) => format!("v{} ({})", version, ui::format_relative_time(ts)),
+        None => format!("v{}", version),
     }
+}
+
+fn visible_width(text: &str) -> usize {
+    console::strip_ansi_codes(text).chars().count()
+}
+
+fn format_sync_line(label: &str, value: &str, value_column: usize) -> String {
+    let label_width = visible_width(label);
+    let dots = ".".repeat(value_column.saturating_sub(label_width).max(3));
+    format!("{} {} {}", label, style(dots).dim(), value)
 }
 
 /// Push a payload to the given plugins, recording results in the plugin index.
@@ -120,67 +77,61 @@ pub fn push_to_plugins(
 }
 
 pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
-    cliclack::set_theme(SyncTheme);
-    let result = (|| -> Result<()> {
-        let runner = RealCommandRunner;
-        let envs: Vec<&str> = match options.env {
-            Some(e) => {
-                if !config.environments.contains(&e.to_string()) {
-                    bail!("{}", suggest::unknown_env(e, &config.environments));
-                }
-                vec![e]
+    let runner = RealCommandRunner;
+    let envs: Vec<&str> = match options.env {
+        Some(e) => {
+            if !config.environments.contains(&e.to_string()) {
+                bail!("{}", suggest::unknown_env(e, &config.environments));
             }
-            None => config.environments.iter().map(|s| s.as_str()).collect(),
-        };
-
-        if envs.len() == 1 {
-            return run_with_runner(
-                config,
-                envs[0],
-                options.only,
-                options.dry_run,
-                options.no_partial,
-                options.force,
-                options.auto_deploy,
-                options.prefer,
-                &runner,
-            );
+            vec![e]
         }
+        None => config.environments.iter().map(|s| s.as_str()).collect(),
+    };
 
-        let mut failures: Vec<String> = Vec::new();
-        for env in &envs {
-            eprintln!("\n━━ {} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", style(env).bold());
-            if let Err(e) = run_with_runner(
-                config,
-                env,
-                options.only,
-                options.dry_run,
-                options.no_partial,
-                options.force,
-                options.auto_deploy,
-                options.prefer,
-                &runner,
-            ) {
-                if options.no_partial {
-                    bail!("sync failed for environment '{env}': {e}");
-                }
-                cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
-                failures.push(env.to_string());
+    if envs.len() == 1 {
+        return run_with_runner(
+            config,
+            envs[0],
+            options.only,
+            options.dry_run,
+            options.no_partial,
+            options.force,
+            options.auto_deploy,
+            options.prefer,
+            &runner,
+        );
+    }
+
+    let mut failures: Vec<String> = Vec::new();
+    for env in &envs {
+        if let Err(e) = run_with_runner(
+            config,
+            env,
+            options.only,
+            options.dry_run,
+            options.no_partial,
+            options.force,
+            options.auto_deploy,
+            options.prefer,
+            &runner,
+        ) {
+            if options.no_partial {
+                bail!("sync failed for environment '{env}': {e}");
             }
+            cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
+            failures.push(env.to_string());
         }
+    }
 
-        if !failures.is_empty() {
-            bail!(
-                "{} environment(s) failed to sync: {}",
-                failures.len(),
-                failures.join(", ")
-            );
-        }
+    if !failures.is_empty() {
+        bail!(
+            "{} environment(s) failed to sync: {}",
+            failures.len(),
+            failures.join(", ")
+        );
+    }
 
-        Ok(())
-    })();
-    cliclack::reset_theme();
-    result
+    Ok(())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -234,32 +185,35 @@ pub fn run_with_runner(
         all_plugins
     };
 
+    let mut lines = Vec::new();
+    let value_column = 24;
+
     // Pull from all target plugins
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
     let mut pull_failures: Vec<String> = Vec::new();
 
     for plugin in &target_plugins {
-        let spinner = cliclack::spinner();
-        spinner.start(format!("↓ {}...", plugin.name()));
-
         match plugin.pull(config, env) {
             Ok(Some((secrets, version))) => {
-                spinner.stop(format!(
-                    "↓ {}  v{}, {} secrets",
-                    plugin.name(),
-                    version,
-                    secrets.len()
+                lines.push(format_sync_line(
+                    &format!("↓ {}", plugin.name()),
+                    &format!("v{}, {} secrets", version, secrets.len()),
+                    value_column,
                 ));
                 remote_data.push((plugin.name().to_string(), secrets, version));
             }
             Ok(None) => {
-                spinner.stop(format!("↓ {}  {}", plugin.name(), style("no data").dim()));
+                lines.push(format_sync_line(
+                    &format!("↓ {}", plugin.name()),
+                    &style("no data").dim().to_string(),
+                    value_column,
+                ));
             }
-            Err(e) => {
-                spinner.error(format!(
-                    "↓ {}  {} — {e}",
-                    plugin.name(),
-                    style("failed").red()
+            Err(_) => {
+                lines.push(format_sync_line(
+                    &format!("↓ {}", plugin.name()),
+                    &style("failed").red().to_string(),
+                    value_column,
                 ));
                 pull_failures.push(plugin.name().to_string());
             }
@@ -273,12 +227,6 @@ pub fn run_with_runner(
                 pull_failures.len(),
                 pull_failures.join(", ")
             );
-        }
-        if !remote_data.is_empty() {
-            cliclack::log::warning(format!(
-                "{} plugin(s) failed to respond. Reconciliation used partial data.",
-                pull_failures.len()
-            ))?;
         }
     }
 
@@ -326,38 +274,51 @@ pub fn run_with_runner(
         Err(e) => return Err(e),
     };
 
+    let mut status_line = String::new();
+
     // Dry-run exit point
     if dry_run {
         if result.local_changed {
             let label = env_version_label(&result.merged_payload, env);
-            cliclack::log::info(format!("Would merge → {label}"))?;
+            status_line = format!("{} Would merge → {}", style("↻").yellow(), label);
         } else if result.sources_to_update.is_empty() {
             let label = env_version_label(&payload, env);
-            cliclack::log::info(format!("Up to date ({label})"))?;
+            status_line = format!("{} Up to date → {}", style("✔").green(), label);
         }
 
         if !result.sources_to_update.is_empty() {
             for name in &result.sources_to_update {
-                cliclack::log::info(format!("Would push → {name}"))?;
+                lines.push(format_sync_line(
+                    &format!("↑ {name}"),
+                    &style("would push").dim().to_string(),
+                    value_column,
+                ));
             }
             if result.has_drift {
                 let label = env_version_label(&payload, env);
-                cliclack::log::info(format!("Current ({label}), would repair remote drift"))?;
+                status_line = format!(
+                    "{} Current ({}), would repair drift",
+                    style("↻").yellow(),
+                    label
+                );
             }
         }
+        lines.push(String::new());
+        lines.push(status_line);
+        cliclack::note(env, lines.join("\n"))?;
         return Ok(());
     }
 
     if result.local_changed {
         store.set_payload(&result.merged_payload)?;
         let label = env_version_label(&result.merged_payload, env);
-        cliclack::log::success(format!("Merged → {label}"))?;
+        status_line = format!("{} Merged → {}", style("↻").yellow(), label);
     } else {
         let label = env_version_label(&payload, env);
         if result.has_drift {
-            cliclack::log::info(format!("Current ({label}), repairing stale plugins..."))?;
+            status_line = format!("{} Stale plugins (repairing...)", style("↻").yellow());
         } else {
-            cliclack::log::success(format!("Up to date ({label})"))?;
+            status_line = format!("{} Up to date → {}", style("✔").green(), label);
         }
     }
 
@@ -379,18 +340,20 @@ pub fn run_with_runner(
 
         let mut pushback_failures = 0u32;
         for plugin in &stale_plugins {
-            let spinner = cliclack::spinner();
-            spinner.start(format!("↑ {}...", plugin.name()));
             match plugin.push(updated_payload, config, env) {
                 Ok(()) => {
-                    spinner.stop(format!("↑ {}  {}", plugin.name(), style("done").green()));
+                    lines.push(format_sync_line(
+                        &format!("↑ {}", plugin.name()),
+                        &style("synced").green().to_string(),
+                        value_column,
+                    ));
                     plugin_index.record_success(plugin.name(), env, pushed_version);
                 }
                 Err(e) => {
-                    spinner.error(format!(
-                        "↑ {}  {} — {e}",
-                        plugin.name(),
-                        style("failed").red()
+                    lines.push(format_sync_line(
+                        &format!("↑ {}", plugin.name()),
+                        &style("failed").red().to_string(),
+                        value_column,
                     ));
                     plugin_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
                     pushback_failures += 1;
@@ -399,11 +362,18 @@ pub fn run_with_runner(
         }
         plugin_index.save()?;
         if pushback_failures > 0 {
+            lines.push(String::new());
+            lines.push(status_line);
+            cliclack::note(env, lines.join("\n"))?;
             bail!(
                 "{pushback_failures} plugin(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
             );
         }
     }
+
+    lines.push(String::new());
+    lines.push(status_line);
+    cliclack::note(env, lines.join("\n"))?;
 
     if auto_deploy && result.local_changed {
         cliclack::log::step("Running deploy...")?;

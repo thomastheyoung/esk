@@ -8,6 +8,7 @@ use crate::adapters::{
 };
 use crate::config::Config;
 use crate::store::SecretStore;
+use crate::ui;
 
 /// A single sync result entry for display.
 struct SyncEntry {
@@ -502,38 +503,91 @@ pub fn run_with_runner(
     }
 
     // Output
-    if dry_run {
-        print_group("synced", &synced)?;
-        print_group("unset", &unset)?;
-        if skip_count > 0 {
-            cliclack::log::remark(format!("{} up to date", style(skip_count).bold()))?;
-        }
-        cliclack::log::warning("Dry run — no changes made".to_string())?;
-    } else if sync_count == 0 && skip_count == 0 && fail_count == 0 && unset_count == 0 {
+    let width = 44;
+
+    if sync_count == 0 && skip_count == 0 && fail_count == 0 && unset_count == 0 {
         cliclack::log::info("Nothing to sync.")?;
-    } else if fail_count == 0 && sync_count == 0 && skip_count > 0 && unset_count == 0 {
-        // Everything up to date
-        cliclack::log::success(format!(
-            "All {} targets up to date",
-            style(skip_count).bold()
-        ))?;
     } else {
-        // Print failed first (most important)
-        print_group("failed", &failed)?;
+        // Group everything by environment for framed output
+        let mut env_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut env_status: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new(); // (synced, failed, unset)
 
-        // Print synced
-        print_group("synced", &synced)?;
+        for entry in &synced {
+            let label = format!("{} {}", style("✔").green(), style(&entry.key).dim());
+            env_map
+                .entry(entry.env.clone())
+                .or_default()
+                .push(ui::format_dashboard_line(&label, &entry.target, width));
+            env_status.entry(entry.env.clone()).or_insert((0, 0, 0)).0 += 1;
+        }
 
-        // Print unset targets explicitly so users can see configured-but-missing values
-        print_group("unset", &unset)?;
+        for entry in &failed {
+            let label = format!("{} {}", style("✗").red(), style(&entry.key).dim());
+            let lines = env_map.entry(entry.env.clone()).or_default();
+            lines.push(ui::format_dashboard_line(&label, &entry.target, width));
+            if let Some(err) = &entry.error {
+                lines.push(format!("      {}", style(format!("({err})")).red().dim()));
+            }
+            env_status.entry(entry.env.clone()).or_insert((0, 0, 0)).1 += 1;
+        }
 
-        // Print skipped summary
+        for entry in &unset {
+            let label = format!("{} {}", style("○").dim(), style(&entry.key).dim());
+            env_map
+                .entry(entry.env.clone())
+                .or_default()
+                .push(ui::format_dashboard_line(&label, &entry.target, width));
+            env_status.entry(entry.env.clone()).or_insert((0, 0, 0)).2 += 1;
+        }
+
+        for (env_name, mut lines) in env_map {
+            let (s_cnt, f_cnt, u_cnt) = env_status.get(&env_name).unwrap();
+            let mut status_parts = Vec::new();
+            if *f_cnt > 0 {
+                status_parts.push(format!("{} failed", f_cnt));
+            }
+            if *s_cnt > 0 {
+                status_parts.push(format!("{} synced", s_cnt));
+            }
+            if *u_cnt > 0 {
+                status_parts.push(format!("{} unset", u_cnt));
+            }
+
+            lines.push(String::new());
+            let status_icon = if *f_cnt > 0 {
+                style("✗").red()
+            } else {
+                style("✔").green()
+            };
+            lines.push(format!(
+                "{} Deployment complete ({})",
+                status_icon,
+                status_parts.join(", ")
+            ));
+
+            cliclack::note(env_name, lines.join("\n"))?;
+        }
+
         if skip_count > 0 {
             if verbose {
-                print_group("up to date", &skipped)?;
+                let mut skip_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+                for entry in &skipped {
+                    let label = format!("{} {}", style("✔").dim(), style(&entry.key).dim());
+                    skip_map
+                        .entry(entry.env.clone())
+                        .or_default()
+                        .push(ui::format_dashboard_line(
+                            &label,
+                            &format!("{} (up to date)", entry.target),
+                            width,
+                        ));
+                }
+                for (env_name, lines) in skip_map {
+                    cliclack::note(format!("{} (up to date)", env_name), lines.join("\n"))?;
+                }
             } else {
                 cliclack::log::remark(format!(
-                    "{} up to date  {}",
+                    "{} targets up to date  {}",
                     style(skip_count).bold(),
                     style("(use --verbose to show)").dim()
                 ))?;
@@ -541,70 +595,12 @@ pub fn run_with_runner(
         }
     }
 
+    if dry_run {
+        cliclack::log::warning("Dry run — no changes made".to_string())?;
+    }
+
     if fail_count > 0 {
         anyhow::bail!("{fail_count} sync(s) failed");
-    }
-
-    Ok(())
-}
-
-/// Group entries by (key, env) → [targets], collapsing same key+env.
-/// Returns Vec<(key, env, targets, error)>.
-fn group_entries(entries: &[SyncEntry]) -> Vec<(&str, &str, Vec<&str>, Option<&str>)> {
-    type EntryGroup<'a> = (Vec<&'a str>, Option<&'a str>);
-    let mut map: BTreeMap<(&str, &str), EntryGroup<'_>> = BTreeMap::new();
-    for entry in entries {
-        let group = map
-            .entry((&entry.key, &entry.env))
-            .or_insert_with(|| (Vec::new(), None));
-        group.0.push(&entry.target);
-        if entry.error.is_some() {
-            group.1 = entry.error.as_deref();
-        }
-    }
-    map.into_iter()
-        .map(|((key, env), (targets, error))| (key, env, targets, error))
-        .collect()
-}
-
-fn print_group(label: &str, entries: &[SyncEntry]) -> Result<()> {
-    if entries.is_empty() {
-        return Ok(());
-    }
-
-    let grouped = group_entries(entries);
-
-    let (icon, count_style) = match label {
-        "failed" => ("✗", style(grouped.len()).red().bold()),
-        "synced" => ("✓", style(grouped.len()).green().bold()),
-        "unset" => ("○", style(grouped.len()).dim().bold()),
-        _ => ("●", style(grouped.len()).dim().bold()),
-    };
-
-    let header = format!("{icon} {count_style} {label}");
-
-    let lines: Vec<String> = grouped
-        .iter()
-        .map(|(key, env, targets, error)| {
-            let targets_str = targets.join(", ");
-            let mut line = format!(
-                "  {}  → {}",
-                style(format!("{key}:{env}")).dim(),
-                targets_str
-            );
-            if let Some(err) = error {
-                line.push_str(&format!("  {}", style(format!("({err})")).dim()));
-            }
-            line
-        })
-        .collect();
-
-    let body = format!("{header}\n{}", lines.join("\n"));
-
-    match label {
-        "failed" => cliclack::log::error(body)?,
-        "synced" => cliclack::log::success(body)?,
-        _ => cliclack::log::remark(body)?,
     }
 
     Ok(())

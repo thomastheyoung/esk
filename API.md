@@ -86,7 +86,7 @@ SHA-256 hash of each secret value is tracked per (secret, adapter, app, environm
 **Example output:**
 
 ```
-  ✓ 2 synced
+  ✔ 2 synced
     STRIPE_SECRET_KEY:prod  → cloudflare:web
     STRIPE_WEBHOOK_SECRET:dev  → env:web
 
@@ -178,7 +178,7 @@ esk list [--env <ENV>]
 - Secrets grouped by vendor (as defined in `esk.yaml`), displayed as tables.
 - Column headers show each environment.
 - Per-cell status indicators reflect deploy state across configured adapter targets for that key/environment:
-  - `✓` (green) — synced: all targets up to date.
+  - `✔` (green) — synced: all targets up to date.
   - `●` (yellow) — pending: value changed since last deploy.
   - `✗` (red) — failed: last deploy attempt failed.
   - `○` (dim) — unset: key is targeted for this environment but has no stored value.
@@ -190,8 +190,8 @@ esk list [--env <ENV>]
 ```
   Stripe
                        dev  prod
-  STRIPE_SECRET_KEY     ✓    ●
-  STRIPE_WEBHOOK_SECRET ✓
+  STRIPE_SECRET_KEY     ✔    ●
+  STRIPE_WEBHOOK_SECRET ✔
 
   Convex
                        dev  prod
@@ -230,8 +230,8 @@ The dashboard closes with the current store version.
   myapp · v5 · 6 targets (3 deployed, 2 pending, 1 unset)
 
   Targets
-    ✓ env            writable
-    ✓ cloudflare     wrangler authenticated
+    ✔ env            writable
+    ✔ cloudflare     wrangler authenticated
 
   Deploy (adapters)
     ● 2 pending
@@ -239,7 +239,7 @@ The dashboard closes with the current store version.
        API_KEY:dev  → env:web  never deployed
     ○ 1 unset
        DATABASE_URL:dev  → env:web:dev
-    ✓ 3 deployed  (--all to show)
+    ✔ 3 deployed  (--all to show)
 
   Next steps
     esk deploy --env prod  deploy 1 pending change

@@ -242,6 +242,10 @@ pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<P
     health
 }
 
+use std::sync::Once;
+
+static OP_WARNING: Once = Once::new();
+
 /// Build all configured plugins from the config.
 /// Runs preflight checks and filters out plugins that fail, printing warnings.
 pub fn build_plugins<'a>(
@@ -255,10 +259,12 @@ pub fn build_plugins<'a>(
         match plugin.preflight() {
             Ok(()) => {
                 if needs_cli_secret_arg_warning(plugin.name()) {
-                    let _ = cliclack::log::warning(format!(
-                        "{}: secrets passed via CLI arguments (visible in process listings)",
-                        plugin.name()
-                    ));
+                    OP_WARNING.call_once(|| {
+                        let _ = cliclack::log::warning(format!(
+                            "{}: security note: secret values are passed as CLI args and may be visible in local process listings\n",
+                            plugin.name()
+                        ));
+                    });
                 }
                 plugins.push(plugin);
             }

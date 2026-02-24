@@ -9,3 +9,4 @@ pub mod store;
 pub mod suggest;
 #[cfg(test)]
 pub mod test_support;
+pub mod ui;

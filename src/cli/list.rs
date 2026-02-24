@@ -9,7 +9,7 @@ use crate::store::SecretStore;
 /// Custom theme that renders note body text without dim styling.
 ///
 /// The default cliclack theme wraps each note body line with `Style::new().dim()`.
-/// When body lines contain their own ANSI styling (e.g. `style("✓").green()`),
+/// When body lines contain their own ANSI styling (e.g. `style("✔").green()`),
 /// the inner `\e[0m` reset breaks the outer dim — causing the first styled
 /// fragment to inherit dim while subsequent ones don't. This produces
 /// inconsistent colors (dim green vs bright green).
@@ -222,7 +222,7 @@ fn render_table(
             let indicator = match cell_status(key, e) {
                 CellStatus::NotTargeted => " ".to_string(),
                 CellStatus::Unset => style("○").dim().to_string(),
-                CellStatus::Synced => style("✓").green().to_string(),
+                CellStatus::Synced => style("✔").green().to_string(),
                 CellStatus::Pending => style("●").yellow().to_string(),
                 CellStatus::Failed => style("✗").red().to_string(),
             };

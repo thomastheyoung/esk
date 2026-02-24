@@ -12,6 +12,7 @@ fn main() {
 }
 
 fn run() -> Result<()> {
+    cliclack::set_theme(esk::ui::EskTheme);
     let cli = Cli::parse();
 
     match &cli.command {
