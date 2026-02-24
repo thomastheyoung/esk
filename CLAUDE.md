@@ -13,6 +13,7 @@ src/
 ├── tracker.rs           # Deploy tracking (SHA-256 change detection)
 ├── plugin_tracker.rs    # Plugin push tracking (version + status per plugin/env)
 ├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
+├── suggest.rs           # Typo suggestions (Levenshtein distance)
 ├── adapters/
 │   ├── mod.rs           # SyncAdapter + CommandRunner traits, build_sync_adapters()
 │   ├── env_file.rs      # .env file generation (batch deploy)
@@ -49,6 +50,7 @@ src/
 │   ├── list.rs          # esk list
 │   ├── deploy.rs        # esk deploy (adapter-agnostic)
 │   ├── status.rs        # esk status (adapter-agnostic)
+│   ├── generate.rs      # esk generate (TypeScript type declarations)
 │   └── sync.rs          # esk sync (plugin-agnostic, bidirectional)
 tests/
 ├── helpers/
@@ -56,7 +58,7 @@ tests/
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (113)
+└── cli_integration.rs      # CLI command tests (122)
 ```
 
 ## Core design
@@ -149,7 +151,6 @@ Version-counter-based reconciliation between local store and remote plugins. Two
 | `hex`                               | Hex encoding for keys, nonces, hashes |
 | `base64`                            | Base64 encoding for K8s secrets       |
 | `rand`                              | Random key and nonce generation       |
-| `atty`                              | TTY detection for interactive prompts |
 | `chrono`                            | Timestamps in sync records            |
 | `cliclack`                          | Terminal UI (spinners, logs, prompts) |
 | `console`                           | Terminal colors and styling           |
@@ -183,18 +184,19 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 625 tests
+cargo test                    # Run all 666 tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
 cargo test tracker::          # Run tracker unit tests only
 cargo test plugin_tracker::   # Run plugin tracker unit tests only
+cargo test suggest::          # Run suggest unit tests only
 cargo test adapters::         # Run all adapter unit tests
 cargo test plugins::          # Run all plugin unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-625 tests total: 498 unit (inline `#[cfg(test)]`) + 127 integration (`tests/`).
+666 tests total: 530 unit (inline `#[cfg(test)]`) + 136 integration (`tests/`).
 
 ### Test infrastructure
 
