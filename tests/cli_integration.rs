@@ -754,7 +754,17 @@ plugins:
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    let err = cli::sync::run_with_runner(&config, "dev", Some("nonexistent"), false, false, false, false, &runner).unwrap_err();
+    let err = cli::sync::run_with_runner(
+        &config,
+        "dev",
+        Some("nonexistent"),
+        false,
+        false,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
 }
 
@@ -845,8 +855,8 @@ fn sync_cloudflare_failure_tracked() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_failure(b"auth error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1020,8 +1030,8 @@ fn sync_convex_failure_tracked() {
     runner.push_success(b"", b""); // preflight: convex env list
     runner.push_failure(b"deploy error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1350,7 +1360,8 @@ plugins:
 
     let plugins = esk::plugins::build_plugins(&config, &runner);
     let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
-    let failures = cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
+    let failures =
+        cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
     plugin_index.save().unwrap();
     assert!(failures > 0);
 
@@ -1566,8 +1577,8 @@ fn sync_records_tombstone_delete_failure() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_failure(b"delete failed"); // delete_secret fails
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1753,8 +1764,8 @@ fn sync_fly_failure_tracked() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_failure(b"deploy error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1877,8 +1888,8 @@ fn sync_netlify_failure_tracked() {
     runner.push_success(b"", b""); // netlify status
     runner.push_failure(b"auth error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2000,8 +2011,8 @@ fn sync_vercel_failure_tracked() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_failure(b"auth error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2123,8 +2134,8 @@ fn sync_github_failure_tracked() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_failure(b"auth error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2244,8 +2255,8 @@ fn sync_heroku_failure_tracked() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_failure(b"auth error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2369,8 +2380,8 @@ fn sync_supabase_failure_tracked() {
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_failure(b"api error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2489,8 +2500,8 @@ fn sync_railway_failure_tracked() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_failure(b"api error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2608,8 +2619,8 @@ fn sync_gitlab_failure_tracked() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_failure(b"api error");
 
-    let err =
-        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap_err();
+    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
+        .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = SyncIndex::load(&project.sync_index_path());

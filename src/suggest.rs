@@ -77,11 +77,7 @@ pub fn unknown_env<S: AsRef<str>>(env: &str, environments: &[S]) -> String {
 }
 
 /// Builds an "unknown environment in target" error message (for config validation).
-pub fn unknown_env_in_target<S: AsRef<str>>(
-    env: &str,
-    target: &str,
-    environments: &[S],
-) -> String {
+pub fn unknown_env_in_target<S: AsRef<str>>(env: &str, target: &str, environments: &[S]) -> String {
     let valid = join(environments);
     let mut msg = format!(
         "unknown environment '{}' in target '{}'",
@@ -118,17 +114,9 @@ pub fn unknown_adapter<S: AsRef<str>>(adapter: &str, adapter_names: &[S]) -> Str
 }
 
 /// Builds an "unknown app in target" error message (for config validation).
-pub fn unknown_app_in_target<S: AsRef<str>>(
-    app: &str,
-    target: &str,
-    app_names: &[S],
-) -> String {
+pub fn unknown_app_in_target<S: AsRef<str>>(app: &str, target: &str, app_names: &[S]) -> String {
     let configured = join(app_names);
-    let mut msg = format!(
-        "unknown app '{}' in target '{}'",
-        style(app).bold(),
-        target
-    );
+    let mut msg = format!("unknown app '{}' in target '{}'", style(app).bold(), target);
     if let Some(suggestion) = closest(app, app_names) {
         msg.push_str(&hint_line(suggestion));
     }

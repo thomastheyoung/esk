@@ -266,11 +266,7 @@ pub fn run_with_runner(
 
             let stale_plugins: Vec<_> = target_plugins
                 .iter()
-                .filter(|p| {
-                    result
-                        .sources_to_update
-                        .contains(&p.name().to_string())
-                })
+                .filter(|p| result.sources_to_update.contains(&p.name().to_string()))
                 .collect();
 
             let mut pushback_failures = 0u32;
@@ -284,11 +280,7 @@ pub fn run_with_runner(
                             plugin.name(),
                             style("done").green()
                         ));
-                        plugin_index.record_success(
-                            plugin.name(),
-                            env,
-                            updated_payload.version,
-                        );
+                        plugin_index.record_success(plugin.name(), env, updated_payload.version);
                     }
                     Err(e) => {
                         spinner.error(format!(

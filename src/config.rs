@@ -493,11 +493,7 @@ impl Config {
         if !self.environments.contains(&resolved.environment) {
             bail!(
                 "{}",
-                suggest::unknown_env_in_target(
-                    &resolved.environment,
-                    target,
-                    &self.environments
-                )
+                suggest::unknown_env_in_target(&resolved.environment, target, &self.environments)
             );
         }
         if let Some(app) = &resolved.app {
