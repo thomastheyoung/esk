@@ -189,9 +189,15 @@ pub fn run_with_runner(
         .map(|(name, secrets, version)| (name.as_str(), secrets, *version))
         .collect();
 
-    let result = match reconcile::reconcile_multi(&payload, &remotes, Some(env), prefer) {
+    let result = match reconcile::reconcile_multi_with_jump_limit(
+        &payload,
+        &remotes,
+        Some(env),
+        prefer,
+        !force,
+    ) {
         Ok(r) => r,
-        Err(e) if e.to_string().contains("version jump too large") && !force => {
+        Err(e) if reconcile::is_version_jump_error(&e) && !force => {
             if std::io::stdin().is_terminal() {
                 cliclack::log::warning(format!("{e}"))?;
                 let accept = cliclack::confirm(
@@ -205,30 +211,13 @@ pub fn run_with_runner(
             } else {
                 bail!("{e}\nRun with --force to bypass version jump protection.");
             }
-            let mut adjusted_payload = payload.clone();
-            let max_remote = remotes.iter().map(|(_, _, v)| *v).max().unwrap_or(0);
-            if let Some(e_str) = adjusted_payload.env_versions.get_mut(env) {
-                *e_str = max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP);
-            } else {
-                adjusted_payload.env_versions.insert(
-                    env.to_string(),
-                    max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP),
-                );
-            }
-            reconcile::reconcile_multi(&adjusted_payload, &remotes, Some(env), prefer)?
-        }
-        Err(e) if e.to_string().contains("version jump too large") && force => {
-            let mut adjusted_payload = payload.clone();
-            let max_remote = remotes.iter().map(|(_, _, v)| *v).max().unwrap_or(0);
-            if let Some(e_str) = adjusted_payload.env_versions.get_mut(env) {
-                *e_str = max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP);
-            } else {
-                adjusted_payload.env_versions.insert(
-                    env.to_string(),
-                    max_remote.saturating_sub(reconcile::MAX_VERSION_JUMP),
-                );
-            }
-            reconcile::reconcile_multi(&adjusted_payload, &remotes, Some(env), prefer)?
+            reconcile::reconcile_multi_with_jump_limit(
+                &payload,
+                &remotes,
+                Some(env),
+                prefer,
+                false,
+            )?
         }
         Err(e) => return Err(e),
     };

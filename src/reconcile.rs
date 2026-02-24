@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 use std::collections::BTreeMap;
+use thiserror::Error;
 
 use crate::store::StorePayload;
 
@@ -17,6 +18,42 @@ pub enum ConflictPreference {
 /// exceeds local by more than this, reconciliation fails to prevent a
 /// compromised plugin from overwriting all local secrets.
 pub const MAX_VERSION_JUMP: u64 = 1000;
+
+#[derive(Debug, Error)]
+pub enum ReconcileError {
+    #[error(
+        "version jump too large: remote version {remote_version} exceeds local \
+         {local_version} by {jump} (max allowed: {max_allowed_jump}). \
+         This may indicate a compromised plugin."
+    )]
+    VersionJump {
+        local_version: u64,
+        remote_version: u64,
+        jump: u64,
+        max_allowed_jump: u64,
+    },
+    #[error(
+        "version jump too large: plugin '{plugin}' reports version {remote_version} \
+         (local is {local_version}, jump of {jump}). Max allowed: {max_allowed_jump}. \
+         This may indicate a compromised plugin."
+    )]
+    PluginVersionJump {
+        plugin: String,
+        local_version: u64,
+        remote_version: u64,
+        jump: u64,
+        max_allowed_jump: u64,
+    },
+}
+
+pub fn is_version_jump_error(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<ReconcileError>().is_some_and(|e| {
+        matches!(
+            e,
+            ReconcileError::VersionJump { .. } | ReconcileError::PluginVersionJump { .. }
+        )
+    })
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReconcileAction {
@@ -56,19 +93,31 @@ pub fn reconcile(
     remote_version: u64,
     env: &str,
 ) -> Result<ReconcileResult> {
+    reconcile_with_jump_limit(local, remote_secrets, remote_version, env, true)
+}
+
+pub fn reconcile_with_jump_limit(
+    local: &StorePayload,
+    remote_secrets: &BTreeMap<String, String>,
+    remote_version: u64,
+    env: &str,
+    enforce_jump_limit: bool,
+) -> Result<ReconcileResult> {
     let local_env_secrets = extract_env_secrets(&local.secrets, env);
 
     let local_version = local.env_version(env);
 
     // Version jump protection
-    if remote_version > local_version {
+    if enforce_jump_limit && remote_version > local_version {
         let jump = remote_version - local_version;
         if jump > MAX_VERSION_JUMP {
-            bail!(
-                "version jump too large: remote version {remote_version} exceeds local \
-                 {local_version} by {jump} (max allowed: {MAX_VERSION_JUMP}). \
-                 This may indicate a compromised plugin. Use --force to override."
-            );
+            return Err(ReconcileError::VersionJump {
+                local_version,
+                remote_version,
+                jump,
+                max_allowed_jump: MAX_VERSION_JUMP,
+            }
+            .into());
         }
     }
 
@@ -233,6 +282,16 @@ pub fn reconcile_multi(
     env: Option<&str>,
     prefer: ConflictPreference,
 ) -> Result<MultiReconcileResult> {
+    reconcile_multi_with_jump_limit(local, remotes, env, prefer, true)
+}
+
+pub fn reconcile_multi_with_jump_limit(
+    local: &StorePayload,
+    remotes: &[(&str, &BTreeMap<String, String>, u64)], // (name, composite_secrets, version)
+    env: Option<&str>,
+    prefer: ConflictPreference,
+    enforce_jump_limit: bool,
+) -> Result<MultiReconcileResult> {
     let local_version = match env {
         Some(e) => local.env_version(e),
         None => local.version,
@@ -245,14 +304,17 @@ pub fn reconcile_multi(
             max_version = *version;
         }
         // Version jump protection for each remote
-        if *version > local_version {
+        if enforce_jump_limit && *version > local_version {
             let jump = *version - local_version;
             if jump > MAX_VERSION_JUMP {
-                bail!(
-                    "version jump too large: plugin '{name}' reports version {version} \
-                     (local is {local_version}, jump of {jump}). Max allowed: {MAX_VERSION_JUMP}. \
-                     This may indicate a compromised plugin. Use --force to override."
-                );
+                return Err(ReconcileError::PluginVersionJump {
+                    plugin: (*name).to_string(),
+                    local_version,
+                    remote_version: *version,
+                    jump,
+                    max_allowed_jump: MAX_VERSION_JUMP,
+                }
+                .into());
             }
         }
     }
@@ -329,9 +391,7 @@ pub fn reconcile_multi(
             // Find remotes that actually drifted
             let drifted_remotes: Vec<_> = equal_version_remotes
                 .iter()
-                .filter(|(_, secrets, _)| {
-                    scoped_composite_secrets(secrets, env) != merged_scope
-                })
+                .filter(|(_, secrets, _)| scoped_composite_secrets(secrets, env) != merged_scope)
                 .collect();
 
             if drifted_remotes.len() > 1 {
@@ -369,11 +429,8 @@ pub fn reconcile_multi(
                 }
                 // Remove local-only keys in scope that remote doesn't have
                 if let Some(ref s) = suffix {
-                    let local_scope_keys: Vec<_> = merged
-                        .keys()
-                        .filter(|k| k.ends_with(s))
-                        .cloned()
-                        .collect();
+                    let local_scope_keys: Vec<_> =
+                        merged.keys().filter(|k| k.ends_with(s)).cloned().collect();
                     for key in local_scope_keys {
                         if !remote_secrets.contains_key(&key) {
                             merged.remove(&key);
@@ -694,7 +751,13 @@ mod tests {
         let local = make_payload_with_tombstones(&[], &[("KEY:dev", 4)], 4);
         let remote = make_composite(&[("KEY:dev", "old")]);
         // Remote at v3 — tombstone at v4 should win
-        let result = reconcile_multi(&local, &[("op", &remote, 3)], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 3)],
+            None,
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert!(!result.merged_payload.secrets.contains_key("KEY:dev"));
         assert!(result.merged_payload.tombstones.contains_key("KEY:dev"));
     }
@@ -705,7 +768,13 @@ mod tests {
         let local = make_payload_with_tombstones(&[], &[("KEY:dev", 3)], 3);
         let remote = make_composite(&[("KEY:dev", "new")]);
         // Remote at v5 — should resurrect
-        let result = reconcile_multi(&local, &[("op", &remote, 5)], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            None,
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert_eq!(result.merged_payload.secrets.get("KEY:dev").unwrap(), "new");
         assert!(!result.merged_payload.tombstones.contains_key("KEY:dev"));
     }
@@ -737,7 +806,13 @@ mod tests {
         local.env_versions.insert("dev".to_string(), 3);
         let remote = make_composite(&[("A:dev", "new")]);
         // Remote at v5, local env version is 3 — remote wins
-        let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert!(result.local_changed);
         assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "new");
     }
@@ -772,7 +847,13 @@ mod tests {
     fn multi_local_highest_no_change() {
         let local = make_payload(&[("A:dev", "a")], 5);
         let remote = make_composite(&[("A:dev", "a")]);
-        let result = reconcile_multi(&local, &[("op", &remote, 3)], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 3)],
+            None,
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert!(!result.local_changed);
         assert!(!result.has_drift);
         assert_eq!(result.merged_payload.version, 5);
@@ -783,7 +864,13 @@ mod tests {
     fn multi_remote_highest_pulls() {
         let local = make_payload(&[("A:dev", "old")], 3);
         let remote = make_composite(&[("A:dev", "new")]);
-        let result = reconcile_multi(&local, &[("op", &remote, 5)], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            None,
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert!(result.local_changed);
         assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "new");
     }
@@ -793,8 +880,13 @@ mod tests {
         let local = make_payload(&[("A:dev", "local")], 1);
         let remote1 = make_composite(&[("A:dev", "r1")]);
         let remote2 = make_composite(&[("A:dev", "r2")]);
-        let result =
-            reconcile_multi(&local, &[("r1", &remote1, 3), ("r2", &remote2, 5)], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("r1", &remote1, 3), ("r2", &remote2, 5)],
+            None,
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "r2");
         assert!(result.sources_to_update.contains(&"r1".to_string()));
     }
@@ -803,7 +895,13 @@ mod tests {
     fn multi_merges_unique_secrets() {
         let local = make_payload(&[("A:dev", "a")], 3);
         let remote = make_composite(&[("B:dev", "b")]);
-        let result = reconcile_multi(&local, &[("op", &remote, 5)], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            None,
+            ConflictPreference::Local,
+        )
+        .unwrap();
         // Remote is higher, so B:dev pulled in. A:dev preserved from local.
         assert!(result.merged_payload.secrets.contains_key("A:dev"));
         assert!(result.merged_payload.secrets.contains_key("B:dev"));
@@ -815,7 +913,13 @@ mod tests {
     fn multi_all_same_version_no_change() {
         let local = make_payload(&[("A:dev", "a")], 5);
         let remote = make_composite(&[("A:dev", "a")]);
-        let result = reconcile_multi(&local, &[("op", &remote, 5)], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            None,
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert!(!result.local_changed);
         assert!(!result.has_drift);
         assert_eq!(result.merged_payload.version, 5);
@@ -826,7 +930,13 @@ mod tests {
     fn multi_equal_version_content_drift_marks_source_stale() {
         let local = make_payload(&[("A:dev", "local")], 5);
         let remote = make_composite(&[("A:dev", "remote")]);
-        let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert!(!result.local_changed);
         assert!(result.has_drift);
         assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "local");
@@ -838,7 +948,13 @@ mod tests {
     fn multi_equal_version_drift_outside_env_is_ignored() {
         let local = make_payload(&[("A:dev", "a"), ("B:prod", "local_prod")], 5);
         let remote = make_composite(&[("A:dev", "a"), ("B:prod", "remote_prod")]);
-        let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Local,
+        )
+        .unwrap();
         assert!(!result.local_changed);
         assert!(!result.has_drift);
         assert!(result.sources_to_update.is_empty());
@@ -857,7 +973,13 @@ mod tests {
         let local = make_payload(&[("L:dev", "l")], 1);
         let r1 = make_composite(&[("R1:dev", "r1")]);
         let r2 = make_composite(&[("R2:dev", "r2")]);
-        let result = reconcile_multi(&local, &[("r1", &r1, 3), ("r2", &r2, 2)], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("r1", &r1, 3), ("r2", &r2, 2)],
+            None,
+            ConflictPreference::Local,
+        )
+        .unwrap();
         // r1 at v3 is highest, so R1:dev is base. R2:dev merged as unique from lower version.
         // L:dev preserved from local.
         assert!(result.merged_payload.secrets.contains_key("L:dev"));
@@ -886,7 +1008,13 @@ mod tests {
         let mut local = make_payload(&[("KEY:dev", "old")], 10);
         local.env_versions.insert("dev".to_string(), 3);
         let remote = make_composite(&[("KEY:dev", "new")]);
-        let result = reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Local,
+        )
+        .unwrap();
         // Global version must not drop below 10
         assert!(result.merged_payload.version >= 10);
     }
@@ -899,6 +1027,7 @@ mod tests {
         let remote = make_remote(&[("A", "a")]);
         let err = reconcile(&local, &remote, MAX_VERSION_JUMP + 1, "dev").unwrap_err();
         assert!(err.to_string().contains("version jump too large"));
+        assert!(is_version_jump_error(&err));
     }
 
     #[test]
@@ -922,6 +1051,7 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("version jump too large"));
         assert!(err.to_string().contains("bad_plugin"));
+        assert!(is_version_jump_error(&err));
     }
 
     #[test]
@@ -938,6 +1068,34 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("version jump too large"));
         assert!(err.to_string().contains("evil"));
+        assert!(is_version_jump_error(&err));
+    }
+
+    #[test]
+    fn reconcile_allows_large_version_jump_when_limit_disabled() {
+        let local = make_payload(&[], 0);
+        let remote = make_remote(&[("A", "a")]);
+        let result =
+            reconcile_with_jump_limit(&local, &remote, MAX_VERSION_JUMP + 1, "dev", false).unwrap();
+        assert_eq!(result.action, ReconcileAction::PullRemote);
+        assert_eq!(result.pulled, vec!["A"]);
+    }
+
+    #[test]
+    fn reconcile_multi_allows_large_version_jump_when_limit_disabled() {
+        let local = make_payload(&[], 0);
+        let remote = make_composite(&[("A:dev", "a")]);
+        let result = reconcile_multi_with_jump_limit(
+            &local,
+            &[("bad_plugin", &remote, MAX_VERSION_JUMP + 1)],
+            None,
+            ConflictPreference::Local,
+            false,
+        )
+        .unwrap();
+        assert!(result.local_changed);
+        assert_eq!(result.merged_payload.version, MAX_VERSION_JUMP + 2);
+        assert!(result.merged_payload.secrets.contains_key("A:dev"));
     }
 
     #[test]
@@ -964,8 +1122,13 @@ mod tests {
 
         // Remote plugin has prod secrets at v2
         let remote = make_composite(&[("DB_URL:prod", "postgres://prod")]);
-        let result =
-            reconcile_multi(&local, &[("plugin1", &remote, 2)], Some("prod"), ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("plugin1", &remote, 2)],
+            Some("prod"),
+            ConflictPreference::Local,
+        )
+        .unwrap();
 
         // prod has no env version -> 0, so remote v2 is newer
         assert!(result.local_changed);
@@ -978,9 +1141,13 @@ mod tests {
     fn multi_prefer_remote_pulls_remote_on_drift() {
         let local = make_payload(&[("A:dev", "local")], 5);
         let remote = make_composite(&[("A:dev", "remote")]);
-        let result =
-            reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Remote)
-                .unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Remote,
+        )
+        .unwrap();
         assert!(result.local_changed);
         assert!(result.has_drift);
         assert_eq!(
@@ -995,9 +1162,13 @@ mod tests {
     fn multi_prefer_remote_noop_when_no_drift() {
         let local = make_payload(&[("A:dev", "same")], 5);
         let remote = make_composite(&[("A:dev", "same")]);
-        let result =
-            reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Remote)
-                .unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Remote,
+        )
+        .unwrap();
         assert!(!result.local_changed);
         assert!(!result.has_drift);
         assert!(result.sources_to_update.is_empty());
@@ -1007,9 +1178,13 @@ mod tests {
     fn multi_prefer_remote_removes_local_only_keys() {
         let local = make_payload(&[("A:dev", "a"), ("EXTRA:dev", "x")], 5);
         let remote = make_composite(&[("A:dev", "a")]);
-        let result =
-            reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Remote)
-                .unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Remote,
+        )
+        .unwrap();
         assert!(result.local_changed);
         assert!(!result.merged_payload.secrets.contains_key("EXTRA:dev"));
     }
@@ -1018,23 +1193,28 @@ mod tests {
     fn multi_prefer_remote_adds_remote_only_keys() {
         let local = make_payload(&[("A:dev", "a")], 5);
         let remote = make_composite(&[("A:dev", "a"), ("NEW:dev", "new")]);
-        let result =
-            reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Remote)
-                .unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Remote,
+        )
+        .unwrap();
         assert!(result.local_changed);
-        assert_eq!(
-            result.merged_payload.secrets.get("NEW:dev").unwrap(),
-            "new"
-        );
+        assert_eq!(result.merged_payload.secrets.get("NEW:dev").unwrap(), "new");
     }
 
     #[test]
     fn multi_prefer_remote_preserves_other_env() {
         let local = make_payload(&[("A:dev", "local_dev"), ("A:prod", "local_prod")], 5);
         let remote = make_composite(&[("A:dev", "remote_dev")]);
-        let result =
-            reconcile_multi(&local, &[("op", &remote, 5)], Some("dev"), ConflictPreference::Remote)
-                .unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            Some("dev"),
+            ConflictPreference::Remote,
+        )
+        .unwrap();
         assert_eq!(
             result.merged_payload.secrets.get("A:dev").unwrap(),
             "remote_dev"
@@ -1085,9 +1265,13 @@ mod tests {
         // When remote is newer by version, --prefer remote shouldn't change behavior
         let local = make_payload(&[("A:dev", "old")], 3);
         let remote = make_composite(&[("A:dev", "new")]);
-        let result =
-            reconcile_multi(&local, &[("op", &remote, 5)], None, ConflictPreference::Remote)
-                .unwrap();
+        let result = reconcile_multi(
+            &local,
+            &[("op", &remote, 5)],
+            None,
+            ConflictPreference::Remote,
+        )
+        .unwrap();
         assert!(result.local_changed);
         assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "new");
     }
