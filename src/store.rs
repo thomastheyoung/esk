@@ -761,7 +761,7 @@ mod tests {
         store.set("KEY", "dev", "val").unwrap();
         let payload = store.delete("KEY", "dev").unwrap();
         assert_eq!(payload.version, 2);
-        assert!(payload.secrets.get("KEY:dev").is_none());
+        assert!(!payload.secrets.contains_key("KEY:dev"));
         assert!(store.get("KEY", "dev").unwrap().is_none());
     }
 
@@ -817,7 +817,7 @@ mod tests {
         let store2 = SecretStore::open(dir.path()).unwrap();
         let payload = store2.payload().unwrap();
         assert_eq!(payload.tombstones.get("A:dev"), Some(&2));
-        assert!(payload.secrets.get("A:dev").is_none());
+        assert!(!payload.secrets.contains_key("A:dev"));
     }
 
     #[test]

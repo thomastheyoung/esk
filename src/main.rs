@@ -84,9 +84,9 @@ fn run() -> Result<()> {
             env,
             only,
             dry_run,
-            strict,
+            no_partial,
             force,
-            deploy,
+            with_deploy,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
@@ -96,9 +96,9 @@ fn run() -> Result<()> {
                 env,
                 only.as_deref(),
                 *dry_run,
-                *strict,
+                *no_partial,
                 *force,
-                *deploy,
+                *with_deploy,
             )?;
         }
     }

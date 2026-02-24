@@ -568,9 +568,9 @@ When multiple plugins are configured, `esk sync` reconciles across all of them:
 3. Start with that as the base.
 4. Merge unique secrets from lower-version sources.
 5. Write the merged result to the local store.
-6. Push the merged result back to any plugins that were behind.
+6. If reconciliation changed the local store, push the merged result back to plugins that were behind.
 
-This means you can use 1Password for team sharing and Dropbox as a backup — sync keeps them all in sync.
+This means you can use 1Password for team sharing and Dropbox as a backup — sync reconciles them when changes are merged.
 
 ### Targeting a specific plugin
 

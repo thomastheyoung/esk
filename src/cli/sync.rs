@@ -55,7 +55,7 @@ pub fn run(
     env: &str,
     only: Option<&str>,
     dry_run: bool,
-    strict: bool,
+    no_partial: bool,
     force: bool,
     auto_deploy: bool,
 ) -> Result<()> {
@@ -64,7 +64,7 @@ pub fn run(
         env,
         only,
         dry_run,
-        strict,
+        no_partial,
         force,
         auto_deploy,
         &RealCommandRunner,
@@ -77,7 +77,7 @@ pub fn run_with_runner(
     env: &str,
     only: Option<&str>,
     dry_run: bool,
-    strict: bool,
+    no_partial: bool,
     force: bool,
     auto_deploy: bool,
     runner: &dyn CommandRunner,
@@ -159,9 +159,9 @@ pub fn run_with_runner(
     }
 
     if !pull_failures.is_empty() {
-        if strict {
+        if no_partial {
             bail!(
-                "{} plugin(s) failed to respond: {}. Use without --strict to reconcile with partial data.",
+                "{} plugin(s) failed to respond: {}. Use without --no-partial to reconcile with partial data.",
                 pull_failures.len(),
                 pull_failures.join(", ")
             );

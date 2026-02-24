@@ -135,6 +135,8 @@ mod tests {
     use crate::adapters::{CommandOpts, CommandOutput};
     use std::sync::Mutex;
 
+    type StdinCall = (String, Vec<String>, Option<Vec<u8>>);
+
     struct MockRunner {
         calls: Mutex<Vec<(String, Vec<String>)>>,
         responses: Mutex<Vec<CommandOutput>>,
@@ -400,7 +402,7 @@ plugins:
 
         // Capture stdin to verify version
         struct StdinCapture {
-            calls: Mutex<Vec<(String, Vec<String>, Option<Vec<u8>>)>>,
+            calls: Mutex<Vec<StdinCall>>,
         }
         impl CommandRunner for StdinCapture {
             fn run(

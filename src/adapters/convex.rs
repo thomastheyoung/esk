@@ -137,15 +137,15 @@ mod tests {
     use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
     use std::sync::Mutex;
 
+    type RunnerCall = (
+        String,
+        Vec<String>,
+        Option<std::path::PathBuf>,
+        Vec<(String, String)>,
+    );
+
     struct MockRunner {
-        calls: Mutex<
-            Vec<(
-                String,
-                Vec<String>,
-                Option<std::path::PathBuf>,
-                Vec<(String, String)>,
-            )>,
-        >,
+        calls: Mutex<Vec<RunnerCall>>,
         responses: Mutex<Vec<CommandOutput>>,
     }
 
@@ -156,14 +156,7 @@ mod tests {
                 responses: Mutex::new(responses),
             }
         }
-        fn take_calls(
-            &self,
-        ) -> Vec<(
-            String,
-            Vec<String>,
-            Option<std::path::PathBuf>,
-            Vec<(String, String)>,
-        )> {
+        fn take_calls(&self) -> Vec<RunnerCall> {
             std::mem::take(&mut *self.calls.lock().unwrap())
         }
     }

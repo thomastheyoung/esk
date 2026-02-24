@@ -135,7 +135,7 @@ adapters:
 | --------------- | ----------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
 | `mode`          | No          | `workers` | Secrets API to use: `workers` (wrangler secret) or `pages` (wrangler pages secret).                                                           |
 | `pages_project` | Conditional | —         | Cloudflare Pages project name. Required when `mode` is `pages`.                                                                               |
-| `env_flags`     | No          | —         | Map of environment name to extra CLI flags passed to `wrangler secret put`. Flags are split on whitespace and appended as separate arguments. |
+| `env_flags`     | No          | —         | Map of environment name to extra CLI flags passed to Cloudflare secret commands (`put`/`delete` in workers or pages mode). Flags are split on whitespace and appended as separate arguments. |
 
 ### Command executed
 
@@ -145,8 +145,8 @@ echo "<value>" | wrangler secret put <KEY> [env_flags...]
 wrangler secret delete <KEY> --force [env_flags...]
 
 # Pages mode:
-echo "<value>" | wrangler pages secret put <KEY> --project <pages_project>
-wrangler pages secret delete <KEY> --project <pages_project> --force
+echo "<value>" | wrangler pages secret put <KEY> --project <pages_project> [env_flags...]
+wrangler pages secret delete <KEY> --project <pages_project> --force [env_flags...]
 ```
 
 For a secret `API_KEY` targeting `web:prod` with `env_flags.prod: "--env production"`:
@@ -301,7 +301,7 @@ Syncs environment variables to Netlify sites using `netlify env:set`.
 ### Prerequisites
 
 - [Netlify CLI](https://docs.netlify.com/cli/get-started/) installed (`npm install -g netlify-cli`).
-- Site linked (`netlify link`) or `site` specified in config.
+- Site linked (`netlify link`) so `netlify status` succeeds during preflight.
 
 Preflight runs `netlify status` to verify CLI installation and site linkage.
 

@@ -107,13 +107,13 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
         /// Fail if any plugin is unreachable (no partial reconciliation)
-        #[arg(long)]
-        strict: bool,
+        #[arg(long = "no-partial", alias = "strict")]
+        no_partial: bool,
         /// Bypass version jump protection (use with caution)
         #[arg(long)]
         force: bool,
         /// Auto-deploy adapters after syncing
-        #[arg(long)]
-        deploy: bool,
+        #[arg(long = "with-deploy", alias = "deploy")]
+        with_deploy: bool,
     },
 }

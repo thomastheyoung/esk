@@ -215,9 +215,9 @@ Displays a multi-section dashboard with the following sections:
 
 - **Summary** — Project name, store version, and target counts with status breakdown.
 - **Targets** — Adapter health from preflight checks (pass/fail per adapter).
-- **Sync** — Secrets grouped by status: failed, pending, unset, and synced (synced hidden unless `--all`). Each entry shows relative timestamps (e.g., "3h ago") and error details for failures.
+- **Deploy (adapters)** — Secrets grouped by status: failed, pending, unset, and deployed (deployed hidden unless `--all`). Entries include relative deploy freshness (for example, "3h ago") and error details for failures.
 - **Coverage** — Gaps where a secret is set in some environments but not others, and orphaned secrets (in store but not in config).
-- **Plugins** — Push state per (plugin, environment): current, stale (version behind), failed, or never pushed.
+- **Sync (plugins)** — Push state per (plugin, environment): current, stale (version behind), failed, or never synced.
 - **Next steps** — Actionable commands to fix issues (retry failed deploys, deploy pending changes, fill coverage gaps, sync stale plugins, remove orphans).
 
 The dashboard closes with the current store version.
@@ -225,19 +225,19 @@ The dashboard closes with the current store version.
 **Example output:**
 
 ```
-  myapp · v5 · 6 targets (3 synced, 2 pending, 1 unset)
+  myapp · v5 · 6 targets (3 deployed, 2 pending, 1 unset)
 
   Targets
     ✓ env            writable
     ✓ cloudflare     wrangler authenticated
 
-  Sync
+  Deploy (adapters)
     ● 2 pending
-       STRIPE_SECRET_KEY:prod  → cloudflare:web  last synced 3h ago
-       API_KEY:dev  → env:web  never synced
+       STRIPE_SECRET_KEY:prod  → cloudflare:web  last deployed 3h ago
+       API_KEY:dev  → env:web  never deployed
     ○ 1 unset
        DATABASE_URL:dev  → env:web:dev
-    ✓ 3 synced  (--all to show)
+    ✓ 3 deployed  (--all to show)
 
   Next steps
     esk deploy --env prod  deploy 1 pending change
@@ -251,20 +251,22 @@ The dashboard closes with the current store version.
 
 ## `esk sync`
 
-Sync secrets with configured storage plugins. Pulls from all plugins, reconciles with the local store, and pushes the merged result back to stale plugins.
+Sync secrets with configured storage plugins. Pulls from all plugins, reconciles with the local store, and, when reconciliation changes local data, pushes the merged result to stale plugins.
 
 ```bash
-esk sync --env <ENV> [--only <PLUGIN>] [--dry-run] [--strict] [--force] [--deploy]
+esk sync --env <ENV> [--only <PLUGIN>] [--dry-run] [--no-partial] [--force] [--with-deploy]
 ```
 
-| Argument   | Required | Description                                                               |
-| ---------- | -------- | ------------------------------------------------------------------------- |
-| `--env`    | Yes      | Environment to sync                                                       |
-| `--only`   | No       | Sync a specific plugin only                                               |
-| `--dry-run`| No       | Show what would change without modifying anything                         |
-| `--strict` | No       | Fail if any plugin is unreachable (no partial reconciliation)             |
-| `--force`  | No       | Bypass version jump protection — skip interactive prompt (use with caution)|
-| `--deploy` | No       | Auto-run `deploy` after syncing                                           |
+| Argument        | Required | Description                                                                |
+| --------------- | -------- | -------------------------------------------------------------------------- |
+| `--env`         | Yes      | Environment to sync                                                        |
+| `--only`        | No       | Sync a specific plugin only                                                |
+| `--dry-run`     | No       | Show what would change without modifying anything                          |
+| `--no-partial`  | No       | Fail if any plugin is unreachable (no partial reconciliation)              |
+| `--force`       | No       | Bypass version jump protection — skip interactive prompt (use with caution)|
+| `--with-deploy` | No       | Auto-run `deploy` after syncing                                            |
+
+Compatibility aliases: `--strict` for `--no-partial`, and `--deploy` for `--with-deploy`.
 
 **Requires:** At least one plugin configured in `esk.yaml` and its dependencies available (e.g., `op` CLI for 1Password).
 
@@ -274,8 +276,8 @@ esk sync --env <ENV> [--only <PLUGIN>] [--dry-run] [--strict] [--force] [--deplo
 2. The highest-version source becomes the base.
 3. Unique secrets from lower-version sources are merged in.
 4. Local store is updated with the merged result.
-5. Stale plugins are automatically pushed the merged result (no interactive prompt).
-6. With `--deploy`, automatically runs `esk deploy --env <ENV>` after a successful sync.
+5. If reconciliation changes local store state, stale plugins are automatically pushed the merged result (no interactive prompt).
+6. With `--with-deploy`, `esk deploy --env <ENV>` runs after a successful sync that changed local store state.
 7. With `--dry-run`, shows what would change without modifying the store or pushing to plugins.
 
 **Examples:**
@@ -283,7 +285,7 @@ esk sync --env <ENV> [--only <PLUGIN>] [--dry-run] [--strict] [--force] [--deplo
 ```bash
 esk sync --env prod                     # Sync all plugins
 esk sync --env prod --only 1password    # Sync specific plugin
-esk sync --env prod --deploy            # Sync + auto-deploy targets
+esk sync --env prod --with-deploy       # Sync + auto-deploy targets
 esk sync --env prod --dry-run           # Preview changes
 ```
 

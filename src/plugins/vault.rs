@@ -176,8 +176,10 @@ mod tests {
     use serde_json::json;
     use std::sync::Mutex;
 
+    type RunnerCall = (String, Vec<String>, Vec<(String, String)>);
+
     struct MockRunner {
-        calls: Mutex<Vec<(String, Vec<String>, Vec<(String, String)>)>>,
+        calls: Mutex<Vec<RunnerCall>>,
         responses: Mutex<Vec<CommandOutput>>,
     }
 
@@ -189,7 +191,7 @@ mod tests {
             }
         }
 
-        fn calls(&self) -> Vec<(String, Vec<String>, Vec<(String, String)>)> {
+        fn calls(&self) -> Vec<RunnerCall> {
             self.calls.lock().unwrap().clone()
         }
     }
