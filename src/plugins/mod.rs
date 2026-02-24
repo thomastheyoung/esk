@@ -79,9 +79,7 @@ pub fn parse_pulled_secrets(
         .filter(|(k, _)| k != ESK_VERSION_KEY)
         .filter(|(k, _)| {
             if validate_key(k).is_err() {
-                let _ = cliclack::log::warning(format!(
-                    "Skipping invalid key from remote: '{k}'"
-                ));
+                let _ = cliclack::log::warning(format!("Skipping invalid key from remote: '{k}'"));
                 false
             } else {
                 true

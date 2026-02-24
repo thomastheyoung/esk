@@ -88,7 +88,10 @@ impl<'a> StoragePlugin for VaultPlugin<'a> {
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
             .collect();
-        data.insert(super::ESK_VERSION_KEY.to_string(), Value::Number(version.into()));
+        data.insert(
+            super::ESK_VERSION_KEY.to_string(),
+            Value::Number(version.into()),
+        );
 
         let json = serde_json::to_string(&data).context("failed to serialize secrets")?;
 

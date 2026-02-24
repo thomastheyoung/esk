@@ -119,7 +119,10 @@ impl<'a> StoragePlugin for BitwardenPlugin<'a> {
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
             .collect();
-        data.insert(super::ESK_VERSION_KEY.to_string(), Value::Number(version.into()));
+        data.insert(
+            super::ESK_VERSION_KEY.to_string(),
+            Value::Number(version.into()),
+        );
 
         let json = serde_json::to_string(&data).context("failed to serialize secrets")?;
         let secret_name = self.secret_name(env);
@@ -343,10 +346,7 @@ plugins:
 "#;
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
-        let runner = MockRunner::new(vec![
-            ok_output(b"bws 0.4.0"),
-            fail_output(b"Unauthorized"),
-        ]);
+        let runner = MockRunner::new(vec![ok_output(b"bws 0.4.0"), fail_output(b"Unauthorized")]);
         let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("Bitwarden authentication failed"));
@@ -470,8 +470,7 @@ plugins:
         let config = make_config(yaml);
         let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
 
-        let inner_value =
-            json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", crate::plugins::ESK_VERSION_KEY: 7});
+        let inner_value = json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", crate::plugins::ESK_VERSION_KEY: 7});
         let items = json!([
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()},
             {"id": "s2", "key": "myapp-prod", "value": "{}"}

@@ -277,10 +277,7 @@ adapters:
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].program, "fly");
-        assert_eq!(
-            calls[0].args,
-            vec!["secrets", "import", "-a", "my-fly-app"]
-        );
+        assert_eq!(calls[0].args, vec!["secrets", "import", "-a", "my-fly-app"]);
         // Value is passed via stdin, not in args
         assert_eq!(
             calls[0].stdin.as_deref(),

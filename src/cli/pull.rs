@@ -17,7 +17,15 @@ pub fn run(
     strict: bool,
     force: bool,
 ) -> Result<()> {
-    run_with_runner(config, env, only, auto_sync, strict, force, &RealCommandRunner)
+    run_with_runner(
+        config,
+        env,
+        only,
+        auto_sync,
+        strict,
+        force,
+        &RealCommandRunner,
+    )
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -155,9 +163,7 @@ pub fn run_with_runner(
                 // Since we can't easily bypass, we re-do with force semantics.
                 // The simplest approach: catch the error and note the user accepted.
             } else {
-                bail!(
-                    "{e}\nRun with --force to bypass version jump protection."
-                );
+                bail!("{e}\nRun with --force to bypass version jump protection.");
             }
             // If we get here, user confirmed interactively. We need to recompute.
             // Use a local payload with inflated version to bypass the check.

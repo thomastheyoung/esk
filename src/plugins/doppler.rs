@@ -335,7 +335,16 @@ plugins:
         assert_eq!(call.program, "doppler");
         assert_eq!(
             call.args,
-            vec!["secrets", "upload", "--json", "-p", "myapp-doppler", "-c", "dev_config", "--silent"]
+            vec![
+                "secrets",
+                "upload",
+                "--json",
+                "-p",
+                "myapp-doppler",
+                "-c",
+                "dev_config",
+                "--silent"
+            ]
         );
 
         // Verify secrets are passed via stdin, not in args

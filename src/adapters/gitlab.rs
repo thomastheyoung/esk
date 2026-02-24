@@ -39,13 +39,7 @@ impl<'a> SyncAdapter for GitlabAdapter<'a> {
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec![
-            "variable",
-            "set",
-            key,
-            "--scope",
-            &target.environment,
-        ];
+        let mut args: Vec<&str> = vec!["variable", "set", key, "--scope", &target.environment];
         append_env_flags(&mut args, &flag_parts);
 
         let output = self
@@ -261,10 +255,7 @@ adapters:
             vec!["variable", "set", "MY_KEY", "--scope", "dev"]
         );
         // Value is passed via stdin, not in args
-        assert_eq!(
-            calls[0].stdin.as_deref(),
-            Some(b"secret_val".as_slice())
-        );
+        assert_eq!(calls[0].stdin.as_deref(), Some(b"secret_val".as_slice()));
         assert!(!calls[0].args.iter().any(|a| a.contains("secret_val")));
     }
 

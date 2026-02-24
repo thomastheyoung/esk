@@ -274,12 +274,7 @@ adapters:
         assert_eq!(calls[0].program, "supabase");
         assert_eq!(
             calls[0].args,
-            vec![
-                "secrets",
-                "set",
-                "--project-ref",
-                "abcdef123456"
-            ]
+            vec!["secrets", "set", "--project-ref", "abcdef123456"]
         );
         // Value is passed via stdin, not in args
         assert_eq!(

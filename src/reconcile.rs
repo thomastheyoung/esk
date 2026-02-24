@@ -626,7 +626,8 @@ mod tests {
         let local = make_payload(&[("A:dev", "local")], 1);
         let remote1 = make_composite(&[("A:dev", "r1")]);
         let remote2 = make_composite(&[("A:dev", "r2")]);
-        let result = reconcile_multi(&local, &[("r1", &remote1, 3), ("r2", &remote2, 5)], None).unwrap();
+        let result =
+            reconcile_multi(&local, &[("r1", &remote1, 3), ("r2", &remote2, 5)], None).unwrap();
         assert_eq!(result.merged_payload.secrets.get("A:dev").unwrap(), "r2");
         assert!(result.sources_to_update.contains(&"r1".to_string()));
     }

@@ -791,9 +791,16 @@ plugins:
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    let err =
-        cli::pull::run_with_runner(&config, "dev", Some("nonexistent"), false, false, false, &runner)
-            .unwrap_err();
+    let err = cli::pull::run_with_runner(
+        &config,
+        "dev",
+        Some("nonexistent"),
+        false,
+        false,
+        false,
+        &runner,
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("unknown plugin"));
 }
 
@@ -1678,10 +1685,7 @@ fn sync_fly_calls_cli() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "fly");
-    assert_eq!(
-        calls[2].args,
-        vec!["secrets", "import", "-a", "my-fly-app"]
-    );
+    assert_eq!(calls[2].args, vec!["secrets", "import", "-a", "my-fly-app"]);
     // Secret value passed via stdin, not in args
     let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
     assert_eq!(stdin, b"API_KEY=secret123\n");
@@ -2559,14 +2563,7 @@ fn sync_gitlab_prod_env_flags() {
     let calls = runner.take_calls();
     assert_eq!(
         calls[2].args,
-        vec![
-            "variable",
-            "set",
-            "API_KEY",
-            "--scope",
-            "prod",
-            "--masked"
-        ]
+        vec!["variable", "set", "API_KEY", "--scope", "prod", "--masked"]
     );
     let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
     assert_eq!(stdin, b"secret456");

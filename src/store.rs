@@ -46,7 +46,9 @@ pub fn validate_identifier(name: &str, label: &str) -> Result<()> {
     let mut chars = name.chars();
     let first = chars.next().unwrap();
     if !first.is_ascii_alphabetic() {
-        bail!("invalid {label} '{name}': must start with a letter and match [a-zA-Z][a-zA-Z0-9_-]*");
+        bail!(
+            "invalid {label} '{name}': must start with a letter and match [a-zA-Z][a-zA-Z0-9_-]*"
+        );
     }
     for c in chars {
         if !c.is_ascii_alphanumeric() && c != '_' && c != '-' {
@@ -380,10 +382,7 @@ impl SecretStore {
             .with_context(|| format!("failed to read key from {}", path.display()))?;
         let key = hex::decode(hex_str.trim()).context("invalid key hex")?;
         if key.len() != 32 {
-            bail!(
-                "invalid key length: expected 32 bytes, got {}",
-                key.len()
-            );
+            bail!("invalid key length: expected 32 bytes, got {}", key.len());
         }
         Ok(key)
     }
