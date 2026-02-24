@@ -35,12 +35,12 @@ pub fn push_to_plugins(
 
     for plugin in plugins {
         let spinner = cliclack::spinner();
-        spinner.start(format!("Pushing → {}...", plugin.name()));
+        spinner.start(format!("↑ {}...", plugin.name()));
 
         match plugin.push(payload, config, env) {
             Ok(()) => {
                 spinner.stop(format!(
-                    "Pushed → {} {}",
+                    "↑ {}  {}",
                     plugin.name(),
                     style("done").green()
                 ));
@@ -48,7 +48,7 @@ pub fn push_to_plugins(
             }
             Err(e) => {
                 spinner.error(format!(
-                    "Pushed → {} {} — {e}",
+                    "↑ {}  {} — {e}",
                     plugin.name(),
                     style("failed").red()
                 ));
@@ -89,7 +89,7 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
 
     let mut failures: Vec<String> = Vec::new();
     for env in &envs {
-        cliclack::log::step(format!("Syncing environment: {env}"))?;
+        eprintln!("\n━━ {} ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━", style(env).bold());
         if let Err(e) = run_with_runner(
             config,
             env,
@@ -177,14 +177,13 @@ pub fn run_with_runner(
 
     for plugin in &target_plugins {
         let spinner = cliclack::spinner();
-        spinner.start(format!("Pulling ← {}...", plugin.name()));
+        spinner.start(format!("↓ {}...", plugin.name()));
 
         match plugin.pull(config, env) {
             Ok(Some((secrets, version))) => {
                 spinner.stop(format!(
-                    "Pulled ← {} {} (v{}, {} secrets)",
+                    "↓ {}  v{}, {} secrets",
                     plugin.name(),
-                    style("ok").green(),
                     version,
                     secrets.len()
                 ));
@@ -192,14 +191,14 @@ pub fn run_with_runner(
             }
             Ok(None) => {
                 spinner.stop(format!(
-                    "Pulled ← {} {}",
+                    "↓ {}  {}",
                     plugin.name(),
                     style("no data").dim()
                 ));
             }
             Err(e) => {
                 spinner.error(format!(
-                    "Pulled ← {} {} — {e}",
+                    "↓ {}  {} — {e}",
                     plugin.name(),
                     style("failed").red()
                 ));
@@ -272,24 +271,22 @@ pub fn run_with_runner(
     if dry_run {
         if result.local_changed {
             cliclack::log::info(format!(
-                "Would update local store to v{}",
+                "Would merge → v{}",
                 result.merged_payload.version
             ))?;
         } else if result.sources_to_update.is_empty() {
             let current = payload.env_version(env);
-            cliclack::log::info(format!("Up to date — already in sync (v{current})"))?;
+            cliclack::log::info(format!("Up to date (v{current})"))?;
         }
 
         if !result.sources_to_update.is_empty() {
-            cliclack::log::info(format!(
-                "Would push to {} stale plugin(s): {}",
-                result.sources_to_update.len(),
-                result.sources_to_update.join(", ")
-            ))?;
+            for name in &result.sources_to_update {
+                cliclack::log::info(format!("Would push → {name}"))?;
+            }
             if result.has_drift {
                 let current = payload.env_version(env);
                 cliclack::log::info(format!(
-                    "Local store is current (v{current}); this would repair remote drift."
+                    "Current (v{current}), would repair remote drift"
                 ))?;
             }
         }
@@ -299,17 +296,17 @@ pub fn run_with_runner(
     if result.local_changed {
         store.set_payload(&result.merged_payload)?;
         cliclack::log::success(format!(
-            "Merged — local store updated to v{}",
+            "Merged → v{}",
             result.merged_payload.version
         ))?;
     } else {
         let current = payload.env_version(env);
         if result.has_drift {
             cliclack::log::info(format!(
-                "Local store is current (v{current}); repairing stale plugin data..."
+                "Current (v{current}), repairing stale plugins..."
             ))?;
         } else {
-            cliclack::log::success(format!("Up to date — already in sync (v{current})"))?;
+            cliclack::log::success(format!("Up to date (v{current})"))?;
         }
     }
 
@@ -332,11 +329,11 @@ pub fn run_with_runner(
         let mut pushback_failures = 0u32;
         for plugin in &stale_plugins {
             let spinner = cliclack::spinner();
-            spinner.start(format!("Pushing merged → {}...", plugin.name()));
+            spinner.start(format!("↑ {}...", plugin.name()));
             match plugin.push(updated_payload, config, env) {
                 Ok(()) => {
                     spinner.stop(format!(
-                        "Pushed merged → {} {}",
+                        "↑ {}  {}",
                         plugin.name(),
                         style("done").green()
                     ));
@@ -344,7 +341,7 @@ pub fn run_with_runner(
                 }
                 Err(e) => {
                     spinner.error(format!(
-                        "Pushed merged → {} {} — {e}",
+                        "↑ {}  {} — {e}",
                         plugin.name(),
                         style("failed").red()
                     ));
