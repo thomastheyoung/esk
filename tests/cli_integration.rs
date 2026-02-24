@@ -275,6 +275,27 @@ fn delete_auto_syncs_env_file() {
 }
 
 #[test]
+fn delete_last_secret_regenerates_batch_target() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let runner = MockCommandRunner::new();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+
+    let env_path = project.root().join("apps/web/.env.local");
+    let contents = std::fs::read_to_string(&env_path).unwrap();
+    assert!(contents.contains("MY_SECRET=val1"));
+
+    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, false, &runner).unwrap();
+
+    let contents = std::fs::read_to_string(&env_path).unwrap();
+    assert!(!contents.contains("MY_SECRET=val1"));
+}
+
+#[test]
 fn delete_creates_tombstone() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();

@@ -69,6 +69,7 @@ pub fn run_with_runner(
     let mut synced: Vec<SyncEntry> = Vec::new();
     let mut skipped: Vec<SyncEntry> = Vec::new();
     let mut failed: Vec<SyncEntry> = Vec::new();
+    let mut unset: Vec<SyncEntry> = Vec::new();
 
     for secret in &resolved {
         for target in &secret.targets {
@@ -89,6 +90,12 @@ pub fn run_with_runner(
             let value = match payload.secrets.get(&composite) {
                 Some(v) => v,
                 None => {
+                    unset.push(SyncEntry {
+                        key: secret.key.clone(),
+                        env: target.environment.clone(),
+                        target: format_target(target),
+                        error: None,
+                    });
                     if verbose {
                         cliclack::log::remark(format!(
                             "{}:{} — no value set",
@@ -175,9 +182,16 @@ pub fn run_with_runner(
     for (adapter_name, app, target_env) in &batch_dirty {
         let (adapter_idx, _) = adapter_map[adapter_name.as_str()];
         let adapter = &adapters[adapter_idx];
+        let target = crate::config::ResolvedTarget {
+            adapter: adapter_name.clone(),
+            app: app.clone(),
+            environment: target_env.clone(),
+        };
+        let target_display = format_target(&target);
 
         // Gather all secrets that target this (adapter, app, env)
         let mut secrets_for_batch: Vec<SecretValue> = Vec::new();
+        let mut tombstoned_keys: BTreeSet<String> = BTreeSet::new();
         for secret in &resolved {
             for target in &secret.targets {
                 if target.adapter == *adapter_name
@@ -185,6 +199,9 @@ pub fn run_with_runner(
                     && target.environment == *target_env
                 {
                     let composite = format!("{}:{}", secret.key, target_env);
+                    if payload.tombstones.contains_key(&composite) {
+                        tombstoned_keys.insert(secret.key.clone());
+                    }
                     if let Some(value) = payload.secrets.get(&composite) {
                         secrets_for_batch.push(SecretValue {
                             key: secret.key.clone(),
@@ -196,19 +213,18 @@ pub fn run_with_runner(
             }
         }
 
-        if secrets_for_batch.is_empty() {
-            continue;
-        }
-
-        let target = crate::config::ResolvedTarget {
-            adapter: adapter_name.clone(),
-            app: app.clone(),
-            environment: target_env.clone(),
-        };
-
-        let target_display = format_target(&target);
-
         if dry_run {
+            if secrets_for_batch.is_empty() {
+                for key in &tombstoned_keys {
+                    synced.push(SyncEntry {
+                        key: key.clone(),
+                        env: target_env.clone(),
+                        target: target_display.clone(),
+                        error: None,
+                    });
+                }
+                continue;
+            }
             for s in &secrets_for_batch {
                 synced.push(SyncEntry {
                     key: s.key.clone(),
@@ -230,6 +246,26 @@ pub fn run_with_runner(
         }
 
         let results = adapter.sync_batch(&secrets_for_batch, &target);
+        if results.is_empty() {
+            for key in &tombstoned_keys {
+                let tracker_key =
+                    SyncIndex::tracker_key(key, adapter_name, app.as_deref(), target_env);
+                index.record_success(
+                    tracker_key,
+                    target.to_string(),
+                    SyncIndex::TOMBSTONE_HASH.to_string(),
+                );
+                synced.push(SyncEntry {
+                    key: key.clone(),
+                    env: target_env.clone(),
+                    target: target_display.clone(),
+                    error: None,
+                });
+            }
+            // Save index after each batch group
+            index.save()?;
+            continue;
+        }
 
         for result in &results {
             let tracker_key =
@@ -458,6 +494,7 @@ pub fn run_with_runner(
     let sync_count = synced.len();
     let skip_count = skipped.len();
     let fail_count = failed.len();
+    let unset_count = unset.len();
 
     // Stop spinner before printing results
     if let Some(s) = spinner {
@@ -467,13 +504,14 @@ pub fn run_with_runner(
     // Output
     if dry_run {
         print_group("synced", &synced)?;
+        print_group("unset", &unset)?;
         if skip_count > 0 {
             cliclack::log::remark(format!("{} up to date", style(skip_count).bold()))?;
         }
         cliclack::log::warning("Dry run — no changes made".to_string())?;
-    } else if sync_count == 0 && skip_count == 0 && fail_count == 0 {
+    } else if sync_count == 0 && skip_count == 0 && fail_count == 0 && unset_count == 0 {
         cliclack::log::info("Nothing to sync.")?;
-    } else if fail_count == 0 && sync_count == 0 && skip_count > 0 {
+    } else if fail_count == 0 && sync_count == 0 && skip_count > 0 && unset_count == 0 {
         // Everything up to date
         cliclack::log::success(format!(
             "All {} targets up to date",
@@ -485,6 +523,9 @@ pub fn run_with_runner(
 
         // Print synced
         print_group("synced", &synced)?;
+
+        // Print unset targets explicitly so users can see configured-but-missing values
+        print_group("unset", &unset)?;
 
         // Print skipped summary
         if skip_count > 0 {
@@ -536,6 +577,7 @@ fn print_group(label: &str, entries: &[SyncEntry]) -> Result<()> {
     let (icon, count_style) = match label {
         "failed" => ("✗", style(grouped.len()).red().bold()),
         "synced" => ("✓", style(grouped.len()).green().bold()),
+        "unset" => ("○", style(grouped.len()).dim().bold()),
         _ => ("●", style(grouped.len()).dim().bold()),
     };
 
