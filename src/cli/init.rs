@@ -6,8 +6,8 @@ use crate::adapter_tracker::SyncIndex;
 use crate::plugin_tracker::PluginIndex;
 use crate::store::SecretStore;
 
-const ESK_GITIGNORE_COMMENT: &str = "# esk";
-const ESK_GITIGNORE_ENTRY: &str = ".esk/";
+const ESK_GITIGNORE_COMMENT: &str = "# esk (store.enc is safe to commit)";
+const ESK_GITIGNORE_ENTRIES: &[&str] = &[".esk/store.key", ".esk/sync-index.json", ".esk/plugin-index.json"];
 
 pub fn run(cwd: &Path) -> Result<()> {
     let config_path = cwd.join("esk.yaml");
@@ -94,11 +94,10 @@ secrets:
     }
 
     let gitignore_path = cwd.join(".gitignore");
-    if ensure_esk_gitignore_entry(&gitignore_path)? {
+    if ensure_esk_gitignore_entries(&gitignore_path)? {
         cliclack::log::success(format!(
-            "Updated {} with {}",
+            "Updated {}",
             style(gitignore_path.display()).dim(),
-            style(ESK_GITIGNORE_ENTRY).bold()
         ))?;
     }
 
@@ -109,27 +108,43 @@ secrets:
     Ok(())
 }
 
-fn ensure_esk_gitignore_entry(gitignore_path: &Path) -> Result<bool> {
+fn ensure_esk_gitignore_entries(gitignore_path: &Path) -> Result<bool> {
     let mut contents = if gitignore_path.is_file() {
         std::fs::read_to_string(gitignore_path)?
     } else {
         String::new()
     };
 
-    if contents.lines().any(|line| line.trim() == ESK_GITIGNORE_ENTRY) {
+    let missing: Vec<&str> = ESK_GITIGNORE_ENTRIES
+        .iter()
+        .filter(|entry| !contents.lines().any(|line| line.trim() == **entry))
+        .copied()
+        .collect();
+
+    if missing.is_empty() {
         return Ok(false);
     }
 
-    if !contents.is_empty() {
-        if !contents.ends_with('\n') {
+    // If no esk entries exist yet, add the comment header
+    let has_any = ESK_GITIGNORE_ENTRIES
+        .iter()
+        .any(|entry| contents.lines().any(|line| line.trim() == *entry));
+
+    if !has_any {
+        if !contents.is_empty() {
+            if !contents.ends_with('\n') {
+                contents.push('\n');
+            }
             contents.push('\n');
         }
+        contents.push_str(ESK_GITIGNORE_COMMENT);
         contents.push('\n');
     }
-    contents.push_str(ESK_GITIGNORE_COMMENT);
-    contents.push('\n');
-    contents.push_str(ESK_GITIGNORE_ENTRY);
-    contents.push('\n');
+
+    for entry in &missing {
+        contents.push_str(entry);
+        contents.push('\n');
+    }
 
     std::fs::write(gitignore_path, contents)
         .with_context(|| format!("failed to update {}", gitignore_path.display()))?;

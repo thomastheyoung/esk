@@ -31,26 +31,34 @@ fn init_idempotent() {
 }
 
 #[test]
-fn init_updates_gitignore_with_esk_entry() {
+fn init_updates_gitignore_with_esk_entries() {
     let dir = tempfile::tempdir().unwrap();
-    // Create .gitignore without .esk/
     std::fs::write(dir.path().join(".gitignore"), "node_modules\n").unwrap();
     cli::init::run(dir.path()).unwrap();
 
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-    assert_eq!(gitignore, "node_modules\n\n# esk\n.esk/\n");
+    assert_eq!(
+        gitignore,
+        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/sync-index.json\n.esk/plugin-index.json\n"
+    );
 }
 
 #[test]
 fn init_gitignore_update_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(dir.path().join(".gitignore"), "node_modules\n\n# esk\n.esk/\n").unwrap();
+    std::fs::write(
+        dir.path().join(".gitignore"),
+        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/sync-index.json\n.esk/plugin-index.json\n",
+    )
+    .unwrap();
 
     cli::init::run(dir.path()).unwrap();
     cli::init::run(dir.path()).unwrap();
 
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-    assert_eq!(gitignore.matches(".esk/").count(), 1);
+    assert_eq!(gitignore.matches(".esk/store.key").count(), 1);
+    assert_eq!(gitignore.matches(".esk/sync-index.json").count(), 1);
+    assert_eq!(gitignore.matches(".esk/plugin-index.json").count(), 1);
 }
 
 #[test]
@@ -61,7 +69,10 @@ fn init_creates_gitignore_when_missing() {
     cli::init::run(dir.path()).unwrap();
 
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-    assert_eq!(gitignore, "# esk\n.esk/\n");
+    assert_eq!(
+        gitignore,
+        "# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/sync-index.json\n.esk/plugin-index.json\n"
+    );
 }
 
 // === get ===
