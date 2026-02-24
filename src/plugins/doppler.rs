@@ -156,47 +156,17 @@ impl<'a> StoragePlugin for DopplerPlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput};
-    use std::sync::Mutex;
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
-    struct RecordedCall {
-        program: String,
-        args: Vec<String>,
-        stdin: Option<Vec<u8>>,
-    }
+    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    struct MockRunner {
-        calls: Mutex<Vec<RecordedCall>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
-
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(&self, program: &str, args: &[&str], opts: CommandOpts) -> Result<CommandOutput> {
-            self.calls.lock().unwrap().push(RecordedCall {
-                program: program.to_string(),
-                args: args.iter().map(|s| s.to_string()).collect(),
-                stdin: opts.stdin,
-            });
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .calls()
+            .into_iter()
+            .map(|call| (call.program, call.args, call.stdin))
+            .collect()
     }
 
     fn make_config(yaml: &str) -> Config {
@@ -238,7 +208,7 @@ plugins:
     fn config_name_resolution() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
         assert_eq!(plugin.config_name("dev").unwrap(), "dev_config");
         assert_eq!(plugin.config_name("prod").unwrap(), "prd");
@@ -248,7 +218,7 @@ plugins:
     fn config_name_missing_env() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
         let err = plugin.config_name("staging").unwrap_err();
         assert!(err.to_string().contains("staging"));
@@ -258,7 +228,7 @@ plugins:
     fn preflight_success() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"v3.60.0".to_vec(),
@@ -272,24 +242,18 @@ plugins:
         ]);
         let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].args, vec!["--version"]);
-        assert_eq!(calls[1].args, vec!["me"]);
+        assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[1].1, vec!["me"]);
     }
 
     #[test]
     fn preflight_missing_doppler() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-        let plugin = DopplerPlugin::new(&config, plugin_config, &FailRunner);
+        let runner = ErrorCommandRunner::missing_command();
+        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("Doppler CLI"));
         assert!(err.to_string().contains("not installed"));
@@ -299,7 +263,7 @@ plugins:
     fn preflight_auth_failure() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"v3.60.0".to_vec(),
@@ -320,7 +284,7 @@ plugins:
     fn push_uploads_via_stdin() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: Vec::new(),
             stderr: Vec::new(),
@@ -329,12 +293,12 @@ plugins:
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
         let call = &calls[0];
-        assert_eq!(call.program, "doppler");
+        assert_eq!(call.0, "doppler");
         assert_eq!(
-            call.args,
+            call.1,
             vec![
                 "secrets",
                 "upload",
@@ -348,7 +312,7 @@ plugins:
         );
 
         // Verify secrets are passed via stdin, not in args
-        let stdin = call.stdin.as_ref().expect("stdin should be set");
+        let stdin = call.2.as_ref().expect("stdin should be set");
         let parsed: BTreeMap<String, String> = serde_json::from_slice(stdin).unwrap();
         assert_eq!(parsed.get("API_KEY").unwrap(), "sk_test");
         assert_eq!(parsed.get("DB_URL").unwrap(), "pg://");
@@ -359,12 +323,12 @@ plugins:
     fn push_skips_empty_env() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert!(calls.is_empty());
     }
 
@@ -377,7 +341,7 @@ plugins:
             "DB_URL": "postgres://localhost",
             "_ESK_VERSION": "7"
         });
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: serde_json::to_vec(&json).unwrap(),
             stderr: Vec::new(),
@@ -397,7 +361,7 @@ plugins:
     fn pull_not_found_returns_none() {
         let config = make_config(doppler_yaml());
         let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: Vec::new(),
             stderr: b"config not found".to_vec(),

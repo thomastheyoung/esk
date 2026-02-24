@@ -275,6 +275,7 @@ pub fn build_plugins<'a>(
 mod tests {
     use super::*;
     use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::test_support::ErrorCommandRunner;
 
     struct DummyRunner;
     impl CommandRunner for DummyRunner {
@@ -396,14 +397,8 @@ plugins:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
 
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("not found")
-            }
-        }
-
-        let plugins = build_plugins(&config, &FailRunner);
+        let runner = ErrorCommandRunner::new("not found");
+        let plugins = build_plugins(&config, &runner);
         // onepassword fails preflight, cloud_file with existing dir passes
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name(), "testcloud");
@@ -465,14 +460,8 @@ plugins:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
 
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("op not found")
-            }
-        }
-
-        let health = check_plugin_health(&config, &FailRunner);
+        let runner = ErrorCommandRunner::new("op not found");
+        let health = check_plugin_health(&config, &runner);
         assert_eq!(health.len(), 1);
         assert!(!health[0].ok);
         assert!(health[0].message.contains("op) is not installed"));

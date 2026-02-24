@@ -229,8 +229,18 @@ impl<'a> StoragePlugin for AwsSecretsManagerPlugin<'a> {
 mod tests {
     use super::*;
     use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
-    use std::sync::Mutex;
+
+    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
+
+    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .calls()
+            .into_iter()
+            .map(|call| (call.program, call.args, call.stdin))
+            .collect()
+    }
 
     #[test]
     fn secret_name_substitution() {
@@ -345,28 +355,21 @@ plugins:
         let plugin_config: AwsSecretsManagerPluginConfig =
             config.plugin_config("aws_secrets_manager").unwrap();
 
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: b"{}".to_vec(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"{}".to_vec(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"{}".to_vec(),
+                stderr: Vec::new(),
+            },
+        ]);
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert_eq!(calls[1].1, vec!["sts", "get-caller-identity"]);
@@ -388,13 +391,7 @@ plugins:
         let plugin_config: AwsSecretsManagerPluginConfig =
             config.plugin_config("aws_secrets_manager").unwrap();
 
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-        let runner = FailRunner;
+        let runner = ErrorCommandRunner::missing_command();
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
@@ -416,33 +413,18 @@ plugins:
         let plugin_config: AwsSecretsManagerPluginConfig =
             config.plugin_config("aws_secrets_manager").unwrap();
 
-        struct MockRunner {
-            call_count: Mutex<usize>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                let mut count = self.call_count.lock().unwrap();
-                *count += 1;
-                if *count == 1 {
-                    // --version succeeds
-                    Ok(CommandOutput {
-                        success: true,
-                        stdout: b"aws-cli/2.0.0".to_vec(),
-                        stderr: Vec::new(),
-                    })
-                } else {
-                    // sts get-caller-identity fails
-                    Ok(CommandOutput {
-                        success: false,
-                        stdout: Vec::new(),
-                        stderr: b"Unable to locate credentials".to_vec(),
-                    })
-                }
-            }
-        }
-        let runner = MockRunner {
-            call_count: Mutex::new(0),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"aws-cli/2.0.0".to_vec(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"Unable to locate credentials".to_vec(),
+            },
+        ]);
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS authentication failed"));
@@ -465,40 +447,20 @@ plugins:
         let plugin_config: AwsSecretsManagerPluginConfig =
             config.plugin_config("aws_secrets_manager").unwrap();
 
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-            call_count: Mutex<usize>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                let mut count = self.call_count.lock().unwrap();
-                *count += 1;
-                if *count == 1 {
-                    // put-secret-value fails with ResourceNotFoundException
-                    Ok(CommandOutput {
-                        success: false,
-                        stdout: Vec::new(),
-                        stderr: b"ResourceNotFoundException: Secrets Manager can't find the specified secret."
-                            .to_vec(),
-                    })
-                } else {
-                    // create-secret succeeds
-                    Ok(CommandOutput {
-                        success: true,
-                        stdout: b"{}".to_vec(),
-                        stderr: Vec::new(),
-                    })
-                }
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-            call_count: Mutex::new(0),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr:
+                    b"ResourceNotFoundException: Secrets Manager can't find the specified secret."
+                        .to_vec(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"{}".to_vec(),
+                stderr: Vec::new(),
+            },
+        ]);
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -512,7 +474,7 @@ plugins:
 
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         // First call: put-secret-value
         assert!(calls[0].1.contains(&"put-secret-value".to_string()));
@@ -538,25 +500,11 @@ plugins:
         let plugin_config: AwsSecretsManagerPluginConfig =
             config.plugin_config("aws_secrets_manager").unwrap();
 
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: b"{}".to_vec(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: b"{}".to_vec(),
+            stderr: Vec::new(),
+        }]);
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
 
         let mut secrets = BTreeMap::new();
@@ -570,7 +518,7 @@ plugins:
 
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
         assert!(calls[0].1.contains(&"put-secret-value".to_string()));
     }
@@ -591,25 +539,7 @@ plugins:
         let plugin_config: AwsSecretsManagerPluginConfig =
             config.plugin_config("aws_secrets_manager").unwrap();
 
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
 
         // Only prod secrets, push for dev -> should skip
@@ -623,7 +553,7 @@ plugins:
         };
 
         plugin.push(&payload, &config, "dev").unwrap();
-        assert!(runner.calls.lock().unwrap().is_empty());
+        assert!(calls(&runner).is_empty());
     }
 
     #[test]
@@ -659,21 +589,11 @@ plugins:
             "Name": "myapp/dev",
         });
 
-        struct MockRunner {
-            response: Vec<u8>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: self.response.clone(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            response: serde_json::to_vec(&aws_response).unwrap(),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&aws_response).unwrap(),
+            stderr: Vec::new(),
+        }]);
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
@@ -698,18 +618,12 @@ plugins:
         let plugin_config: AwsSecretsManagerPluginConfig =
             config.plugin_config("aws_secrets_manager").unwrap();
 
-        struct MockRunner;
-        impl CommandRunner for MockRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput {
-                    success: false,
-                    stdout: Vec::new(),
-                    stderr: b"ResourceNotFoundException: Secrets Manager can't find the specified secret."
-                        .to_vec(),
-                })
-            }
-        }
-        let runner = MockRunner;
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: false,
+            stdout: Vec::new(),
+            stderr: b"ResourceNotFoundException: Secrets Manager can't find the specified secret."
+                .to_vec(),
+        }]);
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
 
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
@@ -731,24 +645,11 @@ plugins:
         let plugin_config: AwsSecretsManagerPluginConfig =
             config.plugin_config("aws_secrets_manager").unwrap();
 
-        struct MockRunner {
-            stdin_data: Mutex<Vec<Vec<u8>>>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, _: &str, _: &[&str], opts: CommandOpts) -> Result<CommandOutput> {
-                if let Some(stdin) = opts.stdin {
-                    self.stdin_data.lock().unwrap().push(stdin);
-                }
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: b"{}".to_vec(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            stdin_data: Mutex::new(Vec::new()),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: b"{}".to_vec(),
+            stderr: Vec::new(),
+        }]);
         let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
 
         let mut env_versions = BTreeMap::new();
@@ -764,9 +665,9 @@ plugins:
 
         plugin.push(&payload, &config, "dev").unwrap();
 
-        let stdin_data = runner.stdin_data.lock().unwrap();
-        assert_eq!(stdin_data.len(), 1);
-        let pushed: StorePayload = serde_json::from_slice(&stdin_data[0]).unwrap();
+        let calls = calls(&runner);
+        assert_eq!(calls.len(), 1);
+        let pushed: StorePayload = serde_json::from_slice(calls[0].2.as_ref().unwrap()).unwrap();
         assert_eq!(pushed.version, 10);
         assert!(pushed.secrets.contains_key("KEY"));
         assert!(!pushed.secrets.contains_key("KEY:dev"));

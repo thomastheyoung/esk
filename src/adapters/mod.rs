@@ -405,6 +405,7 @@ pub fn build_sync_adapters<'a>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::test_support::ErrorCommandRunner;
 
     struct TestAdapter {
         fail_keys: Vec<String>,
@@ -489,13 +490,8 @@ mod tests {
 
     #[test]
     fn check_command_missing() {
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-        let err = check_command(&FailRunner, "missing-tool").unwrap_err();
+        let runner = ErrorCommandRunner::missing_command();
+        let err = check_command(&runner, "missing-tool").unwrap_err();
         assert!(err.to_string().contains("missing-tool is not installed"));
     }
 
@@ -519,14 +515,8 @@ adapters:
         std::fs::write(&path, yaml).unwrap();
         let config = crate::config::Config::load(&path).unwrap();
 
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("not found")
-            }
-        }
-
-        let adapters = build_sync_adapters(&config, &FailRunner);
+        let runner = ErrorCommandRunner::new("not found");
+        let adapters = build_sync_adapters(&config, &runner);
         // env adapter has no preflight check, so it passes; cloudflare fails
         assert_eq!(adapters.len(), 1);
         assert_eq!(adapters[0].name(), "env");
@@ -589,14 +579,8 @@ adapters:
         std::fs::write(&path, yaml).unwrap();
         let config = crate::config::Config::load(&path).unwrap();
 
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("not found")
-            }
-        }
-
-        let health = check_adapter_health(&config, &FailRunner);
+        let runner = ErrorCommandRunner::new("not found");
+        let health = check_adapter_health(&config, &runner);
         assert_eq!(health.len(), 2);
         assert!(health[0].ok); // env always ok
         assert!(!health[1].ok); // cloudflare fails

@@ -307,7 +307,19 @@ impl OpItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
+
+    type RunnerCall = (String, Vec<String>);
+
+    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .calls()
+            .into_iter()
+            .map(|call| (call.program, call.args))
+            .collect()
+    }
 
     #[test]
     fn op_item_from_json_parses_secrets() {
@@ -429,30 +441,21 @@ plugins:
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
-        use std::sync::Mutex;
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: b"{}".to_vec(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"{}".to_vec(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: b"{}".to_vec(),
+                stderr: Vec::new(),
+            },
+        ]);
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
         assert!(plugin.preflight().is_ok());
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert_eq!(calls[1].1, vec!["vault", "get", "V", "--format", "json"]);
@@ -474,35 +477,18 @@ plugins:
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
-        use std::sync::Mutex;
-        struct MockRunner {
-            call_count: Mutex<usize>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                let mut count = self.call_count.lock().unwrap();
-                *count += 1;
-                if *count == 1 {
-                    // --version succeeds
-                    Ok(CommandOutput {
-                        success: true,
-                        stdout: b"2.0.0".to_vec(),
-                        stderr: Vec::new(),
-                    })
-                } else {
-                    // vault get fails
-                    Ok(CommandOutput {
-                        success: false,
-                        stdout: Vec::new(),
-                        stderr: b"vault not found".to_vec(),
-                    })
-                }
-            }
-        }
-        let runner = MockRunner {
-            call_count: Mutex::new(0),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: b"2.0.0".to_vec(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"vault not found".to_vec(),
+            },
+        ]);
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err
@@ -527,14 +513,7 @@ plugins:
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
-        let runner = FailRunner;
+        let runner = ErrorCommandRunner::missing_command();
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err
@@ -675,36 +654,26 @@ secrets:
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
-        use std::sync::Mutex;
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                // Return existing item with A, B, C fields
-                let json = json!({
-                    "fields": [
-                        {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
-                        {"section": {"label": "AWS"}, "label": "SECRET", "value": "old"},
-                        {"section": {"label": "Vendor"}, "label": "STALE_KEY", "value": "old"},
-                        {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
-                    ]
-                });
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: serde_json::to_vec(&json).unwrap(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-        };
+        let json = json!({
+            "fields": [
+                {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
+                {"section": {"label": "AWS"}, "label": "SECRET", "value": "old"},
+                {"section": {"label": "Vendor"}, "label": "STALE_KEY", "value": "old"},
+                {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
+            ]
+        });
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&json).unwrap(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&json).unwrap(),
+                stderr: Vec::new(),
+            },
+        ]);
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
 
         // Push only API_KEY and SECRET (not STALE_KEY)
@@ -713,7 +682,7 @@ secrets:
         secrets.insert("SECRET".to_string(), "new_val".to_string());
         plugin.push_item("dev", &secrets, 2).unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         // Last call is op item edit
         let edit_call = calls.last().unwrap();
         let args_str = edit_call.1.join(" ");
@@ -740,40 +709,31 @@ secrets:
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
-        use std::sync::Mutex;
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                let json = json!({
-                    "fields": [
-                        {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
-                        {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
-                    ]
-                });
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: serde_json::to_vec(&json).unwrap(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-        };
+        let json = json!({
+            "fields": [
+                {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
+                {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
+            ]
+        });
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&json).unwrap(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&json).unwrap(),
+                stderr: Vec::new(),
+            },
+        ]);
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "new_val".to_string());
         plugin.push_item("dev", &secrets, 2).unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         let edit_call = calls.last().unwrap();
         let args_str = edit_call.1.join(" ");
         assert!(!args_str.contains("[delete]"));
@@ -795,40 +755,31 @@ plugins:
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
-        use std::sync::Mutex;
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                let json = json!({
-                    "fields": [
-                        {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
-                        {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
-                    ]
-                });
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: serde_json::to_vec(&json).unwrap(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-        };
+        let json = json!({
+            "fields": [
+                {"section": {"label": "Stripe"}, "label": "API_KEY", "value": "old"},
+                {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
+            ]
+        });
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&json).unwrap(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&json).unwrap(),
+                stderr: Vec::new(),
+            },
+        ]);
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
 
         // Push with no secrets — API_KEY becomes stale
         let secrets = BTreeMap::new();
         plugin.push_item("dev", &secrets, 2).unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         let edit_call = calls.last().unwrap();
         let args_str = edit_call.1.join(" ");
         // Should use "Stripe" section from remote, not "General"
@@ -852,48 +803,25 @@ plugins:
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_plugin_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
-        use std::sync::Mutex;
-        struct MockRunner {
-            calls: Mutex<Vec<(String, Vec<String>)>>,
-            call_count: Mutex<usize>,
-        }
-        impl CommandRunner for MockRunner {
-            fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                ));
-                let mut count = self.call_count.lock().unwrap();
-                *count += 1;
-                if *count == 1 {
-                    // get_item returns "not found"
-                    Ok(CommandOutput {
-                        success: false,
-                        stdout: Vec::new(),
-                        stderr: b"isn't an item".to_vec(),
-                    })
-                } else {
-                    // create succeeds
-                    Ok(CommandOutput {
-                        success: true,
-                        stdout: Vec::new(),
-                        stderr: Vec::new(),
-                    })
-                }
-            }
-        }
-        let runner = MockRunner {
-            calls: Mutex::new(Vec::new()),
-            call_count: Mutex::new(0),
-        };
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"isn't an item".to_vec(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        ]);
         let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "val".to_string());
         plugin.push_item("dev", &secrets, 1).unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = calls(&runner);
         // Second call is op item create
         let create_call = &calls[1];
         let args_str = create_call.1.join(" ");

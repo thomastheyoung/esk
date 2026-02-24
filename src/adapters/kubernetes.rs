@@ -196,51 +196,17 @@ impl<'a> SyncAdapter for KubernetesAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
-    use std::sync::Mutex;
+    use crate::adapters::CommandOutput;
+    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    struct MockRunner {
-        calls: Mutex<Vec<RunnerCall>>,
-        responses: Mutex<Vec<CommandOutput>>,
-    }
-
-    impl MockRunner {
-        fn new(responses: Vec<CommandOutput>) -> Self {
-            Self {
-                calls: Mutex::new(Vec::new()),
-                responses: Mutex::new(responses),
-            }
-        }
-        fn take_calls(&self) -> Vec<RunnerCall> {
-            std::mem::take(&mut *self.calls.lock().unwrap())
-        }
-    }
-
-    impl CommandRunner for MockRunner {
-        fn run(
-            &self,
-            program: &str,
-            args: &[&str],
-            opts: CommandOpts,
-        ) -> anyhow::Result<CommandOutput> {
-            self.calls.lock().unwrap().push((
-                program.to_string(),
-                args.iter().map(|s| s.to_string()).collect(),
-                opts.stdin,
-            ));
-            let mut responses = self.responses.lock().unwrap();
-            if responses.is_empty() {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            } else {
-                Ok(responses.remove(0))
-            }
-        }
+    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
+        runner
+            .take_calls()
+            .into_iter()
+            .map(|call| (call.program, call.args, call.stdin))
+            .collect()
     }
 
     fn make_config(dir: &std::path::Path) -> Config {
@@ -283,7 +249,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"1.28.0".to_vec(),
@@ -301,7 +267,7 @@ adapters:
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert_eq!(calls[1].1, vec!["cluster-info"]);
@@ -312,7 +278,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let runner = MockRunner::new(vec![
+        let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
                 stdout: b"1.28.0".to_vec(),
@@ -338,16 +304,11 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        struct FailRunner;
-        impl CommandRunner for FailRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
-                anyhow::bail!("No such file or directory")
-            }
-        }
+        let runner = ErrorCommandRunner::missing_command();
         let adapter = KubernetesAdapter {
             config: &config,
             adapter_config,
-            runner: &FailRunner,
+            runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
         assert!(err.to_string().contains("kubectl is not installed"));
@@ -358,7 +319,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -376,7 +337,7 @@ adapters:
         let results = adapter.sync_batch(&secrets, &make_target("dev"));
         assert!(results.iter().all(|r| r.success));
 
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "kubectl");
         assert_eq!(calls[0].1, vec!["apply", "-f", "-"]);
 
@@ -395,7 +356,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
@@ -409,7 +370,7 @@ adapters:
         let secrets = vec![make_secret("KEY", "val")];
         adapter.sync_batch(&secrets, &make_target("prod"));
 
-        let calls = runner.take_calls();
+        let calls = take_calls(&runner);
         assert!(calls[0].1.contains(&"--context".to_string()));
         assert!(calls[0].1.contains(&"prod-cluster".to_string()));
         assert!(calls[0].1.contains(&"--dry-run=client".to_string()));
@@ -420,7 +381,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"forbidden".to_vec(),
@@ -442,7 +403,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let runner = MockRunner::new(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]);
         let adapter = KubernetesAdapter {
             config: &config,
             adapter_config,
@@ -467,7 +428,7 @@ adapters:
         let adapter = KubernetesAdapter {
             config: &config,
             adapter_config,
-            runner: &MockRunner::new(vec![]),
+            runner: &MockCommandRunner::from_outputs(vec![]),
         };
         assert_eq!(adapter.secret_name(), "myapp-secrets");
     }
@@ -491,7 +452,7 @@ adapters:
         let adapter = KubernetesAdapter {
             config: &config,
             adapter_config,
-            runner: &MockRunner::new(vec![]),
+            runner: &MockCommandRunner::from_outputs(vec![]),
         };
         assert_eq!(adapter.secret_name(), "custom-secret");
     }
@@ -540,7 +501,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let runner = MockRunner::new(vec![CommandOutput {
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
