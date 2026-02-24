@@ -11,14 +11,6 @@ use crate::reconcile;
 use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
 
-fn env_payload_version(payload: &StorePayload, env: &str) -> u64 {
-    match payload.env_versions.get(env).copied() {
-        Some(v) => v,
-        None if payload.env_versions.is_empty() => payload.version,
-        None => 0,
-    }
-}
-
 /// Push a payload to the given plugins, recording results in the plugin index.
 /// Returns the number of failures.
 pub fn push_to_plugins(
@@ -29,7 +21,7 @@ pub fn push_to_plugins(
     plugin_index: &mut PluginIndex,
 ) -> Result<u32> {
     let mut fail_count = 0u32;
-    let pushed_version = env_payload_version(payload, env);
+    let pushed_version = payload.env_version(env);
 
     for plugin in plugins {
         let spinner = cliclack::spinner();
@@ -246,7 +238,7 @@ pub fn run_with_runner(
                 result.merged_payload.version
             ))?;
         } else if result.sources_to_update.is_empty() {
-            let current = env_payload_version(&payload, env);
+            let current = payload.env_version(env);
             cliclack::log::info(format!("Up to date — already in sync (v{current})"))?;
         }
 
@@ -257,7 +249,7 @@ pub fn run_with_runner(
                 result.sources_to_update.join(", ")
             ))?;
             if !result.local_changed {
-                let current = env_payload_version(&payload, env);
+                let current = payload.env_version(env);
                 cliclack::log::info(format!(
                     "Local store is current (v{current}); this would repair remote drift."
                 ))?;
@@ -273,7 +265,7 @@ pub fn run_with_runner(
             result.merged_payload.version
         ))?;
     } else {
-        let current = env_payload_version(&payload, env);
+        let current = payload.env_version(env);
         if result.sources_to_update.is_empty() {
             cliclack::log::success(format!("Up to date — already in sync (v{current})"))?;
         } else {
@@ -297,7 +289,7 @@ pub fn run_with_runner(
             .iter()
             .filter(|p| result.sources_to_update.contains(&p.name().to_string()))
             .collect();
-        let pushed_version = env_payload_version(updated_payload, env);
+        let pushed_version = updated_payload.env_version(env);
 
         let mut pushback_failures = 0u32;
         for plugin in &stale_plugins {

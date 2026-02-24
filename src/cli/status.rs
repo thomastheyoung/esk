@@ -248,7 +248,7 @@ impl Dashboard {
         let mut plugin_states = Vec::new();
         for plugin_name in &plugin_names {
             for &env_name in &envs {
-                let local_version = local_env_version(&payload, env_name);
+                let local_version = payload.env_version(env_name);
                 let key = PluginIndex::tracker_key(plugin_name, env_name);
                 let status = match plugin_index.records.get(&key) {
                     Some(record) if record.last_push_status == PushStatus::Failed => {
@@ -682,14 +682,6 @@ fn format_target(target: &ResolvedTarget) -> String {
         s.push_str(app);
     }
     s
-}
-
-fn local_env_version(payload: &StorePayload, env: &str) -> u64 {
-    match payload.env_versions.get(env).copied() {
-        Some(v) => v,
-        None if payload.env_versions.is_empty() => payload.version,
-        None => 0,
-    }
 }
 
 /// Convert an RFC3339 timestamp to a human-readable relative time string.

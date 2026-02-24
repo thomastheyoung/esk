@@ -83,6 +83,21 @@ pub struct StorePayload {
     pub env_versions: BTreeMap<String, u64>,
 }
 
+impl StorePayload {
+    /// Returns the effective version for a given environment.
+    ///
+    /// If the environment has a per-env version, returns that. If no per-env
+    /// versions exist at all (pre-env-versioning store), falls back to the
+    /// global version. Otherwise the environment is unknown and returns 0.
+    pub fn env_version(&self, env: &str) -> u64 {
+        match self.env_versions.get(env).copied() {
+            Some(v) => v,
+            None if self.env_versions.is_empty() => self.version,
+            None => 0,
+        }
+    }
+}
+
 impl std::fmt::Debug for StorePayload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StorePayload")
@@ -1069,5 +1084,40 @@ mod tests {
             Some("🔐🔑✨".to_string())
         );
         assert_eq!(store.get("CJK", "dev").unwrap(), Some("秘密鍵".to_string()));
+    }
+
+    #[test]
+    fn env_version_returns_per_env_version() {
+        let mut payload = StorePayload {
+            secrets: BTreeMap::new(),
+            version: 10,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
+        };
+        payload.env_versions.insert("dev".to_string(), 3);
+        assert_eq!(payload.env_version("dev"), 3);
+    }
+
+    #[test]
+    fn env_version_falls_back_to_global_when_no_env_versions() {
+        let payload = StorePayload {
+            secrets: BTreeMap::new(),
+            version: 7,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
+        };
+        assert_eq!(payload.env_version("dev"), 7);
+    }
+
+    #[test]
+    fn env_version_returns_zero_for_unknown_env() {
+        let mut payload = StorePayload {
+            secrets: BTreeMap::new(),
+            version: 10,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
+        };
+        payload.env_versions.insert("dev".to_string(), 3);
+        assert_eq!(payload.env_version("prod"), 0);
     }
 }

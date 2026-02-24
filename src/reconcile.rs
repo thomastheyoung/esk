@@ -45,12 +45,7 @@ pub fn reconcile(
 ) -> Result<ReconcileResult> {
     let local_env_secrets = extract_env_secrets(&local.secrets, env);
 
-    // Use env-specific version when available, fall back to global
-    let local_version = local
-        .env_versions
-        .get(env)
-        .copied()
-        .unwrap_or(local.version);
+    let local_version = local.env_version(env);
 
     // Version jump protection
     if remote_version > local_version {
@@ -221,10 +216,10 @@ pub fn reconcile_multi(
     remotes: &[(&str, &BTreeMap<String, String>, u64)], // (name, composite_secrets, version)
     env: Option<&str>,
 ) -> Result<MultiReconcileResult> {
-    // Use env-specific local version when available
-    let local_version = env
-        .and_then(|e| local.env_versions.get(e).copied())
-        .unwrap_or(local.version);
+    let local_version = match env {
+        Some(e) => local.env_version(e),
+        None => local.version,
+    };
 
     // Find the max version across local and all remotes
     let mut max_version = local_version;
@@ -843,5 +838,37 @@ mod tests {
         .unwrap_err();
         assert!(err.to_string().contains("version jump too large"));
         assert!(err.to_string().contains("evil"));
+    }
+
+    #[test]
+    fn reconcile_unknown_env_with_existing_env_versions_pulls_remote() {
+        // Local has env_versions for dev/staging but not prod
+        let mut local = make_payload(&[], 5);
+        local.env_versions.insert("dev".to_string(), 5);
+        local.env_versions.insert("staging".to_string(), 3);
+
+        // Teammate pushed prod secrets at v2
+        let remote = make_remote(&[("DB_URL", "postgres://prod")]);
+        let result = reconcile(&local, &remote, 2, "prod").unwrap();
+
+        // prod has no env version -> 0, so remote v2 wins
+        assert!(matches!(result.action, ReconcileAction::PullRemote));
+        assert_eq!(result.pulled, vec!["DB_URL"]);
+    }
+
+    #[test]
+    fn reconcile_multi_unknown_env_with_existing_env_versions_pulls_remote() {
+        // Local has env_versions for dev but not prod
+        let mut local = make_payload(&[], 5);
+        local.env_versions.insert("dev".to_string(), 5);
+
+        // Remote plugin has prod secrets at v2
+        let remote = make_remote(&[("DB_URL", "postgres://prod")]);
+        let result =
+            reconcile_multi(&local, &[("plugin1", &remote, 2)], Some("prod")).unwrap();
+
+        // prod has no env version -> 0, so remote v2 is newer
+        assert!(result.local_changed);
+        assert!(result.merged_payload.secrets.contains_key("DB_URL:prod"));
     }
 }
