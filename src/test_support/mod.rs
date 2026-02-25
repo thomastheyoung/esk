@@ -20,7 +20,7 @@ enum QueuedResponse {
     Error(String),
 }
 
-/// Shared command runner test double for adapter and plugin unit tests.
+/// Shared command runner test double for target and remote unit tests.
 pub struct MockCommandRunner {
     calls: Mutex<Vec<RecordedCall>>,
     responses: Mutex<Vec<QueuedResponse>>,

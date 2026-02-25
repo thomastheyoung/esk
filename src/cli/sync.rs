@@ -40,7 +40,7 @@ fn format_sync_line(label: &str, value: &str, value_column: usize) -> String {
     format!("{} {} {}", label, style(dots).dim(), value)
 }
 
-/// Push a payload to the given plugins, recording results in the remote index.
+/// Push a payload to the given remotes, recording results in the remote index.
 /// Returns the number of failures.
 pub fn push_to_remotes(
     remotes: &[Box<dyn SyncRemote + '_>],
@@ -52,22 +52,22 @@ pub fn push_to_remotes(
     let mut fail_count = 0u32;
     let pushed_version = payload.env_version(env);
 
-    for plugin in remotes {
+    for rem in remotes {
         let spinner = cliclack::spinner();
-        spinner.start(format!("↑ {}...", plugin.name()));
+        spinner.start(format!("↑ {}...", rem.name()));
 
-        match plugin.push(payload, config, env) {
+        match rem.push(payload, config, env) {
             Ok(()) => {
-                spinner.stop(format!("↑ {}  {}", plugin.name(), style("done").green()));
-                remote_index.record_success(plugin.name(), env, pushed_version);
+                spinner.stop(format!("↑ {}  {}", rem.name(), style("done").green()));
+                remote_index.record_success(rem.name(), env, pushed_version);
             }
             Err(e) => {
                 spinner.error(format!(
                     "↑ {}  {} — {e}",
-                    plugin.name(),
+                    rem.name(),
                     style("failed").red()
                 ));
-                remote_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
+                remote_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                 fail_count += 1;
             }
         }
@@ -188,41 +188,41 @@ pub fn run_with_runner(
     let mut lines = Vec::new();
     let value_column = 24;
 
-    // Pull from all target plugins
+    // Pull from all target remotes
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
     let mut pull_failures: Vec<String> = Vec::new();
 
-    for plugin in &target_remotes {
-        match plugin.pull(config, env) {
+    for rem in &target_remotes {
+        match rem.pull(config, env) {
             Ok(Some((secrets, version))) => {
                 lines.push(format_sync_line(
-                    &format!("↓ {}", plugin.name()),
+                    &format!("↓ {}", rem.name()),
                     &format!("v{}, {} secrets", version, secrets.len()),
                     value_column,
                 ));
-                remote_data.push((plugin.name().to_string(), secrets, version));
+                remote_data.push((rem.name().to_string(), secrets, version));
             }
             Ok(None) => {
                 lines.push(format_sync_line(
-                    &format!("↓ {}", plugin.name()),
+                    &format!("↓ {}", rem.name()),
                     &style("no data").dim().to_string(),
                     value_column,
                 ));
             }
             Err(_) => {
                 lines.push(format_sync_line(
-                    &format!("↓ {}", plugin.name()),
+                    &format!("↓ {}", rem.name()),
                     &style("failed").red().to_string(),
                     value_column,
                 ));
-                pull_failures.push(plugin.name().to_string());
+                pull_failures.push(rem.name().to_string());
             }
         }
     }
 
     if !pull_failures.is_empty() && no_partial {
         bail!(
-            "{} plugin(s) failed to respond: {}. Use without --no-partial to reconcile with partial data.",
+            "{} remote(s) failed to respond: {}. Use without --no-partial to reconcile with partial data.",
             pull_failures.len(),
             pull_failures.join(", ")
         );
@@ -251,7 +251,7 @@ pub fn run_with_runner(
             if std::io::stdin().is_terminal() {
                 cliclack::log::warning(format!("{e}"))?;
                 let accept = cliclack::confirm(
-                    "Accept the large version jump? This may indicate a compromised plugin.",
+                    "Accept the large version jump? This may indicate a compromised remote.",
                 )
                 .initial_value(false)
                 .interact()?;
@@ -314,13 +314,13 @@ pub fn run_with_runner(
     } else {
         let label = env_version_label(&payload, env);
         if result.has_drift {
-            status_line = format!("{} Stale plugins (repairing...)", style("↻").yellow());
+            status_line = format!("{} Stale remotes (repairing...)", style("↻").yellow());
         } else {
             status_line = format!("{} Up to date → {}", style("✔").green(), label);
         }
     }
 
-    // Push merged/current result back to stale plugins (no interactive prompt)
+    // Push merged/current result back to stale remotes (no interactive prompt)
     if !result.sources_to_update.is_empty() {
         let updated_payload = if result.local_changed {
             &result.merged_payload
@@ -337,23 +337,23 @@ pub fn run_with_runner(
         let pushed_version = updated_payload.env_version(env);
 
         let mut pushback_failures = 0u32;
-        for plugin in &stale_remotes {
-            match plugin.push(updated_payload, config, env) {
+        for rem in &stale_remotes {
+            match rem.push(updated_payload, config, env) {
                 Ok(()) => {
                     lines.push(format_sync_line(
-                        &format!("↑ {}", plugin.name()),
+                        &format!("↑ {}", rem.name()),
                         &style("synced").green().to_string(),
                         value_column,
                     ));
-                    remote_index.record_success(plugin.name(), env, pushed_version);
+                    remote_index.record_success(rem.name(), env, pushed_version);
                 }
                 Err(e) => {
                     lines.push(format_sync_line(
-                        &format!("↑ {}", plugin.name()),
+                        &format!("↑ {}", rem.name()),
                         &style("failed").red().to_string(),
                         value_column,
                     ));
-                    remote_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
+                    remote_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                     pushback_failures += 1;
                 }
             }
@@ -364,7 +364,7 @@ pub fn run_with_runner(
             lines.push(status_line);
             cliclack::note(env, lines.join("\n"))?;
             bail!(
-                "{pushback_failures} plugin(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
+                "{pushback_failures} remote(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
             );
         }
     }

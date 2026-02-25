@@ -17,7 +17,7 @@ apps:
   api:
     path: apps/api
 
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -37,7 +37,7 @@ adapters:
       web: demo-web
       api: demo-api
 
-plugins:
+remotes:
   1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"

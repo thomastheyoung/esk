@@ -10,13 +10,13 @@ pub enum ConflictPreference {
     /// Local store is source-of-truth at equal version (default)
     #[default]
     Local,
-    /// Remote plugin is source-of-truth at equal version
+    /// Remote is source-of-truth at equal version
     Remote,
 }
 
 /// Maximum allowed version jump from local to remote. If a remote version
 /// exceeds local by more than this, reconciliation fails to prevent a
-/// compromised plugin from overwriting all local secrets.
+/// compromised remote from overwriting all local secrets.
 pub const MAX_VERSION_JUMP: u64 = 1000;
 
 #[derive(Debug, Error)]
@@ -24,7 +24,7 @@ pub enum ReconcileError {
     #[error(
         "version jump too large: remote version {remote_version} exceeds local \
          {local_version} by {jump} (max allowed: {max_allowed_jump}). \
-         This may indicate a compromised plugin."
+         This may indicate a compromised remote."
     )]
     VersionJump {
         local_version: u64,
@@ -33,12 +33,12 @@ pub enum ReconcileError {
         max_allowed_jump: u64,
     },
     #[error(
-        "version jump too large: plugin '{plugin}' reports version {remote_version} \
+        "version jump too large: remote '{remote}' reports version {remote_version} \
          (local is {local_version}, jump of {jump}). Max allowed: {max_allowed_jump}. \
-         This may indicate a compromised plugin."
+         This may indicate a compromised remote."
     )]
-    PluginVersionJump {
-        plugin: String,
+    RemoteVersionJump {
+        remote: String,
         local_version: u64,
         remote_version: u64,
         jump: u64,
@@ -50,7 +50,7 @@ pub fn is_version_jump_error(err: &anyhow::Error) -> bool {
     err.downcast_ref::<ReconcileError>().is_some_and(|e| {
         matches!(
             e,
-            ReconcileError::VersionJump { .. } | ReconcileError::PluginVersionJump { .. }
+            ReconcileError::VersionJump { .. } | ReconcileError::RemoteVersionJump { .. }
         )
     })
 }
@@ -312,8 +312,8 @@ pub fn reconcile_multi_with_jump_limit(
         if enforce_jump_limit && *version > local_version {
             let jump = *version - local_version;
             if jump > MAX_VERSION_JUMP {
-                return Err(ReconcileError::PluginVersionJump {
-                    plugin: (*name).to_string(),
+                return Err(ReconcileError::RemoteVersionJump {
+                    remote: (*name).to_string(),
                     local_version,
                     remote_version: *version,
                     jump,
@@ -410,7 +410,7 @@ pub fn reconcile_multi_with_jump_limit(
                     let names: Vec<_> = drifted_remotes.iter().map(|(n, _, _)| *n).collect();
                     bail!(
                         "multiple remotes disagree at equal version v{final_version}: {}. \
-                         Use --only <plugin> to choose which remote to prefer.",
+                         Use --only <remote> to choose which remote to prefer.",
                         names.join(", ")
                     );
                 }
@@ -1056,13 +1056,13 @@ mod tests {
         let remote = make_composite(&[("A:dev", "a")]);
         let err = reconcile_multi(
             &local,
-            &[("bad_plugin", &remote, MAX_VERSION_JUMP + 1)],
+            &[("bad_remote", &remote, MAX_VERSION_JUMP + 1)],
             None,
             ConflictPreference::Local,
         )
         .unwrap_err();
         assert!(err.to_string().contains("version jump too large"));
-        assert!(err.to_string().contains("bad_plugin"));
+        assert!(err.to_string().contains("bad_remote"));
         assert!(is_version_jump_error(&err));
     }
 
@@ -1099,7 +1099,7 @@ mod tests {
         let remote = make_composite(&[("A:dev", "a")]);
         let result = reconcile_multi_with_jump_limit(
             &local,
-            &[("bad_plugin", &remote, MAX_VERSION_JUMP + 1)],
+            &[("bad_remote", &remote, MAX_VERSION_JUMP + 1)],
             None,
             ConflictPreference::Local,
             false,
@@ -1132,11 +1132,11 @@ mod tests {
         let mut local = make_payload(&[], 5);
         local.env_versions.insert("dev".to_string(), 5);
 
-        // Remote plugin has prod secrets at v2
+        // Remote has prod secrets at v2
         let remote = make_composite(&[("DB_URL:prod", "postgres://prod")]);
         let result = reconcile_multi(
             &local,
-            &[("plugin1", &remote, 2)],
+            &[("remote1", &remote, 2)],
             Some("prod"),
             ConflictPreference::Local,
         )
@@ -1244,7 +1244,7 @@ mod tests {
         let r2 = make_composite(&[("A:dev", "r2_val")]);
         let err = reconcile_multi(
             &local,
-            &[("plugin1", &r1, 5), ("plugin2", &r2, 5)],
+            &[("remote1", &r1, 5), ("remote2", &r2, 5)],
             Some("dev"),
             ConflictPreference::Remote,
         )
@@ -1260,7 +1260,7 @@ mod tests {
         let r2 = make_composite(&[("A:dev", "agreed")]);
         let result = reconcile_multi(
             &local,
-            &[("plugin1", &r1, 5), ("plugin2", &r2, 5)],
+            &[("remote1", &r1, 5), ("remote2", &r2, 5)],
             Some("dev"),
             ConflictPreference::Remote,
         )

@@ -16,7 +16,7 @@ use crate::targets::CommandRunner;
 use crate::config::Config;
 use crate::store::{validate_key, StorePayload};
 
-/// The key used to store version metadata in plugin payloads.
+/// The key used to store version metadata in remote payloads.
 pub const ESK_VERSION_KEY: &str = "_esk_version";
 
 /// Extract bare-key secrets for a specific environment from a store payload.
@@ -61,14 +61,14 @@ pub fn parse_pulled_secrets(
             Ok(n) => n,
             Err(_) => {
                 let _ = cliclack::log::warning(format!(
-                    "Plugin returned unparseable {ESK_VERSION_KEY}: '{v}'. Defaulting to version 0."
+                    "Remote returned unparseable {ESK_VERSION_KEY}: '{v}'. Defaulting to version 0."
                 ));
                 0
             }
         },
         None => {
             let _ = cliclack::log::warning(format!(
-                "Plugin did not include {ESK_VERSION_KEY}. Defaulting to version 0."
+                "Remote did not include {ESK_VERSION_KEY}. Defaulting to version 0."
             ));
             0
         }
@@ -91,9 +91,9 @@ pub fn parse_pulled_secrets(
     (composite, version)
 }
 
-/// A storage plugin that stores/retrieves the full secret state.
+/// A sync remote that stores/retrieves the full secret state.
 ///
-/// Unlike sync adapters (which deploy secrets to targets), plugins
+/// Unlike deploy targets, remotes
 /// store or backup the entire secret list as a source of truth.
 pub trait SyncRemote {
     fn name(&self) -> &str;
@@ -103,15 +103,15 @@ pub trait SyncRemote {
         Ok(())
     }
 
-    /// Push store state to this plugin for a given environment.
+    /// Push store state to this remote for a given environment.
     fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()>;
 
-    /// Pull store state from this plugin for a given environment.
+    /// Pull store state from this remote for a given environment.
     /// Returns (composite_key_secrets, version), or None if nothing stored.
     fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>>;
 }
 
-/// Health status of a configured plugin.
+/// Health status of a configured remote.
 pub struct RemoteHealth {
     pub name: String,
     pub ok: bool,
@@ -220,8 +220,8 @@ fn needs_cli_secret_arg_warning(name: &str) -> bool {
     matches!(name, "1password" | "bitwarden")
 }
 
-/// Check the health of all configured plugins without filtering.
-/// Returns one entry per configured plugin with preflight pass/fail.
+/// Check the health of all configured remotes without filtering.
+/// Returns one entry per configured remote with preflight pass/fail.
 pub fn check_remote_health(config: &Config, runner: &dyn CommandRunner) -> Vec<RemoteHealth> {
     let mut health = Vec::new();
     for candidate in remote_candidates(config, runner) {
@@ -246,8 +246,8 @@ use std::sync::Once;
 
 static OP_WARNING: Once = Once::new();
 
-/// Build all configured plugins from the config.
-/// Runs preflight checks and filters out plugins that fail, printing warnings.
+/// Build all configured remotes from the config.
+/// Runs preflight checks and filters out remotes that fail, printing warnings.
 pub fn build_remotes<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
@@ -330,8 +330,8 @@ mod tests {
         std::fs::write(&path, "project: x\nenvironments: [dev]").unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_remotes(&config, &runner);
-        assert!(plugins.is_empty());
+        let built_remotes = build_remotes(&config, &runner);
+        assert!(built_remotes.is_empty());
     }
 
     #[test]
@@ -349,9 +349,9 @@ remotes:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_remotes(&config, &runner);
-        assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name(), "1password");
+        let built_remotes = build_remotes(&config, &runner);
+        assert_eq!(built_remotes.len(), 1);
+        assert_eq!(built_remotes[0].name(), "1password");
     }
 
     #[test]
@@ -374,9 +374,9 @@ remotes:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_remotes(&config, &runner);
-        assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name(), "dropbox");
+        let built_remotes = build_remotes(&config, &runner);
+        assert_eq!(built_remotes.len(), 1);
+        assert_eq!(built_remotes[0].name(), "dropbox");
     }
 
     #[test]
@@ -404,10 +404,10 @@ remotes:
         let config = Config::load(&path).unwrap();
 
         let runner = ErrorCommandRunner::new("not found");
-        let plugins = build_remotes(&config, &runner);
+        let built_remotes = build_remotes(&config, &runner);
         // onepassword fails preflight, cloud_file with existing dir passes
-        assert_eq!(plugins.len(), 1);
-        assert_eq!(plugins[0].name(), "testcloud");
+        assert_eq!(built_remotes.len(), 1);
+        assert_eq!(built_remotes[0].name(), "testcloud");
     }
 
     #[test]
@@ -426,8 +426,8 @@ remotes:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_remotes(&config, &runner);
-        assert!(plugins.is_empty());
+        let built_remotes = build_remotes(&config, &runner);
+        assert!(built_remotes.is_empty());
     }
 
     #[test]
@@ -474,7 +474,7 @@ remotes:
     }
 
     #[test]
-    fn check_remote_health_no_plugins() {
+    fn check_remote_health_no_remotes() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "project: x\nenvironments: [dev]";
         let path = dir.path().join("esk.yaml");
@@ -514,7 +514,7 @@ remotes:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_remotes(&config, &runner);
-        assert_eq!(plugins.len(), 3);
+        let built_remotes = build_remotes(&config, &runner);
+        assert_eq!(built_remotes.len(), 3);
     }
 }

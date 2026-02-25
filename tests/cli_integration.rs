@@ -353,7 +353,7 @@ fn delete_creates_tombstone() {
 }
 
 #[test]
-fn set_strict_plugin_failure_blocks_adapter_sync() {
+fn set_strict_remote_failure_blocks_target_sync() {
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -394,7 +394,7 @@ secrets:
     )
     .unwrap_err();
     assert!(err.to_string().contains("--strict"));
-    assert!(err.to_string().contains("Adapter deploy skipped"));
+    assert!(err.to_string().contains("Target deploy skipped"));
 
     // Env file should NOT have been written
     let env_path = project.root().join("apps/web/.env.local");
@@ -402,7 +402,7 @@ secrets:
 }
 
 #[test]
-fn delete_strict_plugin_failure_blocks_adapter_sync() {
+fn delete_strict_remote_failure_blocks_target_sync() {
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -455,7 +455,7 @@ secrets:
     let err = cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, true, &runner)
         .unwrap_err();
     assert!(err.to_string().contains("--strict"));
-    assert!(err.to_string().contains("Adapter deploy skipped"));
+    assert!(err.to_string().contains("Target deploy skipped"));
 
     // Env file should still contain MY_SECRET (sync was skipped)
     let after = std::fs::read_to_string(&env_path).unwrap();
@@ -494,11 +494,11 @@ fn list_uncategorized_secrets() {
     cli::list::run(&config, None).unwrap(); // Should show "Uncategorized"
 }
 
-// === plugin-sync ===
+// === remote-sync ===
 
 #[test]
-fn plugin_sync_unknown_env_errors() {
-    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+fn remote_sync_unknown_env_errors() {
+    let project = TestProject::with_store(REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let err = cli::sync::run(
         &config,
@@ -517,7 +517,7 @@ fn plugin_sync_unknown_env_errors() {
 }
 
 #[test]
-fn plugin_sync_no_plugins() {
+fn remote_sync_no_remotes() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
     let err = cli::sync::run(
@@ -605,10 +605,10 @@ fn sync_force_resyncs_unchanged() {
 }
 
 #[test]
-fn sync_skips_plugin_targets() {
-    // Secrets with targets that reference a non-adapter name should be skipped
-    // Since onepassword is now a plugin, not an adapter, we just verify sync works
-    // with a config that has both adapter and plugin targets
+fn sync_skips_remote_targets() {
+    // Secrets with targets that reference a non-target name should be skipped
+    // Since onepassword is now a remote, not a target, we just verify sync works
+    // with a config that has both target and remote entries
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -632,7 +632,7 @@ secrets:
     let store = project.store().unwrap();
     store.set("MY_SECRET", "dev", "val").unwrap();
 
-    // Sync should succeed — only hitting env adapter
+    // Sync should succeed — only hitting env target
     cli::deploy::run(&config, None, false, false, false).unwrap();
     assert!(project.root().join("apps/web/.env.local").is_file());
 }
@@ -648,7 +648,7 @@ fn sync_skips_no_value_secrets() {
 
 #[test]
 fn sync_failure_count_causes_error() {
-    // This tests uses env adapter with an app that can't write
+    // This tests uses env target with an app that can't write
     let yaml = r#"
 project: x
 environments: [dev]
@@ -748,7 +748,7 @@ fn sync_records_to_tracker() {
     assert!(keys.iter().any(|k| k.contains("OTHER_SECRET")));
 }
 
-// === cloud_file plugin integration ===
+// === cloud_file remote integration ===
 
 #[test]
 fn cloud_file_push_pull_cleartext() {
@@ -768,7 +768,7 @@ fn cloud_file_push_pull_cleartext() {
     store.set("KEY", "dev", "val123").unwrap();
     let payload = store.payload().unwrap();
 
-    let plugin = CloudFileRemote::new(
+    let cloud_remote = CloudFileRemote::new(
         "test_cloud".to_string(),
         "testapp".to_string(),
         CloudFileRemoteConfig {
@@ -777,10 +777,10 @@ fn cloud_file_push_pull_cleartext() {
         },
     );
 
-    plugin.push(&payload, &config, "dev").unwrap();
+    cloud_remote.push(&payload, &config, "dev").unwrap();
     assert!(cloud_dir.path().join("secrets-dev.json").is_file());
 
-    let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+    let (secrets, version) = cloud_remote.pull(&config, "dev").unwrap().unwrap();
     assert_eq!(version, 1);
     assert_eq!(secrets.get("KEY:dev").unwrap(), "val123");
 }
@@ -803,7 +803,7 @@ fn cloud_file_push_pull_encrypted() {
     store.set("SECRET", "dev", "encrypted_val").unwrap();
     let payload = store.payload().unwrap();
 
-    let plugin = CloudFileRemote::new(
+    let cloud_remote = CloudFileRemote::new(
         "test_enc".to_string(),
         "testapp".to_string(),
         CloudFileRemoteConfig {
@@ -812,17 +812,17 @@ fn cloud_file_push_pull_encrypted() {
         },
     );
 
-    plugin.push(&payload, &config, "dev").unwrap();
+    cloud_remote.push(&payload, &config, "dev").unwrap();
     assert!(cloud_dir.path().join("secrets-dev.enc").is_file());
 
-    let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+    let (secrets, version) = cloud_remote.pull(&config, "dev").unwrap().unwrap();
     assert_eq!(version, 1);
     assert_eq!(secrets.get("SECRET:dev").unwrap(), "encrypted_val");
 }
 
 #[test]
-fn plugin_sync_only_flag() {
-    // Test that --only filters to a specific plugin
+fn remote_sync_only_flag() {
+    // Test that --only filters to a specific remote
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -851,7 +851,7 @@ remotes:
     assert!(err.to_string().contains("unknown remote"));
 }
 
-// === cloudflare adapter integration ===
+// === cloudflare target integration ===
 
 #[test]
 fn sync_cloudflare_calls_wrangler() {
@@ -998,7 +998,7 @@ fn sync_cloudflare_skip_unchanged() {
     assert_eq!(runner.take_calls().len(), 2); // preflight only
 }
 
-// === convex adapter integration ===
+// === convex target integration ===
 
 #[test]
 fn sync_convex_calls_npx() {
@@ -1126,11 +1126,11 @@ fn sync_convex_failure_tracked() {
     assert!(record.last_error.is_some());
 }
 
-// === onepassword plugin integration ===
+// === onepassword remote integration ===
 
 #[test]
 fn push_onepassword_creates_item() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "sk_test_999").unwrap();
@@ -1144,9 +1144,9 @@ fn push_onepassword_creates_item() {
     // op item create → success
     runner.push_success(b"", b"");
 
-    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1168,7 +1168,7 @@ fn push_onepassword_creates_item() {
 
 #[test]
 fn push_onepassword_edits_existing() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "sk_test_999").unwrap();
@@ -1188,9 +1188,9 @@ fn push_onepassword_edits_existing() {
     // op item edit → success
     runner.push_success(b"", b"");
 
-    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1203,7 +1203,7 @@ fn push_onepassword_edits_existing() {
 
 #[test]
 fn push_onepassword_version_metadata() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "val").unwrap();
@@ -1217,9 +1217,9 @@ fn push_onepassword_version_metadata() {
     // op item create → success
     runner.push_success(b"", b"");
 
-    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
 
     let calls = runner.take_calls();
     // The create call should include version metadata
@@ -1230,8 +1230,8 @@ fn push_onepassword_version_metadata() {
 }
 
 #[test]
-fn plugin_sync_onepassword_merges_remote() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+fn remote_sync_onepassword_merges_remote() {
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "local_val").unwrap();
@@ -1280,8 +1280,8 @@ fn plugin_sync_onepassword_merges_remote() {
 }
 
 #[test]
-fn plugin_sync_onepassword_no_item() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+fn remote_sync_onepassword_no_item() {
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "local_val").unwrap();
@@ -1315,8 +1315,8 @@ fn plugin_sync_onepassword_no_item() {
 }
 
 #[test]
-fn plugin_sync_dry_run_no_mutation() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+fn remote_sync_dry_run_no_mutation() {
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "local_val").unwrap();
@@ -1360,7 +1360,7 @@ fn plugin_sync_dry_run_no_mutation() {
     assert_eq!(calls.len(), 3);
 }
 
-// === mixed adapter integration ===
+// === mixed target integration ===
 
 #[test]
 fn sync_full_config_cloudflare_and_convex() {
@@ -1380,7 +1380,7 @@ fn sync_full_config_cloudflare_and_convex() {
     runner.push_success(b"", b""); // wrangler whoami
     runner.push_success(b"", b""); // npx --version
     runner.push_success(b"", b""); // convex env list
-                                   // env adapter is batch (no command runner calls), but cloudflare + convex each need one
+                                   // env target is batch (no command runner calls), but cloudflare + convex each need one
     runner.push_success(b"", b""); // cloudflare: STRIPE_KEY
     runner.push_success(b"", b""); // convex: CONVEX_URL
 
@@ -1419,11 +1419,11 @@ fn sync_cloudflare_force_resyncs() {
     assert_eq!(runner.take_calls().len(), 3); // preflight (2) + sync
 }
 
-// === plugin tracker integration ===
+// === remote tracker integration ===
 
 #[test]
 fn push_records_remote_index() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
@@ -1435,9 +1435,9 @@ fn push_records_remote_index() {
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_success(b"", b""); // op item create
 
-    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
     remote_index.save().unwrap();
 
     let index = RemoteIndex::load(&project.remote_index_path());
@@ -1454,7 +1454,7 @@ fn push_records_remote_index() {
 
 #[test]
 fn push_records_env_scoped_version_when_global_is_higher() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("STRIPE_KEY", "prod", "sk_prod").unwrap();
@@ -1469,9 +1469,9 @@ fn push_records_env_scoped_version_when_global_is_higher() {
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_success(b"", b""); // op item create
 
-    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
     remote_index.save().unwrap();
 
     let index = RemoteIndex::load(&project.remote_index_path());
@@ -1480,7 +1480,7 @@ fn push_records_env_scoped_version_when_global_is_higher() {
 }
 
 #[test]
-fn sync_repairs_equal_version_plugin_drift() {
+fn sync_repairs_equal_version_remote_drift() {
     let cloud_sync = tempfile::tempdir().unwrap();
     let yaml = format!(
         r#"
@@ -1557,10 +1557,10 @@ remotes:
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_failure(b"op create failed"); // op item create fails
 
-    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut remote_index = RemoteIndex::load(&project.remote_index_path());
     let failures =
-        cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+        cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
     remote_index.save().unwrap();
     assert!(failures > 0);
 
@@ -1575,8 +1575,8 @@ remotes:
 }
 
 #[test]
-fn status_shows_plugin_section() {
-    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+fn status_shows_remote_section() {
+    let project = TestProject::with_store(REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
 
     // No sync yet — should show "never synced"
@@ -1584,8 +1584,8 @@ fn status_shows_plugin_section() {
 }
 
 #[test]
-fn status_shows_pushed_plugin() {
-    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+fn status_shows_pushed_remote() {
+    let project = TestProject::with_store(REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     let payload = store.payload().unwrap();
@@ -1599,8 +1599,8 @@ fn status_shows_pushed_plugin() {
 }
 
 #[test]
-fn status_shows_stale_plugin() {
-    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+fn status_shows_stale_remote() {
+    let project = TestProject::with_store(REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
 
@@ -1615,8 +1615,8 @@ fn status_shows_stale_plugin() {
 }
 
 #[test]
-fn status_plugin_env_filter() {
-    let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
+fn status_remote_env_filter() {
+    let project = TestProject::with_store(REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
 
     let mut index = RemoteIndex::new(&project.remote_index_path());
@@ -1670,14 +1670,14 @@ fn status_dashboard_orphan() {
 }
 
 #[test]
-fn status_dashboard_adapter_health() {
+fn status_dashboard_target_health() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_error("wrangler not found"); // preflight fails
 
-    // Should not panic even with failing adapter
+    // Should not panic even with failing target
     cli::status::run_with_runner(&config, None, false, &runner).unwrap();
 }
 
@@ -1699,7 +1699,7 @@ fn status_dashboard_next_steps() {
 
 #[test]
 fn set_auto_push_records_remote_index() {
-    let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
 
     let runner = MockCommandRunner::new();
@@ -1891,7 +1891,7 @@ fn delete_then_recreate_same_value_syncs() {
     assert!(calls[2].args.contains(&"put".to_string()));
 }
 
-// === fly adapter integration tests ===
+// === fly target integration tests ===
 
 #[test]
 fn sync_fly_calls_cli() {
@@ -2012,7 +2012,7 @@ fn sync_fly_skip_unchanged() {
     assert_eq!(calls.len(), 2); // only preflight, no sync
 }
 
-// === netlify adapter integration tests ===
+// === netlify target integration tests ===
 
 #[test]
 fn sync_netlify_calls_cli() {
@@ -2137,7 +2137,7 @@ fn sync_netlify_skip_unchanged() {
     assert_eq!(calls.len(), 2);
 }
 
-// === vercel adapter integration tests ===
+// === vercel target integration tests ===
 
 #[test]
 fn sync_vercel_calls_cli() {
@@ -2263,7 +2263,7 @@ fn sync_vercel_skip_unchanged() {
     assert_eq!(calls.len(), 2);
 }
 
-// === github adapter integration tests ===
+// === github target integration tests ===
 
 #[test]
 fn sync_github_calls_cli() {
@@ -2389,7 +2389,7 @@ fn sync_github_skip_unchanged() {
     assert_eq!(calls.len(), 2);
 }
 
-// === heroku adapter integration tests ===
+// === heroku target integration tests ===
 
 #[test]
 fn sync_heroku_calls_cli() {
@@ -2513,7 +2513,7 @@ fn sync_heroku_skip_unchanged() {
     assert_eq!(calls.len(), 2);
 }
 
-// === supabase adapter integration tests ===
+// === supabase target integration tests ===
 
 #[test]
 fn sync_supabase_calls_cli() {
@@ -2641,7 +2641,7 @@ fn sync_supabase_skip_unchanged() {
     assert_eq!(calls.len(), 2); // only preflight (version check + secrets list)
 }
 
-// === railway adapter integration tests ===
+// === railway target integration tests ===
 
 #[test]
 fn sync_railway_calls_cli() {
@@ -2764,7 +2764,7 @@ fn sync_railway_skip_unchanged() {
     assert_eq!(calls.len(), 2);
 }
 
-// === gitlab adapter integration tests ===
+// === gitlab target integration tests ===
 
 #[test]
 fn sync_gitlab_calls_cli() {

@@ -36,7 +36,7 @@ pub fn run_with_runner(
         return Ok(());
     }
 
-    // Auto-push to all configured plugins
+    // Auto-push to all configured remotes
     let mut remote_failures = 0u32;
     if !config.remotes.is_empty() {
         let remote_index_path = config.root.join(".esk/remote-index.json");
@@ -48,19 +48,19 @@ pub fn run_with_runner(
 
         if remote_failures > 0 && strict {
             bail!(
-                "{remote_failures} plugin(s) failed to push (--strict). Adapter deploy skipped.\n\
-                 Fix the plugin issue, then run:\n  \
+                "{remote_failures} remote(s) failed to push (--strict). Target deploy skipped.\n\
+                 Fix the remote issue, then run:\n  \
                  esk sync --env {env}\n  \
                  esk deploy --env {env}"
             );
         }
     }
 
-    // Auto-deploy adapters (env files regenerate without deleted key; individual adapters delete)
+    // Auto-deploy targets (env files regenerate without deleted key; individual targets delete)
     crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, runner)?;
 
     if remote_failures > 0 {
-        bail!("{remote_failures} plugin(s) failed to push. Run `esk sync --env {env}` to retry.");
+        bail!("{remote_failures} remote(s) failed to push. Run `esk sync --env {env}` to retry.");
     }
 
     Ok(())

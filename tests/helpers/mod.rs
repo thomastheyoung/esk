@@ -50,13 +50,13 @@ impl TestProject {
     }
 }
 
-/// Minimal valid config: project + 1 env, no apps/adapters/secrets.
+/// Minimal valid config: project + 1 env, no apps/targets/secrets.
 pub const MINIMAL_CONFIG: &str = r#"
 project: testapp
 environments: [dev]
 "#;
 
-/// Full config with all adapter types, apps, vendors, and plugins.
+/// Full config with all target types, apps, vendors, and remotes.
 pub const FULL_CONFIG: &str = r#"
 project: myapp
 environments: [dev, prod]
@@ -108,7 +108,7 @@ secrets:
         env: [api:dev, api:prod]
 "#;
 
-/// Config with only env adapter.
+/// Config with only env target.
 pub const ENV_ONLY_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -134,7 +134,7 @@ secrets:
         env: [web:dev]
 "#;
 
-/// Cloudflare adapter config for integration testing.
+/// Cloudflare target config for integration testing.
 pub const CLOUDFLARE_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -158,7 +158,7 @@ secrets:
         cloudflare: [web:dev]
 "#;
 
-/// Convex adapter config for integration testing.
+/// Convex target config for integration testing.
 pub const CONVEX_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -177,8 +177,8 @@ secrets:
         convex: [dev, prod]
 "#;
 
-/// OnePassword plugin config for integration testing.
-pub const ONEPASSWORD_PLUGIN_CONFIG: &str = r#"
+/// OnePassword remote config for integration testing.
+pub const ONEPASSWORD_REMOTE_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
@@ -193,8 +193,8 @@ secrets:
       targets: {}
 "#;
 
-/// Config with cloud_file plugins for testing.
-pub const PLUGIN_CONFIG: &str = r#"
+/// Config with cloud_file remotes for testing.
+pub const REMOTE_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
@@ -204,7 +204,7 @@ remotes:
     item_pattern: "{project} - {Environment}"
 "#;
 
-/// Fly adapter config for integration testing.
+/// Fly target config for integration testing.
 pub const FLY_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -227,7 +227,7 @@ secrets:
         fly: [web:dev, web:prod]
 "#;
 
-/// Netlify adapter config for integration testing.
+/// Netlify target config for integration testing.
 pub const NETLIFY_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -245,7 +245,7 @@ secrets:
         netlify: [dev, prod]
 "#;
 
-/// Vercel adapter config for integration testing.
+/// Vercel target config for integration testing.
 pub const VERCEL_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -265,7 +265,7 @@ secrets:
         vercel: [dev, prod]
 "#;
 
-/// GitHub adapter config for integration testing.
+/// GitHub target config for integration testing.
 pub const GITHUB_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -283,7 +283,7 @@ secrets:
         github: [dev, prod]
 "#;
 
-/// Heroku adapter config for integration testing.
+/// Heroku target config for integration testing.
 pub const HEROKU_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -306,7 +306,7 @@ secrets:
         heroku: [web:dev, web:prod]
 "#;
 
-/// Supabase adapter config for integration testing.
+/// Supabase target config for integration testing.
 pub const SUPABASE_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -324,7 +324,7 @@ secrets:
         supabase: [dev, prod]
 "#;
 
-/// Railway adapter config for integration testing.
+/// Railway target config for integration testing.
 pub const RAILWAY_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -341,7 +341,7 @@ secrets:
         railway: [dev, prod]
 "#;
 
-/// AWS SSM adapter config for integration testing.
+/// AWS SSM target config for integration testing.
 pub const AWS_SSM_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -360,7 +360,7 @@ secrets:
         aws_ssm: [dev, prod]
 "#;
 
-/// Kubernetes adapter config for integration testing.
+/// Kubernetes target config for integration testing.
 pub const KUBERNETES_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
@@ -381,7 +381,7 @@ secrets:
         kubernetes: [dev, prod]
 "#;
 
-/// GitLab adapter config for integration testing.
+/// GitLab target config for integration testing.
 pub const GITLAB_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]

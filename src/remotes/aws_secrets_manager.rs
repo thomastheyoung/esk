@@ -274,9 +274,9 @@ remotes:
             }
         }
         let runner = DummyRunner;
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
-        assert_eq!(plugin.secret_name("dev"), "myapp/dev");
-        assert_eq!(plugin.secret_name("prod"), "myapp/prod");
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        assert_eq!(remote.secret_name("dev"), "myapp/dev");
+        assert_eq!(remote.secret_name("prod"), "myapp/prod");
     }
 
     #[test]
@@ -308,8 +308,8 @@ remotes:
             }
         }
         let runner = DummyRunner;
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
-        let args = plugin.base_args();
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let args = remote.base_args();
         assert_eq!(args, vec!["--region", "us-west-2", "--profile", "staging"]);
     }
 
@@ -340,8 +340,8 @@ remotes:
             }
         }
         let runner = DummyRunner;
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
-        assert!(plugin.base_args().is_empty());
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        assert!(remote.base_args().is_empty());
     }
 
     #[test]
@@ -372,8 +372,8 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -397,8 +397,8 @@ remotes:
             config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
     }
 
@@ -430,8 +430,8 @@ remotes:
                 stderr: b"Unable to locate credentials".to_vec(),
             },
         ]);
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS authentication failed"));
         assert!(err.to_string().contains("Unable to locate credentials"));
     }
@@ -466,7 +466,7 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -478,7 +478,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -511,7 +511,7 @@ remotes:
             stdout: b"{}".to_vec(),
             stderr: Vec::new(),
         }]);
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("DB_URL:dev".to_string(), "postgres://localhost".to_string());
@@ -523,7 +523,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -547,7 +547,7 @@ remotes:
             config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         // Only prod secrets, push for dev -> should skip
         let mut secrets = BTreeMap::new();
@@ -560,7 +560,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
         assert!(calls(&runner).is_empty());
     }
 
@@ -603,9 +603,9 @@ remotes:
             stdout: serde_json::to_vec(&aws_response).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_live");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://prod");
@@ -633,9 +633,9 @@ remotes:
             stderr: b"ResourceNotFoundException: Secrets Manager can't find the specified secret."
                 .to_vec(),
         }]);
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 
     #[test]
@@ -659,7 +659,7 @@ remotes:
             stdout: b"{}".to_vec(),
             stderr: Vec::new(),
         }]);
-        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         let mut env_versions = BTreeMap::new();
         env_versions.insert("dev".to_string(), 10);
@@ -673,7 +673,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);

@@ -133,12 +133,12 @@ targets:
                 stderr: vec![],
             },
         ]);
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        assert!(adapter.preflight().is_ok());
+        assert!(target.preflight().is_ok());
         let calls = take_calls(&runner);
         assert_eq!(calls[1].1, vec!["whoami"]);
     }
@@ -160,12 +160,12 @@ targets:
                 stderr: b"not logged in".to_vec(),
             },
         ]);
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("railway is not authenticated"));
     }
 
@@ -175,12 +175,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.railway.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("railway is not installed"));
     }
 
@@ -194,12 +194,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -217,12 +217,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -248,12 +248,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .delete_secret("MY_KEY", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -270,12 +270,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter.delete_secret("KEY", &make_target("prod")).unwrap();
+        target.delete_secret("KEY", &make_target("prod")).unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
@@ -293,12 +293,12 @@ targets:
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .delete_secret("KEY", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -314,12 +314,12 @@ targets:
             stdout: vec![],
             stderr: b"api error".to_vec(),
         }]);
-        let adapter = RailwayTarget {
+        let target = RailwayTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("api error"));

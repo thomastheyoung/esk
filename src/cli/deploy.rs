@@ -43,25 +43,25 @@ pub fn run_with_runner(
 
     let resolved = config.resolve_secrets()?;
 
-    let has_configured_adapters = !config.target_names().is_empty();
+    let has_configured_targets = !config.target_names().is_empty();
 
-    let adapters = build_targets(config, runner);
+    let deploy_targets = build_targets(config, runner);
 
-    if adapters.is_empty() && has_configured_adapters {
+    if deploy_targets.is_empty() && has_configured_targets {
         cliclack::log::warning(
             "No targets available after preflight checks. Fix the issues above and try again.",
         )?;
         return Ok(());
     }
 
-    // Build a lookup map: adapter_name -> (index, sync_mode)
-    let target_map: HashMap<&str, (usize, DeployMode)> = adapters
+    // Build a lookup map: target_name -> (index, sync_mode)
+    let target_map: HashMap<&str, (usize, DeployMode)> = deploy_targets
         .iter()
         .enumerate()
         .map(|(i, a)| (a.name(), (i, a.sync_mode())))
         .collect();
 
-    // Track batch-mode dirty target groups: (adapter_name, app, env)
+    // Track batch-mode dirty target groups: (target_name, app, env)
     let mut batch_dirty: BTreeSet<(String, Option<String>, String)> = BTreeSet::new();
     // Individual-mode work items: (key, value, target)
     let mut individual_work: Vec<(String, String, crate::config::ResolvedTarget)> = Vec::new();
@@ -81,7 +81,7 @@ pub fn run_with_runner(
                 }
             }
 
-            // Skip targets whose adapter isn't in the sync adapter map (e.g. plugins)
+            // Skip targets whose target isn't in the deploy target map (e.g. remotes)
             let (_, sync_mode) = match target_map.get(target.service.as_str()) {
                 Some(entry) => *entry,
                 None => continue,
@@ -180,22 +180,22 @@ pub fn run_with_runner(
     };
 
     // Handle batch targets: for each dirty target group, gather ALL secrets and sync
-    for (adapter_name, app, target_env) in &batch_dirty {
-        let (target_idx, _) = target_map[adapter_name.as_str()];
-        let adapter = &adapters[target_idx];
+    for (target_name, app, target_env) in &batch_dirty {
+        let (target_idx, _) = target_map[target_name.as_str()];
+        let deploy_target = &deploy_targets[target_idx];
         let target = crate::config::ResolvedTarget {
-            service: adapter_name.clone(),
+            service: target_name.clone(),
             app: app.clone(),
             environment: target_env.clone(),
         };
         let target_display = format_target(&target);
 
-        // Gather all secrets that target this (adapter, app, env)
+        // Gather all secrets that target this (target, app, env)
         let mut secrets_for_batch: Vec<SecretValue> = Vec::new();
         let mut tombstoned_keys: BTreeSet<String> = BTreeSet::new();
         for secret in &resolved {
             for target in &secret.targets {
-                if target.service == *adapter_name
+                if target.service == *target_name
                     && target.app.as_ref() == app.as_ref()
                     && target.environment == *target_env
                 {
@@ -240,17 +240,17 @@ pub fn run_with_runner(
         if verbose {
             cliclack::log::step(format!(
                 "Syncing {} ({} secrets) → {}",
-                style(adapter_name).bold(),
+                style(target_name).bold(),
                 secrets_for_batch.len(),
                 target
             ))?;
         }
 
-        let results = adapter.sync_batch(&secrets_for_batch, &target);
+        let results = deploy_target.sync_batch(&secrets_for_batch, &target);
         if results.is_empty() {
             for key in &tombstoned_keys {
                 let tracker_key =
-                    DeployIndex::tracker_key(key, adapter_name, app.as_deref(), target_env);
+                    DeployIndex::tracker_key(key, target_name, app.as_deref(), target_env);
                 index.record_success(
                     tracker_key,
                     target.to_string(),
@@ -270,7 +270,7 @@ pub fn run_with_runner(
 
         for result in &results {
             let tracker_key =
-                DeployIndex::tracker_key(&result.key, adapter_name, app.as_deref(), target_env);
+                DeployIndex::tracker_key(&result.key, target_name, app.as_deref(), target_env);
             let composite = format!("{}:{}", result.key, target_env);
             let value = payload
                 .secrets
@@ -305,7 +305,7 @@ pub fn run_with_runner(
         }
     }
 
-    // Handle individual adapters
+    // Handle individual targets
     for (key, value, target) in &individual_work {
         let target_display = format_target(target);
 
@@ -327,8 +327,8 @@ pub fn run_with_runner(
         }
 
         let (target_idx, _) = target_map[target.service.as_str()];
-        let adapter = &adapters[target_idx];
-        let result = adapter.sync_secret(key, value, target);
+        let deploy_target = &deploy_targets[target_idx];
+        let result = deploy_target.sync_secret(key, value, target);
 
         let tracker_key = DeployIndex::tracker_key(
             key,
@@ -375,7 +375,7 @@ pub fn run_with_runner(
         index.save()?;
     }
 
-    // Process tombstones: delete secrets from individual adapters
+    // Process tombstones: delete secrets from individual targets
     for composite_key in payload.tombstones.keys() {
         let Some((bare_key, tomb_env)) = composite_key.rsplit_once(':') else {
             continue;
@@ -423,9 +423,9 @@ pub fn run_with_runner(
                 }
 
                 let (target_idx, _) = target_map[target.service.as_str()];
-                let adapter = &adapters[target_idx];
+                let deploy_target = &deploy_targets[target_idx];
 
-                match adapter.delete_secret(bare_key, target) {
+                match deploy_target.delete_secret(bare_key, target) {
                     Ok(()) => {
                         index.record_success(
                             tracker_key,

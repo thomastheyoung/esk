@@ -17,7 +17,7 @@ impl<'a> FlyTarget<'a> {
         let app = target
             .app
             .as_deref()
-            .context("fly adapter requires an app")?;
+            .context("fly target requires an app")?;
         self.target_config
             .app_names
             .get(app)
@@ -151,12 +151,12 @@ targets:
                 stderr: vec![],
             },
         ]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        assert!(adapter.preflight().is_ok());
+        assert!(target.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].args, vec!["--version"]);
@@ -180,12 +180,12 @@ targets:
                 stderr: b"not logged in".to_vec(),
             },
         ]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("fly is not authenticated"));
     }
 
@@ -195,12 +195,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("fly is not installed"));
     }
 
@@ -214,12 +214,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = runner.take_calls();
@@ -243,12 +243,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target(Some("web"), "prod"))
             .unwrap();
         let calls = runner.take_calls();
@@ -265,12 +265,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("requires an app"));
@@ -282,12 +282,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(Some("api"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("no fly app_names mapping"));
@@ -303,12 +303,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .delete_secret("MY_KEY", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = runner.take_calls();
@@ -328,12 +328,12 @@ targets:
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .delete_secret("KEY", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -345,12 +345,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "line1\nline2", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("contains newlines"));
@@ -362,12 +362,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "line1\r\nline2", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("contains newlines"));
@@ -383,12 +383,12 @@ targets:
             stdout: vec![],
             stderr: b"deploy error".to_vec(),
         }]);
-        let adapter = FlyTarget {
+        let target = FlyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("deploy error"));

@@ -152,12 +152,12 @@ targets:
                 stderr: vec![],
             },
         ]);
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        assert!(adapter.preflight().is_ok());
+        assert!(target.preflight().is_ok());
         let calls = take_calls(&runner);
         assert_eq!(calls[1].1, vec!["status"]);
     }
@@ -179,12 +179,12 @@ targets:
                 stderr: b"not linked".to_vec(),
             },
         ]);
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("netlify is not linked"));
     }
 
@@ -194,12 +194,12 @@ targets:
         let config = make_config(dir.path(), false);
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("netlify is not installed"));
     }
 
@@ -213,12 +213,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -236,12 +236,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -261,12 +261,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -286,12 +286,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .delete_secret("MY_KEY", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -311,12 +311,12 @@ targets:
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .delete_secret("KEY", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -332,12 +332,12 @@ targets:
             stdout: vec![],
             stderr: b"auth error".to_vec(),
         }]);
-        let adapter = NetlifyTarget {
+        let target = NetlifyTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));

@@ -187,7 +187,7 @@ pub struct KubernetesTargetConfig {
     pub env_flags: BTreeMap<String, String>,
 }
 
-// --- Plugin config types ---
+// --- Remote config types ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OnePasswordRemoteConfig {
@@ -380,10 +380,10 @@ impl Config {
         for app_name in self.apps.keys() {
             validate_app(app_name)?;
         }
-        // Validate env adapter pattern and env_suffix for unsafe path characters
+        // Validate env target pattern and env_suffix for unsafe path characters
         if let Some(env_config) = &self.targets.env {
             if env_config.pattern.contains("..") {
-                bail!("env adapter pattern must not contain '..'");
+                bail!("env target pattern must not contain '..'");
             }
             for (env, suffix) in &env_config.env_suffix {
                 if suffix.contains("..")
@@ -396,7 +396,7 @@ impl Config {
             }
         }
         self.validate_remotes()?;
-        // Validate secret targets reference known adapters, apps, and environments
+        // Validate secret targets reference known targets, apps, and environments
         // Check for duplicate key names across vendors
         let mut key_vendors: BTreeMap<&str, &str> = BTreeMap::new();
         for (vendor, secrets) in &self.secrets {
@@ -408,11 +408,11 @@ impl Config {
                 }
                 key_vendors.insert(key, vendor);
 
-                for (adapter, targets) in &def.targets {
-                    self.validate_service(adapter)
+                for (service, targets) in &def.targets {
+                    self.validate_service(service)
                         .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
                     for target_str in targets {
-                        self.validate_target_string(adapter, target_str)
+                        self.validate_target_string(service, target_str)
                             .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
                     }
                 }
@@ -421,18 +421,18 @@ impl Config {
         Ok(())
     }
 
-    fn validate_service(&self, adapter: &str) -> Result<()> {
-        if adapter == "1password" {
+    fn validate_service(&self, service: &str) -> Result<()> {
+        if service == "1password" {
             bail!(
                 "'1password' should be configured under 'remotes:', not 'targets:'. \
                  Move your 1password config from targets to remotes in esk.yaml."
             );
         }
         let names = self.target_names();
-        if names.contains(&adapter) {
+        if names.contains(&service) {
             Ok(())
         } else {
-            bail!("{}", suggest::unknown_target(adapter, &names))
+            bail!("{}", suggest::unknown_target(service, &names))
         }
     }
 
@@ -441,42 +441,42 @@ impl Config {
             match name.as_str() {
                 "1password" => {
                     let _: OnePasswordRemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid 1password plugin config")?;
+                        .context("invalid 1password remote config")?;
                 }
                 "aws_secrets_manager" => {
                     let _: AwsSecretsManagerRemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid aws_secrets_manager plugin config")?;
+                        .context("invalid aws_secrets_manager remote config")?;
                 }
                 "bitwarden" => {
                     let _: BitwardenRemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid bitwarden plugin config")?;
+                        .context("invalid bitwarden remote config")?;
                 }
                 "vault" => {
                     let _: HashicorpVaultRemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid vault plugin config")?;
+                        .context("invalid vault remote config")?;
                 }
                 "s3" => {
                     let _: S3RemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid s3 plugin config")?;
+                        .context("invalid s3 remote config")?;
                 }
                 "gcp" => {
                     let _: GcpSecretManagerRemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid gcp plugin config")?;
+                        .context("invalid gcp remote config")?;
                 }
                 "azure" => {
                     let _: AzureKeyVaultRemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid azure plugin config")?;
+                        .context("invalid azure remote config")?;
                 }
                 "doppler" => {
                     let _: DopplerRemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid doppler plugin config")?;
+                        .context("invalid doppler remote config")?;
                 }
                 "sops" => {
                     let _: SopsRemoteConfig = serde_yaml::from_value(value.clone())
-                        .context("invalid sops plugin config")?;
+                        .context("invalid sops remote config")?;
                 }
                 _ => {
-                    // Check for type field to identify cloud_file plugins
+                    // Check for type field to identify cloud_file remotes
                     if let Some(type_val) = value.get("type") {
                         let type_str = type_val
                             .as_str()
@@ -485,13 +485,13 @@ impl Config {
                             "cloud_file" => {
                                 let _: CloudFileRemoteConfig =
                                     serde_yaml::from_value(value.clone()).with_context(|| {
-                                        format!("invalid cloud_file plugin config for '{name}'")
+                                        format!("invalid cloud_file remote config for '{name}'")
                                     })?;
                             }
                             other => bail!("unknown remote type '{other}' for '{name}'"),
                         }
                     } else {
-                        bail!("unknown plugin '{name}' (missing 'type' field)");
+                        bail!("unknown remote '{name}' (missing 'type' field)");
                     }
                 }
             }
@@ -499,8 +499,8 @@ impl Config {
         Ok(())
     }
 
-    fn validate_target_string(&self, adapter: &str, target: &str) -> Result<()> {
-        let resolved = self.parse_target(adapter, target)?;
+    fn validate_target_string(&self, service: &str, target: &str) -> Result<()> {
+        let resolved = self.parse_target(service, target)?;
         if !self.environments.contains(&resolved.environment) {
             bail!(
                 "{}",
@@ -520,16 +520,16 @@ impl Config {
     }
 
     /// Parse a target string like `"web:dev"` or `"dev"` into a `ResolvedTarget`.
-    pub fn parse_target(&self, adapter: &str, target: &str) -> Result<ResolvedTarget> {
+    pub fn parse_target(&self, service: &str, target: &str) -> Result<ResolvedTarget> {
         if let Some((app, env)) = target.split_once(':') {
             Ok(ResolvedTarget {
-                service: adapter.to_string(),
+                service: service.to_string(),
                 app: Some(app.to_string()),
                 environment: env.to_string(),
             })
         } else {
             Ok(ResolvedTarget {
-                service: adapter.to_string(),
+                service: service.to_string(),
                 app: None,
                 environment: target.to_string(),
             })
@@ -542,9 +542,9 @@ impl Config {
         for (vendor, secrets) in &self.secrets {
             for (key, def) in secrets {
                 let mut targets = Vec::new();
-                for (adapter, target_strs) in &def.targets {
+                for (service, target_strs) in &def.targets {
                     for target_str in target_strs {
-                        targets.push(self.parse_target(adapter, target_str)?);
+                        targets.push(self.parse_target(service, target_str)?);
                     }
                 }
                 result.push(ResolvedSecret {
@@ -574,7 +574,7 @@ impl Config {
             .targets
             .env
             .as_ref()
-            .context("env adapter not configured")?;
+            .context("env target not configured")?;
 
         let app_config = self
             .apps
@@ -619,21 +619,21 @@ impl Config {
         Ok(resolved)
     }
 
-    /// Get the parsed 1Password plugin config, if configured.
+    /// Get the parsed 1Password remote config, if configured.
     pub fn onepassword_remote_config(&self) -> Option<OnePasswordRemoteConfig> {
         self.remotes
             .get("1password")
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
     }
 
-    /// Get a typed plugin config by name.
+    /// Get a typed remote config by name.
     pub fn remote_config<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
         self.remotes
             .get(name)
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
     }
 
-    /// Get all cloud_file plugin configs: (name, config) pairs.
+    /// Get all cloud_file remote configs: (name, config) pairs.
     pub fn cloud_file_remote_configs(&self) -> Vec<(String, CloudFileRemoteConfig)> {
         self.remotes
             .iter()
@@ -651,7 +651,7 @@ impl Config {
             .collect()
     }
 
-    /// Get the set of configured adapter names.
+    /// Get the set of configured target names.
     pub fn target_names(&self) -> Vec<&str> {
         let mut names = Vec::new();
         if self.targets.env.is_some() {
@@ -1197,7 +1197,7 @@ remotes:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
-        assert!(err.to_string().contains("unknown plugin 'foo'"));
+        assert!(err.to_string().contains("unknown remote 'foo'"));
     }
 
     #[test]
@@ -1435,7 +1435,7 @@ targets:
         let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
         let config = Config::load(&path).unwrap();
         let err = config.resolve_env_path("web", "dev").unwrap_err();
-        assert!(err.to_string().contains("env adapter not configured"));
+        assert!(err.to_string().contains("env target not configured"));
     }
 
     #[test]

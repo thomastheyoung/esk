@@ -24,7 +24,7 @@ fn env_file_end_to_end() {
     store.set("MY_SECRET", "dev", "secret_dev").unwrap();
     store.set("OTHER_SECRET", "dev", "other_dev").unwrap();
 
-    let adapter = EnvFileTarget { config: &config };
+    let target = EnvFileTarget { config: &config };
     let secrets = vec![
         SecretValue {
             key: "MY_SECRET".into(),
@@ -37,7 +37,7 @@ fn env_file_end_to_end() {
             vendor: "General".into(),
         },
     ];
-    let results = adapter.sync_batch(&secrets, &make_target("web", "dev"));
+    let results = target.sync_batch(&secrets, &make_target("web", "dev"));
     assert!(results.iter().all(|r| r.success));
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
@@ -52,7 +52,7 @@ fn env_file_multiple_vendors() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
 
-    let adapter = EnvFileTarget { config: &config };
+    let target = EnvFileTarget { config: &config };
     let secrets = vec![
         SecretValue {
             key: "A".into(),
@@ -70,7 +70,7 @@ fn env_file_multiple_vendors() {
             vendor: "Resend".into(),
         },
     ];
-    let results = adapter.sync_batch(&secrets, &make_target("web", "dev"));
+    let results = target.sync_batch(&secrets, &make_target("web", "dev"));
     assert!(results.iter().all(|r| r.success));
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
@@ -85,8 +85,8 @@ fn env_file_regeneration_replaces() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
 
-    let adapter = EnvFileTarget { config: &config };
-    let target = make_target("web", "dev");
+    let env_target = EnvFileTarget { config: &config };
+    let resolved = make_target("web", "dev");
 
     // First write
     let secrets1 = vec![SecretValue {
@@ -94,7 +94,7 @@ fn env_file_regeneration_replaces() {
         value: "old".into(),
         vendor: "G".into(),
     }];
-    adapter.sync_batch(&secrets1, &target);
+    env_target.sync_batch(&secrets1, &resolved);
 
     // Second write with different secrets
     let secrets2 = vec![SecretValue {
@@ -102,7 +102,7 @@ fn env_file_regeneration_replaces() {
         value: "new".into(),
         vendor: "G".into(),
     }];
-    adapter.sync_batch(&secrets2, &target);
+    env_target.sync_batch(&secrets2, &resolved);
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
     assert!(content.contains("NEW_KEY=new"));

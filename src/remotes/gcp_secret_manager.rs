@@ -243,9 +243,9 @@ remotes:
         let config = make_config(gcp_yaml());
         let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
-        assert_eq!(plugin.secret_name("dev"), "myapp-dev");
-        assert_eq!(plugin.secret_name("prod"), "myapp-prod");
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        assert_eq!(remote.secret_name("dev"), "myapp-dev");
+        assert_eq!(remote.secret_name("prod"), "myapp-prod");
     }
 
     #[test]
@@ -264,8 +264,8 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -277,8 +277,8 @@ remotes:
         let config = make_config(gcp_yaml());
         let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("gcloud"));
         assert!(err.to_string().contains("not installed"));
     }
@@ -299,8 +299,8 @@ remotes:
                 stderr: b"ERROR: (gcloud.auth.print-access-token) not authenticated".to_vec(),
             },
         ]);
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("not accessible"));
     }
 
@@ -313,9 +313,9 @@ remotes:
             stdout: Vec::new(),
             stderr: Vec::new(),
         }]);
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -349,9 +349,9 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("KEY:dev", "val")], 1);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 3);
@@ -363,10 +363,10 @@ remotes:
         let config = make_config(gcp_yaml());
         let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         // Only prod secrets, pushing dev — should skip
         let payload = make_payload(&[("KEY:prod", "val")], 1);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert!(calls.is_empty());
@@ -386,8 +386,8 @@ remotes:
             stdout: serde_json::to_vec(&json).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
 
         assert_eq!(version, 5);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -404,8 +404,8 @@ remotes:
             stdout: Vec::new(),
             stderr: b"NOT_FOUND: Secret not found".to_vec(),
         }]);
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 
     #[test]
@@ -439,7 +439,7 @@ remotes:
         let runner = StdinCapture {
             calls: Mutex::new(Vec::new()),
         };
-        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
 
         let mut env_versions = BTreeMap::new();
         env_versions.insert("dev".to_string(), 42);
@@ -450,7 +450,7 @@ remotes:
             env_versions,
             env_last_changed_at: BTreeMap::new(),
         };
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = runner.calls.lock().unwrap();
         let stdin = calls[0].2.as_ref().unwrap();

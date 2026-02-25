@@ -34,7 +34,7 @@ pub enum Commands {
         /// Skip auto-sync after deleting
         #[arg(long)]
         no_sync: bool,
-        /// Fail if any plugin push fails (skip adapter sync)
+        /// Fail if any remote push fails (skip target deploy)
         #[arg(long)]
         strict: bool,
     },
@@ -71,7 +71,7 @@ pub enum Commands {
         /// Skip auto-sync after setting
         #[arg(long)]
         no_sync: bool,
-        /// Fail if any plugin push fails (skip adapter sync)
+        /// Fail if any remote push fails (skip target deploy)
         #[arg(long)]
         strict: bool,
     },
@@ -107,24 +107,24 @@ pub enum Commands {
         #[arg(long, short)]
         output: Option<String>,
     },
-    /// Sync secrets with storage plugins (pull, reconcile, push)
+    /// Sync secrets with remotes (pull, reconcile, push)
     Sync {
         /// Environment to sync (omit to sync all)
         #[arg(long)]
         env: Option<String>,
-        /// Sync a specific plugin only
+        /// Sync a specific remote only
         #[arg(long)]
         only: Option<String>,
         /// Show what would change without modifying anything
         #[arg(long)]
         dry_run: bool,
-        /// Fail if any plugin is unreachable (no partial reconciliation)
+        /// Fail if any remote is unreachable (no partial reconciliation)
         #[arg(long = "no-partial", alias = "strict")]
         no_partial: bool,
         /// Bypass version jump protection (use with caution)
         #[arg(long)]
         force: bool,
-        /// Auto-deploy adapters after syncing
+        /// Auto-deploy targets after syncing
         #[arg(long = "with-deploy", alias = "deploy")]
         with_deploy: bool,
         /// When versions match but content differs, prefer this side

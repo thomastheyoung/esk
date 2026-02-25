@@ -117,7 +117,7 @@ impl<'a> DeployTarget for KubernetesTarget<'a> {
     }
 
     fn sync_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
-        // Batch adapter — sync_batch is the primary method
+        // Batch target — sync_batch is the primary method
         Ok(())
     }
 
@@ -261,12 +261,12 @@ targets:
                 stderr: vec![],
             },
         ]);
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        assert!(adapter.preflight().is_ok());
+        assert!(target.preflight().is_ok());
         let calls = take_calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -290,12 +290,12 @@ targets:
                 stderr: b"connection refused".to_vec(),
             },
         ]);
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("cannot connect to a cluster"));
     }
 
@@ -305,12 +305,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("kubectl is not installed"));
     }
 
@@ -324,7 +324,7 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &runner,
@@ -334,7 +334,7 @@ targets:
             make_secret("DB_HOST", "localhost"),
             make_secret("DB_PASS", "s3cret"),
         ];
-        let results = adapter.sync_batch(&secrets, &make_target("dev"));
+        let results = target.sync_batch(&secrets, &make_target("dev"));
         assert!(results.iter().all(|r| r.success));
 
         let calls = take_calls(&runner);
@@ -361,14 +361,14 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        adapter.sync_batch(&secrets, &make_target("prod"));
+        target.sync_batch(&secrets, &make_target("prod"));
 
         let calls = take_calls(&runner);
         assert!(calls[0].1.contains(&"--context".to_string()));
@@ -386,14 +386,14 @@ targets:
             stdout: vec![],
             stderr: b"forbidden".to_vec(),
         }]);
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        let results = adapter.sync_batch(&secrets, &make_target("dev"));
+        let results = target.sync_batch(&secrets, &make_target("dev"));
         assert!(!results[0].success);
         assert!(results[0].error.as_ref().unwrap().contains("forbidden"));
     }
@@ -404,14 +404,14 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        let results = adapter.sync_batch(&secrets, &make_target("staging"));
+        let results = target.sync_batch(&secrets, &make_target("staging"));
         assert!(!results[0].success);
         assert!(results[0]
             .error
@@ -425,12 +425,12 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.kubernetes.as_ref().unwrap();
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &MockCommandRunner::from_outputs(vec![]),
         };
-        assert_eq!(adapter.secret_name(), "myapp-secrets");
+        assert_eq!(target.secret_name(), "myapp-secrets");
     }
 
     #[test]
@@ -449,12 +449,12 @@ targets:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &MockCommandRunner::from_outputs(vec![]),
         };
-        assert_eq!(adapter.secret_name(), "custom-secret");
+        assert_eq!(target.secret_name(), "custom-secret");
     }
 
     #[test]
@@ -506,12 +506,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = KubernetesTarget {
+        let target = KubernetesTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let results = adapter.sync_batch(&[], &make_target("dev"));
+        let results = target.sync_batch(&[], &make_target("dev"));
         assert!(results.is_empty());
     }
 }

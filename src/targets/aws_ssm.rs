@@ -193,12 +193,12 @@ targets:
                 stderr: vec![],
             },
         ]);
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        assert!(adapter.preflight().is_ok());
+        assert!(target.preflight().is_ok());
         let calls = take_calls(&runner);
         assert_eq!(calls[0].1, vec!["--version"]);
         assert_eq!(
@@ -224,12 +224,12 @@ targets:
                 stderr: b"not configured".to_vec(),
             },
         ]);
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("aws is not authenticated"));
     }
 
@@ -239,12 +239,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("aws is not installed"));
     }
 
@@ -258,12 +258,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -298,12 +298,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -320,12 +320,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .delete_secret("MY_KEY", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -352,12 +352,12 @@ targets:
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .delete_secret("KEY", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -373,12 +373,12 @@ targets:
             stdout: vec![],
             stderr: b"access denied".to_vec(),
         }]);
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("access denied"));
@@ -389,12 +389,12 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
-        let adapter = AwsSsmTarget {
+        let target = AwsSsmTarget {
             config: &config,
             target_config,
             runner: &MockCommandRunner::from_outputs(vec![]),
         };
-        let path = adapter.resolve_path("DB_PASSWORD", &make_target("prod"));
+        let path = target.resolve_path("DB_PASSWORD", &make_target("prod"));
         assert_eq!(path, "/myapp/prod/DB_PASSWORD");
     }
 }

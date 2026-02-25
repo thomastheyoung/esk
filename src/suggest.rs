@@ -102,11 +102,11 @@ pub fn unknown_remote<S: AsRef<str>>(name: &str, remote_names: &[S]) -> String {
     msg
 }
 
-/// Builds an "adapter not configured" error message (for config validation).
-pub fn unknown_target<S: AsRef<str>>(adapter: &str, target_names: &[S]) -> String {
+/// Builds a "target not configured" error message (for config validation).
+pub fn unknown_target<S: AsRef<str>>(target_name: &str, target_names: &[S]) -> String {
     let configured = join(target_names);
-    let mut msg = format!("target '{}' is not configured", style(adapter).bold());
-    if let Some(suggestion) = closest(adapter, target_names) {
+    let mut msg = format!("target '{}' is not configured", style(target_name).bold());
+    if let Some(suggestion) = closest(target_name, target_names) {
         msg.push_str(&hint_line(suggestion));
     }
     msg.push_str(&valid_line("configured", &configured));

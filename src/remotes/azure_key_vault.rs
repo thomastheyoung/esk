@@ -222,9 +222,9 @@ remotes:
         let config = make_config(azure_yaml());
         let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
-        assert_eq!(plugin.secret_name("dev"), "myapp-dev");
-        assert_eq!(plugin.secret_name("prod"), "myapp-prod");
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        assert_eq!(remote.secret_name("dev"), "myapp-dev");
+        assert_eq!(remote.secret_name("prod"), "myapp-prod");
     }
 
     #[test]
@@ -244,9 +244,9 @@ remotes:
         std::mem::forget(dir);
         let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         // Underscores should be replaced with hyphens
-        assert_eq!(plugin.secret_name("dev"), "my-app-dev");
+        assert_eq!(remote.secret_name("dev"), "my-app-dev");
     }
 
     #[test]
@@ -265,8 +265,8 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -278,8 +278,8 @@ remotes:
         let config = make_config(azure_yaml());
         let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("Azure CLI (az)"));
         assert!(err.to_string().contains("not installed"));
     }
@@ -300,8 +300,8 @@ remotes:
                 stderr: b"Please run 'az login' to setup account".to_vec(),
             },
         ]);
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("not authenticated"));
     }
 
@@ -314,9 +314,9 @@ remotes:
             stdout: Vec::new(),
             stderr: Vec::new(),
         }]);
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -337,9 +337,9 @@ remotes:
         let config = make_config(azure_yaml());
         let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert!(calls.is_empty());
@@ -362,8 +362,8 @@ remotes:
             stdout: serde_json::to_vec(&outer).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
 
         assert_eq!(version, 5);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -380,7 +380,7 @@ remotes:
             stdout: Vec::new(),
             stderr: b"SecretNotFound: secret not found".to_vec(),
         }]);
-        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        let remote = AzureKeyVaultRemote::new(&config, remote_config, &runner);
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 }

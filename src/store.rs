@@ -10,7 +10,7 @@ use tempfile::NamedTempFile;
 use zeroize::Zeroize;
 
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
-/// Prevents shell injection, format corruption, and adapter compatibility issues.
+/// Prevents shell injection, format corruption, and target compatibility issues.
 pub fn validate_key(key: &str) -> Result<()> {
     if key.is_empty() {
         bail!("invalid secret key '': must match [A-Za-z_][A-Za-z0-9_]*");

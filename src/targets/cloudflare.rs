@@ -110,7 +110,7 @@ impl<'a> DeployTarget for CloudflareTarget<'a> {
         let app = target
             .app
             .as_deref()
-            .context("cloudflare adapter requires an app")?;
+            .context("cloudflare target requires an app")?;
         let app_config = self
             .config
             .apps
@@ -151,7 +151,7 @@ impl<'a> DeployTarget for CloudflareTarget<'a> {
         let app = target
             .app
             .as_deref()
-            .context("cloudflare adapter requires an app")?;
+            .context("cloudflare target requires an app")?;
         let app_config = self
             .config
             .apps
@@ -247,12 +247,12 @@ targets:
                 stderr: vec![],
             },
         ]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        assert!(adapter.preflight().is_ok());
+        assert!(target.preflight().is_ok());
         let calls = take_calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -276,12 +276,12 @@ targets:
                 stderr: b"not logged in".to_vec(),
             },
         ]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("wrangler is not authenticated"));
         assert!(err.to_string().contains("wrangler login"));
     }
@@ -293,12 +293,12 @@ targets:
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
 
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("wrangler is not installed"));
         assert!(err.to_string().contains("npm install -g wrangler"));
     }
@@ -309,12 +309,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("requires an app"));
@@ -326,12 +326,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(Some("nope"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("unknown app 'nope'"));
@@ -348,12 +348,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "prod"))
             .unwrap();
 
@@ -378,12 +378,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "my_secret", &make_target(Some("web"), "dev"))
             .unwrap();
 
@@ -402,12 +402,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap();
 
@@ -427,12 +427,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .delete_secret("MY_KEY", &make_target(Some("web"), "prod"))
             .unwrap();
 
@@ -463,12 +463,12 @@ targets:
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .delete_secret("KEY", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -480,12 +480,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .delete_secret("KEY", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("requires an app"));
@@ -502,12 +502,12 @@ targets:
             stdout: vec![],
             stderr: b"auth error".to_vec(),
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
@@ -541,12 +541,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("MY_KEY", "secret_val", &make_target(None, "dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -575,12 +575,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target(None, "prod"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -609,12 +609,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .delete_secret("MY_KEY", &make_target(None, "dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -647,12 +647,12 @@ targets:
         let config = Config::load(&path).unwrap();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = CloudflareTarget {
+        let target = CloudflareTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("pages_project is required"));

@@ -77,11 +77,11 @@ impl DeployIndex {
         Ok(())
     }
 
-    /// Build a tracker key: "KEY:adapter:app:env" or "KEY:adapter:env"
-    pub fn tracker_key(secret_key: &str, adapter: &str, app: Option<&str>, env: &str) -> String {
+    /// Build a tracker key: "KEY:target:app:env" or "KEY:target:env"
+    pub fn tracker_key(secret_key: &str, target: &str, app: Option<&str>, env: &str) -> String {
         match app {
-            Some(a) => format!("{secret_key}:{adapter}:{a}:{env}"),
-            None => format!("{secret_key}:{adapter}:{env}"),
+            Some(a) => format!("{secret_key}:{target}:{a}:{env}"),
+            None => format!("{secret_key}:{target}:{env}"),
         }
     }
 

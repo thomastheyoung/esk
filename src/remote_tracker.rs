@@ -77,7 +77,7 @@ impl RemoteIndex {
         Ok(())
     }
 
-    /// Build a tracker key: "plugin:env"
+    /// Build a tracker key: "remote:env"
     pub fn tracker_key(remote: &str, env: &str) -> String {
         format!("{remote}:{env}")
     }

@@ -17,7 +17,7 @@ impl<'a> HerokuTarget<'a> {
         let app = target
             .app
             .as_deref()
-            .context("heroku adapter requires an app")?;
+            .context("heroku target requires an app")?;
         self.target_config
             .app_names
             .get(app)
@@ -156,12 +156,12 @@ targets:
                 stderr: vec![],
             },
         ]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        assert!(adapter.preflight().is_ok());
+        assert!(target.preflight().is_ok());
         let calls = take_calls(&runner);
         assert_eq!(calls[1].1, vec!["auth:whoami"]);
     }
@@ -183,12 +183,12 @@ targets:
                 stderr: b"not logged in".to_vec(),
             },
         ]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("heroku is not authenticated"));
     }
 
@@ -198,12 +198,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("heroku is not installed"));
     }
 
@@ -217,12 +217,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -243,12 +243,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target(Some("web"), "prod"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -271,12 +271,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("requires an app"));
@@ -288,12 +288,12 @@ targets:
         let config = make_config(dir.path());
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(Some("api"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("no heroku app_names mapping"));
@@ -309,12 +309,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .delete_secret("MY_KEY", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = take_calls(&runner);
@@ -334,12 +334,12 @@ targets:
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .delete_secret("KEY", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -355,12 +355,12 @@ targets:
             stdout: vec![],
             stderr: b"auth error".to_vec(),
         }]);
-        let adapter = HerokuTarget {
+        let target = HerokuTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));

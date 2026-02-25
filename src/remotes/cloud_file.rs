@@ -250,7 +250,7 @@ mod tests {
     #[test]
     fn cloud_file_preflight_success() {
         let cloud_dir = tempfile::tempdir().unwrap();
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "dropbox".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -258,7 +258,7 @@ mod tests {
                 format: CloudFileFormat::Cleartext,
             },
         );
-        assert!(plugin.preflight().is_ok());
+        assert!(remote.preflight().is_ok());
     }
 
     #[test]
@@ -268,7 +268,7 @@ mod tests {
         let readonly = cloud_dir.path().join("readonly");
         std::fs::create_dir(&readonly).unwrap();
         std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o444)).unwrap();
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "dropbox".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -276,7 +276,7 @@ mod tests {
                 format: CloudFileFormat::Cleartext,
             },
         );
-        let err = plugin.preflight().unwrap_err();
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("not writable"));
         // Restore permissions so tempdir cleanup works
         std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o755)).unwrap();
@@ -284,7 +284,7 @@ mod tests {
 
     #[test]
     fn cloud_file_preflight_missing_dir() {
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "dropbox".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -292,7 +292,7 @@ mod tests {
                 format: CloudFileFormat::Cleartext,
             },
         );
-        let err = plugin.preflight().unwrap_err();
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("dropbox sync folder not found"));
         assert!(err
             .to_string()
@@ -305,7 +305,7 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test_cloud".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -315,13 +315,13 @@ mod tests {
         );
 
         let payload = make_payload(&[("KEY:dev", "val1"), ("KEY:prod", "val2")], 5);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         // Per-env file created, not global
         assert!(cloud_dir.path().join("secrets-dev.json").is_file());
         assert!(!cloud_dir.path().join("secrets.json").is_file());
 
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 5);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "val1");
         // prod key should NOT be in the dev-specific file
@@ -338,7 +338,7 @@ mod tests {
         let store = SecretStore::open(&config.root).unwrap();
         store.set("KEY", "dev", "encrypted_val").unwrap();
 
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test_enc".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -348,13 +348,13 @@ mod tests {
         );
 
         let payload = store.payload().unwrap();
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         // Per-env file created, not global
         assert!(cloud_dir.path().join("secrets-dev.enc").is_file());
         assert!(!cloud_dir.path().join("secrets.enc").is_file());
 
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 1);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "encrypted_val");
     }
@@ -365,7 +365,7 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -376,17 +376,17 @@ mod tests {
 
         // Push dev secrets
         let payload = make_payload(&[("KEY:dev", "dev_val"), ("KEY:prod", "prod_val")], 5);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
         // Push prod secrets
-        plugin.push(&payload, &config, "prod").unwrap();
+        remote.push(&payload, &config, "prod").unwrap();
 
         // Dev file should only have dev secrets
-        let (dev_secrets, _) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let (dev_secrets, _) = remote.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(dev_secrets.get("KEY:dev").unwrap(), "dev_val");
         assert!(!dev_secrets.contains_key("KEY:prod"));
 
         // Prod file should only have prod secrets
-        let (prod_secrets, _) = plugin.pull(&config, "prod").unwrap().unwrap();
+        let (prod_secrets, _) = remote.pull(&config, "prod").unwrap().unwrap();
         assert_eq!(prod_secrets.get("KEY:prod").unwrap(), "prod_val");
         assert!(!prod_secrets.contains_key("KEY:dev"));
     }
@@ -402,7 +402,7 @@ mod tests {
         let json = serde_json::to_string_pretty(&legacy_payload).unwrap();
         std::fs::write(cloud_dir.path().join("secrets.json"), json).unwrap();
 
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -412,7 +412,7 @@ mod tests {
         );
 
         // Pull should fall back to legacy file
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 3);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "legacy_val");
     }
@@ -427,7 +427,7 @@ mod tests {
         std::fs::write(cloud_dir.path().join("secrets.json"), "{}").unwrap();
         assert!(cloud_dir.path().join("secrets.json").is_file());
 
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -437,7 +437,7 @@ mod tests {
         );
 
         let payload = make_payload(&[("KEY:dev", "val")], 1);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         // Legacy file removed, per-env file created
         assert!(!cloud_dir.path().join("secrets.json").is_file());
@@ -450,7 +450,7 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -459,7 +459,7 @@ mod tests {
             },
         );
 
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 
     #[test]
@@ -468,7 +468,7 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -477,7 +477,7 @@ mod tests {
             },
         );
 
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 
     #[test]
@@ -487,7 +487,7 @@ mod tests {
         let nested = cloud_dir.path().join("deep/nested/path");
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -497,13 +497,13 @@ mod tests {
         );
 
         let payload = make_payload(&[("A:dev", "1")], 1);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
         assert!(nested.join("secrets-dev.json").is_file());
     }
 
     #[test]
     fn tilde_expansion() {
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -512,14 +512,14 @@ mod tests {
             },
         );
 
-        let expanded = plugin.expand_path().unwrap();
+        let expanded = remote.expand_path().unwrap();
         assert!(!expanded.to_string_lossy().contains('~'));
         assert!(expanded.to_string_lossy().ends_with("/test/path"));
     }
 
     #[test]
     fn no_tilde_expansion_for_absolute() {
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
@@ -528,13 +528,13 @@ mod tests {
             },
         );
 
-        let expanded = plugin.expand_path().unwrap();
+        let expanded = remote.expand_path().unwrap();
         assert_eq!(expanded, PathBuf::from("/absolute/path"));
     }
 
     #[test]
     fn project_interpolation() {
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "myapp".to_string(),
             CloudFileRemoteConfig {
@@ -543,13 +543,13 @@ mod tests {
             },
         );
 
-        let expanded = plugin.expand_path().unwrap();
+        let expanded = remote.expand_path().unwrap();
         assert_eq!(expanded, PathBuf::from("/cloud/esk/myapp"));
     }
 
     #[test]
     fn project_interpolation_with_tilde() {
-        let plugin = CloudFileRemote::new(
+        let remote = CloudFileRemote::new(
             "test".to_string(),
             "myapp".to_string(),
             CloudFileRemoteConfig {
@@ -558,7 +558,7 @@ mod tests {
             },
         );
 
-        let expanded = plugin.expand_path().unwrap();
+        let expanded = remote.expand_path().unwrap();
         assert!(!expanded.to_string_lossy().contains('~'));
         assert!(!expanded.to_string_lossy().contains("{project}"));
         assert!(expanded.to_string_lossy().ends_with("/Dropbox/esk/myapp"));

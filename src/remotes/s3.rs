@@ -286,8 +286,8 @@ remotes:
             ok_output(b"aws-cli/2.13.0"),
             ok_output(b"{\"Account\": \"123456789012\"}"),
         ]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = S3Remote::new(&config, remote_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -311,8 +311,8 @@ remotes:
             ok_output(b"aws-cli/2.13.0"),
             ok_output(b"{\"Account\": \"123456789012\"}"),
         ]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = S3Remote::new(&config, remote_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         let sts_args = &calls[1].1;
@@ -339,8 +339,8 @@ remotes:
             ok_output(b"aws-cli/2.13.0"),
             fail_output(b"Unable to locate credentials"),
         ]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = S3Remote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS authentication failed"));
     }
 
@@ -356,8 +356,8 @@ remotes:
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = S3Remote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = S3Remote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
     }
 
@@ -385,13 +385,13 @@ remotes:
             }
         }
 
-        let plugin = S3Remote::new(&config, remote_config, &DummyRunner);
+        let remote = S3Remote::new(&config, remote_config, &DummyRunner);
         assert_eq!(
-            plugin.s3_uri("dev"),
+            remote.s3_uri("dev"),
             "s3://my-bucket/esk/myapp/secrets-dev.enc"
         );
         assert_eq!(
-            plugin.s3_uri("prod"),
+            remote.s3_uri("prod"),
             "s3://my-bucket/esk/myapp/secrets-prod.enc"
         );
     }
@@ -419,8 +419,8 @@ remotes:
             }
         }
 
-        let plugin = S3Remote::new(&config, remote_config, &DummyRunner);
-        assert_eq!(plugin.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
+        let remote = S3Remote::new(&config, remote_config, &DummyRunner);
+        assert_eq!(remote.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
     }
 
     #[test]
@@ -447,8 +447,8 @@ remotes:
             }
         }
 
-        let plugin = S3Remote::new(&config, remote_config, &DummyRunner);
-        assert_eq!(plugin.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
+        let remote = S3Remote::new(&config, remote_config, &DummyRunner);
+        assert_eq!(remote.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
     }
 
     #[test]
@@ -465,7 +465,7 @@ remotes:
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -477,7 +477,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -500,7 +500,7 @@ remotes:
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:prod".to_string(), "val".to_string());
@@ -512,7 +512,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
         assert!(calls(&runner).is_empty());
     }
 
@@ -543,9 +543,9 @@ remotes:
         };
         let json = serde_json::to_string(&payload).unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(json.as_bytes())]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(&config, remote_config, &runner);
 
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
@@ -565,9 +565,9 @@ remotes:
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![fail_output(b"An error occurred (NoSuchKey)")]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(&config, remote_config, &runner);
 
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 
     #[test]
@@ -584,9 +584,9 @@ remotes:
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![fail_output(b"Unable to locate credentials")]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(&config, remote_config, &runner);
 
-        let err = plugin.pull(&config, "dev").unwrap_err();
+        let err = remote.pull(&config, "dev").unwrap_err();
         assert!(err.to_string().contains("Unable to locate credentials"));
     }
 
@@ -606,7 +606,7 @@ remotes:
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let plugin = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:dev".to_string(), "val".to_string());
@@ -618,7 +618,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         let args = &calls[0].1;

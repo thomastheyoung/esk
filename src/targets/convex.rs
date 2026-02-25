@@ -197,12 +197,12 @@ targets:
                 stderr: vec![],
             },
         ]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        assert!(adapter.preflight().is_ok());
+        assert!(target.preflight().is_ok());
         let calls = take_calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -227,12 +227,12 @@ targets:
                 stderr: b"deployment not found".to_vec(),
             },
         ]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("convex deployment not accessible"));
         assert!(err.to_string().contains("deployment not found"));
     }
@@ -244,12 +244,12 @@ targets:
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
 
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter.preflight().unwrap_err();
+        let err = target.preflight().unwrap_err();
         assert!(err.to_string().contains("npx is not installed"));
         assert!(err.to_string().contains("Node.js"));
     }
@@ -265,12 +265,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("MY_KEY", "my_value", &make_target("dev"))
             .unwrap();
 
@@ -296,12 +296,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
@@ -323,12 +323,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
@@ -349,12 +349,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
@@ -375,12 +375,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
@@ -401,12 +401,12 @@ targets:
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        adapter
+        target
             .delete_secret("MY_KEY", &make_target("prod"))
             .unwrap();
 
@@ -430,12 +430,12 @@ targets:
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .delete_secret("KEY", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
@@ -452,12 +452,12 @@ targets:
             stdout: vec![],
             stderr: b"deploy error".to_vec(),
         }]);
-        let adapter = ConvexTarget {
+        let target = ConvexTarget {
             config: &config,
             target_config,
             runner: &runner,
         };
-        let err = adapter
+        let err = target
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("deploy error"));

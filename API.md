@@ -57,14 +57,14 @@ esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 ```bash
 esk delete API_KEY --env dev                     # Delete + auto-deploy
 esk delete API_KEY --env dev --no-sync           # Delete only, don't deploy
-esk delete API_KEY --env dev --strict            # Fail hard on plugin errors
+esk delete API_KEY --env dev --strict            # Fail hard on remote errors
 ```
 
 ---
 
 ## `esk deploy`
 
-Deploy secrets to configured adapter targets.
+Deploy secrets to configured targets.
 
 ```bash
 esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose]
@@ -137,7 +137,7 @@ esk set API_KEY --env dev                        # Interactive prompt for value
 esk set API_KEY --env dev --value sk_test_123    # Inline value
 esk set API_KEY --env dev --group Stripe          # Register under Stripe group
 esk set API_KEY --env dev --no-sync              # Store only, don't deploy
-esk set API_KEY --env dev --strict               # Fail hard on plugin errors
+esk set API_KEY --env dev --strict               # Fail hard on remote errors
 ```
 
 ---
@@ -182,7 +182,7 @@ esk list [--env <ENV>]
 
 - Secrets grouped by vendor (as defined in `esk.yaml`), displayed as tables.
 - Column headers show each environment.
-- Per-cell status indicators reflect deploy state across configured adapter targets for that key/environment:
+- Per-cell status indicators reflect deploy state across configured targets for that key/environment:
   - `✔` (green) — synced: all targets up to date.
   - `●` (yellow) — pending: value changed since last deploy.
   - `✗` (red) — failed: last deploy attempt failed.
@@ -300,7 +300,7 @@ esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--no-partial] [--force] [-
 | `--env`         | No       | Environment to sync (omit to sync all configured environments)             |
 | `--only`        | No       | Sync a specific remote only                                                |
 | `--dry-run`     | No       | Show what would change without modifying anything                          |
-| `--no-partial`  | No       | Fail if any plugin is unreachable (no partial reconciliation)              |
+| `--no-partial`  | No       | Fail if any remote is unreachable (no partial reconciliation)              |
 | `--force`       | No       | Bypass version jump protection — skip interactive prompt (use with caution)|
 | `--with-deploy` | No       | Auto-run `deploy` after syncing                                            |
 | `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)        |
@@ -317,12 +317,12 @@ Compatibility aliases: `--strict` for `--no-partial`, and `--deploy` for `--with
 4. Updates local store state when reconciliation changes it.
 5. Pushes merged/current data to stale remotes, including equal-version drift repair (no interactive push prompt).
 6. With `--with-deploy`, runs `esk deploy --env <ENV>` only for environments where local store state changed.
-7. With `--dry-run`, shows what would change without modifying store or plugin state.
+7. With `--dry-run`, shows what would change without modifying store or remote state.
 
 **Examples:**
 
 ```bash
-esk sync                                # Sync all environments and plugins
+esk sync                                # Sync all environments and remotes
 esk sync --env prod                     # Sync one environment
 esk sync --env prod --only 1password    # Sync specific remote
 esk sync --env prod --with-deploy       # Sync + auto-deploy

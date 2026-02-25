@@ -90,9 +90,9 @@ struct NextStep {
 struct Dashboard {
     project: String,
     version: u64,
-    adapter_health: Vec<TargetHealth>,
+    target_health: Vec<TargetHealth>,
     #[allow(dead_code)]
-    plugin_health: Vec<RemoteHealth>,
+    remote_health: Vec<RemoteHealth>,
     failed: Vec<SyncEntry>,
     pending: Vec<SyncEntry>,
     synced: Vec<SyncEntry>,
@@ -120,8 +120,8 @@ impl Dashboard {
         };
 
         // 1. Health checks
-        let adapter_health = check_target_health(config, runner);
-        let plugin_health = check_remote_health(config, runner);
+        let target_health = check_target_health(config, runner);
+        let remote_health = check_remote_health(config, runner);
 
         // 2. Sync entries
         let mut failed = Vec::new();
@@ -240,16 +240,16 @@ impl Dashboard {
             }
         }
 
-        // 5. Plugin states
+        // 5. Remote states
         let remote_index_path = config.root.join(".esk/remote-index.json");
         let remote_index = RemoteIndex::load(&remote_index_path);
         let remote_names: Vec<&String> = config.remotes.keys().collect();
 
         let mut remote_states = Vec::new();
-        for plugin_name in &remote_names {
+        for remote_name in &remote_names {
             for &env_name in &envs {
                 let local_version = payload.env_version(env_name);
-                let key = RemoteIndex::tracker_key(plugin_name, env_name);
+                let key = RemoteIndex::tracker_key(remote_name, env_name);
                 let status = match remote_index.records.get(&key) {
                     Some(record) if record.last_push_status == PushStatus::Failed => {
                         RemoteStatus::Failed {
@@ -273,7 +273,7 @@ impl Dashboard {
                     None => RemoteStatus::NeverSynced,
                 };
                 remote_states.push(RemoteState {
-                    name: plugin_name.to_string(),
+                    name: remote_name.to_string(),
                     env: env_name.to_string(),
                     status,
                 });
@@ -317,13 +317,13 @@ impl Dashboard {
             }
         }
 
-        // Stale plugins
+        // Stale remotes
         for ps in &remote_states {
             if let RemoteStatus::Stale { pushed, local } = &ps.status {
                 next_steps.push(NextStep {
                     command: format!("esk sync --env {}", ps.env),
                     description: format!(
-                        "plugin is {} version{} behind",
+                        "remote is {} version{} behind",
                         local - pushed,
                         if local - pushed == 1 { "" } else { "s" }
                     ),
@@ -332,7 +332,7 @@ impl Dashboard {
             if let RemoteStatus::NeverSynced = &ps.status {
                 next_steps.push(NextStep {
                     command: format!("esk sync --env {}", ps.env),
-                    description: "plugin never synced".to_string(),
+                    description: "remote never synced".to_string(),
                 });
             }
         }
@@ -352,8 +352,8 @@ impl Dashboard {
         Ok(Dashboard {
             project: config.project.clone(),
             version: payload.version,
-            adapter_health,
-            plugin_health,
+            target_health,
+            remote_health,
             failed,
             pending,
             synced,
@@ -419,9 +419,9 @@ impl Dashboard {
         cliclack::intro(style(summary).to_string())?;
 
         // Targets section
-        if !self.adapter_health.is_empty() {
+        if !self.target_health.is_empty() {
             let lines: Vec<String> = self
-                .adapter_health
+                .target_health
                 .iter()
                 .map(|h| {
                     if h.ok {
@@ -600,7 +600,7 @@ impl Dashboard {
             cliclack::log::step(format!("Coverage\n{}", cov_lines.join("\n")))?;
         }
 
-        // Sync section (plugins)
+        // Sync section (remotes)
         if !self.remote_states.is_empty() {
             let lines: Vec<String> = self
                 .remote_states
@@ -757,7 +757,7 @@ mod tests {
     }
 
     #[test]
-    fn plugin_status_uses_env_scoped_version_for_stale() {
+    fn remote_status_uses_env_scoped_version_for_stale() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: testapp
@@ -795,7 +795,7 @@ remotes:
     }
 
     #[test]
-    fn plugin_status_does_not_mark_other_env_stale() {
+    fn remote_status_does_not_mark_other_env_stale() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: testapp

@@ -210,9 +210,9 @@ remotes:
         let config = make_config(doppler_yaml());
         let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
-        assert_eq!(plugin.config_name("dev").unwrap(), "dev_config");
-        assert_eq!(plugin.config_name("prod").unwrap(), "prd");
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        assert_eq!(remote.config_name("dev").unwrap(), "dev_config");
+        assert_eq!(remote.config_name("prod").unwrap(), "prd");
     }
 
     #[test]
@@ -220,8 +220,8 @@ remotes:
         let config = make_config(doppler_yaml());
         let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
-        let err = plugin.config_name("staging").unwrap_err();
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let err = remote.config_name("staging").unwrap_err();
         assert!(err.to_string().contains("staging"));
     }
 
@@ -241,8 +241,8 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -254,8 +254,8 @@ remotes:
         let config = make_config(doppler_yaml());
         let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("Doppler CLI"));
         assert!(err.to_string().contains("not installed"));
     }
@@ -276,8 +276,8 @@ remotes:
                 stderr: b"Unable to authenticate".to_vec(),
             },
         ]);
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("not authenticated"));
     }
 
@@ -290,9 +290,9 @@ remotes:
             stdout: Vec::new(),
             stderr: Vec::new(),
         }]);
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -325,9 +325,9 @@ remotes:
         let config = make_config(doppler_yaml());
         let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert!(calls.is_empty());
@@ -347,8 +347,8 @@ remotes:
             stdout: serde_json::to_vec(&json).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
 
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -367,7 +367,7 @@ remotes:
             stdout: Vec::new(),
             stderr: b"config not found".to_vec(),
         }]);
-        let plugin = DopplerRemote::new(&config, remote_config, &runner);
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 }

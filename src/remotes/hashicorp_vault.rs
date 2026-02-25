@@ -225,8 +225,8 @@ remotes:
         let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(b"vault 1.15.0"), ok_output(b"{}")]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -245,8 +245,8 @@ remotes:
         let config = make_config(yaml);
         let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err
             .to_string()
             .contains("Vault CLI (vault) is not installed"));
@@ -267,8 +267,8 @@ remotes:
             ok_output(b"vault 1.15.0"),
             fail_output(b"permission denied"),
         ]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("authentication failed"));
     }
 
@@ -284,7 +284,7 @@ remotes:
         let config = make_config(yaml);
         let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -298,7 +298,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -320,7 +320,7 @@ remotes:
         let config = make_config(yaml);
         let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:dev".to_string(), "val".to_string());
@@ -334,7 +334,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         // Verify the stdin payload contains version 10 (env-specific), not 5
         let calls = calls(&runner);
@@ -353,7 +353,7 @@ remotes:
         let config = make_config(yaml);
         let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:prod".to_string(), "val".to_string());
@@ -365,7 +365,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
         assert!(calls(&runner).is_empty());
     }
 
@@ -394,9 +394,9 @@ remotes:
         let runner = MockCommandRunner::from_outputs(vec![ok_output(
             &serde_json::to_vec(&response).unwrap(),
         )]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
@@ -425,9 +425,9 @@ remotes:
         let runner = MockCommandRunner::from_outputs(vec![ok_output(
             &serde_json::to_vec(&response).unwrap(),
         )]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 3);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
     }
@@ -446,9 +446,9 @@ remotes:
         let runner = MockCommandRunner::from_outputs(vec![fail_output(
             b"No value found at secret/data/myapp/dev",
         )]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 
     #[test]
@@ -463,9 +463,9 @@ remotes:
         let config = make_config(yaml);
         let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![fail_output(b"permission denied")]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
-        let err = plugin.pull(&config, "dev").unwrap_err();
+        let err = remote.pull(&config, "dev").unwrap_err();
         assert!(err.to_string().contains("permission denied"));
     }
 
@@ -482,9 +482,9 @@ remotes:
         let config = make_config(yaml);
         let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b""), ok_output(b"")]);
-        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
+        let remote = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
-        plugin.preflight().unwrap();
+        remote.preflight().unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);

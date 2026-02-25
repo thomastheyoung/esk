@@ -186,9 +186,9 @@ remotes:
         let config = make_config(sops_yaml());
         let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
-        assert_eq!(plugin.resolve_path("dev"), "secrets/dev.enc.json");
-        assert_eq!(plugin.resolve_path("prod"), "secrets/prod.enc.json");
+        let remote = SopsRemote::new(&config, remote_config, &runner);
+        assert_eq!(remote.resolve_path("dev"), "secrets/dev.enc.json");
+        assert_eq!(remote.resolve_path("prod"), "secrets/prod.enc.json");
     }
 
     /// Create a config in a specific directory so we can also place .sops.yaml there.
@@ -214,8 +214,8 @@ remotes:
             stdout: b"sops 3.8.0".to_vec(),
             stderr: Vec::new(),
         }]);
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = SopsRemote::new(&config, remote_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -231,8 +231,8 @@ remotes:
             stdout: b"sops 3.8.0".to_vec(),
             stderr: Vec::new(),
         }]);
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains(".sops.yaml"));
         assert!(err.to_string().contains("not found"));
     }
@@ -248,8 +248,8 @@ remotes:
         let config = make_config_in(dir.path(), sops_yaml());
         let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("SOPS"));
         assert!(err.to_string().contains("not installed"));
     }
@@ -277,9 +277,9 @@ remotes:
             stdout: encrypted.to_vec(),
             stderr: Vec::new(),
         }]);
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -297,9 +297,9 @@ remotes:
         let config = make_config(sops_yaml());
         let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = calls(&runner);
         assert!(calls.is_empty());
@@ -335,8 +335,8 @@ remotes:
             stdout: serde_json::to_vec(&decrypted).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
-        let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
+        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
 
         assert_eq!(version, 5);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -349,9 +349,9 @@ remotes:
         let config = make_config(sops_yaml());
         let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(&config, remote_config, &runner);
         // Path "secrets/dev.enc.json" doesn't exist
-        assert!(plugin.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
 
         let calls = calls(&runner);
         assert!(calls.is_empty());
@@ -399,7 +399,7 @@ remotes:
         let runner = StdinCapture {
             calls: Mutex::new(Vec::new()),
         };
-        let plugin = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(&config, remote_config, &runner);
 
         let mut env_versions = BTreeMap::new();
         env_versions.insert("dev".to_string(), 99);
@@ -410,7 +410,7 @@ remotes:
             env_versions,
             env_last_changed_at: BTreeMap::new(),
         };
-        plugin.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, &config, "dev").unwrap();
 
         let calls = runner.calls.lock().unwrap();
         let stdin = calls[0].2.as_ref().unwrap();

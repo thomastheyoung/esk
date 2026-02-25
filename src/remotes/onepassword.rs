@@ -453,8 +453,8 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
-        assert!(plugin.preflight().is_ok());
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].1, vec!["--version"]);
@@ -489,8 +489,8 @@ remotes:
                 stderr: b"vault not found".to_vec(),
             },
         ]);
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err
             .to_string()
             .contains("1Password vault 'SecretVault' not accessible"));
@@ -514,8 +514,8 @@ remotes:
         let op_config = config.onepassword_remote_config().unwrap();
 
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
-        let err = plugin.preflight().unwrap_err();
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        let err = remote.preflight().unwrap_err();
         assert!(err
             .to_string()
             .contains("1Password CLI (op) is not installed"));
@@ -549,8 +549,8 @@ remotes:
             }
         }
         let runner = DummyRunner;
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
-        assert_eq!(plugin.item_name("dev"), "myapp - Dev");
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name("dev"), "myapp - Dev");
     }
 
     #[test]
@@ -581,8 +581,8 @@ remotes:
             }
         }
         let runner = DummyRunner;
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
-        assert_eq!(plugin.item_name("dev"), "dev");
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name("dev"), "dev");
     }
 
     #[test]
@@ -613,8 +613,8 @@ remotes:
             }
         }
         let runner = DummyRunner;
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
-        assert_eq!(plugin.item_name(""), "myapp - ");
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name(""), "myapp - ");
     }
 
     #[test]
@@ -674,13 +674,13 @@ secrets:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
 
         // Push only API_KEY and SECRET (not STALE_KEY)
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "new_val".to_string());
         secrets.insert("SECRET".to_string(), "new_val".to_string());
-        plugin.push_item("dev", &secrets, 2).unwrap();
+        remote.push_item("dev", &secrets, 2).unwrap();
 
         let calls = calls(&runner);
         // Last call is op item edit
@@ -727,11 +727,11 @@ secrets:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "new_val".to_string());
-        plugin.push_item("dev", &secrets, 2).unwrap();
+        remote.push_item("dev", &secrets, 2).unwrap();
 
         let calls = calls(&runner);
         let edit_call = calls.last().unwrap();
@@ -773,11 +773,11 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
 
         // Push with no secrets — API_KEY becomes stale
         let secrets = BTreeMap::new();
-        plugin.push_item("dev", &secrets, 2).unwrap();
+        remote.push_item("dev", &secrets, 2).unwrap();
 
         let calls = calls(&runner);
         let edit_call = calls.last().unwrap();
@@ -815,11 +815,11 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "val".to_string());
-        plugin.push_item("dev", &secrets, 1).unwrap();
+        remote.push_item("dev", &secrets, 1).unwrap();
 
         let calls = calls(&runner);
         // Second call is op item create

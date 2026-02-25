@@ -34,7 +34,7 @@ pub struct SecretValue {
     pub vendor: String,
 }
 
-/// Whether an adapter syncs secrets individually or as a batch per target group.
+/// Whether a target syncs secrets individually or as a batch per target group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeployMode {
     /// Sync each secret individually (e.g. cloudflare, convex).
@@ -106,7 +106,7 @@ impl CommandRunner for RealCommandRunner {
 pub trait DeployTarget {
     fn name(&self) -> &str;
 
-    /// Whether this adapter syncs individually or in batches.
+    /// Whether this target syncs individually or in batches.
     fn sync_mode(&self) -> DeployMode;
 
     /// Validate that external dependencies are available before syncing.
@@ -117,7 +117,7 @@ pub trait DeployTarget {
     /// Sync a single secret to a target.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
 
-    /// Delete a single secret from a target. Default: no-op (batch adapters handle deletion
+    /// Delete a single secret from a target. Default: no-op (batch targets handle deletion
     /// by regenerating the full output without the deleted key).
     fn delete_secret(&self, _key: &str, _target: &ResolvedTarget) -> Result<()> {
         Ok(())
@@ -145,14 +145,14 @@ pub trait DeployTarget {
     }
 }
 
-/// Validate that a secret value is safe for stdin-based KEY=VALUE adapters.
+/// Validate that a secret value is safe for stdin-based KEY=VALUE targets.
 ///
-/// Adapters like Fly and Supabase pass `KEY=VALUE\n` via stdin. A newline
+/// Targets like Fly and Supabase pass `KEY=VALUE\n` via stdin. A newline
 /// in the value would inject additional environment variables.
-pub fn validate_stdin_kv_value(key: &str, value: &str, adapter_name: &str) -> Result<()> {
+pub fn validate_stdin_kv_value(key: &str, value: &str, target_name: &str) -> Result<()> {
     if value.contains('\n') || value.contains('\r') {
         anyhow::bail!(
-            "{adapter_name}: secret '{key}' contains newlines, which would inject \
+            "{target_name}: secret '{key}' contains newlines, which would inject \
              additional variables via stdin. Remove newlines or use a different target."
         );
     }
@@ -186,7 +186,7 @@ pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
     Ok(())
 }
 
-/// Health status of a configured adapter.
+/// Health status of a configured target.
 pub struct TargetHealth {
     pub name: String,
     pub ok: bool,
@@ -350,8 +350,8 @@ fn needs_cli_secret_arg_warning(name: &str) -> bool {
     matches!(name, "convex" | "netlify" | "heroku" | "railway")
 }
 
-/// Check the health of all configured adapters without filtering.
-/// Returns one entry per configured adapter with preflight pass/fail.
+/// Check the health of all configured targets without filtering.
+/// Returns one entry per configured target with preflight pass/fail.
 pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<TargetHealth> {
     let mut health = Vec::new();
     for candidate in target_candidates(config, runner) {
@@ -372,8 +372,8 @@ pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<T
     health
 }
 
-/// Build all configured sync adapters from the config.
-/// Runs preflight checks and filters out adapters that fail, printing warnings.
+/// Build all configured deploy targets from the config.
+/// Runs preflight checks and filters out targets that fail, printing warnings.
 pub fn build_targets<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
@@ -381,20 +381,20 @@ pub fn build_targets<'a>(
     let mut targets: Vec<Box<dyn DeployTarget + 'a>> = Vec::new();
 
     for candidate in target_candidates(config, runner) {
-        let adapter = candidate.target;
-        match adapter.preflight() {
+        let target = candidate.target;
+        match target.preflight() {
             Ok(()) => {
-                if needs_cli_secret_arg_warning(adapter.name()) {
+                if needs_cli_secret_arg_warning(target.name()) {
                     let _ = cliclack::log::warning(format!(
                         "{}: security note: secret values are passed as CLI args and may be visible in local process listings",
-                        adapter.name()
+                        target.name()
                     ));
                 }
-                targets.push(adapter);
+                targets.push(target);
             }
             Err(e) => {
                 let _ =
-                    cliclack::log::warning(format!("Skipping {} target: {}", adapter.name(), e));
+                    cliclack::log::warning(format!("Skipping {} target: {}", target.name(), e));
             }
         }
     }
@@ -407,11 +407,11 @@ mod tests {
     use super::*;
     use crate::test_support::ErrorCommandRunner;
 
-    struct TestAdapter {
+    struct TestTarget {
         fail_keys: Vec<String>,
     }
 
-    impl DeployTarget for TestAdapter {
+    impl DeployTarget for TestTarget {
         fn name(&self) -> &str {
             "test"
         }
@@ -446,20 +446,20 @@ mod tests {
 
     #[test]
     fn default_sync_batch_all_success() {
-        let adapter = TestAdapter { fail_keys: vec![] };
+        let target = TestTarget { fail_keys: vec![] };
         let secrets = vec![make_secret("A"), make_secret("B")];
-        let results = adapter.sync_batch(&secrets, &make_target());
+        let results = target.sync_batch(&secrets, &make_target());
         assert!(results.iter().all(|r| r.success));
         assert_eq!(results.len(), 2);
     }
 
     #[test]
     fn default_sync_batch_partial_failure() {
-        let adapter = TestAdapter {
+        let target = TestTarget {
             fail_keys: vec!["B".to_string()],
         };
         let secrets = vec![make_secret("A"), make_secret("B"), make_secret("C")];
-        let results = adapter.sync_batch(&secrets, &make_target());
+        let results = target.sync_batch(&secrets, &make_target());
         assert!(results[0].success);
         assert!(!results[1].success);
         assert!(results[1].error.is_some());
@@ -468,8 +468,8 @@ mod tests {
 
     #[test]
     fn default_sync_batch_empty_input() {
-        let adapter = TestAdapter { fail_keys: vec![] };
-        let results = adapter.sync_batch(&[], &make_target());
+        let target = TestTarget { fail_keys: vec![] };
+        let results = target.sync_batch(&[], &make_target());
         assert!(results.is_empty());
     }
 
@@ -497,7 +497,7 @@ mod tests {
 
     #[test]
     fn build_targets_filters_failing_preflight() {
-        // Use a config with cloudflare adapter, but a runner that fails
+        // Use a config with cloudflare target, but a runner that fails
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -516,10 +516,10 @@ targets:
         let config = crate::config::Config::load(&path).unwrap();
 
         let runner = ErrorCommandRunner::new("not found");
-        let adapters = build_targets(&config, &runner);
-        // env adapter has no preflight check, so it passes; cloudflare fails
-        assert_eq!(adapters.len(), 1);
-        assert_eq!(adapters[0].name(), "env");
+        let targets = build_targets(&config, &runner);
+        // env target has no preflight check, so it passes; cloudflare fails
+        assert_eq!(targets.len(), 1);
+        assert_eq!(targets[0].name(), "env");
     }
 
     #[test]
@@ -605,7 +605,7 @@ targets:
     }
 
     #[test]
-    fn check_target_health_no_adapters() {
+    fn check_target_health_no_targets() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "project: x\nenvironments: [dev]";
         let path = dir.path().join("esk.yaml");
