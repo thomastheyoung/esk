@@ -1,3 +1,18 @@
+//! Mozilla SOPS remote — syncs secrets via the `sops` CLI.
+//!
+//! SOPS (Secrets OPerationS) is a file encryption tool that encrypts the
+//! *values* in structured files (JSON, YAML, ENV) while leaving keys in
+//! cleartext. Supports multiple key backends: AGE, PGP, AWS KMS, GCP KMS,
+//! Azure Key Vault, and HashiCorp Vault Transit.
+//!
+//! CLI: `sops` (Mozilla SOPS).
+//! Commands: `sops -e /dev/stdin` (encrypt) / `sops -d /dev/stdin` (decrypt).
+//!
+//! The esk store payload is serialized as JSON, encrypted via **stdin**, and
+//! written to a file (one per environment). On pull, the file is decrypted via
+//! stdin. Requires a `.sops.yaml` configuration file to define encryption keys
+//! and rules.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 

@@ -1,3 +1,15 @@
+//! GitLab CI/CD target — deploys project variables via the `glab` CLI.
+//!
+//! GitLab CI/CD variables are injected into pipeline jobs. They can be scoped
+//! to specific environments and optionally masked in job logs or protected
+//! (only available on protected branches/tags).
+//!
+//! CLI: `glab` (GitLab's official CLI).
+//! Commands: `glab variable set` / `glab variable delete`.
+//!
+//! Secrets are sent via **stdin** to avoid process argument exposure. Each
+//! variable is scoped to an environment with `--scope <environment>`.
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

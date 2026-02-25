@@ -1,3 +1,17 @@
+//! Convex target — deploys environment variables via `npx convex`.
+//!
+//! Convex is a backend-as-a-service platform with a real-time database and
+//! serverless functions. Environment variables are set per-deployment and
+//! are available to Convex functions at runtime.
+//!
+//! CLI: `npx convex` (runs via npx, no global install needed).
+//! Commands: `convex env set` / `convex env unset`.
+//!
+//! The Convex CLI does **not** support stdin for secret values, so they are
+//! passed as command-line arguments (visible in `ps` output). The
+//! `CONVEX_DEPLOYMENT` environment variable is read from the project's Convex
+//! config file and injected into the command environment.
+
 use std::path::PathBuf;
 
 use anyhow::{Context, Result};

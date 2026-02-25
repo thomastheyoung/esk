@@ -1,3 +1,17 @@
+//! S3-compatible storage remote — syncs secrets via the `aws` CLI's S3 commands.
+//!
+//! Works with any S3-compatible object store: AWS S3, Cloudflare R2, MinIO,
+//! DigitalOcean Spaces, Backblaze B2, etc. Secrets are stored as a single JSON
+//! file per environment in a bucket.
+//!
+//! CLI: `aws` (AWS CLI v2).
+//! Commands: `aws s3 cp - s3://...` (push via stdin) / `aws s3 cp s3://... -` (pull to stdout).
+//!
+//! The store payload is serialized as JSON and streamed via **stdin**. Supports
+//! cleartext or encrypted format (same AES-256-GCM as the local store). The
+//! `--endpoint-url` flag enables non-AWS S3-compatible providers. Supports
+//! `--region` and `--profile` for multi-account setups.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 

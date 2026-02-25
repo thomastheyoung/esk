@@ -1,3 +1,18 @@
+//! Kubernetes target — deploys secrets as K8s Secret resources via `kubectl`.
+//!
+//! Kubernetes Secrets are objects that store sensitive data (passwords, tokens,
+//! keys) separately from pod specs. They can be mounted as volumes or exposed
+//! as environment variables to containers.
+//!
+//! CLI: `kubectl` (Kubernetes CLI).
+//! Commands: `kubectl apply -f -` (via stdin).
+//!
+//! Operates in **batch mode**: generates a complete YAML `Secret` manifest with
+//! all secrets base64-encoded in the `data` field, then applies it via stdin.
+//! Secret and namespace names are validated against Kubernetes naming rules
+//! (RFC 1123: lowercase alphanumeric and hyphens, max 253 chars). Supports
+//! `--context` for multi-cluster setups.
+
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 

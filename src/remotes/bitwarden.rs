@@ -1,3 +1,17 @@
+//! Bitwarden Secrets Manager remote — syncs secrets via the `bws` CLI.
+//!
+//! Bitwarden Secrets Manager is a secrets management service separate from the
+//! Bitwarden password manager. It is designed for machine-to-machine secrets
+//! (API keys, certificates, database credentials) with project-scoped access.
+//!
+//! CLI: `bws` (Bitwarden Secrets Manager CLI, distinct from the `bw` vault CLI).
+//! Commands: `bws secret list --project-id` / `bws secret create` / `bws secret update`.
+//!
+//! Requires a `BWS_ACCESS_TOKEN` environment variable for authentication.
+//! Secrets are scoped to a project ID and stored one-per-secret (not as a
+//! single blob). The esk version metadata and store payload are stored as a
+//! specially-named secret within the project.
+
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;

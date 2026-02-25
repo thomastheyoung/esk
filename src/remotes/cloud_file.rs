@@ -1,3 +1,16 @@
+//! Cloud file remote — syncs secrets via a local filesystem path.
+//!
+//! Designed for cloud-synced folders (Dropbox, Google Drive, OneDrive, iCloud)
+//! where writing a file to a local directory automatically syncs it to other
+//! machines. Can also be used with any mounted filesystem.
+//!
+//! No external CLI required — reads and writes files directly.
+//!
+//! The store payload is serialized as JSON (one file per environment). The file
+//! can be stored either in cleartext or encrypted using the same AES-256-GCM
+//! scheme as the local store. Paths support `{project}`, `{environment}`, and
+//! `~` expansion. Writes are atomic via temp-file-then-rename.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};

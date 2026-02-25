@@ -1,3 +1,15 @@
+//! Cloudflare Pages target — deploys secrets via the `wrangler` CLI.
+//!
+//! Cloudflare Pages is a Jamstack hosting platform. Each Pages project has its
+//! own set of encrypted environment variables (called "secrets") that are
+//! injected at build time and into Functions.
+//!
+//! CLI: `wrangler` (Cloudflare's official CLI, installed via npm).
+//! Commands: `wrangler pages secret put` / `wrangler pages secret delete`.
+//!
+//! Secrets are sent via **stdin** to avoid exposing values in process argument
+//! lists. Requires a `--project` flag to identify the Pages project.
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

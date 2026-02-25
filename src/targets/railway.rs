@@ -1,3 +1,17 @@
+//! Railway target — deploys variables via the `railway` CLI.
+//!
+//! Railway is a cloud platform for deploying applications with managed
+//! infrastructure. Variables are scoped to a service/environment and injected
+//! at runtime.
+//!
+//! CLI: `railway` (Railway's official CLI).
+//! Commands: `railway variables --set KEY=value` / `railway variables delete KEY`.
+//!
+//! The Railway CLI does **not** support stdin for secret values, so they are
+//! passed as command-line arguments (visible in `ps` output). The CLI
+//! determines the target project/service from the linked context (no explicit
+//! app flag needed).
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

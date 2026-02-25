@@ -1,3 +1,17 @@
+//! Fly.io target — deploys secrets via the `fly` CLI.
+//!
+//! Fly.io is a platform for running full-stack apps close to users on
+//! lightweight VMs (Machines). Secrets are encrypted at rest and exposed as
+//! environment variables to running applications.
+//!
+//! CLI: `fly` (Fly.io's official CLI, aka `flyctl`).
+//! Commands: `fly secrets import -a <app>` (set) / `fly secrets unset -a <app>` (delete).
+//!
+//! Secrets are set via **stdin** in `KEY=value` format using `secrets import`.
+//! Requires an app name (mapped from esk's app config). Values containing
+//! newlines or `=` in keys are rejected since the `KEY=value` stdin format
+//! cannot represent them.
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

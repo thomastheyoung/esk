@@ -1,3 +1,16 @@
+//! GitHub Actions target — deploys repository secrets via the `gh` CLI.
+//!
+//! GitHub Actions secrets are encrypted environment variables available to
+//! workflow runs. They are stored using libsodium sealed-box encryption on
+//! GitHub's servers.
+//!
+//! CLI: `gh` (GitHub's official CLI).
+//! Commands: `gh secret set` / `gh secret delete`.
+//!
+//! Secrets are sent via **stdin** to avoid process argument exposure. Supports
+//! an optional `-R <owner/repo>` flag to target a specific repository (defaults
+//! to the current repo).
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

@@ -1,3 +1,16 @@
+//! Vercel target — deploys environment variables via the `vercel` CLI.
+//!
+//! Vercel is a cloud platform for frontend frameworks and serverless functions.
+//! Environment variables are scoped to environments (production, preview,
+//! development) and injected at build and runtime.
+//!
+//! CLI: `vercel` (Vercel's official CLI).
+//! Commands: `vercel env add <key> <env> --force` / `vercel env rm <key> <env> --yes`.
+//!
+//! Secrets are sent via **stdin** to avoid process argument exposure. Vercel
+//! uses its own environment names (production/preview/development), so esk
+//! environment names are mapped via the `env_names` config field.
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

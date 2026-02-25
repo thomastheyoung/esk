@@ -1,3 +1,13 @@
+//! .env file target — writes secrets to a local `.env` file.
+//!
+//! Not a cloud service — generates standard dotenv files consumed by most
+//! frameworks and runtimes (Node.js, Python, Ruby, etc.).
+//!
+//! Operates in **batch mode**: the entire file is regenerated atomically on
+//! every deploy via temp-file-then-rename. Deletions are handled implicitly
+//! by omitting the key from the next write. Values containing newlines are
+//! rejected since the dotenv format has no reliable multiline escaping.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use tempfile::NamedTempFile;

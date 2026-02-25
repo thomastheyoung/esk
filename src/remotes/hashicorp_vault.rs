@@ -1,3 +1,16 @@
+//! HashiCorp Vault remote — syncs secrets via the `vault` CLI.
+//!
+//! HashiCorp Vault is an identity-based secrets management system. It supports
+//! multiple secrets engines; esk uses the **KV v2** (key-value version 2)
+//! engine, which provides versioned secrets with metadata.
+//!
+//! CLI: `vault` (HashiCorp Vault CLI).
+//! Commands: `vault kv put` / `vault kv get` / `vault token lookup`.
+//!
+//! Secrets are sent via **stdin** as JSON (`-`). The KV path supports
+//! `{project}` and `{environment}` placeholders. Requires `VAULT_ADDR` to be
+//! set (or configured in the Vault CLI config) and a valid auth token.
+
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;

@@ -1,3 +1,17 @@
+//! GCP Secret Manager remote — syncs secrets via the `gcloud` CLI.
+//!
+//! Google Cloud Secret Manager is a managed service for storing API keys,
+//! passwords, certificates, and other sensitive data. Secrets are versioned
+//! (each update creates a new immutable version) and integrate with IAM for
+//! access control.
+//!
+//! CLI: `gcloud` (Google Cloud CLI).
+//! Commands: `gcloud secrets versions add --data-file=-` / `gcloud secrets versions access latest`.
+//!
+//! The entire esk store payload is serialized as JSON and pushed as a new
+//! secret version via **stdin** (`--data-file=-`). On first push, creates the
+//! secret if it doesn't exist. Supports `--project` for GCP project targeting.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 

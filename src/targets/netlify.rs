@@ -1,3 +1,16 @@
+//! Netlify target — deploys environment variables via the `netlify` CLI.
+//!
+//! Netlify is a web hosting and automation platform for modern web projects.
+//! Environment variables are available during builds and in Netlify Functions
+//! (serverless).
+//!
+//! CLI: `netlify` (Netlify's official CLI).
+//! Commands: `netlify env:set` / `netlify env:unset`.
+//!
+//! The Netlify CLI does **not** support stdin or file input for secret values,
+//! so they are passed as command-line arguments (visible in `ps` output).
+//! Supports an optional `--site` flag to target a specific site.
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

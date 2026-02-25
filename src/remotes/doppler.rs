@@ -1,3 +1,16 @@
+//! Doppler remote — syncs secrets via the `doppler` CLI.
+//!
+//! Doppler is a secrets management platform designed for developer workflows.
+//! Secrets are organized into projects and configs (environments), with
+//! automatic syncing to infrastructure and CI/CD.
+//!
+//! CLI: `doppler` (Doppler's official CLI).
+//! Commands: `doppler secrets upload --json` / `doppler secrets download --json`.
+//!
+//! Secrets are pushed and pulled as JSON objects via **stdin**. Requires a
+//! `--project` and `-c <config>` flag for each operation. esk environment names
+//! are mapped to Doppler config names via the `config_names` config field.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 

@@ -1,3 +1,18 @@
+//! AWS Systems Manager Parameter Store target — deploys secrets via the `aws` CLI.
+//!
+//! SSM Parameter Store is a key-value store within AWS Systems Manager for
+//! configuration data and secrets. Parameters are organized in a hierarchy
+//! (e.g. `/{project}/{env}/KEY`) and can be encrypted with KMS (`SecureString`
+//! type).
+//!
+//! CLI: `aws` (AWS CLI v2).
+//! Commands: `aws ssm put-parameter` / `aws ssm delete-parameter`.
+//!
+//! Parameters are created via `--cli-input-json` with the JSON payload on
+//! **stdin** to avoid exposing secret values in process arguments. Supports
+//! `--region` and `--profile` flags for multi-account setups. The
+//! `parameter_type` config field controls the SSM type (default: `SecureString`).
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

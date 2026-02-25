@@ -1,3 +1,17 @@
+//! 1Password remote — syncs secrets via the `op` CLI.
+//!
+//! 1Password is a password manager with a secrets automation feature.
+//! Secrets are stored as items in a vault, with each esk secret mapped to a
+//! field on the item. Items are scoped per environment.
+//!
+//! CLI: `op` (1Password CLI v2).
+//! Commands: `op item get` / `op item create` / `op item edit`.
+//!
+//! The `op` CLI does **not** support stdin for field assignments, so secret
+//! values are passed as command-line arguments (visible in `ps` output).
+//! Field names are stored with a section prefix for organization. Version
+//! metadata is stored as a separate field on the item.
+
 use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;

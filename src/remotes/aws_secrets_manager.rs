@@ -1,3 +1,19 @@
+//! AWS Secrets Manager remote — syncs secrets via the `aws` CLI.
+//!
+//! AWS Secrets Manager is a managed service for storing, rotating, and
+//! retrieving secrets (database credentials, API keys, etc.). Unlike SSM
+//! Parameter Store, it stores arbitrary blobs with built-in rotation and
+//! cross-account access policies.
+//!
+//! CLI: `aws` (AWS CLI v2).
+//! Commands: `aws secretsmanager put-secret-value` / `get-secret-value` / `create-secret`.
+//!
+//! The entire esk store payload is serialized as a single JSON blob and stored
+//! under one secret name per environment (e.g. `{project}/{environment}`).
+//! Secret values are sent via **stdin** (`file:///dev/stdin`). On first push,
+//! falls back to `create-secret` if the secret doesn't exist yet. Supports
+//! `--region` and `--profile` for multi-account setups.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 

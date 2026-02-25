@@ -1,3 +1,16 @@
+//! Heroku target — deploys config vars via the `heroku` CLI.
+//!
+//! Heroku is a cloud PaaS that runs applications in managed containers (dynos).
+//! Config vars are exposed as environment variables to the running application
+//! and persist across deploys.
+//!
+//! CLI: `heroku` (Heroku's official CLI).
+//! Commands: `heroku config:set KEY=value -a <app>` / `heroku config:unset KEY -a <app>`.
+//!
+//! The Heroku CLI does **not** support stdin for secret values, so they are
+//! passed as command-line arguments (visible in `ps` output). Requires an app
+//! name (mapped from esk's app config).
+
 use anyhow::{Context, Result};
 
 use crate::targets::{

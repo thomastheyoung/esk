@@ -1,3 +1,18 @@
+//! Azure Key Vault remote — syncs secrets via the `az` CLI.
+//!
+//! Azure Key Vault is Microsoft's cloud service for securely storing and
+//! accessing secrets, encryption keys, and certificates. Secrets are versioned
+//! and protected by Azure RBAC or access policies.
+//!
+//! CLI: `az` (Azure CLI).
+//! Commands: `az keyvault secret set --file` / `az keyvault secret show`.
+//!
+//! Secret values are written to a temp file and passed via `--file` (the `az`
+//! CLI does not support stdin for secret values, and using `--value` would
+//! expose them in process arguments). Secret names are sanitized to comply with
+//! Key Vault naming rules: only alphanumeric characters and hyphens are allowed.
+//! Requires a `vault_name` in the config.
+
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::io::Write;

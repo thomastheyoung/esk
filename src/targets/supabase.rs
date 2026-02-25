@@ -1,3 +1,18 @@
+//! Supabase target — deploys Edge Function secrets via the `supabase` CLI.
+//!
+//! Supabase is an open-source Firebase alternative providing a Postgres
+//! database, auth, realtime subscriptions, and Edge Functions (Deno-based
+//! serverless). Secrets are available to Edge Functions as environment
+//! variables.
+//!
+//! CLI: `supabase` (Supabase's official CLI).
+//! Commands: `supabase secrets set` / `supabase secrets delete`.
+//!
+//! Secrets are set via **stdin** in `KEY=value` format. Requires a
+//! `--project-ref` flag to identify the Supabase project. Values containing
+//! newlines are rejected since the stdin `KEY=value` format cannot represent
+//! them.
+
 use anyhow::{Context, Result};
 
 use crate::targets::{
