@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 
 use crate::targets::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
-use crate::remote_tracker::RemoteIndex;
+use crate::sync_tracker::SyncIndex;
 use crate::remotes::{self, SyncRemote};
 use crate::reconcile::{self, ConflictPreference};
 use crate::store::{SecretStore, StorePayload};
@@ -47,7 +47,7 @@ pub fn push_to_remotes(
     payload: &StorePayload,
     config: &Config,
     env: &str,
-    remote_index: &mut RemoteIndex,
+    sync_index: &mut SyncIndex,
 ) -> Result<u32> {
     let mut fail_count = 0u32;
     let pushed_version = payload.env_version(env);
@@ -59,7 +59,7 @@ pub fn push_to_remotes(
         match rem.push(payload, config, env) {
             Ok(()) => {
                 spinner.stop(format!("↑ {}  {}", rem.name(), style("done").green()));
-                remote_index.record_success(rem.name(), env, pushed_version);
+                sync_index.record_success(rem.name(), env, pushed_version);
             }
             Err(e) => {
                 spinner.error(format!(
@@ -67,7 +67,7 @@ pub fn push_to_remotes(
                     rem.name(),
                     style("failed").red()
                 ));
-                remote_index.record_failure(rem.name(), env, pushed_version, e.to_string());
+                sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                 fail_count += 1;
             }
         }
@@ -327,8 +327,8 @@ pub fn run_with_runner(
         } else {
             &payload
         };
-        let remote_index_path = config.root.join(".esk/remote-index.json");
-        let mut remote_index = RemoteIndex::load(&remote_index_path);
+        let sync_index_path = config.root.join(".esk/sync-index.json");
+        let mut sync_index = SyncIndex::load(&sync_index_path);
 
         let stale_remotes: Vec<_> = target_remotes
             .iter()
@@ -345,7 +345,7 @@ pub fn run_with_runner(
                         &style("synced").green().to_string(),
                         value_column,
                     ));
-                    remote_index.record_success(rem.name(), env, pushed_version);
+                    sync_index.record_success(rem.name(), env, pushed_version);
                 }
                 Err(e) => {
                     lines.push(format_sync_line(
@@ -353,12 +353,12 @@ pub fn run_with_runner(
                         &style("failed").red().to_string(),
                         value_column,
                     ));
-                    remote_index.record_failure(rem.name(), env, pushed_version, e.to_string());
+                    sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                     pushback_failures += 1;
                 }
             }
         }
-        remote_index.save()?;
+        sync_index.save()?;
         if pushback_failures > 0 {
             lines.push(String::new());
             lines.push(status_line);

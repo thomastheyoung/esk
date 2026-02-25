@@ -2,7 +2,7 @@ use anyhow::{bail, Result};
 
 use crate::targets::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
-use crate::remote_tracker::RemoteIndex;
+use crate::sync_tracker::SyncIndex;
 use crate::remotes;
 use crate::store::SecretStore;
 use crate::suggest;
@@ -39,12 +39,12 @@ pub fn run_with_runner(
     // Auto-push to all configured remotes
     let mut remote_failures = 0u32;
     if !config.remotes.is_empty() {
-        let remote_index_path = config.root.join(".esk/remote-index.json");
-        let mut remote_index = RemoteIndex::load(&remote_index_path);
+        let sync_index_path = config.root.join(".esk/sync-index.json");
+        let mut sync_index = SyncIndex::load(&sync_index_path);
         let all_remotes = remotes::build_remotes(config, runner);
         remote_failures =
-            super::sync::push_to_remotes(&all_remotes, &payload, config, env, &mut remote_index)?;
-        remote_index.save()?;
+            super::sync::push_to_remotes(&all_remotes, &payload, config, env, &mut sync_index)?;
+        sync_index.save()?;
 
         if remote_failures > 0 && strict {
             bail!(

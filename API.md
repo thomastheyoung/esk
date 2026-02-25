@@ -16,7 +16,7 @@ Creates:
 - `.esk/store.key` — random 32-byte encryption key (hex-encoded, `0600` permissions)
 - `.esk/store.enc` — empty encrypted store
 - `.esk/deploy-index.json` — empty deploy tracker
-- `.esk/remote-index.json` — empty remote push tracker
+- `.esk/sync-index.json` — empty sync tracker
 
 Idempotent — skips files that already exist. Updates `.gitignore` to include:
 
@@ -35,12 +35,12 @@ Delete a secret value from an environment.
 esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 ```
 
-| Argument    | Required | Description                                                            |
-| ----------- | -------- | ---------------------------------------------------------------------- |
-| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                            |
-| `--env`     | Yes      | Environment to delete from                                             |
-| `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy                 |
-| `--strict`  | No       | Fail if any remote push fails and skip deploy                          |
+| Argument    | Required | Description                                            |
+| ----------- | -------- | ------------------------------------------------------ |
+| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)            |
+| `--env`     | Yes      | Environment to delete from                             |
+| `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy |
+| `--strict`  | No       | Fail if any remote push fails and skip deploy          |
 
 **Behavior:**
 
@@ -108,14 +108,14 @@ Set a secret value for an environment.
 esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--strict]
 ```
 
-| Argument    | Required | Description                                                                |
-| ----------- | -------- | -------------------------------------------------------------------------- |
-| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                                |
-| `--env`     | Yes      | Target environment                                                         |
-| `--value`   | No       | Secret value. If omitted, prompts interactively (hidden input)             |
-| `--group`   | No       | Config group to register the secret under (skips interactive prompt)        |
-| `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy                     |
-| `--strict`  | No       | Fail if any remote push fails and skip deploy                              |
+| Argument    | Required | Description                                                          |
+| ----------- | -------- | -------------------------------------------------------------------- |
+| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                          |
+| `--env`     | Yes      | Target environment                                                   |
+| `--value`   | No       | Secret value. If omitted, prompts interactively (hidden input)       |
+| `--group`   | No       | Config group to register the secret under (skips interactive prompt) |
+| `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy               |
+| `--strict`  | No       | Fail if any remote push fails and skip deploy                        |
 
 **Behavior:**
 
@@ -213,10 +213,10 @@ Show status as an actionable dashboard.
 esk status [--env <ENV>] [--all]
 ```
 
-| Argument | Required | Description                                    |
-| -------- | -------- | ---------------------------------------------- |
-| `--env`  | No       | Filter to a single environment                 |
-| `--all`  | No       | Show all entries including deployed ones        |
+| Argument | Required | Description                              |
+| -------- | -------- | ---------------------------------------- |
+| `--env`  | No       | Filter to a single environment           |
+| `--all`  | No       | Show all entries including deployed ones |
 
 Displays a multi-section dashboard with the following sections:
 
@@ -264,10 +264,10 @@ Generate TypeScript declarations (or a runtime validator) for configured secret 
 esk generate [--runtime] [--output <PATH>]
 ```
 
-| Argument              | Required | Description                                       |
-| --------------------- | -------- | ------------------------------------------------- |
-| `--runtime`           | No       | Generate `env.ts` runtime validator instead of `.d.ts` declarations |
-| `--output` / `-o`     | No       | Output path (defaults to `env.d.ts` or `env.ts`) |
+| Argument          | Required | Description                                                         |
+| ----------------- | -------- | ------------------------------------------------------------------- |
+| `--runtime`       | No       | Generate `env.ts` runtime validator instead of `.d.ts` declarations |
+| `--output` / `-o` | No       | Output path (defaults to `env.d.ts` or `env.ts`)                    |
 
 **Behavior:**
 
@@ -295,15 +295,15 @@ Sync secrets with configured remotes. Pulls from remotes, reconciles with the lo
 esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--no-partial] [--force] [--with-deploy] [--prefer <local|remote>]
 ```
 
-| Argument        | Required | Description                                                                |
-| --------------- | -------- | -------------------------------------------------------------------------- |
-| `--env`         | No       | Environment to sync (omit to sync all configured environments)             |
-| `--only`        | No       | Sync a specific remote only                                                |
-| `--dry-run`     | No       | Show what would change without modifying anything                          |
-| `--no-partial`  | No       | Fail if any remote is unreachable (no partial reconciliation)              |
-| `--force`       | No       | Bypass version jump protection — skip interactive prompt (use with caution)|
-| `--with-deploy` | No       | Auto-run `deploy` after syncing                                            |
-| `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)        |
+| Argument        | Required | Description                                                                 |
+| --------------- | -------- | --------------------------------------------------------------------------- |
+| `--env`         | No       | Environment to sync (omit to sync all configured environments)              |
+| `--only`        | No       | Sync a specific remote only                                                 |
+| `--dry-run`     | No       | Show what would change without modifying anything                           |
+| `--no-partial`  | No       | Fail if any remote is unreachable (no partial reconciliation)               |
+| `--force`       | No       | Bypass version jump protection — skip interactive prompt (use with caution) |
+| `--with-deploy` | No       | Auto-run `deploy` after syncing                                             |
+| `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)         |
 
 Compatibility aliases: `--strict` for `--no-partial`, and `--deploy` for `--with-deploy`.
 
@@ -334,17 +334,17 @@ esk sync --env prod --dry-run           # Preview changes
 
 ## Files
 
-| File                         | Description                               | Commit to git? |
-| ---------------------------- | ----------------------------------------- | -------------- |
+| File                     | Description                               | Commit to git? |
+| ------------------------ | ----------------------------------------- | -------------- |
 | `esk.yaml`               | Project configuration                     | Yes            |
 | `.esk/store.enc`         | AES-256-GCM encrypted secret store        | Yes            |
 | `.esk/store.key`         | 32-byte encryption key (hex)              | **No**         |
-| `.esk/deploy-index.json`  | Deploy state (hashes, timestamps, status) | Optional       |
-| `.esk/remote-index.json`  | Remote push state (versions, timestamps)  | Optional       |
+| `.esk/deploy-index.json` | Deploy state (hashes, timestamps, status) | Optional       |
+| `.esk/sync-index.json`   | Sync state (versions, timestamps)         | Optional       |
 
 ## Exit codes
 
-| Code | Meaning                                                         |
-| ---- | --------------------------------------------------------------- |
-| `0`  | Success                                                         |
+| Code | Meaning                                                           |
+| ---- | ----------------------------------------------------------------- |
+| `0`  | Success                                                           |
 | `1`  | Error (missing config, unknown environment, deploy failure, etc.) |

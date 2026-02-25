@@ -3,14 +3,14 @@ use console::style;
 use std::path::Path;
 
 use crate::deploy_tracker::DeployIndex;
-use crate::remote_tracker::RemoteIndex;
+use crate::sync_tracker::SyncIndex;
 use crate::store::SecretStore;
 
 const ESK_GITIGNORE_COMMENT: &str = "# esk (store.enc is safe to commit)";
 const ESK_GITIGNORE_ENTRIES: &[&str] = &[
     ".esk/store.key",
     ".esk/deploy-index.json",
-    ".esk/remote-index.json",
+    ".esk/sync-index.json",
 ];
 
 pub fn run(cwd: &Path) -> Result<()> {
@@ -81,19 +81,19 @@ secrets:
         ))?;
     }
 
-    // Create empty remote index
-    let remote_index_path = esk_dir.join("remote-index.json");
-    if !remote_index_path.is_file() {
-        let index = RemoteIndex::new(&remote_index_path);
+    // Create empty sync index
+    let sync_index_path = esk_dir.join("sync-index.json");
+    if !sync_index_path.is_file() {
+        let index = SyncIndex::new(&sync_index_path);
         index.save()?;
         cliclack::log::success(format!(
             "Created {}",
-            style(remote_index_path.display()).dim()
+            style(sync_index_path.display()).dim()
         ))?;
     } else {
         cliclack::log::remark(format!(
             "Exists  {}",
-            style(remote_index_path.display()).dim()
+            style(sync_index_path.display()).dim()
         ))?;
     }
 

@@ -134,10 +134,10 @@ targets:
       prod: "--env production"
 ```
 
-| Field           | Required    | Default   | Description                                                                                                                                   |
-| --------------- | ----------- | --------- | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `mode`          | No          | `workers` | Secrets API to use: `workers` (wrangler secret) or `pages` (wrangler pages secret).                                                           |
-| `pages_project` | Conditional | —         | Cloudflare Pages project name. Required when `mode` is `pages`.                                                                               |
+| Field           | Required    | Default   | Description                                                                                                                                                                                  |
+| --------------- | ----------- | --------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `mode`          | No          | `workers` | Secrets API to use: `workers` (wrangler secret) or `pages` (wrangler pages secret).                                                                                                          |
+| `pages_project` | Conditional | —         | Cloudflare Pages project name. Required when `mode` is `pages`.                                                                                                                              |
 | `env_flags`     | No          | —         | Map of environment name to extra CLI flags passed to Cloudflare secret commands (`put`/`delete` in workers or pages mode). Flags are split on whitespace and appended as separate arguments. |
 
 ### Command executed

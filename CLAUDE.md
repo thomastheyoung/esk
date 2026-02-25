@@ -11,7 +11,7 @@ src/
 ├── config.rs            # YAML config parsing + validation
 ├── store.rs             # Encrypted secret store (AES-256-GCM)
 ├── deploy_tracker.rs    # Deploy tracking (SHA-256 change detection)
-├── remote_tracker.rs    # Remote push tracking (version + status per remote/env)
+├── sync_tracker.rs      # Sync tracking (version + status per remote/env)
 ├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
 ├── suggest.rs           # Typo suggestions (Levenshtein distance)
 ├── targets/
@@ -129,7 +129,7 @@ SHA-256 hash per (secret, target, app, environment) tuple. Skip deploy when hash
 Records include target, value hash, timestamp, deploy status (success/failed), and optional error.
 Atomic writes via temp file + rename.
 
-### Remote push tracking (`.esk/remote-index.json`)
+### Sync tracking (`.esk/sync-index.json`)
 
 Tracks push state per (remote, environment) pair. Records pushed version, timestamp, push status (success/failed), and optional error. Used by `status` to show remote push drift. Atomic writes via temp file + rename.
 
@@ -151,7 +151,7 @@ Version-counter-based reconciliation between local store and remote sources. Two
 | `hex`                               | Hex encoding for keys, nonces, hashes |
 | `base64`                            | Base64 encoding for K8s secrets       |
 | `rand`                              | Random key and nonce generation       |
-| `chrono`                             | Timestamps in deploy records          |
+| `chrono`                            | Timestamps in deploy records          |
 | `cliclack`                          | Terminal UI (spinners, logs, prompts) |
 | `console`                           | Terminal colors and styling           |
 | `fs2`                               | File locking (exclusive store locks)  |
@@ -189,7 +189,7 @@ cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
 cargo test deploy_tracker::   # Run deploy tracker unit tests only
-cargo test remote_tracker::   # Run remote tracker unit tests only
+cargo test sync_tracker::     # Run sync tracker unit tests only
 cargo test suggest::          # Run suggest unit tests only
 cargo test targets::          # Run all target unit tests
 cargo test remotes::          # Run all remote unit tests
@@ -198,7 +198,7 @@ cargo test --test cli_integration  # Run CLI integration tests only
 
 ### Test infrastructure
 
-- **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `remote_index_path()`.
+- **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `sync_index_path()`.
 - **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.

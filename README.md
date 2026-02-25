@@ -4,6 +4,7 @@
 ▙▖▌▌▙▖▌ ▙▌▙▌▐▖▙▖▙▌  ▄▌▙▖▙▖▌ ▙▖▐▖▄▌  ▌▌▙▖▙▖▙▌▙▖▌
         ▄▌▌                               ▌
 ```
+
 <div align="center">
   <img src="docs/overview-diagram.png" alt="ESK Diagram" width="800" height="600">
 </div>
@@ -76,13 +77,13 @@ esk status --env dev
 
 `esk init` creates:
 
-| File                     | Purpose                                                         | Commit to git |
-| ------------------------ | --------------------------------------------------------------- | ------------- |
-| `esk.yaml`                | Project config (environments, apps, targets, remotes, secrets) | Yes           |
-| `.esk/store.enc`          | Encrypted secret store                                         | Yes           |
-| `.esk/store.key`          | Local encryption key (32-byte hex)                             | No            |
-| `.esk/deploy-index.json`  | Deploy state tracker                                           | Optional      |
-| `.esk/remote-index.json`  | Remote push state tracker                                      | Optional      |
+| File                     | Purpose                                                        | Commit to git |
+| ------------------------ | -------------------------------------------------------------- | ------------- |
+| `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets) | Yes           |
+| `.esk/store.enc`         | Encrypted secret store                                         | Yes           |
+| `.esk/store.key`         | Local encryption key (32-byte hex)                             | No            |
+| `.esk/deploy-index.json` | Deploy state tracker                                           | Optional      |
+| `.esk/sync-index.json`   | Sync state tracker                                             | Optional      |
 
 ## Mental model
 
@@ -134,16 +135,16 @@ When you need cloud deploy targets or shared sync, add target/remote blocks. See
 
 ## Commands you will use most
 
-| Command                        | Purpose                                       |
-| ------------------------------ | --------------------------------------------- |
-| `esk init`                     | Initialize config and encrypted store         |
-| `esk set <KEY> --env <ENV>`    | Set a secret (auto-sync/deploy by default)    |
-| `esk get <KEY> --env <ENV>`    | Read a secret                                 |
-| `esk delete <KEY> --env <ENV>` | Delete a secret (auto-sync/deploy by default) |
-| `esk list [--env <ENV>]`       | List secrets and deploy status                |
-| `esk deploy [--env <ENV>]`     | Deploy to configured targets                  |
-| `esk status [--env <ENV>]`     | Show drift/sync dashboard                     |
-| `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state        |
+| Command                        | Purpose                                        |
+| ------------------------------ | ---------------------------------------------- |
+| `esk init`                     | Initialize config and encrypted store          |
+| `esk set <KEY> --env <ENV>`    | Set a secret (auto-sync/deploy by default)     |
+| `esk get <KEY> --env <ENV>`    | Read a secret                                  |
+| `esk delete <KEY> --env <ENV>` | Delete a secret (auto-sync/deploy by default)  |
+| `esk list [--env <ENV>]`       | List secrets and deploy status                 |
+| `esk deploy [--env <ENV>]`     | Deploy to configured targets                   |
+| `esk status [--env <ENV>]`     | Show drift/sync dashboard                      |
+| `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state         |
 | `esk generate [--runtime]`     | Generate TypeScript env declarations/validator |
 
 Full flags and behavior: [API.md](API.md).
@@ -213,6 +214,7 @@ cargo release-tag
 ```
 
 This command:
+
 - verifies you are on `main` and your working tree is clean
 - reads the crate version and tags `v<version>`
 - runs `fmt`, `clippy`, and `test`

@@ -45,8 +45,8 @@ impl TestProject {
         self.dir.path().join(".esk/deploy-index.json")
     }
 
-    pub fn remote_index_path(&self) -> PathBuf {
-        self.dir.path().join(".esk/remote-index.json")
+    pub fn sync_index_path(&self) -> PathBuf {
+        self.dir.path().join(".esk/sync-index.json")
     }
 }
 

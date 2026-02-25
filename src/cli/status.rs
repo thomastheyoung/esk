@@ -6,7 +6,7 @@ use std::collections::BTreeSet;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::targets::{check_target_health, TargetHealth, CommandRunner, RealCommandRunner};
 use crate::config::{Config, ResolvedTarget};
-use crate::remote_tracker::{RemoteIndex, PushStatus};
+use crate::sync_tracker::{SyncIndex, SyncStatus};
 use crate::remotes::{check_remote_health, RemoteHealth};
 use crate::store::SecretStore;
 
@@ -241,17 +241,17 @@ impl Dashboard {
         }
 
         // 5. Remote states
-        let remote_index_path = config.root.join(".esk/remote-index.json");
-        let remote_index = RemoteIndex::load(&remote_index_path);
+        let sync_index_path = config.root.join(".esk/sync-index.json");
+        let sync_index = SyncIndex::load(&sync_index_path);
         let remote_names: Vec<&String> = config.remotes.keys().collect();
 
         let mut remote_states = Vec::new();
         for remote_name in &remote_names {
             for &env_name in &envs {
                 let local_version = payload.env_version(env_name);
-                let key = RemoteIndex::tracker_key(remote_name, env_name);
-                let status = match remote_index.records.get(&key) {
-                    Some(record) if record.last_push_status == PushStatus::Failed => {
+                let key = SyncIndex::tracker_key(remote_name, env_name);
+                let status = match sync_index.records.get(&key) {
+                    Some(record) if record.last_push_status == SyncStatus::Failed => {
                         RemoteStatus::Failed {
                             version: record.pushed_version,
                             error: record
@@ -774,8 +774,8 @@ remotes:
         let store = SecretStore::open(dir.path()).unwrap();
         store.set("KEY", "dev", "val").unwrap(); // dev v1, prod v0 (implicit)
 
-        let remote_index_path = dir.path().join(".esk/remote-index.json");
-        let mut index = RemoteIndex::new(&remote_index_path);
+        let sync_index_path = dir.path().join(".esk/sync-index.json");
+        let mut index = SyncIndex::new(&sync_index_path);
         index.record_success("1password", "dev", 0);
         index.save().unwrap();
 
@@ -812,8 +812,8 @@ remotes:
         let store = SecretStore::open(dir.path()).unwrap();
         store.set("KEY", "dev", "val").unwrap(); // global v1, prod env version remains 0
 
-        let remote_index_path = dir.path().join(".esk/remote-index.json");
-        let mut index = RemoteIndex::new(&remote_index_path);
+        let sync_index_path = dir.path().join(".esk/sync-index.json");
+        let mut index = SyncIndex::new(&sync_index_path);
         index.record_success("1password", "prod", 0);
         index.save().unwrap();
 

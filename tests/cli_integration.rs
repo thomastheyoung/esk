@@ -2,7 +2,7 @@ mod helpers;
 
 use esk::deploy_tracker::DeployIndex;
 use esk::cli;
-use esk::remote_tracker::RemoteIndex;
+use esk::sync_tracker::SyncIndex;
 use esk::reconcile::ConflictPreference;
 use helpers::*;
 use serde_json::json;
@@ -17,7 +17,7 @@ fn init_creates_all_files() {
     assert!(dir.path().join(".esk/store.enc").is_file());
     assert!(dir.path().join(".esk/store.key").is_file());
     assert!(dir.path().join(".esk/deploy-index.json").is_file());
-    assert!(dir.path().join(".esk/remote-index.json").is_file());
+    assert!(dir.path().join(".esk/sync-index.json").is_file());
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn init_updates_gitignore_with_esk_entries() {
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(
         gitignore,
-        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/remote-index.json\n"
+        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n"
     );
 }
 
@@ -48,7 +48,7 @@ fn init_gitignore_update_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join(".gitignore"),
-        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/remote-index.json\n",
+        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n",
     )
     .unwrap();
 
@@ -58,7 +58,7 @@ fn init_gitignore_update_is_idempotent() {
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(gitignore.matches(".esk/store.key").count(), 1);
     assert_eq!(gitignore.matches(".esk/deploy-index.json").count(), 1);
-    assert_eq!(gitignore.matches(".esk/remote-index.json").count(), 1);
+    assert_eq!(gitignore.matches(".esk/sync-index.json").count(), 1);
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn init_creates_gitignore_when_missing() {
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(
         gitignore,
-        "# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/remote-index.json\n"
+        "# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n"
     );
 }
 
@@ -1145,8 +1145,8 @@ fn push_onepassword_creates_item() {
     runner.push_success(b"", b"");
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
+    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1189,8 +1189,8 @@ fn push_onepassword_edits_existing() {
     runner.push_success(b"", b"");
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
+    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1218,8 +1218,8 @@ fn push_onepassword_version_metadata() {
     runner.push_success(b"", b"");
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
+    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
     // The create call should include version metadata
@@ -1422,7 +1422,7 @@ fn sync_cloudflare_force_resyncs() {
 // === remote tracker integration ===
 
 #[test]
-fn push_records_remote_index() {
+fn push_records_sync_index() {
     let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1436,11 +1436,11 @@ fn push_records_remote_index() {
     runner.push_success(b"", b""); // op item create
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
-    remote_index.save().unwrap();
+    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
+    sync_index.save().unwrap();
 
-    let index = RemoteIndex::load(&project.remote_index_path());
+    let index = SyncIndex::load(&project.sync_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(record.remote, "1password");
@@ -1448,7 +1448,7 @@ fn push_records_remote_index() {
     assert_eq!(record.pushed_version, 1);
     assert_eq!(
         record.last_push_status,
-        esk::remote_tracker::PushStatus::Success
+        esk::sync_tracker::SyncStatus::Success
     );
 }
 
@@ -1470,11 +1470,11 @@ fn push_records_env_scoped_version_when_global_is_higher() {
     runner.push_success(b"", b""); // op item create
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
-    remote_index.save().unwrap();
+    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
+    sync_index.save().unwrap();
 
-    let index = RemoteIndex::load(&project.remote_index_path());
+    let index = SyncIndex::load(&project.sync_index_path());
     let record = &index.records["1password:dev"];
     assert_eq!(record.pushed_version, 1);
 }
@@ -1530,13 +1530,13 @@ remotes:
     assert_eq!(repaired["secrets"]["KEY"], "local_val");
     assert_eq!(repaired["version"], 1);
 
-    let remote_index = RemoteIndex::load(&project.remote_index_path());
-    let record = remote_index.records.get("dropbox:dev").unwrap();
+    let sync_index = SyncIndex::load(&project.sync_index_path());
+    let record = sync_index.records.get("dropbox:dev").unwrap();
     assert_eq!(record.pushed_version, 1);
 }
 
 #[test]
-fn push_records_failure_in_remote_index() {
+fn push_records_failure_in_sync_index() {
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -1558,18 +1558,18 @@ remotes:
     runner.push_failure(b"op create failed"); // op item create fails
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
+    let mut sync_index = SyncIndex::load(&project.sync_index_path());
     let failures =
-        cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut remote_index).unwrap();
-    remote_index.save().unwrap();
+        cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
+    sync_index.save().unwrap();
     assert!(failures > 0);
 
-    let index = RemoteIndex::load(&project.remote_index_path());
+    let index = SyncIndex::load(&project.sync_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(
         record.last_push_status,
-        esk::remote_tracker::PushStatus::Failed
+        esk::sync_tracker::SyncStatus::Failed
     );
     assert!(record.last_error.is_some());
 }
@@ -1591,7 +1591,7 @@ fn status_shows_pushed_remote() {
     let payload = store.payload().unwrap();
 
     // Manually write a remote index with a pushed record
-    let mut index = RemoteIndex::new(&project.remote_index_path());
+    let mut index = SyncIndex::new(&project.sync_index_path());
     index.record_success("1password", "dev", payload.version);
     index.save().unwrap();
 
@@ -1605,7 +1605,7 @@ fn status_shows_stale_remote() {
     let store = project.store().unwrap();
 
     // Push at v0, then bump store version
-    let mut index = RemoteIndex::new(&project.remote_index_path());
+    let mut index = SyncIndex::new(&project.sync_index_path());
     index.record_success("1password", "dev", 0);
     index.save().unwrap();
 
@@ -1619,7 +1619,7 @@ fn status_remote_env_filter() {
     let project = TestProject::with_store(REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    let mut index = RemoteIndex::new(&project.remote_index_path());
+    let mut index = SyncIndex::new(&project.sync_index_path());
     index.record_success("1password", "dev", 1);
     index.record_success("1password", "prod", 1);
     index.save().unwrap();
@@ -1698,7 +1698,7 @@ fn status_dashboard_next_steps() {
 }
 
 #[test]
-fn set_auto_push_records_remote_index() {
+fn set_auto_push_records_sync_index() {
     let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
     let config = project.config().unwrap();
 
@@ -1721,12 +1721,12 @@ fn set_auto_push_records_remote_index() {
     )
     .unwrap();
 
-    let index = RemoteIndex::load(&project.remote_index_path());
+    let index = SyncIndex::load(&project.sync_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(
         record.last_push_status,
-        esk::remote_tracker::PushStatus::Success
+        esk::sync_tracker::SyncStatus::Success
     );
 }
 
