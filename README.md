@@ -4,8 +4,11 @@
 ▙▖▌▌▙▖▌ ▙▌▙▌▐▖▙▖▙▌  ▄▌▙▖▙▖▌ ▙▖▐▖▄▌  ▌▌▙▖▙▖▙▌▙▖▌
         ▄▌▌                               ▌
 ```
+<div align="center">
+  <img src="docs/overview-diagram.png" alt="ESK Diagram" width="800" height="600">
+</div>
 
-`esk` is an encrypted secrets manager that lets you define secrets once and deploy them to many targets.
+**`ESK`** is an encrypted secrets manager that lets you define secrets once and deploy them to many targets.
 
 It is built for teams that want:
 
