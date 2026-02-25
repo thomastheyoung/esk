@@ -2,27 +2,27 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::io::Write;
 
-use crate::adapters::{CommandOpts, CommandRunner};
-use crate::config::{AzurePluginConfig, Config};
+use crate::targets::{CommandOpts, CommandRunner};
+use crate::config::{AzureKeyVaultRemoteConfig, Config};
 use crate::store::StorePayload;
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct AzurePlugin<'a> {
+pub struct AzureKeyVaultRemote<'a> {
     config: &'a Config,
-    plugin_config: AzurePluginConfig,
+    remote_config: AzureKeyVaultRemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
-impl<'a> AzurePlugin<'a> {
+impl<'a> AzureKeyVaultRemote<'a> {
     pub fn new(
         config: &'a Config,
-        plugin_config: AzurePluginConfig,
+        remote_config: AzureKeyVaultRemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
             config,
-            plugin_config,
+            remote_config,
             runner,
         }
     }
@@ -31,7 +31,7 @@ impl<'a> AzurePlugin<'a> {
     /// Azure secret names only allow alphanumeric characters and hyphens.
     fn secret_name(&self, env: &str) -> String {
         let raw = self
-            .plugin_config
+            .remote_config
             .secret_name
             .replace("{project}", &self.config.project)
             .replace("{environment}", env);
@@ -49,13 +49,13 @@ impl<'a> AzurePlugin<'a> {
     }
 }
 
-impl<'a> StoragePlugin for AzurePlugin<'a> {
+impl<'a> SyncRemote for AzureKeyVaultRemote<'a> {
     fn name(&self) -> &str {
         "azure"
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::adapters::check_command(self.runner, "az").map_err(|_| {
+        crate::targets::check_command(self.runner, "az").map_err(|_| {
             anyhow::anyhow!(
                 "Azure CLI (az) is not installed or not in PATH. Install it from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli"
             )
@@ -92,7 +92,7 @@ impl<'a> StoragePlugin for AzurePlugin<'a> {
         let tmppath = tmpfile.path().to_string_lossy().to_string();
 
         let secret_name = self.secret_name(env);
-        let vault_name = &self.plugin_config.vault_name;
+        let vault_name = &self.remote_config.vault_name;
 
         let output = self
             .runner
@@ -123,7 +123,7 @@ impl<'a> StoragePlugin for AzurePlugin<'a> {
 
     fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let secret_name = self.secret_name(env);
-        let vault_name = &self.plugin_config.vault_name;
+        let vault_name = &self.remote_config.vault_name;
 
         let output = self
             .runner
@@ -170,7 +170,7 @@ impl<'a> StoragePlugin for AzurePlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>);
@@ -196,7 +196,7 @@ mod tests {
         r#"
 project: myapp
 environments: [dev, prod]
-plugins:
+remotes:
   azure:
     vault_name: my-vault
     secret_name: "{project}-{environment}"
@@ -220,9 +220,9 @@ plugins:
     #[test]
     fn secret_name_substitution() {
         let config = make_config(azure_yaml());
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         assert_eq!(plugin.secret_name("dev"), "myapp-dev");
         assert_eq!(plugin.secret_name("prod"), "myapp-prod");
     }
@@ -233,7 +233,7 @@ plugins:
         let yaml = r#"
 project: my_app
 environments: [dev]
-plugins:
+remotes:
   azure:
     vault_name: v
     secret_name: "{project}_{environment}"
@@ -242,9 +242,9 @@ plugins:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         std::mem::forget(dir);
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         // Underscores should be replaced with hyphens
         assert_eq!(plugin.secret_name("dev"), "my-app-dev");
     }
@@ -252,7 +252,7 @@ plugins:
     #[test]
     fn preflight_success() {
         let config = make_config(azure_yaml());
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -265,7 +265,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -276,9 +276,9 @@ plugins:
     #[test]
     fn preflight_missing_az() {
         let config = make_config(azure_yaml());
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("Azure CLI (az)"));
         assert!(err.to_string().contains("not installed"));
@@ -287,7 +287,7 @@ plugins:
     #[test]
     fn preflight_auth_failure() {
         let config = make_config(azure_yaml());
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -300,7 +300,7 @@ plugins:
                 stderr: b"Please run 'az login' to setup account".to_vec(),
             },
         ]);
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("not authenticated"));
     }
@@ -308,13 +308,13 @@ plugins:
     #[test]
     fn push_success() {
         let config = make_config(azure_yaml());
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: Vec::new(),
             stderr: Vec::new(),
         }]);
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
         plugin.push(&payload, &config, "dev").unwrap();
 
@@ -335,9 +335,9 @@ plugins:
     #[test]
     fn push_skips_empty_env() {
         let config = make_config(azure_yaml());
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
 
@@ -348,11 +348,11 @@ plugins:
     #[test]
     fn pull_success() {
         let config = make_config(azure_yaml());
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let inner = serde_json::json!({
             "API_KEY": "sk_test",
             "DB_URL": "postgres://localhost",
-            crate::plugins::ESK_VERSION_KEY: "5"
+            crate::remotes::ESK_VERSION_KEY: "5"
         });
         let outer = serde_json::json!({
             "value": inner.to_string()
@@ -362,7 +362,7 @@ plugins:
             stdout: serde_json::to_vec(&outer).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
 
         assert_eq!(version, 5);
@@ -374,13 +374,13 @@ plugins:
     #[test]
     fn pull_not_found_returns_none() {
         let config = make_config(azure_yaml());
-        let plugin_config: AzurePluginConfig = config.plugin_config("azure").unwrap();
+        let remote_config: AzureKeyVaultRemoteConfig = config.remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: Vec::new(),
             stderr: b"SecretNotFound: secret not found".to_vec(),
         }]);
-        let plugin = AzurePlugin::new(&config, plugin_config, &runner);
+        let plugin = AzureKeyVaultRemote::new(&config, remote_config, &runner);
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
     }
 }

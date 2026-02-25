@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tempfile::TempDir;
 
-use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
+use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
 use crate::config::Config;
 
 #[derive(Debug, Clone)]

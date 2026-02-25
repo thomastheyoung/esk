@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 use crate::config::{Config, ResolvedTarget};
 
-pub struct SyncResult {
+pub struct DeployResult {
     pub key: String,
     #[allow(dead_code)]
     pub target: ResolvedTarget,
@@ -36,7 +36,7 @@ pub struct SecretValue {
 
 /// Whether an adapter syncs secrets individually or as a batch per target group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum SyncMode {
+pub enum DeployMode {
     /// Sync each secret individually (e.g. cloudflare, convex).
     Individual,
     /// Regenerate the entire target in one batch (e.g. env files).
@@ -103,11 +103,11 @@ impl CommandRunner for RealCommandRunner {
     }
 }
 
-pub trait SyncAdapter {
+pub trait DeployTarget {
     fn name(&self) -> &str;
 
     /// Whether this adapter syncs individually or in batches.
-    fn sync_mode(&self) -> SyncMode;
+    fn sync_mode(&self) -> DeployMode;
 
     /// Validate that external dependencies are available before syncing.
     fn preflight(&self) -> Result<()> {
@@ -124,17 +124,17 @@ pub trait SyncAdapter {
     }
 
     /// Sync a batch of secrets. Default implementation loops sync_secret.
-    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<SyncResult> {
+    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         secrets
             .iter()
             .map(|s| match self.sync_secret(&s.key, &s.value, target) {
-                Ok(()) => SyncResult {
+                Ok(()) => DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
                     success: true,
                     error: None,
                 },
-                Err(e) => SyncResult {
+                Err(e) => DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
                     success: false,
@@ -153,7 +153,7 @@ pub fn validate_stdin_kv_value(key: &str, value: &str, adapter_name: &str) -> Re
     if value.contains('\n') || value.contains('\r') {
         anyhow::bail!(
             "{adapter_name}: secret '{key}' contains newlines, which would inject \
-             additional variables via stdin. Remove newlines or use a different adapter."
+             additional variables via stdin. Remove newlines or use a different target."
         );
     }
     Ok(())
@@ -187,156 +187,156 @@ pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
 }
 
 /// Health status of a configured adapter.
-pub struct AdapterHealth {
+pub struct TargetHealth {
     pub name: String,
     pub ok: bool,
     pub message: String,
 }
 
-struct AdapterCandidate<'a> {
-    adapter: Box<dyn SyncAdapter + 'a>,
+struct TargetCandidate<'a> {
+    target: Box<dyn DeployTarget + 'a>,
     ok_message: &'static str,
 }
 
-fn adapter_candidates<'a>(
+fn target_candidates<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
-) -> Vec<AdapterCandidate<'a>> {
-    let mut candidates: Vec<AdapterCandidate<'a>> = Vec::new();
+) -> Vec<TargetCandidate<'a>> {
+    let mut candidates: Vec<TargetCandidate<'a>> = Vec::new();
 
-    if config.adapters.env.is_some() {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(env_file::EnvFileAdapter { config }),
+    if config.targets.env.is_some() {
+        candidates.push(TargetCandidate {
+            target: Box::new(env_file::EnvFileTarget { config }),
             ok_message: "writable",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.cloudflare {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(cloudflare::CloudflareAdapter {
+    if let Some(target_config) = &config.targets.cloudflare {
+        candidates.push(TargetCandidate {
+            target: Box::new(cloudflare::CloudflareTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "wrangler authenticated",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.convex {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(convex::ConvexAdapter {
+    if let Some(target_config) = &config.targets.convex {
+        candidates.push(TargetCandidate {
+            target: Box::new(convex::ConvexTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "deployment accessible",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.fly {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(fly::FlyAdapter {
+    if let Some(target_config) = &config.targets.fly {
+        candidates.push(TargetCandidate {
+            target: Box::new(fly::FlyTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "fly authenticated",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.netlify {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(netlify::NetlifyAdapter {
+    if let Some(target_config) = &config.targets.netlify {
+        candidates.push(TargetCandidate {
+            target: Box::new(netlify::NetlifyTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "netlify linked",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.vercel {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(vercel::VercelAdapter {
+    if let Some(target_config) = &config.targets.vercel {
+        candidates.push(TargetCandidate {
+            target: Box::new(vercel::VercelTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "vercel authenticated",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.github {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(github::GithubAdapter {
+    if let Some(target_config) = &config.targets.github {
+        candidates.push(TargetCandidate {
+            target: Box::new(github::GithubTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "gh authenticated",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.heroku {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(heroku::HerokuAdapter {
+    if let Some(target_config) = &config.targets.heroku {
+        candidates.push(TargetCandidate {
+            target: Box::new(heroku::HerokuTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "heroku authenticated",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.supabase {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(supabase::SupabaseAdapter {
+    if let Some(target_config) = &config.targets.supabase {
+        candidates.push(TargetCandidate {
+            target: Box::new(supabase::SupabaseTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "supabase available",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.railway {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(railway::RailwayAdapter {
+    if let Some(target_config) = &config.targets.railway {
+        candidates.push(TargetCandidate {
+            target: Box::new(railway::RailwayTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "railway authenticated",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.gitlab {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(gitlab::GitlabAdapter {
+    if let Some(target_config) = &config.targets.gitlab {
+        candidates.push(TargetCandidate {
+            target: Box::new(gitlab::GitlabTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "glab authenticated",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.aws_ssm {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(aws_ssm::AwsSsmAdapter {
+    if let Some(target_config) = &config.targets.aws_ssm {
+        candidates.push(TargetCandidate {
+            target: Box::new(aws_ssm::AwsSsmTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "aws authenticated",
         });
     }
 
-    if let Some(adapter_config) = &config.adapters.kubernetes {
-        candidates.push(AdapterCandidate {
-            adapter: Box::new(kubernetes::KubernetesAdapter {
+    if let Some(target_config) = &config.targets.kubernetes {
+        candidates.push(TargetCandidate {
+            target: Box::new(kubernetes::KubernetesTarget {
                 config,
-                adapter_config,
+                target_config,
                 runner,
             }),
             ok_message: "kubectl available",
@@ -352,17 +352,17 @@ fn needs_cli_secret_arg_warning(name: &str) -> bool {
 
 /// Check the health of all configured adapters without filtering.
 /// Returns one entry per configured adapter with preflight pass/fail.
-pub fn check_adapter_health(config: &Config, runner: &dyn CommandRunner) -> Vec<AdapterHealth> {
+pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<TargetHealth> {
     let mut health = Vec::new();
-    for candidate in adapter_candidates(config, runner) {
-        let name = candidate.adapter.name().to_string();
-        match candidate.adapter.preflight() {
-            Ok(()) => health.push(AdapterHealth {
+    for candidate in target_candidates(config, runner) {
+        let name = candidate.target.name().to_string();
+        match candidate.target.preflight() {
+            Ok(()) => health.push(TargetHealth {
                 name,
                 ok: true,
                 message: candidate.ok_message.to_string(),
             }),
-            Err(e) => health.push(AdapterHealth {
+            Err(e) => health.push(TargetHealth {
                 name,
                 ok: false,
                 message: e.to_string(),
@@ -374,14 +374,14 @@ pub fn check_adapter_health(config: &Config, runner: &dyn CommandRunner) -> Vec<
 
 /// Build all configured sync adapters from the config.
 /// Runs preflight checks and filters out adapters that fail, printing warnings.
-pub fn build_sync_adapters<'a>(
+pub fn build_targets<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
-) -> Vec<Box<dyn SyncAdapter + 'a>> {
-    let mut adapters: Vec<Box<dyn SyncAdapter + 'a>> = Vec::new();
+) -> Vec<Box<dyn DeployTarget + 'a>> {
+    let mut targets: Vec<Box<dyn DeployTarget + 'a>> = Vec::new();
 
-    for candidate in adapter_candidates(config, runner) {
-        let adapter = candidate.adapter;
+    for candidate in target_candidates(config, runner) {
+        let adapter = candidate.target;
         match adapter.preflight() {
             Ok(()) => {
                 if needs_cli_secret_arg_warning(adapter.name()) {
@@ -390,16 +390,16 @@ pub fn build_sync_adapters<'a>(
                         adapter.name()
                     ));
                 }
-                adapters.push(adapter);
+                targets.push(adapter);
             }
             Err(e) => {
                 let _ =
-                    cliclack::log::warning(format!("Skipping {} adapter: {}", adapter.name(), e));
+                    cliclack::log::warning(format!("Skipping {} target: {}", adapter.name(), e));
             }
         }
     }
 
-    adapters
+    targets
 }
 
 #[cfg(test)]
@@ -411,13 +411,13 @@ mod tests {
         fail_keys: Vec<String>,
     }
 
-    impl SyncAdapter for TestAdapter {
+    impl DeployTarget for TestAdapter {
         fn name(&self) -> &str {
             "test"
         }
 
-        fn sync_mode(&self) -> SyncMode {
-            SyncMode::Individual
+        fn sync_mode(&self) -> DeployMode {
+            DeployMode::Individual
         }
 
         fn sync_secret(&self, key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
@@ -430,7 +430,7 @@ mod tests {
 
     fn make_target() -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "test".to_string(),
+            service: "test".to_string(),
             app: Some("web".to_string()),
             environment: "dev".to_string(),
         }
@@ -496,7 +496,7 @@ mod tests {
     }
 
     #[test]
-    fn build_sync_adapters_filters_failing_preflight() {
+    fn build_targets_filters_failing_preflight() {
         // Use a config with cloudflare adapter, but a runner that fails
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
@@ -505,7 +505,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env"
   cloudflare:
@@ -516,14 +516,14 @@ adapters:
         let config = crate::config::Config::load(&path).unwrap();
 
         let runner = ErrorCommandRunner::new("not found");
-        let adapters = build_sync_adapters(&config, &runner);
+        let adapters = build_targets(&config, &runner);
         // env adapter has no preflight check, so it passes; cloudflare fails
         assert_eq!(adapters.len(), 1);
         assert_eq!(adapters[0].name(), "env");
     }
 
     #[test]
-    fn check_adapter_health_all_ok() {
+    fn check_target_health_all_ok() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -531,7 +531,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env"
   cloudflare:
@@ -552,7 +552,7 @@ adapters:
             }
         }
 
-        let health = check_adapter_health(&config, &OkRunner);
+        let health = check_target_health(&config, &OkRunner);
         assert_eq!(health.len(), 2);
         assert!(health[0].ok);
         assert_eq!(health[0].name, "env");
@@ -561,7 +561,7 @@ adapters:
     }
 
     #[test]
-    fn check_adapter_health_cloudflare_fails() {
+    fn check_target_health_cloudflare_fails() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -569,7 +569,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env"
   cloudflare:
@@ -580,7 +580,7 @@ adapters:
         let config = crate::config::Config::load(&path).unwrap();
 
         let runner = ErrorCommandRunner::new("not found");
-        let health = check_adapter_health(&config, &runner);
+        let health = check_target_health(&config, &runner);
         assert_eq!(health.len(), 2);
         assert!(health[0].ok); // env always ok
         assert!(!health[1].ok); // cloudflare fails
@@ -605,7 +605,7 @@ adapters:
     }
 
     #[test]
-    fn check_adapter_health_no_adapters() {
+    fn check_target_health_no_adapters() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "project: x\nenvironments: [dev]";
         let path = dir.path().join("esk.yaml");
@@ -623,7 +623,7 @@ adapters:
             }
         }
 
-        let health = check_adapter_health(&config, &OkRunner);
+        let health = check_target_health(&config, &OkRunner);
         assert!(health.is_empty());
     }
 }

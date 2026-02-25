@@ -15,8 +15,8 @@ Creates:
 - `esk.yaml` — scaffold config with example structure
 - `.esk/store.key` — random 32-byte encryption key (hex-encoded, `0600` permissions)
 - `.esk/store.enc` — empty encrypted store
-- `.esk/sync-index.json` — empty deploy tracker
-- `.esk/plugin-index.json` — empty plugin push tracker
+- `.esk/deploy-index.json` — empty deploy tracker
+- `.esk/remote-index.json` — empty remote push tracker
 
 Idempotent — skips files that already exist. Updates `.gitignore` to include:
 
@@ -39,18 +39,18 @@ esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 | ----------- | -------- | ---------------------------------------------------------------------- |
 | `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                            |
 | `--env`     | Yes      | Environment to delete from                                             |
-| `--no-sync` | No       | Store only — skip auto-push to plugins and auto-deploy                 |
-| `--strict`  | No       | Fail if any plugin push fails and skip adapter deploy                  |
+| `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy                 |
+| `--strict`  | No       | Fail if any remote push fails and skip deploy                          |
 
 **Behavior:**
 
 1. Validates the environment exists in config.
 2. Warns if the key isn't defined in `esk.yaml`.
 3. Removes the value from the encrypted store and records a tombstone, incrementing the version counter.
-4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
-5. Unless `--no-sync`: runs `deploy` for the affected environment (batch adapters regenerate without the deleted key; individual adapters call their delete command).
-6. With `--strict`: if any plugin push fails, exits with an error and skips adapter deploy entirely.
-7. Without `--strict`: adapter deploy still runs, but the command exits non-zero if any plugin push failed (to surface retry work).
+4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
+5. Unless `--no-sync`: runs `deploy` for the affected environment (batch targets regenerate without the deleted key; individual targets call their delete command).
+6. With `--strict`: if any remote push fails, exits with an error and skips deploy entirely.
+7. Without `--strict`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
 
 **Examples:**
 
@@ -77,16 +77,16 @@ esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose]
 | `--dry-run`        | No       | Show what would be deployed without making changes   |
 | `--verbose` / `-v` | No       | Show detailed output including skipped secrets       |
 
-**Adapter behavior:**
+**Target behavior:**
 
-- **Batch adapters** (`env`, `kubernetes`): Regenerate the entire output atomically when any secret in a target group changes.
-- **Individual adapters** (for example `cloudflare`, `convex`): Deploy one secret at a time via external CLI calls.
+- **Batch targets** (`env`, `kubernetes`): Regenerate the entire output atomically when any secret in a target group changes.
+- **Individual targets** (for example `cloudflare`, `convex`): Deploy one secret at a time via external CLI calls.
 
-Adapters that fail preflight checks are skipped with warnings (or all deploy work is skipped if no adapters remain available).
+Targets that fail preflight checks are skipped with warnings (or all deploy work is skipped if no targets remain available).
 
 **Change detection:**
 
-SHA-256 hash of each secret value is tracked per (secret, adapter, app, environment) tuple in `.esk/sync-index.json`. Secrets are skipped when the hash matches unless `--force` is used. Failed deploys are always retried.
+SHA-256 hash of each secret value is tracked per (secret, target, app, environment) tuple in `.esk/deploy-index.json`. Secrets are skipped when the hash matches unless `--force` is used. Failed deploys are always retried.
 
 **Example output:**
 
@@ -114,8 +114,8 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--str
 | `--env`     | Yes      | Target environment                                                         |
 | `--value`   | No       | Secret value. If omitted, prompts interactively (hidden input)             |
 | `--group`   | No       | Config group to register the secret under (skips interactive prompt)        |
-| `--no-sync` | No       | Store only — skip auto-push to plugins and auto-deploy                     |
-| `--strict`  | No       | Fail if any plugin push fails and skip adapter deploy                      |
+| `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy                     |
+| `--strict`  | No       | Fail if any remote push fails and skip deploy                              |
 
 **Behavior:**
 
@@ -125,10 +125,10 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--str
    - Interactive mode (TTY, no `--group`): prompts "Add it?" with a group selector (existing groups or new).
    - Non-interactive mode (piped stdin, no `--group`): warns but proceeds.
 3. Stores the value in the encrypted store, incrementing the version counter.
-4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured plugins.
+4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
 5. Unless `--no-sync`: runs `deploy` for the affected environment.
-6. With `--strict`: if any plugin push fails, exits with an error and skips adapter deploy entirely.
-7. Without `--strict`: adapter deploy still runs, but the command exits non-zero if any plugin push failed (to surface retry work).
+6. With `--strict`: if any remote push fails, exits with an error and skips deploy entirely.
+7. Without `--strict`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
 
 **Examples:**
 
@@ -216,16 +216,16 @@ esk status [--env <ENV>] [--all]
 | Argument | Required | Description                                    |
 | -------- | -------- | ---------------------------------------------- |
 | `--env`  | No       | Filter to a single environment                 |
-| `--all`  | No       | Show all targets including synced ones          |
+| `--all`  | No       | Show all entries including deployed ones        |
 
 Displays a multi-section dashboard with the following sections:
 
 - **Summary** — Project name, store version, and target counts with status breakdown.
-- **Targets** — Adapter health from preflight checks (pass/fail per adapter).
-- **Deploy (adapters)** — Secrets grouped by status: failed, pending, unset, and deployed (deployed hidden unless `--all`). Entries include relative deploy freshness (for example, "3h ago") and error details for failures.
+- **Targets** — Target health from preflight checks (pass/fail per target).
+- **Deploy (targets)** — Secrets grouped by status: failed, pending, unset, and deployed (deployed hidden unless `--all`). Entries include relative deploy freshness (for example, "3h ago") and error details for failures.
 - **Coverage** — Gaps where a secret is set in some environments but not others, and orphaned secrets (in store but not in config).
-- **Sync (plugins)** — Push state per (plugin, environment): current, stale (version behind), failed, or never synced.
-- **Next steps** — Actionable commands to fix issues (retry failed deploys, deploy pending changes, fill coverage gaps, sync stale plugins, remove orphans).
+- **Sync (remotes)** — Push state per (remote, environment): current, stale (version behind), failed, or never synced.
+- **Next steps** — Actionable commands to fix issues (retry failed deploys, deploy pending changes, fill coverage gaps, sync stale remotes, remove orphans).
 
 The dashboard closes with the current store version.
 
@@ -238,7 +238,7 @@ The dashboard closes with the current store version.
     ✔ env            writable
     ✔ cloudflare     wrangler authenticated
 
-  Deploy (adapters)
+  Deploy (targets)
     ● 2 pending
        STRIPE_SECRET_KEY:prod  → cloudflare:web  last deployed 3h ago
        API_KEY:dev  → env:web  never deployed
@@ -289,16 +289,16 @@ esk generate --runtime --output src/env.ts
 
 ## `esk sync`
 
-Sync secrets with configured storage plugins. Pulls from plugins, reconciles with the local store, then pushes merged data to stale or drifted plugins.
+Sync secrets with configured remotes. Pulls from remotes, reconciles with the local store, then pushes merged data to stale or drifted remotes.
 
 ```bash
-esk sync [--env <ENV>] [--only <PLUGIN>] [--dry-run] [--no-partial] [--force] [--with-deploy] [--prefer <local|remote>]
+esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--no-partial] [--force] [--with-deploy] [--prefer <local|remote>]
 ```
 
 | Argument        | Required | Description                                                                |
 | --------------- | -------- | -------------------------------------------------------------------------- |
 | `--env`         | No       | Environment to sync (omit to sync all configured environments)             |
-| `--only`        | No       | Sync a specific plugin only                                                |
+| `--only`        | No       | Sync a specific remote only                                                |
 | `--dry-run`     | No       | Show what would change without modifying anything                          |
 | `--no-partial`  | No       | Fail if any plugin is unreachable (no partial reconciliation)              |
 | `--force`       | No       | Bypass version jump protection — skip interactive prompt (use with caution)|
@@ -307,15 +307,15 @@ esk sync [--env <ENV>] [--only <PLUGIN>] [--dry-run] [--no-partial] [--force] [-
 
 Compatibility aliases: `--strict` for `--no-partial`, and `--deploy` for `--with-deploy`.
 
-**Requires:** At least one plugin configured in `esk.yaml`. Plugins that fail preflight are skipped; if none remain, sync exits with a warning and no changes.
+**Requires:** At least one remote configured in `esk.yaml`. Remotes that fail preflight are skipped; if none remain, sync exits with a warning and no changes.
 
 **Behavior:**
 
 1. Syncs the selected environment(s): `--env` limits to one; omitted means all configured environments.
-2. Pulls secrets and versions from all available plugins (or just `--only <name>`).
+2. Pulls secrets and versions from all available remotes (or just `--only <name>`).
 3. Uses the highest version as the base and merges unique keys from lower versions.
 4. Updates local store state when reconciliation changes it.
-5. Pushes merged/current data to stale plugins, including equal-version drift repair (no interactive push prompt).
+5. Pushes merged/current data to stale remotes, including equal-version drift repair (no interactive push prompt).
 6. With `--with-deploy`, runs `esk deploy --env <ENV>` only for environments where local store state changed.
 7. With `--dry-run`, shows what would change without modifying store or plugin state.
 
@@ -324,8 +324,8 @@ Compatibility aliases: `--strict` for `--no-partial`, and `--deploy` for `--with
 ```bash
 esk sync                                # Sync all environments and plugins
 esk sync --env prod                     # Sync one environment
-esk sync --env prod --only 1password    # Sync specific plugin
-esk sync --env prod --with-deploy       # Sync + auto-deploy targets
+esk sync --env prod --only 1password    # Sync specific remote
+esk sync --env prod --with-deploy       # Sync + auto-deploy
 esk sync --env prod --prefer remote     # At equal versions, prefer remote content
 esk sync --env prod --dry-run           # Preview changes
 ```
@@ -339,8 +339,8 @@ esk sync --env prod --dry-run           # Preview changes
 | `esk.yaml`               | Project configuration                     | Yes            |
 | `.esk/store.enc`         | AES-256-GCM encrypted secret store        | Yes            |
 | `.esk/store.key`         | 32-byte encryption key (hex)              | **No**         |
-| `.esk/sync-index.json`   | Deploy state (hashes, timestamps, status) | Optional       |
-| `.esk/plugin-index.json` | Plugin push state (versions, timestamps)  | Optional       |
+| `.esk/deploy-index.json`  | Deploy state (hashes, timestamps, status) | Optional       |
+| `.esk/remote-index.json`  | Remote push state (versions, timestamps)  | Optional       |
 
 ## Exit codes
 

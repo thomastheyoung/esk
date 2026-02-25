@@ -1,34 +1,34 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 
-use crate::adapters::{CommandOpts, CommandRunner};
-use crate::config::{AwsSecretsManagerPluginConfig, Config};
+use crate::targets::{CommandOpts, CommandRunner};
+use crate::config::{AwsSecretsManagerRemoteConfig, Config};
 use crate::store::StorePayload;
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct AwsSecretsManagerPlugin<'a> {
+pub struct AwsSecretsManagerRemote<'a> {
     config: &'a Config,
-    plugin_config: AwsSecretsManagerPluginConfig,
+    remote_config: AwsSecretsManagerRemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
-impl<'a> AwsSecretsManagerPlugin<'a> {
+impl<'a> AwsSecretsManagerRemote<'a> {
     pub fn new(
         config: &'a Config,
-        plugin_config: AwsSecretsManagerPluginConfig,
+        remote_config: AwsSecretsManagerRemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
             config,
-            plugin_config,
+            remote_config,
             runner,
         }
     }
 
     /// Resolve the secret name for an environment by replacing placeholders.
     pub fn secret_name(&self, env: &str) -> String {
-        self.plugin_config
+        self.remote_config
             .secret_name
             .replace("{project}", &self.config.project)
             .replace("{environment}", env)
@@ -37,11 +37,11 @@ impl<'a> AwsSecretsManagerPlugin<'a> {
     /// Build base args for --region and --profile flags.
     fn base_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        if let Some(ref region) = self.plugin_config.region {
+        if let Some(ref region) = self.remote_config.region {
             args.push("--region".to_string());
             args.push(region.clone());
         }
-        if let Some(ref profile) = self.plugin_config.profile {
+        if let Some(ref profile) = self.remote_config.profile {
             args.push("--profile".to_string());
             args.push(profile.clone());
         }
@@ -49,13 +49,13 @@ impl<'a> AwsSecretsManagerPlugin<'a> {
     }
 }
 
-impl<'a> StoragePlugin for AwsSecretsManagerPlugin<'a> {
+impl<'a> SyncRemote for AwsSecretsManagerRemote<'a> {
     fn name(&self) -> &str {
         "aws_secrets_manager"
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::adapters::check_command(self.runner, "aws").map_err(|_| {
+        crate::targets::check_command(self.runner, "aws").map_err(|_| {
             anyhow::anyhow!(
                 "AWS CLI (aws) is not installed or not in PATH. Install it from: https://aws.amazon.com/cli/"
             )
@@ -233,7 +233,7 @@ impl<'a> StoragePlugin for AwsSecretsManagerPlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::targets::{CommandOpts, CommandOutput};
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
@@ -253,15 +253,15 @@ mod tests {
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -274,7 +274,7 @@ plugins:
             }
         }
         let runner = DummyRunner;
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         assert_eq!(plugin.secret_name("dev"), "myapp/dev");
         assert_eq!(plugin.secret_name("prod"), "myapp/prod");
     }
@@ -285,7 +285,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: test
     region: us-west-2
@@ -294,8 +294,8 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -308,7 +308,7 @@ plugins:
             }
         }
         let runner = DummyRunner;
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         let args = plugin.base_args();
         assert_eq!(args, vec!["--region", "us-west-2", "--profile", "staging"]);
     }
@@ -319,15 +319,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: test
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -340,7 +340,7 @@ plugins:
             }
         }
         let runner = DummyRunner;
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         assert!(plugin.base_args().is_empty());
     }
 
@@ -350,15 +350,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: test
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -372,7 +372,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -386,18 +386,18 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: test
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
     }
@@ -408,15 +408,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: test
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -430,7 +430,7 @@ plugins:
                 stderr: b"Unable to locate credentials".to_vec(),
             },
         ]);
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS authentication failed"));
         assert!(err.to_string().contains("Unable to locate credentials"));
@@ -442,15 +442,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -466,7 +466,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -496,22 +496,22 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: b"{}".to_vec(),
             stderr: Vec::new(),
         }]);
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("DB_URL:dev".to_string(), "postgres://localhost".to_string());
@@ -536,18 +536,18 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         // Only prod secrets, push for dev -> should skip
         let mut secrets = BTreeMap::new();
@@ -570,15 +570,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let remote_payload = StorePayload {
             secrets: {
@@ -603,7 +603,7 @@ plugins:
             stdout: serde_json::to_vec(&aws_response).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 7);
@@ -617,15 +617,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -633,7 +633,7 @@ plugins:
             stderr: b"ResourceNotFoundException: Secrets Manager can't find the specified secret."
                 .to_vec(),
         }]);
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
     }
@@ -644,22 +644,22 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let plugin_config: AwsSecretsManagerPluginConfig =
-            config.plugin_config("aws_secrets_manager").unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: b"{}".to_vec(),
             stderr: Vec::new(),
         }]);
-        let plugin = AwsSecretsManagerPlugin::new(&config, plugin_config, &runner);
+        let plugin = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         let mut env_versions = BTreeMap::new();
         env_versions.insert("dev".to_string(), 10);

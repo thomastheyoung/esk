@@ -3,10 +3,10 @@ use console::style;
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 
-use crate::adapters::{CommandRunner, RealCommandRunner};
+use crate::targets::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
-use crate::plugin_tracker::PluginIndex;
-use crate::plugins::{self, StoragePlugin};
+use crate::remote_tracker::RemoteIndex;
+use crate::remotes::{self, SyncRemote};
 use crate::reconcile::{self, ConflictPreference};
 use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
@@ -40,26 +40,26 @@ fn format_sync_line(label: &str, value: &str, value_column: usize) -> String {
     format!("{} {} {}", label, style(dots).dim(), value)
 }
 
-/// Push a payload to the given plugins, recording results in the plugin index.
+/// Push a payload to the given plugins, recording results in the remote index.
 /// Returns the number of failures.
-pub fn push_to_plugins(
-    plugins: &[Box<dyn StoragePlugin + '_>],
+pub fn push_to_remotes(
+    remotes: &[Box<dyn SyncRemote + '_>],
     payload: &StorePayload,
     config: &Config,
     env: &str,
-    plugin_index: &mut PluginIndex,
+    remote_index: &mut RemoteIndex,
 ) -> Result<u32> {
     let mut fail_count = 0u32;
     let pushed_version = payload.env_version(env);
 
-    for plugin in plugins {
+    for plugin in remotes {
         let spinner = cliclack::spinner();
         spinner.start(format!("↑ {}...", plugin.name()));
 
         match plugin.push(payload, config, env) {
             Ok(()) => {
                 spinner.stop(format!("↑ {}  {}", plugin.name(), style("done").green()));
-                plugin_index.record_success(plugin.name(), env, pushed_version);
+                remote_index.record_success(plugin.name(), env, pushed_version);
             }
             Err(e) => {
                 spinner.error(format!(
@@ -67,7 +67,7 @@ pub fn push_to_plugins(
                     plugin.name(),
                     style("failed").red()
                 ));
-                plugin_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
+                remote_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
                 fail_count += 1;
             }
         }
@@ -150,39 +150,39 @@ pub fn run_with_runner(
         bail!("{}", suggest::unknown_env(env, &config.environments));
     }
 
-    if config.plugins.is_empty() {
-        bail!("no plugins configured in esk.yaml");
+    if config.remotes.is_empty() {
+        bail!("no remotes configured in esk.yaml");
     }
 
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
 
-    let all_plugins = plugins::build_plugins(config, runner);
+    let all_remotes = remotes::build_remotes(config, runner);
 
-    if all_plugins.is_empty() {
-        if config.plugins.is_empty() {
-            bail!("no plugins configured in esk.yaml");
+    if all_remotes.is_empty() {
+        if config.remotes.is_empty() {
+            bail!("no remotes configured in esk.yaml");
         } else {
             cliclack::log::warning(
-                "No plugins available after preflight checks. Fix the issues above and try again.",
+                "No remotes available after preflight checks. Fix the issues above and try again.",
             )?;
             return Ok(());
         }
     }
 
     // Filter by --only if provided
-    let target_plugins: Vec<_> = if let Some(name) = only {
-        let plugin_names: Vec<String> = all_plugins.iter().map(|p| p.name().to_string()).collect();
-        let filtered: Vec<_> = all_plugins
+    let target_remotes: Vec<_> = if let Some(name) = only {
+        let remote_names: Vec<String> = all_remotes.iter().map(|p| p.name().to_string()).collect();
+        let filtered: Vec<_> = all_remotes
             .into_iter()
             .filter(|p| p.name() == name)
             .collect();
         if filtered.is_empty() {
-            bail!("{}", suggest::unknown_plugin(name, &plugin_names));
+            bail!("{}", suggest::unknown_remote(name, &remote_names));
         }
         filtered
     } else {
-        all_plugins
+        all_remotes
     };
 
     let mut lines = Vec::new();
@@ -192,7 +192,7 @@ pub fn run_with_runner(
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
     let mut pull_failures: Vec<String> = Vec::new();
 
-    for plugin in &target_plugins {
+    for plugin in &target_remotes {
         match plugin.pull(config, env) {
             Ok(Some((secrets, version))) => {
                 lines.push(format_sync_line(
@@ -327,17 +327,17 @@ pub fn run_with_runner(
         } else {
             &payload
         };
-        let plugin_index_path = config.root.join(".esk/plugin-index.json");
-        let mut plugin_index = PluginIndex::load(&plugin_index_path);
+        let remote_index_path = config.root.join(".esk/remote-index.json");
+        let mut remote_index = RemoteIndex::load(&remote_index_path);
 
-        let stale_plugins: Vec<_> = target_plugins
+        let stale_remotes: Vec<_> = target_remotes
             .iter()
             .filter(|p| result.sources_to_update.contains(&p.name().to_string()))
             .collect();
         let pushed_version = updated_payload.env_version(env);
 
         let mut pushback_failures = 0u32;
-        for plugin in &stale_plugins {
+        for plugin in &stale_remotes {
             match plugin.push(updated_payload, config, env) {
                 Ok(()) => {
                     lines.push(format_sync_line(
@@ -345,7 +345,7 @@ pub fn run_with_runner(
                         &style("synced").green().to_string(),
                         value_column,
                     ));
-                    plugin_index.record_success(plugin.name(), env, pushed_version);
+                    remote_index.record_success(plugin.name(), env, pushed_version);
                 }
                 Err(e) => {
                     lines.push(format_sync_line(
@@ -353,12 +353,12 @@ pub fn run_with_runner(
                         &style("failed").red().to_string(),
                         value_column,
                     ));
-                    plugin_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
+                    remote_index.record_failure(plugin.name(), env, pushed_version, e.to_string());
                     pushback_failures += 1;
                 }
             }
         }
-        plugin_index.save()?;
+        remote_index.save()?;
         if pushback_failures > 0 {
             lines.push(String::new());
             lines.push(status_line);

@@ -1,31 +1,31 @@
-# Adapters
+# Targets
 
-Adapters deploy secrets to targets via `esk deploy`. Each adapter is configured in the `adapters` section of `esk.yaml`. Secrets declare which adapters they target — only targeted secrets are synced.
+Targets deploy secrets to their configured services via `esk deploy`. Each target is configured in the `targets` section of `esk.yaml`. Secrets declare which targets they deploy to — only targeted secrets are deployed.
 
-For storage/backup plugins (1Password, cloud files), see [PLUGINS.md](PLUGINS.md).
+For sync remotes (1Password, cloud files), see [REMOTES.md](REMOTES.md).
 
 ## Overview
 
-| Adapter                                   | Config key   | External CLI | Sync mode  | Targets require app?      |
-| ----------------------------------------- | ------------ | ------------ | ---------- | ------------------------- |
-| [Env file](#env-file)                     | `env`        | None         | Batch      | Yes                       |
-| [Cloudflare Workers](#cloudflare-workers) | `cloudflare` | `wrangler`   | Individual | Yes (Workers); No (Pages) |
-| [Convex](#convex)                         | `convex`     | `npx`        | Individual | No                        |
-| [Fly.io](#flyio)                          | `fly`        | `fly`        | Individual | Yes                       |
-| [Netlify](#netlify)                       | `netlify`    | `netlify`    | Individual | No                        |
-| [Vercel](#vercel)                         | `vercel`     | `vercel`     | Individual | No                        |
-| [GitHub Actions](#github-actions)         | `github`     | `gh`         | Individual | No                        |
-| [Heroku](#heroku)                         | `heroku`     | `heroku`     | Individual | Yes                       |
-| [Supabase](#supabase)                     | `supabase`   | `supabase`   | Individual | No                        |
-| [Railway](#railway)                       | `railway`    | `railway`    | Individual | No                        |
-| [GitLab CI](#gitlab-ci)                   | `gitlab`     | `glab`       | Individual | No                        |
-| [AWS SSM](#aws-ssm)                       | `aws_ssm`    | `aws`        | Individual | No                        |
-| [Kubernetes](#kubernetes)                 | `kubernetes` | `kubectl`    | Batch      | No                        |
+| Target                                    | Config key   | External CLI | Deploy mode | Requires app?             |
+| ----------------------------------------- | ------------ | ------------ | ----------- | ------------------------- |
+| [Env file](#env-file)                     | `env`        | None         | Batch       | Yes                       |
+| [Cloudflare Workers](#cloudflare-workers) | `cloudflare` | `wrangler`   | Individual  | Yes (Workers); No (Pages) |
+| [Convex](#convex)                         | `convex`     | `npx`        | Individual  | No                        |
+| [Fly.io](#flyio)                          | `fly`        | `fly`        | Individual  | Yes                       |
+| [Netlify](#netlify)                       | `netlify`    | `netlify`    | Individual  | No                        |
+| [Vercel](#vercel)                         | `vercel`     | `vercel`     | Individual  | No                        |
+| [GitHub Actions](#github-actions)         | `github`     | `gh`         | Individual  | No                        |
+| [Heroku](#heroku)                         | `heroku`     | `heroku`     | Individual  | Yes                       |
+| [Supabase](#supabase)                     | `supabase`   | `supabase`   | Individual  | No                        |
+| [Railway](#railway)                       | `railway`    | `railway`    | Individual  | No                        |
+| [GitLab CI](#gitlab-ci)                   | `gitlab`     | `glab`       | Individual  | No                        |
+| [AWS SSM](#aws-ssm)                       | `aws_ssm`    | `aws`        | Individual  | No                        |
+| [Kubernetes](#kubernetes)                 | `kubernetes` | `kubectl`    | Batch       | No                        |
 
-**Sync modes:**
+**Deploy modes:**
 
-- **Batch** — When any secret changes for a target group, the entire output is regenerated. Used by env file and Kubernetes adapters.
-- **Individual** — Each changed secret is synced independently. Used by all other adapters.
+- **Batch** — When any secret changes for a target group, the entire output is regenerated. Used by env file and Kubernetes targets.
+- **Individual** — Each changed secret is deployed independently. Used by all other targets.
 
 ---
 
@@ -45,7 +45,7 @@ Generates `.env` files from the encrypted store. The output path is computed fro
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -109,7 +109,7 @@ STRIPE_WEBHOOK_SECRET=whsec_xyz
 
 ## Cloudflare Workers
 
-Syncs secrets to Cloudflare Workers using `wrangler secret put`.
+Deploys secrets to Cloudflare Workers using `wrangler secret put`.
 
 ### How it works
 
@@ -120,12 +120,12 @@ Syncs secrets to Cloudflare Workers using `wrangler secret put`.
 ### Prerequisites
 
 - [Wrangler CLI](https://developers.cloudflare.com/workers/wrangler/) installed and authenticated.
-- A `wrangler.toml` in each app directory that uses this adapter.
+- A `wrangler.toml` in each app directory that uses this target.
 
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   cloudflare:
     mode: workers # "workers" (default) or "pages"
     pages_project: my-pages # required when mode is "pages"
@@ -176,7 +176,7 @@ secrets:
 
 ## Convex
 
-Syncs environment variables to Convex deployments using `npx convex env set`.
+Deploys environment variables to Convex deployments using `npx convex env set`.
 
 ### How it works
 
@@ -193,7 +193,7 @@ Syncs environment variables to Convex deployments using `npx convex env set`.
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   convex:
     path: apps/api
     deployment_source: apps/api/.env.local
@@ -230,11 +230,11 @@ CONVEX_DEPLOYMENT=dev:my-app-123 npx convex env set <KEY> <VALUE> [env_flags...]
 CONVEX_DEPLOYMENT=dev:my-app-123 npx convex env unset <KEY> [env_flags...]
 ```
 
-> **Security note**: `npx convex env set` has no stdin support. Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). This is a known limitation of the Convex CLI. A warning is printed at sync time.
+> **Security note**: `npx convex env set` has no stdin support. Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). This is a known limitation of the Convex CLI. A warning is printed at deploy time.
 
 ### Target format
 
-Targets are environment-only (no app prefix needed since the adapter has its own `path`):
+Targets are environment-only (no app prefix needed since the target has its own `path`):
 
 ```yaml
 secrets:
@@ -248,9 +248,9 @@ secrets:
 
 ## Fly.io
 
-Syncs secrets to Fly.io apps using `fly secrets import`. Values are piped via stdin to avoid exposing them in process listings.
+Deploys secrets to Fly.io apps using `fly secrets import`. Values are piped via stdin to avoid exposing them in process listings.
 
-Values containing newlines are rejected (the adapter sends `KEY=VALUE` over stdin, and newlines would inject additional variables).
+Values containing newlines are rejected (the target sends `KEY=VALUE` over stdin, and newlines would inject additional variables).
 
 ### Prerequisites
 
@@ -259,7 +259,7 @@ Values containing newlines are rejected (the adapter sends `KEY=VALUE` over stdi
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   fly:
     app_names:
       web: my-fly-app
@@ -299,9 +299,9 @@ secrets:
 
 ## Netlify
 
-Syncs environment variables to Netlify sites using `netlify env:set`.
+Deploys environment variables to Netlify sites using `netlify env:set`.
 
-> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at sync time.
+> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at deploy time.
 
 ### Prerequisites
 
@@ -313,7 +313,7 @@ Preflight runs `netlify status` to verify CLI installation and site linkage.
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   netlify:
     site: my-site-id # optional
     env_flags:
@@ -348,7 +348,7 @@ secrets:
 
 ## Vercel
 
-Syncs environment variables to Vercel projects using `vercel env add` with the value piped via stdin.
+Deploys environment variables to Vercel projects using `vercel env add` with the value piped via stdin.
 
 ### Prerequisites
 
@@ -357,7 +357,7 @@ Syncs environment variables to Vercel projects using `vercel env add` with the v
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   vercel:
     env_names:
       dev: development
@@ -394,7 +394,7 @@ secrets:
 
 ## GitHub Actions
 
-Syncs repository secrets using `gh secret set` with the value piped via stdin to avoid exposing secrets in process listings.
+Deploys repository secrets using `gh secret set` with the value piped via stdin to avoid exposing secrets in process listings.
 
 ### Prerequisites
 
@@ -403,7 +403,7 @@ Syncs repository secrets using `gh secret set` with the value piped via stdin to
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   github:
     repo: owner/repo # optional — defaults to current repo
     env_flags:
@@ -438,9 +438,9 @@ secrets:
 
 ## Heroku
 
-Syncs config vars to Heroku apps using `heroku config:set`.
+Deploys config vars to Heroku apps using `heroku config:set`.
 
-> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at sync time.
+> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at deploy time.
 
 ### Prerequisites
 
@@ -449,7 +449,7 @@ Syncs config vars to Heroku apps using `heroku config:set`.
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   heroku:
     app_names:
       web: my-heroku-app
@@ -485,9 +485,9 @@ secrets:
 
 ## Supabase
 
-Syncs secrets to Supabase edge functions using `supabase secrets set`. Values are piped via stdin to avoid exposing them in process listings.
+Deploys secrets to Supabase edge functions using `supabase secrets set`. Values are piped via stdin to avoid exposing them in process listings.
 
-Values containing newlines are rejected (the adapter sends `KEY=VALUE` over stdin, and newlines would inject additional variables).
+Values containing newlines are rejected (the target sends `KEY=VALUE` over stdin, and newlines would inject additional variables).
 
 ### Prerequisites
 
@@ -496,7 +496,7 @@ Values containing newlines are rejected (the adapter sends `KEY=VALUE` over stdi
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   supabase:
     project_ref: abcdef123456
     env_flags:
@@ -534,9 +534,9 @@ secrets:
 
 ## Railway
 
-Syncs environment variables to Railway projects using `railway variables --set`.
+Deploys environment variables to Railway projects using `railway variables --set`.
 
-> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at sync time.
+> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at deploy time.
 
 ### Prerequisites
 
@@ -545,7 +545,7 @@ Syncs environment variables to Railway projects using `railway variables --set`.
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   railway:
     env_flags:
       prod: "--environment production"
@@ -578,7 +578,7 @@ secrets:
 
 ## GitLab CI
 
-Syncs CI/CD variables to GitLab projects using `glab variable set`.
+Deploys CI/CD variables to GitLab projects using `glab variable set`.
 
 ### Prerequisites
 
@@ -587,7 +587,7 @@ Syncs CI/CD variables to GitLab projects using `glab variable set`.
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   gitlab:
     env_flags:
       prod: "--masked"
@@ -623,7 +623,7 @@ secrets:
 
 ## AWS SSM
 
-Syncs secrets to AWS Systems Manager Parameter Store using `aws ssm put-parameter`. Values are sent via stdin (`--cli-input-json file:///dev/stdin`) to avoid exposing secrets in process listings.
+Deploys secrets to AWS Systems Manager Parameter Store using `aws ssm put-parameter`. Values are sent via stdin (`--cli-input-json file:///dev/stdin`) to avoid exposing secrets in process listings.
 
 ### Prerequisites
 
@@ -634,7 +634,7 @@ Preflight runs `aws sts get-caller-identity` to verify credentials and connectiv
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   aws_ssm:
     path_prefix: "/{project}/{environment}/"
     region: us-east-1
@@ -690,7 +690,7 @@ secrets:
 
 ## Kubernetes
 
-Generates Kubernetes Secret manifests and applies them using `kubectl apply`. This is a **batch** adapter — when any secret changes, the entire Secret resource is regenerated and applied.
+Generates Kubernetes Secret manifests and applies them using `kubectl apply`. This is a **batch** target — when any secret changes, the entire Secret resource is regenerated and applied.
 
 ### How it works
 
@@ -707,7 +707,7 @@ Preflight runs `kubectl cluster-info` to verify cluster connectivity.
 ### Configuration
 
 ```yaml
-adapters:
+targets:
   kubernetes:
     namespace:
       dev: myapp-dev

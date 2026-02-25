@@ -1,53 +1,53 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 
-use crate::adapters::{CommandOpts, CommandRunner};
-use crate::config::{Config, GcpPluginConfig};
+use crate::targets::{CommandOpts, CommandRunner};
+use crate::config::{Config, GcpSecretManagerRemoteConfig};
 use crate::store::StorePayload;
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct GcpPlugin<'a> {
+pub struct GcpSecretManagerRemote<'a> {
     config: &'a Config,
-    plugin_config: GcpPluginConfig,
+    remote_config: GcpSecretManagerRemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
-impl<'a> GcpPlugin<'a> {
+impl<'a> GcpSecretManagerRemote<'a> {
     pub fn new(
         config: &'a Config,
-        plugin_config: GcpPluginConfig,
+        remote_config: GcpSecretManagerRemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
             config,
-            plugin_config,
+            remote_config,
             runner,
         }
     }
 
     /// Resolve the GCP secret name for an environment.
     fn secret_name(&self, env: &str) -> String {
-        self.plugin_config
+        self.remote_config
             .secret_name
             .replace("{project}", &self.config.project)
             .replace("{environment}", env)
     }
 }
 
-impl<'a> StoragePlugin for GcpPlugin<'a> {
+impl<'a> SyncRemote for GcpSecretManagerRemote<'a> {
     fn name(&self) -> &str {
         "gcp"
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::adapters::check_command(self.runner, "gcloud").map_err(|_| {
+        crate::targets::check_command(self.runner, "gcloud").map_err(|_| {
             anyhow::anyhow!(
                 "Google Cloud CLI (gcloud) is not installed or not in PATH. Install it from: https://cloud.google.com/sdk/docs/install"
             )
         })?;
 
-        let project = &self.plugin_config.gcp_project;
+        let project = &self.remote_config.gcp_project;
         let output = self
             .runner
             .run(
@@ -75,7 +75,7 @@ impl<'a> StoragePlugin for GcpPlugin<'a> {
         let json = serde_json::to_string(&json_map).context("failed to serialize secrets")?;
 
         let secret_name = self.secret_name(env);
-        let project = &self.plugin_config.gcp_project;
+        let project = &self.remote_config.gcp_project;
 
         // Try to add a new version
         let output = self
@@ -149,7 +149,7 @@ impl<'a> StoragePlugin for GcpPlugin<'a> {
 
     fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let secret_name = self.secret_name(env);
-        let project = &self.plugin_config.gcp_project;
+        let project = &self.remote_config.gcp_project;
 
         let output = self
             .runner
@@ -187,7 +187,7 @@ impl<'a> StoragePlugin for GcpPlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::targets::{CommandOpts, CommandOutput};
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use std::sync::Mutex;
 
@@ -217,7 +217,7 @@ mod tests {
         r#"
 project: myapp
 environments: [dev, prod]
-plugins:
+remotes:
   gcp:
     gcp_project: my-gcp-project
     secret_name: "{project}-{environment}"
@@ -241,9 +241,9 @@ plugins:
     #[test]
     fn secret_name_substitution() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         assert_eq!(plugin.secret_name("dev"), "myapp-dev");
         assert_eq!(plugin.secret_name("prod"), "myapp-prod");
     }
@@ -251,7 +251,7 @@ plugins:
     #[test]
     fn preflight_success() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -264,7 +264,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -275,9 +275,9 @@ plugins:
     #[test]
     fn preflight_missing_gcloud() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("gcloud"));
         assert!(err.to_string().contains("not installed"));
@@ -286,7 +286,7 @@ plugins:
     #[test]
     fn preflight_auth_failure() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -299,7 +299,7 @@ plugins:
                 stderr: b"ERROR: (gcloud.auth.print-access-token) not authenticated".to_vec(),
             },
         ]);
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("not accessible"));
     }
@@ -307,13 +307,13 @@ plugins:
     #[test]
     fn push_success() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: Vec::new(),
             stderr: Vec::new(),
         }]);
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
         plugin.push(&payload, &config, "dev").unwrap();
 
@@ -328,7 +328,7 @@ plugins:
     #[test]
     fn push_creates_secret_on_not_found() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // First versions add fails with NOT_FOUND
             CommandOutput {
@@ -349,7 +349,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("KEY:dev", "val")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
 
@@ -361,9 +361,9 @@ plugins:
     #[test]
     fn push_skips_empty_env() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         // Only prod secrets, pushing dev — should skip
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
@@ -375,18 +375,18 @@ plugins:
     #[test]
     fn pull_success() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let json = serde_json::json!({
             "API_KEY": "sk_test",
             "DB_URL": "postgres://localhost",
-            crate::plugins::ESK_VERSION_KEY: "5"
+            crate::remotes::ESK_VERSION_KEY: "5"
         });
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: serde_json::to_vec(&json).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
 
         assert_eq!(version, 5);
@@ -398,20 +398,20 @@ plugins:
     #[test]
     fn pull_not_found_returns_none() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: Vec::new(),
             stderr: b"NOT_FOUND: Secret not found".to_vec(),
         }]);
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
     }
 
     #[test]
     fn push_uses_env_version() {
         let config = make_config(gcp_yaml());
-        let plugin_config: GcpPluginConfig = config.plugin_config("gcp").unwrap();
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
 
         // Capture stdin to verify version
         struct StdinCapture {
@@ -439,7 +439,7 @@ plugins:
         let runner = StdinCapture {
             calls: Mutex::new(Vec::new()),
         };
-        let plugin = GcpPlugin::new(&config, plugin_config, &runner);
+        let plugin = GcpSecretManagerRemote::new(&config, remote_config, &runner);
 
         let mut env_versions = BTreeMap::new();
         env_versions.insert("dev".to_string(), 42);
@@ -455,6 +455,6 @@ plugins:
         let calls = runner.calls.lock().unwrap();
         let stdin = calls[0].2.as_ref().unwrap();
         let json: BTreeMap<String, String> = serde_json::from_slice(stdin).unwrap();
-        assert_eq!(json.get(crate::plugins::ESK_VERSION_KEY).unwrap(), "42");
+        assert_eq!(json.get(crate::remotes::ESK_VERSION_KEY).unwrap(), "42");
     }
 }

@@ -20,8 +20,8 @@ It is built for teams that want:
 
 - Stores secrets in `.esk/store.enc` (AES-256-GCM encrypted)
 - Keeps the decryption key in `.esk/store.key` (local only)
-- Deploys to adapters like `.env` files, Cloudflare, Convex, Vercel, GitHub Actions, Kubernetes, and more
-- Syncs with plugins like 1Password, cloud folders, AWS Secrets Manager, Vault, Bitwarden, S3, GCP, Azure, Doppler, and SOPS
+- Deploys to targets like `.env` files, Cloudflare, Convex, Vercel, GitHub Actions, Kubernetes, and more
+- Syncs with remotes like 1Password, cloud folders, AWS Secrets Manager, Vault, Bitwarden, S3, GCP, Azure, Doppler, and SOPS
 
 ## Install
 
@@ -78,29 +78,29 @@ esk status --env dev
 
 | File                     | Purpose                                                         | Commit to git |
 | ------------------------ | --------------------------------------------------------------- | ------------- |
-| `esk.yaml`               | Project config (environments, apps, adapters, plugins, secrets) | Yes           |
-| `.esk/store.enc`         | Encrypted secret store                                          | Yes           |
-| `.esk/store.key`         | Local encryption key (32-byte hex)                              | No            |
-| `.esk/sync-index.json`   | Deploy state tracker                                            | Optional      |
-| `.esk/plugin-index.json` | Plugin push state tracker                                       | Optional      |
+| `esk.yaml`                | Project config (environments, apps, targets, remotes, secrets) | Yes           |
+| `.esk/store.enc`          | Encrypted secret store                                         | Yes           |
+| `.esk/store.key`          | Local encryption key (32-byte hex)                             | No            |
+| `.esk/deploy-index.json`  | Deploy state tracker                                           | Optional      |
+| `.esk/remote-index.json`  | Remote push state tracker                                      | Optional      |
 
 ## Mental model
 
 `esk` has 3 parts:
 
 1. **Store**: local encrypted data (`.esk/store.enc` + `.esk/store.key`)
-2. **Adapters**: deploy secrets to runtime targets (`esk deploy`)
-3. **Plugins**: sync full secret state to team/shared backends (`esk sync`)
+2. **Targets**: deploy secrets to runtime services (`esk deploy`)
+3. **Remotes**: sync full secret state to team/shared backends (`esk sync`)
 
 ## Important default behavior
 
 By default, `esk set` and `esk delete` do more than update local storage:
 
 1. Update encrypted local store
-2. Push to configured plugins
-3. Deploy to configured adapters
+2. Push to configured remotes
+3. Deploy to configured targets
 
-Use `--no-sync` to skip steps 2 and 3. Use `--strict` to fail before deploy if any plugin push fails.
+Use `--no-sync` to skip steps 2 and 3. Use `--strict` to fail before deploy if any remote push fails.
 
 ## Minimal config (`esk.yaml`)
 
@@ -115,7 +115,7 @@ apps:
   web:
     path: .
 
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -130,7 +130,7 @@ secrets:
         env: [web:dev, web:prod]
 ```
 
-When you need cloud targets or shared sync, add adapter/plugin blocks. See [ADAPTERS.md](ADAPTERS.md) and [PLUGINS.md](PLUGINS.md).
+When you need cloud deploy targets or shared sync, add target/remote blocks. See [TARGETS.md](TARGETS.md) and [REMOTES.md](REMOTES.md).
 
 ## Commands you will use most
 
@@ -141,14 +141,14 @@ When you need cloud targets or shared sync, add adapter/plugin blocks. See [ADAP
 | `esk get <KEY> --env <ENV>`    | Read a secret                                 |
 | `esk delete <KEY> --env <ENV>` | Delete a secret (auto-sync/deploy by default) |
 | `esk list [--env <ENV>]`       | List secrets and deploy status                |
-| `esk deploy [--env <ENV>]`     | Deploy to adapter targets                     |
+| `esk deploy [--env <ENV>]`     | Deploy to configured targets                  |
 | `esk status [--env <ENV>]`     | Show drift/sync dashboard                     |
-| `esk sync [--env <ENV>]`       | Pull, reconcile, and push plugin state        |
+| `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state        |
 | `esk generate [--runtime]`     | Generate TypeScript env declarations/validator |
 
 Full flags and behavior: [API.md](API.md).
 
-## Supported deploy adapters
+## Supported deploy targets
 
 - `env`
 - `cloudflare`
@@ -164,9 +164,9 @@ Full flags and behavior: [API.md](API.md).
 - `aws_ssm`
 - `kubernetes`
 
-Adapter config details: [ADAPTERS.md](ADAPTERS.md).
+Target config details: [TARGETS.md](TARGETS.md).
 
-## Supported sync plugins
+## Supported sync remotes
 
 - `1password`
 - Cloud file (`dropbox`, `gdrive`, `onedrive`, etc.)
@@ -179,7 +179,7 @@ Adapter config details: [ADAPTERS.md](ADAPTERS.md).
 - `doppler`
 - `sops`
 
-Plugin config details: [PLUGINS.md](PLUGINS.md).
+Remote config details: [REMOTES.md](REMOTES.md).
 
 ## Security model
 
@@ -194,7 +194,7 @@ The encrypted store file is safe to commit. The key file is not.
 
 - `esk.yaml not found`: run commands from your project root, or run `esk init`
 - `encryption key not found`: run `esk init` to create `.esk/store.key`
-- Adapter/plugin CLI errors: install and authenticate required CLIs (for example `wrangler`, `op`, `aws`)
+- Target/remote CLI errors: install and authenticate required CLIs (for example `wrangler`, `op`, `aws`)
 - Unknown environment/app in target: verify names match `environments` and `apps` in `esk.yaml`
 
 ## Development

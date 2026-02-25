@@ -1,12 +1,12 @@
-# Plugins
+# Remotes
 
-Plugins sync the entire secret list via `esk sync`. Unlike adapters (which deploy individual secrets to targets), plugins operate on the full store per environment — pulling from remote, reconciling, and pushing merged results back.
+Remotes sync the entire secret list via `esk sync`. Unlike targets (which deploy individual secrets to services), remotes operate on the full store per environment — pulling from remote, reconciling, and pushing merged results back.
 
-For deploy adapters (env files, Cloudflare, Convex, etc.), see [ADAPTERS.md](ADAPTERS.md).
+For deploy targets (env files, Cloudflare, Convex, etc.), see [TARGETS.md](TARGETS.md).
 
 ## Overview
 
-| Plugin                                      | Config key                    | External CLI | Storage location          |
+| Remote                                      | Config key                    | External CLI | Storage location          |
 | ------------------------------------------- | ----------------------------- | ------------ | ------------------------- |
 | [1Password](#1password)                     | `1password`                   | `op`         | 1Password vault item      |
 | [Cloud file](#cloud-file)                   | Any name + `type: cloud_file` | None         | Local/cloud-synced folder |
@@ -39,9 +39,9 @@ Uses the 1Password CLI (`op`) to push and pull entire environment snapshots as v
 1. Fetches the 1Password item for the environment.
 2. Parses fields back into key-value pairs (section label = vendor, field label = key).
 3. Reads the version from `_Metadata`.
-4. Reconciles with the local store and other plugins using version comparison.
+4. Reconciles with the local store and other remotes using version comparison.
 
-**Auto-push**: The `set` and `delete` commands automatically push to all configured plugins after modifying the store (unless `--no-sync` is used).
+**Auto-push**: The `set` and `delete` commands automatically push to all configured remotes after modifying the store (unless `--no-sync` is used).
 
 > **Security note**: `op item create/edit` requires secret field assignments as CLI arguments, so values are visible in process listings (`ps aux`).
 
@@ -55,7 +55,7 @@ Preflight verifies both CLI installation and vault accessibility by running `op 
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
@@ -132,14 +132,14 @@ Both formats use atomic writes (temp file + rename) and create parent directorie
 
 Preflight checks that the configured path is an existing, writable directory. Fails if the path doesn't exist or isn't writable.
 
-**Backward compatibility**: On pull, if a per-env file doesn't exist, the plugin falls back to the legacy global file (`secrets.enc` or `secrets.json`) and prints a migration warning. On push, legacy global files are automatically removed after the per-env file is written.
+**Backward compatibility**: On pull, if a per-env file doesn't exist, the remote falls back to the legacy global file (`secrets.enc` or `secrets.json`) and prints a migration warning. On push, legacy global files are automatically removed after the per-env file is written.
 
 ### Configuration
 
-Cloud file plugins use any name you choose, with `type: cloud_file` to identify them:
+Cloud file remotes use any name you choose, with `type: cloud_file` to identify them:
 
 ```yaml
-plugins:
+remotes:
   dropbox:
     type: cloud_file
     path: ~/Dropbox/secrets/myproject
@@ -208,7 +208,7 @@ Preflight runs `aws sts get-caller-identity` to verify credentials and connectiv
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
     region: us-west-2
@@ -249,7 +249,7 @@ Preflight runs `vault token lookup` to verify the current token is valid.
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
     addr: "https://vault.example.com"
@@ -296,7 +296,7 @@ Preflight runs `bws secret list --project-id <id>` to verify `BWS_ACCESS_TOKEN` 
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123-abc"
     secret_name: "{project}-{environment}"
@@ -324,7 +324,7 @@ bws secret edit <secret-id> --value <json-value>
 
 ## S3
 
-Stores encrypted or cleartext files in any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces). Uses the same file format as the cloud file plugin.
+Stores encrypted or cleartext files in any S3-compatible bucket (AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces). Uses the same file format as the cloud file remote.
 
 ### How it works
 
@@ -343,7 +343,7 @@ Preflight runs `aws sts get-caller-identity` to verify credentials and connectiv
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   s3:
     bucket: my-secrets-bucket
     prefix: esk/myapp
@@ -401,7 +401,7 @@ Preflight runs `gcloud auth print-access-token --project <gcp_project>` to verif
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   gcp:
     gcp_project: my-gcp-project
     secret_name: "{project}-{environment}"
@@ -445,7 +445,7 @@ Preflight runs `az account show` to verify the CLI is authenticated.
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   azure:
     vault_name: my-vault
     secret_name: "{project}-{environment}"
@@ -487,7 +487,7 @@ Preflight runs `doppler me` to verify the CLI is authenticated.
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   doppler:
     project: myapp-doppler
     config_map:
@@ -534,7 +534,7 @@ Preflight checks that a `.sops.yaml` file exists in the project root — fails i
 ### Configuration
 
 ```yaml
-plugins:
+remotes:
   sops:
     path: "secrets/{environment}.enc.json"
 ```
@@ -563,22 +563,22 @@ sops -d secrets/dev.enc.json
 
 ---
 
-## Multi-plugin reconciliation
+## Multi-remote reconciliation
 
-When multiple plugins are configured, `esk sync` reconciles across all of them:
+When multiple remotes are configured, `esk sync` reconciles across all of them:
 
-1. Pull from every configured plugin (or just `--only <name>`).
+1. Pull from every configured remote (or just `--only <name>`).
 2. Find the source with the highest version (including local).
 3. Start with that as the base.
 4. Merge unique secrets from lower-version sources.
 5. Write the merged result to the local store.
-6. Push merged/current data back to stale plugins, including equal-version drift repair (even when local content was already current).
+6. Push merged/current data back to stale remotes, including equal-version drift repair (even when local content was already current).
 
 This means you can use 1Password for team sharing and Dropbox as a backup — sync reconciles them when changes are merged.
 
-### Targeting a specific plugin
+### Targeting a specific remote
 
-Use `--only` to sync with a single plugin:
+Use `--only` to sync with a single remote:
 
 ```bash
 esk sync --env prod --only 1password

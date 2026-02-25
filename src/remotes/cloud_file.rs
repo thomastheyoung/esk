@@ -3,30 +3,30 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
-use crate::config::{CloudFileFormat, CloudFilePluginConfig, Config};
+use crate::config::{CloudFileFormat, CloudFileRemoteConfig, Config};
 use crate::reconcile::extract_env_secrets;
 use crate::store::{SecretStore, StorePayload};
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct CloudFilePlugin {
+pub struct CloudFileRemote {
     name: String,
     project: String,
-    plugin_config: CloudFilePluginConfig,
+    remote_config: CloudFileRemoteConfig,
 }
 
-impl CloudFilePlugin {
-    pub fn new(name: String, project: String, plugin_config: CloudFilePluginConfig) -> Self {
+impl CloudFileRemote {
+    pub fn new(name: String, project: String, remote_config: CloudFileRemoteConfig) -> Self {
         Self {
             name,
             project,
-            plugin_config,
+            remote_config,
         }
     }
 
     /// Expand `{project}` and tilde in path.
     fn expand_path(&self) -> Result<PathBuf> {
-        let path = self.plugin_config.path.replace("{project}", &self.project);
+        let path = self.remote_config.path.replace("{project}", &self.project);
         if let Some(rest) = path.strip_prefix("~/") {
             let home = std::env::var("HOME").context("HOME environment variable not set")?;
             Ok(PathBuf::from(home).join(rest))
@@ -80,7 +80,7 @@ impl CloudFilePlugin {
 
     /// Remove the legacy global file if per-env files are being written.
     fn cleanup_legacy_file(&self, base_path: &Path) -> Result<()> {
-        let legacy = match self.plugin_config.format {
+        let legacy = match self.remote_config.format {
             CloudFileFormat::Encrypted => base_path.join("secrets.enc"),
             CloudFileFormat::Cleartext => base_path.join("secrets.json"),
         };
@@ -92,7 +92,7 @@ impl CloudFilePlugin {
     }
 }
 
-impl StoragePlugin for CloudFilePlugin {
+impl SyncRemote for CloudFileRemote {
     fn name(&self) -> &str {
         &self.name
     }
@@ -123,7 +123,7 @@ impl StoragePlugin for CloudFilePlugin {
         let base_path = self.expand_path()?;
         let env_payload = Self::env_payload(payload, env);
 
-        match self.plugin_config.format {
+        match self.remote_config.format {
             CloudFileFormat::Encrypted => {
                 // Build per-env payload, encrypt it using the local store key
                 let store = SecretStore::open(&config.root)?;
@@ -150,7 +150,7 @@ impl StoragePlugin for CloudFilePlugin {
     fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let base_path = self.expand_path()?;
 
-        match self.plugin_config.format {
+        match self.remote_config.format {
             CloudFileFormat::Encrypted => {
                 let per_env = base_path.join(format!("secrets-{env}.enc"));
                 let source = if per_env.is_file() {
@@ -250,10 +250,10 @@ mod tests {
     #[test]
     fn cloud_file_preflight_success() {
         let cloud_dir = tempfile::tempdir().unwrap();
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "dropbox".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -268,10 +268,10 @@ mod tests {
         let readonly = cloud_dir.path().join("readonly");
         std::fs::create_dir(&readonly).unwrap();
         std::fs::set_permissions(&readonly, std::fs::Permissions::from_mode(0o444)).unwrap();
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "dropbox".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: readonly.to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -284,10 +284,10 @@ mod tests {
 
     #[test]
     fn cloud_file_preflight_missing_dir() {
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "dropbox".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: "/nonexistent/path/that/does/not/exist".to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -305,10 +305,10 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test_cloud".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -338,10 +338,10 @@ mod tests {
         let store = SecretStore::open(&config.root).unwrap();
         store.set("KEY", "dev", "encrypted_val").unwrap();
 
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test_enc".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Encrypted,
             },
@@ -365,10 +365,10 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -402,10 +402,10 @@ mod tests {
         let json = serde_json::to_string_pretty(&legacy_payload).unwrap();
         std::fs::write(cloud_dir.path().join("secrets.json"), json).unwrap();
 
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -427,10 +427,10 @@ mod tests {
         std::fs::write(cloud_dir.path().join("secrets.json"), "{}").unwrap();
         assert!(cloud_dir.path().join("secrets.json").is_file());
 
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -450,10 +450,10 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -468,10 +468,10 @@ mod tests {
         let cloud_dir = tempfile::tempdir().unwrap();
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: cloud_dir.path().to_string_lossy().to_string(),
                 format: CloudFileFormat::Encrypted,
             },
@@ -487,10 +487,10 @@ mod tests {
         let nested = cloud_dir.path().join("deep/nested/path");
         let config = make_config_with_store(project_dir.path());
 
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: nested.to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -503,10 +503,10 @@ mod tests {
 
     #[test]
     fn tilde_expansion() {
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: "~/test/path".to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -519,10 +519,10 @@ mod tests {
 
     #[test]
     fn no_tilde_expansion_for_absolute() {
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "testapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: "/absolute/path".to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -534,10 +534,10 @@ mod tests {
 
     #[test]
     fn project_interpolation() {
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "myapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: "/cloud/esk/{project}".to_string(),
                 format: CloudFileFormat::Cleartext,
             },
@@ -549,10 +549,10 @@ mod tests {
 
     #[test]
     fn project_interpolation_with_tilde() {
-        let plugin = CloudFilePlugin::new(
+        let plugin = CloudFileRemote::new(
             "test".to_string(),
             "myapp".to_string(),
-            CloudFilePluginConfig {
+            CloudFileRemoteConfig {
                 path: "~/Dropbox/esk/{project}".to_string(),
                 format: CloudFileFormat::Encrypted,
             },

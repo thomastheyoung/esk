@@ -124,8 +124,8 @@ mod tests {
             project: "test".to_string(),
             environments: vec!["dev".to_string(), "prod".to_string()],
             apps: BTreeMap::new(),
-            adapters: Default::default(),
-            plugins: BTreeMap::new(),
+            targets: Default::default(),
+            remotes: BTreeMap::new(),
             secrets,
             root: std::path::PathBuf::from("/tmp"),
         }

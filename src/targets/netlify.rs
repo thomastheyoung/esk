@@ -1,80 +1,84 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
-    SyncMode,
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
+    DeployMode,
 };
-use crate::config::{Config, GitlabAdapterConfig, ResolvedTarget};
+use crate::config::{Config, NetlifyTargetConfig, ResolvedTarget};
 
-pub struct GitlabAdapter<'a> {
+pub struct NetlifyTarget<'a> {
     pub config: &'a Config,
-    pub adapter_config: &'a GitlabAdapterConfig,
+    pub target_config: &'a NetlifyTargetConfig,
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> SyncAdapter for GitlabAdapter<'a> {
+impl<'a> DeployTarget for NetlifyTarget<'a> {
     fn name(&self) -> &str {
-        "gitlab"
+        "netlify"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Individual
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Individual
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "glab").map_err(|_| {
+        check_command(self.runner, "netlify").map_err(|_| {
             anyhow::anyhow!(
-                "glab is not installed or not in PATH. Install it from: https://gitlab.com/gitlab-org/cli"
+                "netlify is not installed or not in PATH. Install it with: npm install -g netlify-cli"
             )
         })?;
         let output = self
             .runner
-            .run("glab", &["auth", "status"], CommandOpts::default())
-            .context("failed to run glab auth status")?;
+            .run("netlify", &["status"], CommandOpts::default())
+            .context("failed to run netlify status")?;
         if !output.success {
-            anyhow::bail!("glab is not authenticated. Run: glab auth login");
+            anyhow::bail!("netlify is not linked. Run: netlify link");
         }
         Ok(())
     }
 
+    // SECURITY: netlify CLI has no stdin/file support for `env:set`. It has `env:import` but with
+    // different semantics (replaces all vars). Secret values are exposed in process arguments
+    // (visible via `ps aux`). No workaround available.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["variable", "set", key, "--scope", &target.environment];
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["env:set", key, value];
+        if let Some(site) = &self.target_config.site {
+            args.push("--site");
+            args.push(site);
+        }
         append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
-            .run(
-                "glab",
-                &args,
-                CommandOpts {
-                    stdin: Some(value.as_bytes().to_vec()),
-                    ..Default::default()
-                },
-            )
-            .with_context(|| format!("failed to run glab for {key}"))?;
+            .run("netlify", &args, CommandOpts::default())
+            .with_context(|| format!("failed to run netlify for {key}"))?;
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("glab variable set failed for {key}: {stderr}");
+            anyhow::bail!("netlify env:set failed for {key}: {stderr}");
         }
 
         Ok(())
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["variable", "delete", key, "--scope", &target.environment];
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["env:unset", key];
+        if let Some(site) = &self.target_config.site {
+            args.push("--site");
+            args.push(site);
+        }
         append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
-            .run("glab", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run glab delete for {key}"))?;
+            .run("netlify", &args, CommandOpts::default())
+            .with_context(|| format!("failed to run netlify delete for {key}"))?;
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("glab variable delete failed for {key}: {stderr}");
+            anyhow::bail!("netlify env:unset failed for {key}: {stderr}");
         }
 
         Ok(())
@@ -84,28 +88,40 @@ impl<'a> SyncAdapter for GitlabAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
+    type RunnerCall = (String, Vec<String>);
 
     fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
         runner
             .take_calls()
             .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
+            .map(|call| (call.program, call.args))
             .collect()
     }
 
-    fn make_config(dir: &std::path::Path) -> Config {
-        let yaml = r#"
+    fn make_config(dir: &std::path::Path, with_site: bool) -> Config {
+        let yaml = if with_site {
+            r#"
 project: x
 environments: [dev, prod]
-adapters:
-  gitlab:
+targets:
+  netlify:
+    site: my-site-id
     env_flags:
-      prod: "--masked"
-"#;
+      prod: "--context production"
+"#
+        } else {
+            r#"
+project: x
+environments: [dev, prod]
+targets:
+  netlify:
+    env_flags:
+      prod: "--context production"
+"#
+        };
         let path = dir.join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         Config::load(&path).unwrap()
@@ -113,17 +129,17 @@ adapters:
 
     fn make_target(env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "gitlab".to_string(),
+            service: "netlify".to_string(),
             app: None,
             environment: env.to_string(),
         }
     }
 
     #[test]
-    fn gitlab_preflight_success() {
+    fn netlify_preflight_success() {
         let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
+        let config = make_config(dir.path(), false);
+        let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -132,25 +148,25 @@ adapters:
             },
             CommandOutput {
                 success: true,
-                stdout: b"Logged in".to_vec(),
+                stdout: b"linked".to_vec(),
                 stderr: vec![],
             },
         ]);
-        let adapter = GitlabAdapter {
+        let adapter = NetlifyTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
         let calls = take_calls(&runner);
-        assert_eq!(calls[1].1, vec!["auth", "status"]);
+        assert_eq!(calls[1].1, vec!["status"]);
     }
 
     #[test]
-    fn gitlab_preflight_auth_failure() {
+    fn netlify_preflight_not_linked() {
         let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
+        let config = make_config(dir.path(), false);
+        let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -160,75 +176,94 @@ adapters:
             CommandOutput {
                 success: false,
                 stdout: vec![],
-                stderr: b"not logged in".to_vec(),
+                stderr: b"not linked".to_vec(),
             },
         ]);
-        let adapter = GitlabAdapter {
+        let adapter = NetlifyTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
-        assert!(err.to_string().contains("glab is not authenticated"));
+        assert!(err.to_string().contains("netlify is not linked"));
     }
 
     #[test]
-    fn gitlab_preflight_missing_cli() {
+    fn netlify_preflight_missing_cli() {
         let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
+        let config = make_config(dir.path(), false);
+        let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = GitlabAdapter {
+        let adapter = NetlifyTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
-        assert!(err.to_string().contains("glab is not installed"));
+        assert!(err.to_string().contains("netlify is not installed"));
     }
 
     #[test]
-    fn gitlab_sync_uses_stdin() {
+    fn netlify_sync_correct_args() {
         let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
+        let config = make_config(dir.path(), false);
+        let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = GitlabAdapter {
+        let adapter = NetlifyTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "glab");
-        assert_eq!(
-            calls[0].1,
-            vec!["variable", "set", "MY_KEY", "--scope", "dev"]
-        );
-        // Value is passed via stdin, not in args
-        assert_eq!(calls[0].2.as_deref(), Some(b"secret_val".as_slice()));
-        assert!(!calls[0].1.iter().any(|a| a.contains("secret_val")));
+        assert_eq!(calls[0].0, "netlify");
+        assert_eq!(calls[0].1, vec!["env:set", "MY_KEY", "secret_val"]);
     }
 
     #[test]
-    fn gitlab_sync_with_env_flags() {
+    fn netlify_sync_with_site() {
         let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
+        let config = make_config(dir.path(), true);
+        let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = GitlabAdapter {
+        let adapter = NetlifyTarget {
             config: &config,
-            adapter_config,
+            target_config,
+            runner: &runner,
+        };
+        adapter
+            .sync_secret("KEY", "val", &make_target("dev"))
+            .unwrap();
+        let calls = take_calls(&runner);
+        assert_eq!(
+            calls[0].1,
+            vec!["env:set", "KEY", "val", "--site", "my-site-id"]
+        );
+    }
+
+    #[test]
+    fn netlify_sync_with_env_flags() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = make_config(dir.path(), false);
+        let target_config = config.targets.netlify.as_ref().unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: vec![],
+            stderr: vec![],
+        }]);
+        let adapter = NetlifyTarget {
+            config: &config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -237,24 +272,23 @@ adapters:
         let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
-            vec!["variable", "set", "KEY", "--scope", "prod", "--masked"]
+            vec!["env:set", "KEY", "val", "--context", "production"]
         );
-        assert_eq!(calls[0].2.as_deref(), Some(b"val".as_slice()));
     }
 
     #[test]
-    fn gitlab_delete_correct_args() {
+    fn netlify_delete_correct_args() {
         let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
+        let config = make_config(dir.path(), true);
+        let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = GitlabAdapter {
+        let adapter = NetlifyTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -263,46 +297,23 @@ adapters:
         let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
-            vec!["variable", "delete", "MY_KEY", "--scope", "dev"]
+            vec!["env:unset", "MY_KEY", "--site", "my-site-id"]
         );
     }
 
     #[test]
-    fn gitlab_delete_with_env_flags() {
+    fn netlify_delete_failure() {
         let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
-        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
-            success: true,
-            stdout: vec![],
-            stderr: vec![],
-        }]);
-        let adapter = GitlabAdapter {
-            config: &config,
-            adapter_config,
-            runner: &runner,
-        };
-        adapter.delete_secret("KEY", &make_target("prod")).unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(
-            calls[0].1,
-            vec!["variable", "delete", "KEY", "--scope", "prod", "--masked"]
-        );
-    }
-
-    #[test]
-    fn gitlab_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
+        let config = make_config(dir.path(), false);
+        let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = GitlabAdapter {
+        let adapter = NetlifyTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -312,23 +323,23 @@ adapters:
     }
 
     #[test]
-    fn gitlab_nonzero_exit() {
+    fn netlify_nonzero_exit() {
         let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
-        let adapter_config = config.adapters.gitlab.as_ref().unwrap();
+        let config = make_config(dir.path(), false);
+        let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
-            stderr: b"api error".to_vec(),
+            stderr: b"auth error".to_vec(),
         }]);
-        let adapter = GitlabAdapter {
+        let adapter = NetlifyTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
             .sync_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
-        assert!(err.to_string().contains("api error"));
+        assert!(err.to_string().contains("auth error"));
     }
 }

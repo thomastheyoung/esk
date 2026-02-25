@@ -13,9 +13,9 @@ pub struct Config {
     #[serde(default)]
     pub apps: BTreeMap<String, AppConfig>,
     #[serde(default)]
-    pub adapters: AdaptersConfig,
+    pub targets: TargetsConfig,
     #[serde(default)]
-    pub plugins: BTreeMap<String, serde_yaml::Value>,
+    pub remotes: BTreeMap<String, serde_yaml::Value>,
     #[serde(default)]
     pub secrets: BTreeMap<String, BTreeMap<String, SecretDef>>,
     /// Root directory containing esk.yaml
@@ -29,46 +29,46 @@ pub struct AppConfig {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-pub struct AdaptersConfig {
+pub struct TargetsConfig {
     #[serde(default)]
-    pub env: Option<EnvAdapterConfig>,
+    pub env: Option<EnvTargetConfig>,
     #[serde(default)]
-    pub cloudflare: Option<CloudflareAdapterConfig>,
+    pub cloudflare: Option<CloudflareTargetConfig>,
     #[serde(default)]
-    pub convex: Option<ConvexAdapterConfig>,
+    pub convex: Option<ConvexTargetConfig>,
     #[serde(default)]
-    pub fly: Option<FlyAdapterConfig>,
+    pub fly: Option<FlyTargetConfig>,
     #[serde(default)]
-    pub netlify: Option<NetlifyAdapterConfig>,
+    pub netlify: Option<NetlifyTargetConfig>,
     #[serde(default)]
-    pub vercel: Option<VercelAdapterConfig>,
+    pub vercel: Option<VercelTargetConfig>,
     #[serde(default)]
-    pub github: Option<GithubAdapterConfig>,
+    pub github: Option<GithubTargetConfig>,
     #[serde(default)]
-    pub heroku: Option<HerokuAdapterConfig>,
+    pub heroku: Option<HerokuTargetConfig>,
     #[serde(default)]
-    pub supabase: Option<SupabaseAdapterConfig>,
+    pub supabase: Option<SupabaseTargetConfig>,
     #[serde(default)]
-    pub railway: Option<RailwayAdapterConfig>,
+    pub railway: Option<RailwayTargetConfig>,
     #[serde(default)]
-    pub gitlab: Option<GitlabAdapterConfig>,
+    pub gitlab: Option<GitlabTargetConfig>,
     // Phase 2: Cloud infrastructure
     #[serde(default)]
-    pub aws_ssm: Option<AwsSsmAdapterConfig>,
+    pub aws_ssm: Option<AwsSsmTargetConfig>,
     // Phase 4: Full cloud coverage
     #[serde(default)]
-    pub kubernetes: Option<KubernetesAdapterConfig>,
+    pub kubernetes: Option<KubernetesTargetConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnvAdapterConfig {
+pub struct EnvTargetConfig {
     pub pattern: String,
     #[serde(default)]
     pub env_suffix: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloudflareAdapterConfig {
+pub struct CloudflareTargetConfig {
     /// Mode: "workers" (default) or "pages".
     #[serde(default = "default_cloudflare_mode")]
     pub mode: String,
@@ -84,7 +84,7 @@ fn default_cloudflare_mode() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ConvexAdapterConfig {
+pub struct ConvexTargetConfig {
     pub path: String,
     #[serde(default)]
     pub deployment_source: Option<String>,
@@ -93,7 +93,7 @@ pub struct ConvexAdapterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct FlyAdapterConfig {
+pub struct FlyTargetConfig {
     /// Maps esk app name → Fly app name (e.g. web → my-fly-app).
     pub app_names: BTreeMap<String, String>,
     #[serde(default)]
@@ -101,7 +101,7 @@ pub struct FlyAdapterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NetlifyAdapterConfig {
+pub struct NetlifyTargetConfig {
     /// Optional Netlify site ID or name.
     #[serde(default)]
     pub site: Option<String>,
@@ -110,7 +110,7 @@ pub struct NetlifyAdapterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VercelAdapterConfig {
+pub struct VercelTargetConfig {
     /// Maps esk env name → Vercel env name (e.g. prod → production).
     pub env_names: BTreeMap<String, String>,
     #[serde(default)]
@@ -118,7 +118,7 @@ pub struct VercelAdapterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GithubAdapterConfig {
+pub struct GithubTargetConfig {
     /// Optional GitHub repo in owner/repo format.
     #[serde(default)]
     pub repo: Option<String>,
@@ -127,7 +127,7 @@ pub struct GithubAdapterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct HerokuAdapterConfig {
+pub struct HerokuTargetConfig {
     /// Maps esk app name → Heroku app name.
     pub app_names: BTreeMap<String, String>,
     #[serde(default)]
@@ -135,7 +135,7 @@ pub struct HerokuAdapterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SupabaseAdapterConfig {
+pub struct SupabaseTargetConfig {
     /// Supabase project reference ID.
     pub project_ref: String,
     #[serde(default)]
@@ -143,19 +143,19 @@ pub struct SupabaseAdapterConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct RailwayAdapterConfig {
+pub struct RailwayTargetConfig {
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GitlabAdapterConfig {
+pub struct GitlabTargetConfig {
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AwsSsmAdapterConfig {
+pub struct AwsSsmTargetConfig {
     /// Path prefix with interpolation, e.g. "/{project}/{environment}/".
     pub path_prefix: String,
     #[serde(default)]
@@ -174,7 +174,7 @@ fn default_ssm_parameter_type() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct KubernetesAdapterConfig {
+pub struct KubernetesTargetConfig {
     /// Maps esk env → Kubernetes namespace.
     pub namespace: BTreeMap<String, String>,
     /// Secret resource name (default: "{project}-secrets").
@@ -190,13 +190,13 @@ pub struct KubernetesAdapterConfig {
 // --- Plugin config types ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OnePasswordPluginConfig {
+pub struct OnePasswordRemoteConfig {
     pub vault: String,
     pub item_pattern: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct CloudFilePluginConfig {
+pub struct CloudFileRemoteConfig {
     pub path: String,
     #[serde(default = "default_cloud_file_format")]
     pub format: CloudFileFormat,
@@ -214,7 +214,7 @@ pub enum CloudFileFormat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AwsSecretsManagerPluginConfig {
+pub struct AwsSecretsManagerRemoteConfig {
     /// Secret name pattern, e.g. "{project}/{environment}".
     pub secret_name: String,
     #[serde(default)]
@@ -224,14 +224,14 @@ pub struct AwsSecretsManagerPluginConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct BitwardenPluginConfig {
+pub struct BitwardenRemoteConfig {
     pub project_id: String,
     /// Secret name pattern, e.g. "{project}-{environment}".
     pub secret_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct VaultPluginConfig {
+pub struct HashicorpVaultRemoteConfig {
     /// KV path pattern, e.g. "secret/data/{project}/{environment}".
     pub path: String,
     #[serde(default)]
@@ -245,7 +245,7 @@ fn default_kv_version() -> u8 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct S3PluginConfig {
+pub struct S3RemoteConfig {
     pub bucket: String,
     #[serde(default)]
     pub prefix: Option<String>,
@@ -261,28 +261,28 @@ pub struct S3PluginConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct GcpPluginConfig {
+pub struct GcpSecretManagerRemoteConfig {
     pub gcp_project: String,
     /// Secret name pattern, e.g. "{project}-{environment}".
     pub secret_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct AzurePluginConfig {
+pub struct AzureKeyVaultRemoteConfig {
     pub vault_name: String,
     /// Secret name pattern, e.g. "{project}-{environment}".
     pub secret_name: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct DopplerPluginConfig {
+pub struct DopplerRemoteConfig {
     pub project: String,
     /// Maps esk env → Doppler config name.
     pub config_map: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SopsPluginConfig {
+pub struct SopsRemoteConfig {
     /// File path pattern with {environment} interpolation.
     pub path: String,
 }
@@ -297,7 +297,7 @@ pub struct SecretDef {
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ResolvedTarget {
-    pub adapter: String,
+    pub service: String,
     pub app: Option<String>,
     pub environment: String,
 }
@@ -381,7 +381,7 @@ impl Config {
             validate_app(app_name)?;
         }
         // Validate env adapter pattern and env_suffix for unsafe path characters
-        if let Some(env_config) = &self.adapters.env {
+        if let Some(env_config) = &self.targets.env {
             if env_config.pattern.contains("..") {
                 bail!("env adapter pattern must not contain '..'");
             }
@@ -395,7 +395,7 @@ impl Config {
                 }
             }
         }
-        self.validate_plugins()?;
+        self.validate_remotes()?;
         // Validate secret targets reference known adapters, apps, and environments
         // Check for duplicate key names across vendors
         let mut key_vendors: BTreeMap<&str, &str> = BTreeMap::new();
@@ -409,7 +409,7 @@ impl Config {
                 key_vendors.insert(key, vendor);
 
                 for (adapter, targets) in &def.targets {
-                    self.validate_adapter(adapter)
+                    self.validate_service(adapter)
                         .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
                     for target_str in targets {
                         self.validate_target_string(adapter, target_str)
@@ -421,58 +421,58 @@ impl Config {
         Ok(())
     }
 
-    fn validate_adapter(&self, adapter: &str) -> Result<()> {
+    fn validate_service(&self, adapter: &str) -> Result<()> {
         if adapter == "1password" {
             bail!(
-                "'1password' should be configured under 'plugins:', not 'adapters:'. \
-                 Move your 1password config from adapters to plugins in esk.yaml."
+                "'1password' should be configured under 'remotes:', not 'targets:'. \
+                 Move your 1password config from targets to remotes in esk.yaml."
             );
         }
-        let names = self.adapter_names();
+        let names = self.target_names();
         if names.contains(&adapter) {
             Ok(())
         } else {
-            bail!("{}", suggest::unknown_adapter(adapter, &names))
+            bail!("{}", suggest::unknown_target(adapter, &names))
         }
     }
 
-    fn validate_plugins(&self) -> Result<()> {
-        for (name, value) in &self.plugins {
+    fn validate_remotes(&self) -> Result<()> {
+        for (name, value) in &self.remotes {
             match name.as_str() {
                 "1password" => {
-                    let _: OnePasswordPluginConfig = serde_yaml::from_value(value.clone())
+                    let _: OnePasswordRemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid 1password plugin config")?;
                 }
                 "aws_secrets_manager" => {
-                    let _: AwsSecretsManagerPluginConfig = serde_yaml::from_value(value.clone())
+                    let _: AwsSecretsManagerRemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid aws_secrets_manager plugin config")?;
                 }
                 "bitwarden" => {
-                    let _: BitwardenPluginConfig = serde_yaml::from_value(value.clone())
+                    let _: BitwardenRemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid bitwarden plugin config")?;
                 }
                 "vault" => {
-                    let _: VaultPluginConfig = serde_yaml::from_value(value.clone())
+                    let _: HashicorpVaultRemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid vault plugin config")?;
                 }
                 "s3" => {
-                    let _: S3PluginConfig = serde_yaml::from_value(value.clone())
+                    let _: S3RemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid s3 plugin config")?;
                 }
                 "gcp" => {
-                    let _: GcpPluginConfig = serde_yaml::from_value(value.clone())
+                    let _: GcpSecretManagerRemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid gcp plugin config")?;
                 }
                 "azure" => {
-                    let _: AzurePluginConfig = serde_yaml::from_value(value.clone())
+                    let _: AzureKeyVaultRemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid azure plugin config")?;
                 }
                 "doppler" => {
-                    let _: DopplerPluginConfig = serde_yaml::from_value(value.clone())
+                    let _: DopplerRemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid doppler plugin config")?;
                 }
                 "sops" => {
-                    let _: SopsPluginConfig = serde_yaml::from_value(value.clone())
+                    let _: SopsRemoteConfig = serde_yaml::from_value(value.clone())
                         .context("invalid sops plugin config")?;
                 }
                 _ => {
@@ -480,15 +480,15 @@ impl Config {
                     if let Some(type_val) = value.get("type") {
                         let type_str = type_val
                             .as_str()
-                            .context("plugin 'type' must be a string")?;
+                            .context("remote 'type' must be a string")?;
                         match type_str {
                             "cloud_file" => {
-                                let _: CloudFilePluginConfig =
+                                let _: CloudFileRemoteConfig =
                                     serde_yaml::from_value(value.clone()).with_context(|| {
                                         format!("invalid cloud_file plugin config for '{name}'")
                                     })?;
                             }
-                            other => bail!("unknown plugin type '{other}' for '{name}'"),
+                            other => bail!("unknown remote type '{other}' for '{name}'"),
                         }
                     } else {
                         bail!("unknown plugin '{name}' (missing 'type' field)");
@@ -523,13 +523,13 @@ impl Config {
     pub fn parse_target(&self, adapter: &str, target: &str) -> Result<ResolvedTarget> {
         if let Some((app, env)) = target.split_once(':') {
             Ok(ResolvedTarget {
-                adapter: adapter.to_string(),
+                service: adapter.to_string(),
                 app: Some(app.to_string()),
                 environment: env.to_string(),
             })
         } else {
             Ok(ResolvedTarget {
-                adapter: adapter.to_string(),
+                service: adapter.to_string(),
                 app: None,
                 environment: target.to_string(),
             })
@@ -571,7 +571,7 @@ impl Config {
     /// Resolve the env file path for an (app, env) pair.
     pub fn resolve_env_path(&self, app: &str, env: &str) -> Result<PathBuf> {
         let env_config = self
-            .adapters
+            .targets
             .env
             .as_ref()
             .context("env adapter not configured")?;
@@ -620,22 +620,22 @@ impl Config {
     }
 
     /// Get the parsed 1Password plugin config, if configured.
-    pub fn onepassword_plugin_config(&self) -> Option<OnePasswordPluginConfig> {
-        self.plugins
+    pub fn onepassword_remote_config(&self) -> Option<OnePasswordRemoteConfig> {
+        self.remotes
             .get("1password")
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
     }
 
     /// Get a typed plugin config by name.
-    pub fn plugin_config<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
-        self.plugins
+    pub fn remote_config<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
+        self.remotes
             .get(name)
             .and_then(|v| serde_yaml::from_value(v.clone()).ok())
     }
 
     /// Get all cloud_file plugin configs: (name, config) pairs.
-    pub fn cloud_file_plugin_configs(&self) -> Vec<(String, CloudFilePluginConfig)> {
-        self.plugins
+    pub fn cloud_file_remote_configs(&self) -> Vec<(String, CloudFileRemoteConfig)> {
+        self.remotes
             .iter()
             .filter_map(|(name, value)| {
                 if name == "1password" {
@@ -645,52 +645,52 @@ impl Config {
                 if type_val != "cloud_file" {
                     return None;
                 }
-                let cfg: CloudFilePluginConfig = serde_yaml::from_value(value.clone()).ok()?;
+                let cfg: CloudFileRemoteConfig = serde_yaml::from_value(value.clone()).ok()?;
                 Some((name.clone(), cfg))
             })
             .collect()
     }
 
     /// Get the set of configured adapter names.
-    pub fn adapter_names(&self) -> Vec<&str> {
+    pub fn target_names(&self) -> Vec<&str> {
         let mut names = Vec::new();
-        if self.adapters.env.is_some() {
+        if self.targets.env.is_some() {
             names.push("env");
         }
-        if self.adapters.cloudflare.is_some() {
+        if self.targets.cloudflare.is_some() {
             names.push("cloudflare");
         }
-        if self.adapters.convex.is_some() {
+        if self.targets.convex.is_some() {
             names.push("convex");
         }
-        if self.adapters.fly.is_some() {
+        if self.targets.fly.is_some() {
             names.push("fly");
         }
-        if self.adapters.netlify.is_some() {
+        if self.targets.netlify.is_some() {
             names.push("netlify");
         }
-        if self.adapters.vercel.is_some() {
+        if self.targets.vercel.is_some() {
             names.push("vercel");
         }
-        if self.adapters.github.is_some() {
+        if self.targets.github.is_some() {
             names.push("github");
         }
-        if self.adapters.heroku.is_some() {
+        if self.targets.heroku.is_some() {
             names.push("heroku");
         }
-        if self.adapters.supabase.is_some() {
+        if self.targets.supabase.is_some() {
             names.push("supabase");
         }
-        if self.adapters.railway.is_some() {
+        if self.targets.railway.is_some() {
             names.push("railway");
         }
-        if self.adapters.gitlab.is_some() {
+        if self.targets.gitlab.is_some() {
             names.push("gitlab");
         }
-        if self.adapters.aws_ssm.is_some() {
+        if self.targets.aws_ssm.is_some() {
             names.push("aws_ssm");
         }
-        if self.adapters.kubernetes.is_some() {
+        if self.targets.kubernetes.is_some() {
             names.push("kubernetes");
         }
         names
@@ -699,7 +699,7 @@ impl Config {
 
 impl std::fmt::Display for ResolvedTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.adapter)?;
+        write!(f, "{}", self.service)?;
         if let Some(app) = &self.app {
             write!(f, ":{app}")?;
         }
@@ -903,7 +903,7 @@ environments: [dev, prod]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
@@ -914,7 +914,7 @@ adapters:
       prod: "--env production"
   convex:
     path: apps/api
-plugins:
+remotes:
   1password:
     vault: Eng
     item_pattern: "{project} - {Environment}"
@@ -930,10 +930,10 @@ secrets:
         let config = Config::load(&path).unwrap();
         assert_eq!(config.project, "myapp");
         assert_eq!(config.environments.len(), 2);
-        assert!(config.adapters.env.is_some());
-        assert!(config.adapters.cloudflare.is_some());
-        assert!(config.adapters.convex.is_some());
-        assert!(config.onepassword_plugin_config().is_some());
+        assert!(config.targets.env.is_some());
+        assert!(config.targets.cloudflare.is_some());
+        assert!(config.targets.convex.is_some());
+        assert!(config.onepassword_remote_config().is_some());
     }
 
     #[test]
@@ -999,12 +999,12 @@ secrets:
     }
 
     #[test]
-    fn validate_unknown_adapter_reference() {
+    fn validate_unknown_target_reference() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   env:
     pattern: "test"
 secrets:
@@ -1016,11 +1016,11 @@ secrets:
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         let chain = console::strip_ansi_codes(&format!("{err:?}")).to_string();
-        assert!(chain.contains("adapter 'cloudflare' is not configured"));
+        assert!(chain.contains("target 'cloudflare' is not configured"));
     }
 
     #[test]
-    fn validate_adapter_known_but_unconfigured() {
+    fn validate_service_known_but_unconfigured() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -1034,7 +1034,7 @@ secrets:
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         let chain = console::strip_ansi_codes(&format!("{err:?}")).to_string();
-        assert!(chain.contains("adapter 'env' is not configured"));
+        assert!(chain.contains("target 'env' is not configured"));
     }
 
     #[test]
@@ -1046,7 +1046,7 @@ environments: [dev, prod]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "test"
 secrets:
@@ -1070,7 +1070,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "test"
 secrets:
@@ -1094,7 +1094,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "test"
   cloudflare: {}
@@ -1127,34 +1127,34 @@ secrets:
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         let chain = format!("{err:?}");
-        assert!(chain.contains("plugins:"));
+        assert!(chain.contains("remotes:"));
     }
 
     #[test]
-    fn validate_plugins_onepassword() {
+    fn validate_remotes_onepassword() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let op = config.onepassword_plugin_config().unwrap();
+        let op = config.onepassword_remote_config().unwrap();
         assert_eq!(op.vault, "V");
         assert_eq!(op.item_pattern, "test");
     }
 
     #[test]
-    fn validate_plugins_cloud_file() {
+    fn validate_remotes_cloud_file() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   dropbox:
     type: cloud_file
     path: ~/Dropbox/secrets
@@ -1166,32 +1166,32 @@ plugins:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let cfs = config.cloud_file_plugin_configs();
+        let cfs = config.cloud_file_remote_configs();
         assert_eq!(cfs.len(), 2);
     }
 
     #[test]
-    fn validate_plugins_unknown_type_errors() {
+    fn validate_remotes_unknown_type_errors() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   foo:
     type: unknown_thing
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
-        assert!(err.to_string().contains("unknown plugin type"));
+        assert!(err.to_string().contains("unknown remote type"));
     }
 
     #[test]
-    fn validate_plugins_unknown_name_no_type_errors() {
+    fn validate_remotes_unknown_name_no_type_errors() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   foo:
     bar: baz
 "#;
@@ -1206,7 +1206,7 @@ plugins:
         let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
         let config = Config::load(&path).unwrap();
         let target = config.parse_target("env", "web:dev").unwrap();
-        assert_eq!(target.adapter, "env");
+        assert_eq!(target.service, "env");
         assert_eq!(target.app, Some("web".to_string()));
         assert_eq!(target.environment, "dev");
     }
@@ -1217,7 +1217,7 @@ plugins:
         let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
         let config = Config::load(&path).unwrap();
         let target = config.parse_target("cloudflare", "prod").unwrap();
-        assert_eq!(target.adapter, "cloudflare");
+        assert_eq!(target.service, "cloudflare");
         assert_eq!(target.app, None);
         assert_eq!(target.environment, "prod");
     }
@@ -1241,7 +1241,7 @@ environments: [dev, prod]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "test"
 secrets:
@@ -1281,7 +1281,7 @@ environments: [dev]
 apps:
   web:
     path: w
-adapters:
+targets:
   env:
     pattern: "t"
 secrets:
@@ -1308,7 +1308,7 @@ secrets:
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   env:
     pattern: "t"
 apps:
@@ -1342,7 +1342,7 @@ secrets:
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   env:
     pattern: "t"
 apps:
@@ -1369,7 +1369,7 @@ environments: [dev]
 apps:
   web:
     path: w
-adapters:
+targets:
   env:
     pattern: "t"
 secrets:
@@ -1397,7 +1397,7 @@ environments: [dev, prod]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -1419,7 +1419,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
 "#;
@@ -1444,7 +1444,7 @@ adapters:
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   env:
     pattern: "test"
 "#;
@@ -1455,19 +1455,19 @@ adapters:
     }
 
     #[test]
-    fn adapter_names_returns_configured() {
+    fn target_names_returns_configured() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   env:
     pattern: "test"
   cloudflare: {}
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let names = config.adapter_names();
+        let names = config.target_names();
         assert!(names.contains(&"env"));
         assert!(names.contains(&"cloudflare"));
         assert!(!names.contains(&"convex"));
@@ -1476,7 +1476,7 @@ adapters:
     #[test]
     fn resolved_target_display_with_app() {
         let t = ResolvedTarget {
-            adapter: "env".to_string(),
+            service: "env".to_string(),
             app: Some("web".to_string()),
             environment: "dev".to_string(),
         };
@@ -1486,7 +1486,7 @@ adapters:
     #[test]
     fn resolved_target_display_without_app() {
         let t = ResolvedTarget {
-            adapter: "cloudflare".to_string(),
+            service: "cloudflare".to_string(),
             app: None,
             environment: "prod".to_string(),
         };
@@ -1499,7 +1499,7 @@ adapters:
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   env:
     pattern: "../../../etc/{env_suffix}"
 "#;
@@ -1514,7 +1514,7 @@ adapters:
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
@@ -1531,7 +1531,7 @@ adapters:
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
@@ -1548,7 +1548,7 @@ adapters:
         let yaml = r#"
 project: x
 environments: [dev, prod]
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
@@ -1568,7 +1568,7 @@ environments: [dev]
 apps:
   web:
     path: "../../../etc"
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
@@ -1589,7 +1589,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
@@ -1616,7 +1616,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:

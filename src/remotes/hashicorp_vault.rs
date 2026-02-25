@@ -2,34 +2,34 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::adapters::{CommandOpts, CommandRunner};
-use crate::config::{Config, VaultPluginConfig};
+use crate::targets::{CommandOpts, CommandRunner};
+use crate::config::{Config, HashicorpVaultRemoteConfig};
 use crate::store::StorePayload;
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct VaultPlugin<'a> {
+pub struct HashicorpVaultRemote<'a> {
     config: &'a Config,
-    plugin_config: VaultPluginConfig,
+    remote_config: HashicorpVaultRemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
-impl<'a> VaultPlugin<'a> {
+impl<'a> HashicorpVaultRemote<'a> {
     pub fn new(
         config: &'a Config,
-        plugin_config: VaultPluginConfig,
+        remote_config: HashicorpVaultRemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
             config,
-            plugin_config,
+            remote_config,
             runner,
         }
     }
 
     /// Resolve the KV path for an environment.
     fn resolve_path(&self, env: &str) -> String {
-        self.plugin_config
+        self.remote_config
             .path
             .replace("{project}", &self.config.project)
             .replace("{environment}", env)
@@ -38,7 +38,7 @@ impl<'a> VaultPlugin<'a> {
     /// Build CommandOpts with VAULT_ADDR if configured.
     fn command_opts(&self) -> CommandOpts {
         let mut opts = CommandOpts::default();
-        if let Some(addr) = &self.plugin_config.addr {
+        if let Some(addr) = &self.remote_config.addr {
             opts.env.push(("VAULT_ADDR".to_string(), addr.clone()));
         }
         opts
@@ -52,13 +52,13 @@ impl<'a> VaultPlugin<'a> {
     }
 }
 
-impl<'a> StoragePlugin for VaultPlugin<'a> {
+impl<'a> SyncRemote for HashicorpVaultRemote<'a> {
     fn name(&self) -> &str {
         "vault"
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::adapters::check_command(self.runner, "vault").map_err(|_| {
+        crate::targets::check_command(self.runner, "vault").map_err(|_| {
             anyhow::anyhow!(
                 "HashiCorp Vault CLI (vault) is not installed or not in PATH. Install it from: https://developer.hashicorp.com/vault/install"
             )
@@ -137,7 +137,7 @@ impl<'a> StoragePlugin for VaultPlugin<'a> {
             serde_json::from_slice(&output.stdout).context("failed to parse vault output")?;
 
         // KV v2: data is at .data.data, KV v1: data is at .data
-        let data = if self.plugin_config.kv_version == 2 {
+        let data = if self.remote_config.kv_version == 2 {
             json.get("data")
                 .and_then(|d| d.get("data"))
                 .context("missing .data.data in vault KV v2 response")?
@@ -172,7 +172,7 @@ impl<'a> StoragePlugin for VaultPlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
@@ -217,15 +217,15 @@ mod tests {
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(b"vault 1.15.0"), ok_output(b"{}")]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -238,14 +238,14 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err
             .to_string()
@@ -257,17 +257,17 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"vault 1.15.0"),
             fail_output(b"permission denied"),
         ]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("authentication failed"));
     }
@@ -277,14 +277,14 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -313,14 +313,14 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:dev".to_string(), "val".to_string());
@@ -346,14 +346,14 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:prod".to_string(), "val".to_string());
@@ -374,27 +374,27 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
     kv_version: 2
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
 
         let response = json!({
             "data": {
                 "data": {
                     "API_KEY": "sk_test",
                     "DB_URL": "postgres://localhost",
-                    crate::plugins::ESK_VERSION_KEY: 7
+                    crate::remotes::ESK_VERSION_KEY: 7
                 }
             }
         });
         let runner = MockCommandRunner::from_outputs(vec![ok_output(
             &serde_json::to_vec(&response).unwrap(),
         )]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 7);
@@ -408,24 +408,24 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/{project}/{environment}"
     kv_version: 1
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
 
         let response = json!({
             "data": {
                 "API_KEY": "sk_test",
-                crate::plugins::ESK_VERSION_KEY: 3
+                crate::remotes::ESK_VERSION_KEY: 3
             }
         });
         let runner = MockCommandRunner::from_outputs(vec![ok_output(
             &serde_json::to_vec(&response).unwrap(),
         )]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 3);
@@ -437,16 +437,16 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![fail_output(
             b"No value found at secret/data/myapp/dev",
         )]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
     }
@@ -456,14 +456,14 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![fail_output(b"permission denied")]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         let err = plugin.pull(&config, "dev").unwrap_err();
         assert!(err.to_string().contains("permission denied"));
@@ -474,15 +474,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   vault:
     path: "secret/data/{project}/{environment}"
     addr: "https://vault.example.com"
 "#;
         let config = make_config(yaml);
-        let plugin_config: VaultPluginConfig = config.plugin_config("vault").unwrap();
+        let remote_config: HashicorpVaultRemoteConfig = config.remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b""), ok_output(b"")]);
-        let plugin = VaultPlugin::new(&config, plugin_config, &runner);
+        let plugin = HashicorpVaultRemote::new(&config, remote_config, &runner);
 
         plugin.preflight().unwrap();
 

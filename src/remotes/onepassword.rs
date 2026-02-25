@@ -2,27 +2,27 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::adapters::{CommandOpts, CommandRunner};
-use crate::config::{Config, OnePasswordPluginConfig};
+use crate::targets::{CommandOpts, CommandRunner};
+use crate::config::{Config, OnePasswordRemoteConfig};
 use crate::store::StorePayload;
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct OnePasswordPlugin<'a> {
+pub struct OnePasswordRemote<'a> {
     config: &'a Config,
-    plugin_config: OnePasswordPluginConfig,
+    remote_config: OnePasswordRemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
-impl<'a> OnePasswordPlugin<'a> {
+impl<'a> OnePasswordRemote<'a> {
     pub fn new(
         config: &'a Config,
-        plugin_config: OnePasswordPluginConfig,
+        remote_config: OnePasswordRemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
             config,
-            plugin_config,
+            remote_config,
             runner,
         }
     }
@@ -38,7 +38,7 @@ impl<'a> OnePasswordPlugin<'a> {
             }
         };
 
-        self.plugin_config
+        self.remote_config
             .item_pattern
             .replace("{project}", &self.config.project)
             .replace("{Environment}", &env_capitalized)
@@ -48,7 +48,7 @@ impl<'a> OnePasswordPlugin<'a> {
     /// Get a 1Password item, returning None if it doesn't exist.
     pub fn get_item(&self, env: &str) -> Result<Option<OpItem>> {
         let item_name = self.item_name(env);
-        let vault = &self.plugin_config.vault;
+        let vault = &self.remote_config.vault;
 
         let output = self
             .runner
@@ -88,7 +88,7 @@ impl<'a> OnePasswordPlugin<'a> {
         version: u64,
     ) -> Result<()> {
         let item_name = self.item_name(env);
-        let vault = &self.plugin_config.vault;
+        let vault = &self.remote_config.vault;
 
         let existing = self.get_item(env)?;
 
@@ -192,18 +192,18 @@ impl<'a> OnePasswordPlugin<'a> {
     }
 }
 
-impl<'a> StoragePlugin for OnePasswordPlugin<'a> {
+impl<'a> SyncRemote for OnePasswordRemote<'a> {
     fn name(&self) -> &str {
         "1password"
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::adapters::check_command(self.runner, "op").map_err(|_| {
+        crate::targets::check_command(self.runner, "op").map_err(|_| {
             anyhow::anyhow!(
                 "1Password CLI (op) is not installed or not in PATH. Install it from: https://1password.com/downloads/command-line/"
             )
         })?;
-        let vault = &self.plugin_config.vault;
+        let vault = &self.remote_config.vault;
         let output = self
             .runner
             .run(
@@ -307,7 +307,7 @@ impl OpItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
@@ -431,7 +431,7 @@ mod tests {
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -439,7 +439,7 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -453,7 +453,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -467,7 +467,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: SecretVault
     item_pattern: test
@@ -475,7 +475,7 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -489,7 +489,7 @@ plugins:
                 stderr: b"vault not found".to_vec(),
             },
         ]);
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err
             .to_string()
@@ -503,7 +503,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -511,10 +511,10 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err
             .to_string()
@@ -527,7 +527,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: "{project} - {Environment}"
@@ -535,9 +535,9 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
+        use crate::targets::{CommandOpts, CommandOutput};
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -549,7 +549,7 @@ plugins:
             }
         }
         let runner = DummyRunner;
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
         assert_eq!(plugin.item_name("dev"), "myapp - Dev");
     }
 
@@ -559,7 +559,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: "{environment}"
@@ -567,9 +567,9 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
+        use crate::targets::{CommandOpts, CommandOutput};
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -581,7 +581,7 @@ plugins:
             }
         }
         let runner = DummyRunner;
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
         assert_eq!(plugin.item_name("dev"), "dev");
     }
 
@@ -591,7 +591,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: "{project} - {Environment}"
@@ -599,9 +599,9 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
-        use crate::adapters::{CommandOpts, CommandOutput};
+        use crate::targets::{CommandOpts, CommandOutput};
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -613,7 +613,7 @@ plugins:
             }
         }
         let runner = DummyRunner;
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
         assert_eq!(plugin.item_name(""), "myapp - ");
     }
 
@@ -637,7 +637,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -652,7 +652,7 @@ secrets:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
         let json = json!({
             "fields": [
@@ -674,7 +674,7 @@ secrets:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
 
         // Push only API_KEY and SECRET (not STALE_KEY)
         let mut secrets = BTreeMap::new();
@@ -695,7 +695,7 @@ secrets:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -707,7 +707,7 @@ secrets:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
         let json = json!({
             "fields": [
@@ -727,7 +727,7 @@ secrets:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "new_val".to_string());
@@ -745,7 +745,7 @@ secrets:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -753,7 +753,7 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
         let json = json!({
             "fields": [
@@ -773,7 +773,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
 
         // Push with no secrets — API_KEY becomes stale
         let secrets = BTreeMap::new();
@@ -793,7 +793,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -801,7 +801,7 @@ plugins:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let op_config = config.onepassword_plugin_config().unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
 
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -815,7 +815,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = OnePasswordPlugin::new(&config, op_config, &runner);
+        let plugin = OnePasswordRemote::new(&config, op_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "val".to_string());

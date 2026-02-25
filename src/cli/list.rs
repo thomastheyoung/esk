@@ -2,7 +2,7 @@ use anyhow::Result;
 use console::style;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::adapter_tracker::{SyncIndex, SyncStatus};
+use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::config::Config;
 use crate::store::SecretStore;
 
@@ -145,23 +145,23 @@ fn build_cell_statuses(
     all_secrets: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<(String, String), CellStatus>> {
     let resolved = config.resolve_secrets()?;
-    let adapter_names: Vec<&str> = config.adapter_names();
-    let index_path = config.root.join(".esk/sync-index.json");
-    let index = SyncIndex::load(&index_path);
+    let target_names: Vec<&str> = config.target_names();
+    let index_path = config.root.join(".esk/deploy-index.json");
+    let index = DeployIndex::load(&index_path);
 
     let mut statuses: BTreeMap<(String, String), CellStatus> = BTreeMap::new();
 
     for secret in &resolved {
         for target in &secret.targets {
-            if !adapter_names.contains(&target.adapter.as_str()) {
+            if !target_names.contains(&target.service.as_str()) {
                 continue;
             }
 
             let composite = format!("{}:{}", secret.key, target.environment);
             let value = all_secrets.get(&composite);
-            let tracker_key = SyncIndex::tracker_key(
+            let tracker_key = DeployIndex::tracker_key(
                 &secret.key,
-                &target.adapter,
+                &target.service,
                 target.app.as_deref(),
                 &target.environment,
             );
@@ -170,8 +170,8 @@ fn build_cell_statuses(
                 (None, _) => continue, // no value — cell status determined by has_value check
                 (Some(_), None) => CellStatus::Pending,
                 (Some(v), Some(record)) => {
-                    let current_hash = SyncIndex::hash_value(v);
-                    if record.last_sync_status == SyncStatus::Failed {
+                    let current_hash = DeployIndex::hash_value(v);
+                    if record.last_sync_status == DeployStatus::Failed {
                         CellStatus::Failed
                     } else if current_hash != record.value_hash {
                         CellStatus::Pending

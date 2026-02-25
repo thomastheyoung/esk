@@ -1,77 +1,80 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
-    SyncMode,
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
+    DeployMode,
 };
-use crate::config::{Config, RailwayAdapterConfig, ResolvedTarget};
+use crate::config::{Config, GitlabTargetConfig, ResolvedTarget};
 
-pub struct RailwayAdapter<'a> {
+pub struct GitlabTarget<'a> {
     pub config: &'a Config,
-    pub adapter_config: &'a RailwayAdapterConfig,
+    pub target_config: &'a GitlabTargetConfig,
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> SyncAdapter for RailwayAdapter<'a> {
+impl<'a> DeployTarget for GitlabTarget<'a> {
     fn name(&self) -> &str {
-        "railway"
+        "gitlab"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Individual
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Individual
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "railway").map_err(|_| {
+        check_command(self.runner, "glab").map_err(|_| {
             anyhow::anyhow!(
-                "railway is not installed or not in PATH. Install it from: https://docs.railway.app/guides/cli"
+                "glab is not installed or not in PATH. Install it from: https://gitlab.com/gitlab-org/cli"
             )
         })?;
         let output = self
             .runner
-            .run("railway", &["whoami"], CommandOpts::default())
-            .context("failed to run railway whoami")?;
+            .run("glab", &["auth", "status"], CommandOpts::default())
+            .context("failed to run glab auth status")?;
         if !output.success {
-            anyhow::bail!("railway is not authenticated. Run: railway login");
+            anyhow::bail!("glab is not authenticated. Run: glab auth login");
         }
         Ok(())
     }
 
-    // SECURITY: railway CLI has no stdin/file support for `variables --set`. Secret values are
-    // exposed in process arguments (visible via `ps aux`). No workaround available.
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
-        let kv = format!("{key}={value}");
-
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["variables", "--set", &kv];
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["variable", "set", key, "--scope", &target.environment];
         append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
-            .run("railway", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run railway for {key}"))?;
+            .run(
+                "glab",
+                &args,
+                CommandOpts {
+                    stdin: Some(value.as_bytes().to_vec()),
+                    ..Default::default()
+                },
+            )
+            .with_context(|| format!("failed to run glab for {key}"))?;
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("railway variables --set failed for {key}: {stderr}");
+            anyhow::bail!("glab variable set failed for {key}: {stderr}");
         }
 
         Ok(())
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["variables", "delete", key];
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["variable", "delete", key, "--scope", &target.environment];
         append_env_flags(&mut args, &flag_parts);
 
         let output = self
             .runner
-            .run("railway", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run railway delete for {key}"))?;
+            .run("glab", &args, CommandOpts::default())
+            .with_context(|| format!("failed to run glab delete for {key}"))?;
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("railway variables delete failed for {key}: {stderr}");
+            anyhow::bail!("glab variable delete failed for {key}: {stderr}");
         }
 
         Ok(())
@@ -81,16 +84,16 @@ impl<'a> SyncAdapter for RailwayAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>);
+    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
     fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
         runner
             .take_calls()
             .into_iter()
-            .map(|call| (call.program, call.args))
+            .map(|call| (call.program, call.args, call.stdin))
             .collect()
     }
 
@@ -98,10 +101,10 @@ mod tests {
         let yaml = r#"
 project: x
 environments: [dev, prod]
-adapters:
-  railway:
+targets:
+  gitlab:
     env_flags:
-      prod: "--environment production"
+      prod: "--masked"
 "#;
         let path = dir.join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -110,48 +113,48 @@ adapters:
 
     fn make_target(env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "railway".to_string(),
+            service: "gitlab".to_string(),
             app: None,
             environment: env.to_string(),
         }
     }
 
     #[test]
-    fn railway_preflight_success() {
+    fn gitlab_preflight_success() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
-                stdout: b"3.0.0".to_vec(),
+                stdout: b"1.0.0".to_vec(),
                 stderr: vec![],
             },
             CommandOutput {
                 success: true,
-                stdout: b"user@test".to_vec(),
+                stdout: b"Logged in".to_vec(),
                 stderr: vec![],
             },
         ]);
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
         let calls = take_calls(&runner);
-        assert_eq!(calls[1].1, vec!["whoami"]);
+        assert_eq!(calls[1].1, vec!["auth", "status"]);
     }
 
     #[test]
-    fn railway_preflight_auth_failure() {
+    fn gitlab_preflight_auth_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
-                stdout: b"3.0.0".to_vec(),
+                stdout: b"1.0.0".to_vec(),
                 stderr: vec![],
             },
             CommandOutput {
@@ -160,66 +163,72 @@ adapters:
                 stderr: b"not logged in".to_vec(),
             },
         ]);
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
-        assert!(err.to_string().contains("railway is not authenticated"));
+        assert!(err.to_string().contains("glab is not authenticated"));
     }
 
     #[test]
-    fn railway_preflight_missing_cli() {
+    fn gitlab_preflight_missing_cli() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
-        assert!(err.to_string().contains("railway is not installed"));
+        assert!(err.to_string().contains("glab is not installed"));
     }
 
     #[test]
-    fn railway_sync_correct_args() {
+    fn gitlab_sync_uses_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
             .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "railway");
-        assert_eq!(calls[0].1, vec!["variables", "--set", "MY_KEY=secret_val"]);
+        assert_eq!(calls[0].0, "glab");
+        assert_eq!(
+            calls[0].1,
+            vec!["variable", "set", "MY_KEY", "--scope", "dev"]
+        );
+        // Value is passed via stdin, not in args
+        assert_eq!(calls[0].2.as_deref(), Some(b"secret_val".as_slice()));
+        assert!(!calls[0].1.iter().any(|a| a.contains("secret_val")));
     }
 
     #[test]
-    fn railway_sync_with_env_flags() {
+    fn gitlab_sync_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -228,74 +237,72 @@ adapters:
         let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
-            vec![
-                "variables",
-                "--set",
-                "KEY=val",
-                "--environment",
-                "production"
-            ]
+            vec!["variable", "set", "KEY", "--scope", "prod", "--masked"]
         );
+        assert_eq!(calls[0].2.as_deref(), Some(b"val".as_slice()));
     }
 
     #[test]
-    fn railway_delete_correct_args() {
+    fn gitlab_delete_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
             .delete_secret("MY_KEY", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
-        assert_eq!(calls[0].1, vec!["variables", "delete", "MY_KEY"]);
+        assert_eq!(
+            calls[0].1,
+            vec!["variable", "delete", "MY_KEY", "--scope", "dev"]
+        );
     }
 
     #[test]
-    fn railway_delete_with_env_flags() {
+    fn gitlab_delete_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter.delete_secret("KEY", &make_target("prod")).unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,
-            vec!["variables", "delete", "KEY", "--environment", "production"]
+            vec!["variable", "delete", "KEY", "--scope", "prod", "--masked"]
         );
     }
 
     #[test]
-    fn railway_delete_failure() {
+    fn gitlab_delete_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -305,18 +312,18 @@ adapters:
     }
 
     #[test]
-    fn railway_nonzero_exit() {
+    fn gitlab_nonzero_exit() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.railway.as_ref().unwrap();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"api error".to_vec(),
         }]);
-        let adapter = RailwayAdapter {
+        let adapter = GitlabTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter

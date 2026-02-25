@@ -1,11 +1,11 @@
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
-use crate::adapters::{
+use crate::targets::{
     append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SecretValue,
-    SyncAdapter, SyncMode, SyncResult,
+    DeployTarget, DeployMode, DeployResult,
 };
-use crate::config::{Config, KubernetesAdapterConfig, ResolvedTarget};
+use crate::config::{Config, KubernetesTargetConfig, ResolvedTarget};
 
 /// Validate a Kubernetes resource name or namespace.
 ///
@@ -42,15 +42,15 @@ fn validate_k8s_name(name: &str, field: &str) -> Result<()> {
     Ok(())
 }
 
-pub struct KubernetesAdapter<'a> {
+pub struct KubernetesTarget<'a> {
     pub config: &'a Config,
-    pub adapter_config: &'a KubernetesAdapterConfig,
+    pub target_config: &'a KubernetesTargetConfig,
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> KubernetesAdapter<'a> {
+impl<'a> KubernetesTarget<'a> {
     fn resolve_namespace(&self, env: &str) -> Result<&str> {
-        self.adapter_config
+        self.target_config
             .namespace
             .get(env)
             .map(|s| s.as_str())
@@ -58,7 +58,7 @@ impl<'a> KubernetesAdapter<'a> {
     }
 
     fn secret_name(&self) -> String {
-        self.adapter_config
+        self.target_config
             .secret_name
             .clone()
             .unwrap_or_else(|| format!("{}-secrets", self.config.project))
@@ -87,13 +87,13 @@ impl<'a> KubernetesAdapter<'a> {
     }
 }
 
-impl<'a> SyncAdapter for KubernetesAdapter<'a> {
+impl<'a> DeployTarget for KubernetesTarget<'a> {
     fn name(&self) -> &str {
         "kubernetes"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Batch
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Batch
     }
 
     fn preflight(&self) -> Result<()> {
@@ -121,13 +121,13 @@ impl<'a> SyncAdapter for KubernetesAdapter<'a> {
         Ok(())
     }
 
-    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<SyncResult> {
+    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         let manifest = match self.generate_manifest(secrets, target) {
             Ok(m) => m,
             Err(e) => {
                 return secrets
                     .iter()
-                    .map(|s| SyncResult {
+                    .map(|s| DeployResult {
                         key: s.key.clone(),
                         target: target.clone(),
                         success: false,
@@ -137,10 +137,10 @@ impl<'a> SyncAdapter for KubernetesAdapter<'a> {
             }
         };
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["apply", "-f", "-"];
 
-        if let Some(ctx) = self.adapter_config.context.get(&target.environment) {
+        if let Some(ctx) = self.target_config.context.get(&target.environment) {
             args.push("--context");
             // We need to hold the string alive
             // Push context separately to keep lifetime
@@ -161,7 +161,7 @@ impl<'a> SyncAdapter for KubernetesAdapter<'a> {
         match result {
             Ok(output) if output.success => secrets
                 .iter()
-                .map(|s| SyncResult {
+                .map(|s| DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
                     success: true,
@@ -172,7 +172,7 @@ impl<'a> SyncAdapter for KubernetesAdapter<'a> {
                 let stderr = String::from_utf8_lossy(&output.stderr).to_string();
                 secrets
                     .iter()
-                    .map(|s| SyncResult {
+                    .map(|s| DeployResult {
                         key: s.key.clone(),
                         target: target.clone(),
                         success: false,
@@ -182,7 +182,7 @@ impl<'a> SyncAdapter for KubernetesAdapter<'a> {
             }
             Err(e) => secrets
                 .iter()
-                .map(|s| SyncResult {
+                .map(|s| DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
                     success: false,
@@ -196,7 +196,7 @@ impl<'a> SyncAdapter for KubernetesAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
@@ -213,7 +213,7 @@ mod tests {
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
-adapters:
+targets:
   kubernetes:
     namespace:
       dev: myapp-dev
@@ -230,7 +230,7 @@ adapters:
 
     fn make_target(env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "kubernetes".to_string(),
+            service: "kubernetes".to_string(),
             app: None,
             environment: env.to_string(),
         }
@@ -248,7 +248,7 @@ adapters:
     fn preflight_success() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -261,9 +261,9 @@ adapters:
                 stderr: vec![],
             },
         ]);
-        let adapter = KubernetesAdapter {
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
@@ -277,7 +277,7 @@ adapters:
     fn preflight_cluster_unreachable() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -290,9 +290,9 @@ adapters:
                 stderr: b"connection refused".to_vec(),
             },
         ]);
-        let adapter = KubernetesAdapter {
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -303,11 +303,11 @@ adapters:
     fn preflight_missing_cli() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = KubernetesAdapter {
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -318,15 +318,15 @@ adapters:
     fn sync_batch_generates_manifest() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = KubernetesAdapter {
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
 
@@ -355,15 +355,15 @@ adapters:
     fn sync_batch_with_context_and_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = KubernetesAdapter {
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
 
@@ -380,15 +380,15 @@ adapters:
     fn sync_batch_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"forbidden".to_vec(),
         }]);
-        let adapter = KubernetesAdapter {
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
 
@@ -402,11 +402,11 @@ adapters:
     fn sync_batch_unknown_namespace() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = KubernetesAdapter {
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
 
@@ -424,10 +424,10 @@ adapters:
     fn default_secret_name() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let adapter = KubernetesAdapter {
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &MockCommandRunner::from_outputs(vec![]),
         };
         assert_eq!(adapter.secret_name(), "myapp-secrets");
@@ -439,7 +439,7 @@ adapters:
         let yaml = r#"
 project: myapp
 environments: [dev]
-adapters:
+targets:
   kubernetes:
     namespace:
       dev: ns
@@ -448,10 +448,10 @@ adapters:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
-        let adapter = KubernetesAdapter {
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &MockCommandRunner::from_outputs(vec![]),
         };
         assert_eq!(adapter.secret_name(), "custom-secret");
@@ -500,15 +500,15 @@ adapters:
     fn sync_batch_empty() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.kubernetes.as_ref().unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = KubernetesAdapter {
+        let adapter = KubernetesTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let results = adapter.sync_batch(&[], &make_target("dev"));

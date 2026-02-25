@@ -1,13 +1,13 @@
 mod helpers;
 
-use esk::adapters::env_file::EnvFileAdapter;
-use esk::adapters::{SecretValue, SyncAdapter};
+use esk::targets::env_file::EnvFileTarget;
+use esk::targets::{SecretValue, DeployTarget};
 use esk::config::ResolvedTarget;
 use helpers::*;
 
 fn make_target(app: &str, env: &str) -> ResolvedTarget {
     ResolvedTarget {
-        adapter: "env".to_string(),
+        service: "env".to_string(),
         app: Some(app.to_string()),
         environment: env.to_string(),
     }
@@ -24,7 +24,7 @@ fn env_file_end_to_end() {
     store.set("MY_SECRET", "dev", "secret_dev").unwrap();
     store.set("OTHER_SECRET", "dev", "other_dev").unwrap();
 
-    let adapter = EnvFileAdapter { config: &config };
+    let adapter = EnvFileTarget { config: &config };
     let secrets = vec![
         SecretValue {
             key: "MY_SECRET".into(),
@@ -52,7 +52,7 @@ fn env_file_multiple_vendors() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
 
-    let adapter = EnvFileAdapter { config: &config };
+    let adapter = EnvFileTarget { config: &config };
     let secrets = vec![
         SecretValue {
             key: "A".into(),
@@ -85,7 +85,7 @@ fn env_file_regeneration_replaces() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
 
-    let adapter = EnvFileAdapter { config: &config };
+    let adapter = EnvFileTarget { config: &config };
     let target = make_target("web", "dev");
 
     // First write

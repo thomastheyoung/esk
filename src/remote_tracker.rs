@@ -5,15 +5,15 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginIndex {
-    pub records: BTreeMap<String, PluginRecord>,
+pub struct RemoteIndex {
+    pub records: BTreeMap<String, RemoteRecord>,
     #[serde(skip)]
     path: PathBuf,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct PluginRecord {
-    pub plugin: String,
+pub struct RemoteRecord {
+    pub remote: String,
     pub environment: String,
     pub pushed_version: u64,
     pub last_pushed_at: String,
@@ -29,7 +29,7 @@ pub enum PushStatus {
     Failed,
 }
 
-impl PluginIndex {
+impl RemoteIndex {
     pub fn new(path: &Path) -> Self {
         Self {
             records: BTreeMap::new(),
@@ -45,19 +45,19 @@ impl PluginIndex {
             Ok(c) => c,
             Err(e) => {
                 eprintln!(
-                    "Warning: could not read plugin index ({}), starting fresh",
+                    "Warning: could not read remote index ({}), starting fresh",
                     e
                 );
                 return Self::new(path);
             }
         };
-        match serde_json::from_str::<PluginIndex>(&contents) {
+        match serde_json::from_str::<RemoteIndex>(&contents) {
             Ok(mut index) => {
                 index.path = path.to_path_buf();
                 index
             }
             Err(e) => {
-                eprintln!("Warning: plugin index corrupted ({}), starting fresh", e);
+                eprintln!("Warning: remote index corrupted ({}), starting fresh", e);
                 Self::new(path)
             }
         }
@@ -68,26 +68,26 @@ impl PluginIndex {
         let dir = self
             .path
             .parent()
-            .context("plugin index path has no parent")?;
+            .context("remote index path has no parent")?;
         let tmp = NamedTempFile::new_in(dir)?;
         std::fs::write(tmp.path(), json)?;
         tmp.persist(&self.path).with_context(|| {
-            format!("failed to persist plugin index to {}", self.path.display())
+            format!("failed to persist remote index to {}", self.path.display())
         })?;
         Ok(())
     }
 
     /// Build a tracker key: "plugin:env"
-    pub fn tracker_key(plugin: &str, env: &str) -> String {
-        format!("{plugin}:{env}")
+    pub fn tracker_key(remote: &str, env: &str) -> String {
+        format!("{remote}:{env}")
     }
 
-    pub fn record_success(&mut self, plugin: &str, env: &str, version: u64) {
-        let key = Self::tracker_key(plugin, env);
+    pub fn record_success(&mut self, remote: &str, env: &str, version: u64) {
+        let key = Self::tracker_key(remote, env);
         self.records.insert(
             key,
-            PluginRecord {
-                plugin: plugin.to_string(),
+            RemoteRecord {
+                remote: remote.to_string(),
                 environment: env.to_string(),
                 pushed_version: version,
                 last_pushed_at: chrono::Utc::now().to_rfc3339(),
@@ -97,12 +97,12 @@ impl PluginIndex {
         );
     }
 
-    pub fn record_failure(&mut self, plugin: &str, env: &str, version: u64, error: String) {
-        let key = Self::tracker_key(plugin, env);
+    pub fn record_failure(&mut self, remote: &str, env: &str, version: u64, error: String) {
+        let key = Self::tracker_key(remote, env);
         self.records.insert(
             key,
-            PluginRecord {
-                plugin: plugin.to_string(),
+            RemoteRecord {
+                remote: remote.to_string(),
                 environment: env.to_string(),
                 pushed_version: version,
                 last_pushed_at: chrono::Utc::now().to_rfc3339(),
@@ -119,13 +119,13 @@ mod tests {
 
     #[test]
     fn new_empty() {
-        let index = PluginIndex::new(Path::new("/tmp/test.json"));
+        let index = RemoteIndex::new(Path::new("/tmp/test.json"));
         assert!(index.records.is_empty());
     }
 
     #[test]
     fn load_nonexistent_returns_empty() {
-        let index = PluginIndex::load(Path::new("/nonexistent/path/test.json"));
+        let index = RemoteIndex::load(Path::new("/nonexistent/path/test.json"));
         assert!(index.records.is_empty());
     }
 
@@ -133,11 +133,11 @@ mod tests {
     fn load_existing_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.json");
-        let mut index = PluginIndex::new(&path);
+        let mut index = RemoteIndex::new(&path);
         index.record_success("1password", "dev", 3);
         index.save().unwrap();
 
-        let loaded = PluginIndex::load(&path);
+        let loaded = RemoteIndex::load(&path);
         assert_eq!(loaded.records.len(), 1);
         assert!(loaded.records.contains_key("1password:dev"));
     }
@@ -147,7 +147,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.json");
         std::fs::write(&path, "not valid json").unwrap();
-        let index = PluginIndex::load(&path);
+        let index = RemoteIndex::load(&path);
         assert!(index.records.is_empty());
     }
 
@@ -155,12 +155,12 @@ mod tests {
     fn save_and_reload() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.json");
-        let mut index = PluginIndex::new(&path);
+        let mut index = RemoteIndex::new(&path);
         index.record_success("1password", "dev", 5);
         index.record_failure("dropbox", "prod", 3, "timeout".to_string());
         index.save().unwrap();
 
-        let loaded = PluginIndex::load(&path);
+        let loaded = RemoteIndex::load(&path);
         assert_eq!(loaded.records.len(), 2);
         assert_eq!(
             loaded.records["1password:dev"].last_push_status,
@@ -176,7 +176,7 @@ mod tests {
     fn save_atomic() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.json");
-        let index = PluginIndex::new(&path);
+        let index = RemoteIndex::new(&path);
         index.save().unwrap();
         assert!(path.is_file());
     }
@@ -184,18 +184,18 @@ mod tests {
     #[test]
     fn tracker_key_format() {
         assert_eq!(
-            PluginIndex::tracker_key("1password", "dev"),
+            RemoteIndex::tracker_key("1password", "dev"),
             "1password:dev"
         );
-        assert_eq!(PluginIndex::tracker_key("dropbox", "prod"), "dropbox:prod");
+        assert_eq!(RemoteIndex::tracker_key("dropbox", "prod"), "dropbox:prod");
     }
 
     #[test]
     fn record_success_sets_fields() {
-        let mut index = PluginIndex::new(Path::new("/tmp/test.json"));
+        let mut index = RemoteIndex::new(Path::new("/tmp/test.json"));
         index.record_success("1password", "dev", 5);
         let record = &index.records["1password:dev"];
-        assert_eq!(record.plugin, "1password");
+        assert_eq!(record.remote, "1password");
         assert_eq!(record.environment, "dev");
         assert_eq!(record.pushed_version, 5);
         assert_eq!(record.last_push_status, PushStatus::Success);
@@ -204,10 +204,10 @@ mod tests {
 
     #[test]
     fn record_failure_sets_fields() {
-        let mut index = PluginIndex::new(Path::new("/tmp/test.json"));
+        let mut index = RemoteIndex::new(Path::new("/tmp/test.json"));
         index.record_failure("dropbox", "prod", 3, "timeout".to_string());
         let record = &index.records["dropbox:prod"];
-        assert_eq!(record.plugin, "dropbox");
+        assert_eq!(record.remote, "dropbox");
         assert_eq!(record.environment, "prod");
         assert_eq!(record.pushed_version, 3);
         assert_eq!(record.last_push_status, PushStatus::Failed);
@@ -216,7 +216,7 @@ mod tests {
 
     #[test]
     fn record_overwrites_previous() {
-        let mut index = PluginIndex::new(Path::new("/tmp/test.json"));
+        let mut index = RemoteIndex::new(Path::new("/tmp/test.json"));
         index.record_failure("1password", "dev", 3, "err".to_string());
         index.record_success("1password", "dev", 5);
         let record = &index.records["1password:dev"];

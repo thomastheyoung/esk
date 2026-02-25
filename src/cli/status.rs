@@ -3,11 +3,11 @@ use chrono::Utc;
 use console::style;
 use std::collections::BTreeSet;
 
-use crate::adapter_tracker::{SyncIndex, SyncStatus};
-use crate::adapters::{check_adapter_health, AdapterHealth, CommandRunner, RealCommandRunner};
+use crate::deploy_tracker::{DeployIndex, DeployStatus};
+use crate::targets::{check_target_health, TargetHealth, CommandRunner, RealCommandRunner};
 use crate::config::{Config, ResolvedTarget};
-use crate::plugin_tracker::{PluginIndex, PushStatus};
-use crate::plugins::{check_plugin_health, PluginHealth};
+use crate::remote_tracker::{RemoteIndex, PushStatus};
+use crate::remotes::{check_remote_health, RemoteHealth};
 use crate::store::SecretStore;
 
 // ---------------------------------------------------------------------------
@@ -69,17 +69,17 @@ struct Orphan {
 }
 
 #[derive(Clone)]
-enum PluginStatus {
+enum RemoteStatus {
     Current { version: u64 },
     Stale { pushed: u64, local: u64 },
     Failed { version: u64, error: String },
     NeverSynced,
 }
 
-struct PluginState {
+struct RemoteState {
     name: String,
     env: String,
-    status: PluginStatus,
+    status: RemoteStatus,
 }
 
 struct NextStep {
@@ -90,16 +90,16 @@ struct NextStep {
 struct Dashboard {
     project: String,
     version: u64,
-    adapter_health: Vec<AdapterHealth>,
+    adapter_health: Vec<TargetHealth>,
     #[allow(dead_code)]
-    plugin_health: Vec<PluginHealth>,
+    plugin_health: Vec<RemoteHealth>,
     failed: Vec<SyncEntry>,
     pending: Vec<SyncEntry>,
     synced: Vec<SyncEntry>,
     unset: Vec<SyncEntry>,
     coverage_gaps: Vec<CoverageGap>,
     orphans: Vec<Orphan>,
-    plugin_states: Vec<PluginState>,
+    remote_states: Vec<RemoteState>,
     next_steps: Vec<NextStep>,
 }
 
@@ -109,10 +109,10 @@ impl Dashboard {
         let payload = store.payload()?;
         let all_secrets = &payload.secrets;
 
-        let index_path = config.root.join(".esk/sync-index.json");
-        let index = SyncIndex::load(&index_path);
+        let index_path = config.root.join(".esk/deploy-index.json");
+        let index = DeployIndex::load(&index_path);
         let resolved = config.resolve_secrets()?;
-        let adapter_names: Vec<&str> = config.adapter_names();
+        let target_names: Vec<&str> = config.target_names();
 
         let envs: Vec<&str> = match env {
             Some(e) => vec![e],
@@ -120,8 +120,8 @@ impl Dashboard {
         };
 
         // 1. Health checks
-        let adapter_health = check_adapter_health(config, runner);
-        let plugin_health = check_plugin_health(config, runner);
+        let adapter_health = check_target_health(config, runner);
+        let plugin_health = check_remote_health(config, runner);
 
         // 2. Sync entries
         let mut failed = Vec::new();
@@ -134,15 +134,15 @@ impl Dashboard {
                 if !envs.contains(&target.environment.as_str()) {
                     continue;
                 }
-                if !adapter_names.contains(&target.adapter.as_str()) {
+                if !target_names.contains(&target.service.as_str()) {
                     continue;
                 }
 
                 let composite = format!("{}:{}", secret.key, target.environment);
                 let value = all_secrets.get(&composite);
-                let tracker_key = SyncIndex::tracker_key(
+                let tracker_key = DeployIndex::tracker_key(
                     &secret.key,
-                    &target.adapter,
+                    &target.service,
                     target.app.as_deref(),
                     &target.environment,
                 );
@@ -161,8 +161,8 @@ impl Dashboard {
                     (None, _) => unset.push(entry),
                     (Some(_), None) => pending.push(entry),
                     (Some(v), Some(rec)) => {
-                        let current_hash = SyncIndex::hash_value(v);
-                        if rec.last_sync_status == SyncStatus::Failed {
+                        let current_hash = DeployIndex::hash_value(v);
+                        if rec.last_sync_status == DeployStatus::Failed {
                             failed.push(SyncEntry {
                                 error: Some(
                                     rec.last_error
@@ -241,18 +241,18 @@ impl Dashboard {
         }
 
         // 5. Plugin states
-        let plugin_index_path = config.root.join(".esk/plugin-index.json");
-        let plugin_index = PluginIndex::load(&plugin_index_path);
-        let plugin_names: Vec<&String> = config.plugins.keys().collect();
+        let remote_index_path = config.root.join(".esk/remote-index.json");
+        let remote_index = RemoteIndex::load(&remote_index_path);
+        let remote_names: Vec<&String> = config.remotes.keys().collect();
 
-        let mut plugin_states = Vec::new();
-        for plugin_name in &plugin_names {
+        let mut remote_states = Vec::new();
+        for plugin_name in &remote_names {
             for &env_name in &envs {
                 let local_version = payload.env_version(env_name);
-                let key = PluginIndex::tracker_key(plugin_name, env_name);
-                let status = match plugin_index.records.get(&key) {
+                let key = RemoteIndex::tracker_key(plugin_name, env_name);
+                let status = match remote_index.records.get(&key) {
                     Some(record) if record.last_push_status == PushStatus::Failed => {
-                        PluginStatus::Failed {
+                        RemoteStatus::Failed {
                             version: record.pushed_version,
                             error: record
                                 .last_error
@@ -262,17 +262,17 @@ impl Dashboard {
                         }
                     }
                     Some(record) if record.pushed_version >= local_version => {
-                        PluginStatus::Current {
+                        RemoteStatus::Current {
                             version: local_version,
                         }
                     }
-                    Some(record) => PluginStatus::Stale {
+                    Some(record) => RemoteStatus::Stale {
                         pushed: record.pushed_version,
                         local: local_version,
                     },
-                    None => PluginStatus::NeverSynced,
+                    None => RemoteStatus::NeverSynced,
                 };
-                plugin_states.push(PluginState {
+                remote_states.push(RemoteState {
                     name: plugin_name.to_string(),
                     env: env_name.to_string(),
                     status,
@@ -318,8 +318,8 @@ impl Dashboard {
         }
 
         // Stale plugins
-        for ps in &plugin_states {
-            if let PluginStatus::Stale { pushed, local } = &ps.status {
+        for ps in &remote_states {
+            if let RemoteStatus::Stale { pushed, local } = &ps.status {
                 next_steps.push(NextStep {
                     command: format!("esk sync --env {}", ps.env),
                     description: format!(
@@ -329,7 +329,7 @@ impl Dashboard {
                     ),
                 });
             }
-            if let PluginStatus::NeverSynced = &ps.status {
+            if let RemoteStatus::NeverSynced = &ps.status {
                 next_steps.push(NextStep {
                     command: format!("esk sync --env {}", ps.env),
                     description: "plugin never synced".to_string(),
@@ -360,7 +360,7 @@ impl Dashboard {
             unset,
             coverage_gaps,
             orphans,
-            plugin_states,
+            remote_states,
             next_steps,
         })
     }
@@ -555,7 +555,7 @@ impl Dashboard {
             }
 
             if !sync_lines.is_empty() {
-                cliclack::log::step(format!("Deploy (adapters)\n{}", sync_lines.join("\n")))?;
+                cliclack::log::step(format!("Deploy (targets)\n{}", sync_lines.join("\n")))?;
             }
         }
 
@@ -601,31 +601,31 @@ impl Dashboard {
         }
 
         // Sync section (plugins)
-        if !self.plugin_states.is_empty() {
+        if !self.remote_states.is_empty() {
             let lines: Vec<String> = self
-                .plugin_states
+                .remote_states
                 .iter()
                 .map(|ps| match &ps.status {
-                    PluginStatus::Current { version } => format!(
+                    RemoteStatus::Current { version } => format!(
                         "  {} {}  {}",
                         style("✓").green(),
                         style(format!("{}:{}", ps.name, ps.env)),
                         style(format!("v{version}")).dim()
                     ),
-                    PluginStatus::Stale { pushed, local } => format!(
+                    RemoteStatus::Stale { pushed, local } => format!(
                         "  {} {}  {}",
                         style("●").yellow(),
                         style(format!("{}:{}", ps.name, ps.env)),
                         style(format!("v{pushed} → local v{local}")).dim()
                     ),
-                    PluginStatus::Failed { version, error } => format!(
+                    RemoteStatus::Failed { version, error } => format!(
                         "  {} {}  {} {}",
                         style("✗").red(),
                         style(format!("{}:{}", ps.name, ps.env)),
                         style(format!("v{version}")).dim(),
                         style(format!("({error})")).dim()
                     ),
-                    PluginStatus::NeverSynced => format!(
+                    RemoteStatus::NeverSynced => format!(
                         "  {} {}  {}",
                         style("○").dim(),
                         style(format!("{}:{}", ps.name, ps.env)),
@@ -633,7 +633,7 @@ impl Dashboard {
                     ),
                 })
                 .collect();
-            cliclack::log::step(format!("Sync (plugins)\n{}", lines.join("\n")))?;
+            cliclack::log::step(format!("Sync (remotes)\n{}", lines.join("\n")))?;
         }
 
         // Next steps section
@@ -676,7 +676,7 @@ impl Dashboard {
 // ---------------------------------------------------------------------------
 
 fn format_target(target: &ResolvedTarget) -> String {
-    let mut s = target.adapter.clone();
+    let mut s = target.service.clone();
     if let Some(app) = &target.app {
         s.push(':');
         s.push_str(app);
@@ -713,7 +713,7 @@ fn relative_time(timestamp: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput, CommandRunner};
+    use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
     use crate::store::SecretStore;
 
     #[test]
@@ -762,7 +762,7 @@ mod tests {
         let yaml = r#"
 project: testapp
 environments: [dev, prod]
-plugins:
+remotes:
   1password:
     vault: Test
     item_pattern: "{project} - {Environment}"
@@ -774,20 +774,20 @@ plugins:
         let store = SecretStore::open(dir.path()).unwrap();
         store.set("KEY", "dev", "val").unwrap(); // dev v1, prod v0 (implicit)
 
-        let plugin_index_path = dir.path().join(".esk/plugin-index.json");
-        let mut index = PluginIndex::new(&plugin_index_path);
+        let remote_index_path = dir.path().join(".esk/remote-index.json");
+        let mut index = RemoteIndex::new(&remote_index_path);
         index.record_success("1password", "dev", 0);
         index.save().unwrap();
 
         let dashboard = Dashboard::build(&config, Some("dev"), &OkRunner).unwrap();
         let dev = dashboard
-            .plugin_states
+            .remote_states
             .iter()
             .find(|ps| ps.name == "1password" && ps.env == "dev")
             .unwrap();
         assert!(matches!(
             dev.status,
-            PluginStatus::Stale {
+            RemoteStatus::Stale {
                 pushed: 0,
                 local: 1
             }
@@ -800,7 +800,7 @@ plugins:
         let yaml = r#"
 project: testapp
 environments: [dev, prod]
-plugins:
+remotes:
   1password:
     vault: Test
     item_pattern: "{project} - {Environment}"
@@ -812,17 +812,17 @@ plugins:
         let store = SecretStore::open(dir.path()).unwrap();
         store.set("KEY", "dev", "val").unwrap(); // global v1, prod env version remains 0
 
-        let plugin_index_path = dir.path().join(".esk/plugin-index.json");
-        let mut index = PluginIndex::new(&plugin_index_path);
+        let remote_index_path = dir.path().join(".esk/remote-index.json");
+        let mut index = RemoteIndex::new(&remote_index_path);
         index.record_success("1password", "prod", 0);
         index.save().unwrap();
 
         let dashboard = Dashboard::build(&config, None, &OkRunner).unwrap();
         let prod = dashboard
-            .plugin_states
+            .remote_states
             .iter()
             .find(|ps| ps.name == "1password" && ps.env == "prod")
             .unwrap();
-        assert!(matches!(prod.status, PluginStatus::Current { version: 0 }));
+        assert!(matches!(prod.status, RemoteStatus::Current { version: 0 }));
     }
 }

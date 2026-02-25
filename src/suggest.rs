@@ -91,11 +91,11 @@ pub fn unknown_env_in_target<S: AsRef<str>>(env: &str, target: &str, environment
     msg
 }
 
-/// Builds an "unknown plugin" error message (for --only flag validation).
-pub fn unknown_plugin<S: AsRef<str>>(name: &str, plugin_names: &[S]) -> String {
-    let available = join(plugin_names);
-    let mut msg = format!("unknown plugin '{}'", style(name).bold());
-    if let Some(suggestion) = closest(name, plugin_names) {
+/// Builds an "unknown remote" error message (for --only flag validation).
+pub fn unknown_remote<S: AsRef<str>>(name: &str, remote_names: &[S]) -> String {
+    let available = join(remote_names);
+    let mut msg = format!("unknown remote '{}'", style(name).bold());
+    if let Some(suggestion) = closest(name, remote_names) {
         msg.push_str(&hint_line(suggestion));
     }
     msg.push_str(&valid_line("available", &available));
@@ -103,10 +103,10 @@ pub fn unknown_plugin<S: AsRef<str>>(name: &str, plugin_names: &[S]) -> String {
 }
 
 /// Builds an "adapter not configured" error message (for config validation).
-pub fn unknown_adapter<S: AsRef<str>>(adapter: &str, adapter_names: &[S]) -> String {
-    let configured = join(adapter_names);
-    let mut msg = format!("adapter '{}' is not configured", style(adapter).bold());
-    if let Some(suggestion) = closest(adapter, adapter_names) {
+pub fn unknown_target<S: AsRef<str>>(adapter: &str, target_names: &[S]) -> String {
+    let configured = join(target_names);
+    let mut msg = format!("target '{}' is not configured", style(adapter).bold());
+    if let Some(suggestion) = closest(adapter, target_names) {
         msg.push_str(&hint_line(suggestion));
     }
     msg.push_str(&valid_line("configured", &configured));
@@ -219,38 +219,38 @@ mod tests {
     }
 
     #[test]
-    fn unknown_plugin_with_suggestion() {
-        let msg = strip(&unknown_plugin(
+    fn unknown_remote_with_suggestion() {
+        let msg = strip(&unknown_remote(
             "1pasword",
             &envs(&["1password", "s3", "vault"]),
         ));
-        assert!(msg.contains("unknown plugin '1pasword'"));
+        assert!(msg.contains("unknown remote '1pasword'"));
         assert!(msg.contains("did you mean 1password"));
         assert!(msg.contains("available:"));
     }
 
     #[test]
-    fn unknown_plugin_no_suggestion() {
-        let msg = strip(&unknown_plugin("xyz", &envs(&["1password", "s3"])));
-        assert!(msg.contains("unknown plugin 'xyz'"));
+    fn unknown_remote_no_suggestion() {
+        let msg = strip(&unknown_remote("xyz", &envs(&["1password", "s3"])));
+        assert!(msg.contains("unknown remote 'xyz'"));
         assert!(!msg.contains("did you mean"));
         assert!(msg.contains("available:"));
     }
 
     #[test]
-    fn unknown_adapter_with_suggestion() {
+    fn unknown_target_with_suggestion() {
         let candidates: Vec<&str> = vec!["env", "cloudflare", "convex"];
-        let msg = strip(&unknown_adapter("cloudflar", &candidates));
-        assert!(msg.contains("adapter 'cloudflar' is not configured"));
+        let msg = strip(&unknown_target("cloudflar", &candidates));
+        assert!(msg.contains("target 'cloudflar' is not configured"));
         assert!(msg.contains("did you mean cloudflare"));
         assert!(msg.contains("configured:"));
     }
 
     #[test]
-    fn unknown_adapter_no_suggestion() {
+    fn unknown_target_no_suggestion() {
         let candidates: Vec<&str> = vec!["env"];
-        let msg = strip(&unknown_adapter("xyz", &candidates));
-        assert!(msg.contains("adapter 'xyz' is not configured"));
+        let msg = strip(&unknown_target("xyz", &candidates));
+        assert!(msg.contains("target 'xyz' is not configured"));
         assert!(!msg.contains("did you mean"));
         assert!(msg.contains("configured: env"));
     }

@@ -10,12 +10,12 @@ src/
 ├── lib.rs               # Library root (re-exports all modules)
 ├── config.rs            # YAML config parsing + validation
 ├── store.rs             # Encrypted secret store (AES-256-GCM)
-├── tracker.rs           # Deploy tracking (SHA-256 change detection)
-├── plugin_tracker.rs    # Plugin push tracking (version + status per plugin/env)
+├── deploy_tracker.rs    # Deploy tracking (SHA-256 change detection)
+├── remote_tracker.rs    # Remote push tracking (version + status per remote/env)
 ├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
 ├── suggest.rs           # Typo suggestions (Levenshtein distance)
-├── adapters/
-│   ├── mod.rs           # SyncAdapter + CommandRunner traits, build_sync_adapters()
+├── targets/
+│   ├── mod.rs           # DeployTarget + CommandRunner traits, build_targets()
 │   ├── env_file.rs      # .env file generation (batch deploy)
 │   ├── cloudflare.rs    # wrangler secret put/delete (individual deploy)
 │   ├── convex.rs        # convex env set/unset (individual deploy)
@@ -29,16 +29,16 @@ src/
 │   ├── gitlab.rs        # glab variable set/delete (individual deploy, stdin)
 │   ├── aws_ssm.rs       # aws ssm put-parameter/delete-parameter (individual deploy, stdin)
 │   └── kubernetes.rs    # kubectl apply Secret manifest (batch deploy)
-├── plugins/
-│   ├── mod.rs           # StoragePlugin trait, build_plugins()
+├── remotes/
+│   ├── mod.rs           # SyncRemote trait, build_remotes()
 │   ├── onepassword.rs   # 1Password op CLI
 │   ├── cloud_file.rs    # Cloud file storage (Dropbox, Google Drive, OneDrive)
 │   ├── aws_secrets_manager.rs  # AWS Secrets Manager
-│   ├── vault.rs         # HashiCorp Vault KV
+│   ├── hashicorp_vault.rs      # HashiCorp Vault KV
 │   ├── bitwarden.rs     # Bitwarden Secrets Manager (bws CLI)
 │   ├── s3.rs            # S3-compatible storage (AWS S3, R2, MinIO, DO Spaces)
-│   ├── gcp.rs           # GCP Secret Manager
-│   ├── azure.rs         # Azure Key Vault
+│   ├── gcp_secret_manager.rs   # GCP Secret Manager
+│   ├── azure_key_vault.rs      # Azure Key Vault
 │   ├── doppler.rs       # Doppler secrets management
 │   └── sops.rs          # Mozilla SOPS encrypted files
 ├── cli/
@@ -48,10 +48,10 @@ src/
 │   ├── get.rs           # esk get
 │   ├── delete.rs        # esk delete
 │   ├── list.rs          # esk list
-│   ├── deploy.rs        # esk deploy (adapter-agnostic)
-│   ├── status.rs        # esk status (adapter-agnostic)
+│   ├── deploy.rs        # esk deploy (target-agnostic)
+│   ├── status.rs        # esk status (target-agnostic)
 │   ├── generate.rs      # esk generate (TypeScript type declarations)
-│   └── sync.rs          # esk sync (plugin-agnostic, bidirectional)
+│   └── sync.rs          # esk sync (remote-agnostic, bidirectional)
 tests/
 ├── helpers/
 │   └── mod.rs              # TestProject, fixtures, MockCommandRunner
@@ -63,16 +63,16 @@ tests/
 
 ## Core design
 
-### Adapters vs plugins
+### Targets vs remotes
 
 esk distinguishes between two extension types:
 
-- **Adapters** deploy secrets to targets via `esk deploy`. Secrets declare which adapters they target in `targets:`. Each adapter deploys individual secrets or batches.
-- **Plugins** sync the entire secret list via `esk sync`. Plugins pull from remote, reconcile with local, and push merged results back — all in one bidirectional operation. Used for team sharing and backup.
+- **Targets** deploy secrets to services via `esk deploy`. Secrets declare which targets they deploy to in `targets:`. Each target deploys individual secrets or batches.
+- **Remotes** sync the entire secret list via `esk sync`. Remotes pull from remote, reconcile with local, and push merged results back — all in one bidirectional operation. Used for team sharing and backup.
 
 ### Config (`esk.yaml`)
 
-Project-level config defines everything: environments, apps, adapter settings, plugin settings, and secrets. No hardcoded paths or project-specific assumptions in the binary.
+Project-level config defines everything: environments, apps, target settings, remote settings, and secrets. No hardcoded paths or project-specific assumptions in the binary.
 
 ### Encrypted store (`.esk/store.enc`)
 
@@ -83,27 +83,27 @@ Project-level config defines everything: environments, apps, adapter settings, p
 - JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N, "tombstones": { "KEY:env": N }, "env_versions": { "env": N } }`
 - Safe to commit to git
 
-### Sync adapter trait
+### Deploy target trait
 
 ```rust
-pub trait SyncAdapter {
+pub trait DeployTarget {
     fn name(&self) -> &str;
-    fn sync_mode(&self) -> SyncMode;  // Batch or Individual
+    fn deploy_mode(&self) -> DeployMode;  // Batch or Individual
     fn preflight(&self) -> Result<()>;  // Validate external deps (default: Ok)
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()>;  // Default: no-op
-    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<SyncResult>;
+    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;
 }
 ```
 
-Batch adapters handle deletion by regenerating the full output without the deleted key. Individual adapters override `delete_secret` to call the external CLI's delete/unset command.
+Batch targets handle deletion by regenerating the full output without the deleted key. Individual targets override `delete_secret` to call the external CLI's delete/unset command.
 
-`SyncMode::Batch` adapters (env, kubernetes) regenerate the full output when any secret changes. `SyncMode::Individual` adapters deploy one secret at a time. The `build_sync_adapters()` factory constructs all configured adapters from config, running preflight checks and filtering out adapters that fail.
+`DeployMode::Batch` targets (env, kubernetes) regenerate the full output when any secret changes. `DeployMode::Individual` targets deploy one secret at a time. The `build_targets()` factory constructs all configured targets from config, running preflight checks and filtering out targets that fail.
 
-### Storage plugin trait
+### Sync remote trait
 
 ```rust
-pub trait StoragePlugin {
+pub trait SyncRemote {
     fn name(&self) -> &str;
     fn preflight(&self) -> Result<()>;  // Validate external deps (default: Ok)
     fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()>;
@@ -111,11 +111,11 @@ pub trait StoragePlugin {
 }
 ```
 
-Plugins receive the full store payload and operate per environment. The `build_plugins()` factory constructs all configured plugins from config, running preflight checks and filtering out plugins that fail.
+Remotes receive the full store payload and operate per environment. The `build_remotes()` factory constructs all configured remotes from config, running preflight checks and filtering out remotes that fail.
 
 ### CommandRunner trait
 
-Adapters and plugins that shell out to external CLIs (wrangler, convex, op) use the `CommandRunner` trait instead of `std::process::Command` directly. Production uses `RealCommandRunner`; tests inject `MockCommandRunner` to record calls and return canned responses.
+Targets and remotes that shell out to external CLIs (wrangler, convex, op) use the `CommandRunner` trait instead of `std::process::Command` directly. Production uses `RealCommandRunner`; tests inject `MockCommandRunner` to record calls and return canned responses.
 
 ```rust
 pub trait CommandRunner: Send + Sync {
@@ -123,22 +123,22 @@ pub trait CommandRunner: Send + Sync {
 }
 ```
 
-### Change tracking (`.esk/sync-index.json`)
+### Change tracking (`.esk/deploy-index.json`)
 
-SHA-256 hash per (secret, adapter, app, environment) tuple. Skip deploy when hash matches.
+SHA-256 hash per (secret, target, app, environment) tuple. Skip deploy when hash matches.
 Records include target, value hash, timestamp, deploy status (success/failed), and optional error.
 Atomic writes via temp file + rename.
 
-### Plugin push tracking (`.esk/plugin-index.json`)
+### Remote push tracking (`.esk/remote-index.json`)
 
-Tracks push state per (plugin, environment) pair. Records pushed version, timestamp, push status (success/failed), and optional error. Used by `status` to show plugin push drift. Atomic writes via temp file + rename.
+Tracks push state per (remote, environment) pair. Records pushed version, timestamp, push status (success/failed), and optional error. Used by `status` to show remote push drift. Atomic writes via temp file + rename.
 
 ### Reconciliation
 
-Version-counter-based reconciliation between local store and remote plugins. Two modes:
+Version-counter-based reconciliation between local store and remote sources. Two modes:
 
 - **Pairwise** (`reconcile()`): compares local store against a single remote source.
-- **Multi-plugin** (`reconcile_multi()`): compares local store against N remote sources. Highest version wins as base; unique secrets from lower-version sources are merged in.
+- **Multi-remote** (`reconcile_multi()`): compares local store against N remote sources. Highest version wins as base; unique secrets from lower-version sources are merged in.
 
 ## Key crates
 
@@ -151,7 +151,7 @@ Version-counter-based reconciliation between local store and remote plugins. Two
 | `hex`                               | Hex encoding for keys, nonces, hashes |
 | `base64`                            | Base64 encoding for K8s secrets       |
 | `rand`                              | Random key and nonce generation       |
-| `chrono`                            | Timestamps in sync records            |
+| `chrono`                             | Timestamps in deploy records          |
 | `cliclack`                          | Terminal UI (spinners, logs, prompts) |
 | `console`                           | Terminal colors and styling           |
 | `fs2`                               | File locking (exclusive store locks)  |
@@ -163,10 +163,10 @@ Version-counter-based reconciliation between local store and remote plugins. Two
 ## Rules
 
 - No hardcoded project names, paths, or assumptions — everything from config
-- Adapters shell out to external CLIs (wrangler, convex) via `CommandRunner` — don't reimplement their APIs
-- Plugins shell out to external CLIs (op) or use filesystem operations via `CommandRunner`
+- Targets shell out to external CLIs (wrangler, convex) via `CommandRunner` — don't reimplement their APIs
+- Remotes shell out to external CLIs (op) or use filesystem operations via `CommandRunner`
 - Prefer `anyhow` for error propagation, `thiserror` for typed errors at API boundaries
-- Atomic file writes for store and sync index (write to temp, rename)
+- Atomic file writes for store and deploy index (write to temp, rename)
 - Secrets in memory should be zeroized when possible (`zeroize` crate)
 - No `unwrap()` on fallible operations — propagate errors
 
@@ -184,24 +184,22 @@ cargo run -- <command>
 ## Testing
 
 ```bash
-cargo test                    # Run all 666 tests
+cargo test                    # Run all tests
 cargo test config::           # Run config unit tests only
 cargo test store::            # Run store unit tests only
 cargo test reconcile::        # Run reconcile unit tests only
-cargo test tracker::          # Run tracker unit tests only
-cargo test plugin_tracker::   # Run plugin tracker unit tests only
+cargo test deploy_tracker::   # Run deploy tracker unit tests only
+cargo test remote_tracker::   # Run remote tracker unit tests only
 cargo test suggest::          # Run suggest unit tests only
-cargo test adapters::         # Run all adapter unit tests
-cargo test plugins::          # Run all plugin unit tests
+cargo test targets::          # Run all target unit tests
+cargo test remotes::          # Run all remote unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
 ```
 
-666 tests total: 530 unit (inline `#[cfg(test)]`) + 136 integration (`tests/`).
-
 ### Test infrastructure
 
-- **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `sync_index_path()`, `plugin_index_path()`.
+- **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `remote_index_path()`.
 - **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG` — reusable YAML for tests.
-- **`MockCommandRunner`**: records calls and returns configurable responses for adapter/plugin tests.
+- **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.

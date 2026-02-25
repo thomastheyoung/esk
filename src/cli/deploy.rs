@@ -2,9 +2,9 @@ use anyhow::Result;
 use console::style;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::adapter_tracker::SyncIndex;
-use crate::adapters::{
-    build_sync_adapters, CommandRunner, RealCommandRunner, SecretValue, SyncMode,
+use crate::deploy_tracker::DeployIndex;
+use crate::targets::{
+    build_targets, CommandRunner, RealCommandRunner, SecretValue, DeployMode,
 };
 use crate::config::Config;
 use crate::store::SecretStore;
@@ -38,24 +38,24 @@ pub fn run_with_runner(
 ) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
-    let index_path = config.root.join(".esk/sync-index.json");
-    let mut index = SyncIndex::load(&index_path);
+    let index_path = config.root.join(".esk/deploy-index.json");
+    let mut index = DeployIndex::load(&index_path);
 
     let resolved = config.resolve_secrets()?;
 
-    let has_configured_adapters = !config.adapter_names().is_empty();
+    let has_configured_adapters = !config.target_names().is_empty();
 
-    let adapters = build_sync_adapters(config, runner);
+    let adapters = build_targets(config, runner);
 
     if adapters.is_empty() && has_configured_adapters {
         cliclack::log::warning(
-            "No adapters available after preflight checks. Fix the issues above and try again.",
+            "No targets available after preflight checks. Fix the issues above and try again.",
         )?;
         return Ok(());
     }
 
     // Build a lookup map: adapter_name -> (index, sync_mode)
-    let adapter_map: HashMap<&str, (usize, SyncMode)> = adapters
+    let target_map: HashMap<&str, (usize, DeployMode)> = adapters
         .iter()
         .enumerate()
         .map(|(i, a)| (a.name(), (i, a.sync_mode())))
@@ -82,7 +82,7 @@ pub fn run_with_runner(
             }
 
             // Skip targets whose adapter isn't in the sync adapter map (e.g. plugins)
-            let (_, sync_mode) = match adapter_map.get(target.adapter.as_str()) {
+            let (_, sync_mode) = match target_map.get(target.service.as_str()) {
                 Some(entry) => *entry,
                 None => continue,
             };
@@ -107,25 +107,25 @@ pub fn run_with_runner(
                 }
             };
 
-            let value_hash = SyncIndex::hash_value(value);
-            let tracker_key = SyncIndex::tracker_key(
+            let value_hash = DeployIndex::hash_value(value);
+            let tracker_key = DeployIndex::tracker_key(
                 &secret.key,
-                &target.adapter,
+                &target.service,
                 target.app.as_deref(),
                 &target.environment,
             );
 
             match sync_mode {
-                SyncMode::Batch => {
+                DeployMode::Batch => {
                     if index.should_sync(&tracker_key, &value_hash, force) {
                         batch_dirty.insert((
-                            target.adapter.clone(),
+                            target.service.clone(),
                             target.app.clone(),
                             target.environment.clone(),
                         ));
                     }
                 }
-                SyncMode::Individual => {
+                DeployMode::Individual => {
                     if index.should_sync(&tracker_key, &value_hash, force) {
                         individual_work.push((secret.key.clone(), value.clone(), target.clone()));
                     } else {
@@ -159,9 +159,9 @@ pub fn run_with_runner(
                 if target.environment != tomb_env {
                     continue;
                 }
-                if let Some((_, SyncMode::Batch)) = adapter_map.get(target.adapter.as_str()) {
+                if let Some((_, DeployMode::Batch)) = target_map.get(target.service.as_str()) {
                     batch_dirty.insert((
-                        target.adapter.clone(),
+                        target.service.clone(),
                         target.app.clone(),
                         target.environment.clone(),
                     ));
@@ -179,12 +179,12 @@ pub fn run_with_runner(
         None
     };
 
-    // Handle batch adapters: for each dirty target group, gather ALL secrets and sync
+    // Handle batch targets: for each dirty target group, gather ALL secrets and sync
     for (adapter_name, app, target_env) in &batch_dirty {
-        let (adapter_idx, _) = adapter_map[adapter_name.as_str()];
-        let adapter = &adapters[adapter_idx];
+        let (target_idx, _) = target_map[adapter_name.as_str()];
+        let adapter = &adapters[target_idx];
         let target = crate::config::ResolvedTarget {
-            adapter: adapter_name.clone(),
+            service: adapter_name.clone(),
             app: app.clone(),
             environment: target_env.clone(),
         };
@@ -195,7 +195,7 @@ pub fn run_with_runner(
         let mut tombstoned_keys: BTreeSet<String> = BTreeSet::new();
         for secret in &resolved {
             for target in &secret.targets {
-                if target.adapter == *adapter_name
+                if target.service == *adapter_name
                     && target.app.as_ref() == app.as_ref()
                     && target.environment == *target_env
                 {
@@ -250,11 +250,11 @@ pub fn run_with_runner(
         if results.is_empty() {
             for key in &tombstoned_keys {
                 let tracker_key =
-                    SyncIndex::tracker_key(key, adapter_name, app.as_deref(), target_env);
+                    DeployIndex::tracker_key(key, adapter_name, app.as_deref(), target_env);
                 index.record_success(
                     tracker_key,
                     target.to_string(),
-                    SyncIndex::TOMBSTONE_HASH.to_string(),
+                    DeployIndex::TOMBSTONE_HASH.to_string(),
                 );
                 synced.push(SyncEntry {
                     key: key.clone(),
@@ -270,14 +270,14 @@ pub fn run_with_runner(
 
         for result in &results {
             let tracker_key =
-                SyncIndex::tracker_key(&result.key, adapter_name, app.as_deref(), target_env);
+                DeployIndex::tracker_key(&result.key, adapter_name, app.as_deref(), target_env);
             let composite = format!("{}:{}", result.key, target_env);
             let value = payload
                 .secrets
                 .get(&composite)
                 .map(|v| v.as_str())
                 .unwrap_or("");
-            let value_hash = SyncIndex::hash_value(value);
+            let value_hash = DeployIndex::hash_value(value);
 
             if result.success {
                 index.record_success(tracker_key, target.to_string(), value_hash);
@@ -326,17 +326,17 @@ pub fn run_with_runner(
             ))?;
         }
 
-        let (adapter_idx, _) = adapter_map[target.adapter.as_str()];
-        let adapter = &adapters[adapter_idx];
+        let (target_idx, _) = target_map[target.service.as_str()];
+        let adapter = &adapters[target_idx];
         let result = adapter.sync_secret(key, value, target);
 
-        let tracker_key = SyncIndex::tracker_key(
+        let tracker_key = DeployIndex::tracker_key(
             key,
-            &target.adapter,
+            &target.service,
             target.app.as_deref(),
             &target.environment,
         );
-        let value_hash = SyncIndex::hash_value(value);
+        let value_hash = DeployIndex::hash_value(value);
 
         match result {
             Ok(()) => {
@@ -395,20 +395,20 @@ pub fn run_with_runner(
                 if target.environment != tomb_env {
                     continue;
                 }
-                let Some((_, SyncMode::Individual)) = adapter_map.get(target.adapter.as_str())
+                let Some((_, DeployMode::Individual)) = target_map.get(target.service.as_str())
                 else {
                     continue;
                 };
 
-                let tracker_key = SyncIndex::tracker_key(
+                let tracker_key = DeployIndex::tracker_key(
                     bare_key,
-                    &target.adapter,
+                    &target.service,
                     target.app.as_deref(),
                     tomb_env,
                 );
 
                 // Skip if already successfully deleted (unless forced)
-                if !force && !index.should_sync(&tracker_key, SyncIndex::TOMBSTONE_HASH, false) {
+                if !force && !index.should_sync(&tracker_key, DeployIndex::TOMBSTONE_HASH, false) {
                     continue;
                 }
 
@@ -422,15 +422,15 @@ pub fn run_with_runner(
                     continue;
                 }
 
-                let (adapter_idx, _) = adapter_map[target.adapter.as_str()];
-                let adapter = &adapters[adapter_idx];
+                let (target_idx, _) = target_map[target.service.as_str()];
+                let adapter = &adapters[target_idx];
 
                 match adapter.delete_secret(bare_key, target) {
                     Ok(()) => {
                         index.record_success(
                             tracker_key,
                             format_target(target),
-                            SyncIndex::TOMBSTONE_HASH.to_string(),
+                            DeployIndex::TOMBSTONE_HASH.to_string(),
                         );
                         synced.push(SyncEntry {
                             key: bare_key.to_string(),
@@ -443,7 +443,7 @@ pub fn run_with_runner(
                         index.record_failure(
                             tracker_key,
                             format_target(target),
-                            SyncIndex::TOMBSTONE_HASH.to_string(),
+                            DeployIndex::TOMBSTONE_HASH.to_string(),
                             e.to_string(),
                         );
                         failed.push(SyncEntry {
@@ -462,14 +462,14 @@ pub fn run_with_runner(
     // Count skipped batch secrets (those in non-dirty batch target groups)
     for secret in &resolved {
         for target in &secret.targets {
-            if let Some((_, SyncMode::Batch)) = adapter_map.get(target.adapter.as_str()) {
+            if let Some((_, DeployMode::Batch)) = target_map.get(target.service.as_str()) {
                 if let Some(filter_env) = env {
                     if target.environment != filter_env {
                         continue;
                     }
                 }
                 let group = (
-                    target.adapter.clone(),
+                    target.service.clone(),
                     target.app.clone(),
                     target.environment.clone(),
                 );
@@ -607,7 +607,7 @@ pub fn run_with_runner(
 }
 
 fn format_target(target: &crate::config::ResolvedTarget) -> String {
-    let mut s = target.adapter.clone();
+    let mut s = target.service.clone();
     if let Some(app) = &target.app {
         s.push(':');
         s.push_str(app);

@@ -1,18 +1,18 @@
 pub mod aws_secrets_manager;
-pub mod azure;
+pub mod azure_key_vault;
 pub mod bitwarden;
 pub mod cloud_file;
 pub mod doppler;
-pub mod gcp;
+pub mod gcp_secret_manager;
 pub mod onepassword;
 pub mod s3;
 pub mod sops;
-pub mod vault;
+pub mod hashicorp_vault;
 
 use anyhow::Result;
 use std::collections::BTreeMap;
 
-use crate::adapters::CommandRunner;
+use crate::targets::CommandRunner;
 use crate::config::Config;
 use crate::store::{validate_key, StorePayload};
 
@@ -95,7 +95,7 @@ pub fn parse_pulled_secrets(
 ///
 /// Unlike sync adapters (which deploy secrets to targets), plugins
 /// store or backup the entire secret list as a source of truth.
-pub trait StoragePlugin {
+pub trait SyncRemote {
     fn name(&self) -> &str;
 
     /// Validate that external dependencies are available before push/pull.
@@ -112,35 +112,35 @@ pub trait StoragePlugin {
 }
 
 /// Health status of a configured plugin.
-pub struct PluginHealth {
+pub struct RemoteHealth {
     pub name: String,
     pub ok: bool,
     pub message: String,
 }
 
-struct PluginCandidate<'a> {
-    plugin: Box<dyn StoragePlugin + 'a>,
+struct RemoteCandidate<'a> {
+    remote: Box<dyn SyncRemote + 'a>,
     ok_message: &'static str,
 }
 
-fn plugin_candidates<'a>(
+fn remote_candidates<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
-) -> Vec<PluginCandidate<'a>> {
-    let mut candidates: Vec<PluginCandidate<'a>> = Vec::new();
+) -> Vec<RemoteCandidate<'a>> {
+    let mut candidates: Vec<RemoteCandidate<'a>> = Vec::new();
 
-    if let Some(op_config) = config.onepassword_plugin_config() {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(onepassword::OnePasswordPlugin::new(
+    if let Some(op_config) = config.onepassword_remote_config() {
+        candidates.push(RemoteCandidate {
+            remote: Box::new(onepassword::OnePasswordRemote::new(
                 config, op_config, runner,
             )),
             ok_message: "vault accessible",
         });
     }
 
-    for (name, cf_config) in config.cloud_file_plugin_configs() {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(cloud_file::CloudFilePlugin::new(
+    for (name, cf_config) in config.cloud_file_remote_configs() {
+        candidates.push(RemoteCandidate {
+            remote: Box::new(cloud_file::CloudFileRemote::new(
                 name,
                 config.project.clone(),
                 cf_config,
@@ -149,64 +149,64 @@ fn plugin_candidates<'a>(
         });
     }
 
-    if let Some(vault_config) = config.plugin_config::<crate::config::VaultPluginConfig>("vault") {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(vault::VaultPlugin::new(config, vault_config, runner)),
+    if let Some(vault_config) = config.remote_config::<crate::config::HashicorpVaultRemoteConfig>("vault") {
+        candidates.push(RemoteCandidate {
+            remote: Box::new(hashicorp_vault::HashicorpVaultRemote::new(config, vault_config, runner)),
             ok_message: "authenticated",
         });
     }
 
     if let Some(bw_config) =
-        config.plugin_config::<crate::config::BitwardenPluginConfig>("bitwarden")
+        config.remote_config::<crate::config::BitwardenRemoteConfig>("bitwarden")
     {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(bitwarden::BitwardenPlugin::new(config, bw_config, runner)),
+        candidates.push(RemoteCandidate {
+            remote: Box::new(bitwarden::BitwardenRemote::new(config, bw_config, runner)),
             ok_message: "authenticated",
         });
     }
 
-    if let Some(s3_config) = config.plugin_config::<crate::config::S3PluginConfig>("s3") {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(s3::S3Plugin::new(config, s3_config, runner)),
+    if let Some(s3_config) = config.remote_config::<crate::config::S3RemoteConfig>("s3") {
+        candidates.push(RemoteCandidate {
+            remote: Box::new(s3::S3Remote::new(config, s3_config, runner)),
             ok_message: "CLI available",
         });
     }
 
-    if let Some(gcp_config) = config.plugin_config::<crate::config::GcpPluginConfig>("gcp") {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(gcp::GcpPlugin::new(config, gcp_config, runner)),
+    if let Some(gcp_config) = config.remote_config::<crate::config::GcpSecretManagerRemoteConfig>("gcp") {
+        candidates.push(RemoteCandidate {
+            remote: Box::new(gcp_secret_manager::GcpSecretManagerRemote::new(config, gcp_config, runner)),
             ok_message: "authenticated",
         });
     }
 
-    if let Some(azure_config) = config.plugin_config::<crate::config::AzurePluginConfig>("azure") {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(azure::AzurePlugin::new(config, azure_config, runner)),
+    if let Some(azure_config) = config.remote_config::<crate::config::AzureKeyVaultRemoteConfig>("azure") {
+        candidates.push(RemoteCandidate {
+            remote: Box::new(azure_key_vault::AzureKeyVaultRemote::new(config, azure_config, runner)),
             ok_message: "authenticated",
         });
     }
 
     if let Some(doppler_config) =
-        config.plugin_config::<crate::config::DopplerPluginConfig>("doppler")
+        config.remote_config::<crate::config::DopplerRemoteConfig>("doppler")
     {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(doppler::DopplerPlugin::new(config, doppler_config, runner)),
+        candidates.push(RemoteCandidate {
+            remote: Box::new(doppler::DopplerRemote::new(config, doppler_config, runner)),
             ok_message: "authenticated",
         });
     }
 
-    if let Some(sops_config) = config.plugin_config::<crate::config::SopsPluginConfig>("sops") {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(sops::SopsPlugin::new(config, sops_config, runner)),
+    if let Some(sops_config) = config.remote_config::<crate::config::SopsRemoteConfig>("sops") {
+        candidates.push(RemoteCandidate {
+            remote: Box::new(sops::SopsRemote::new(config, sops_config, runner)),
             ok_message: "CLI available",
         });
     }
 
     if let Some(asm_config) =
-        config.plugin_config::<crate::config::AwsSecretsManagerPluginConfig>("aws_secrets_manager")
+        config.remote_config::<crate::config::AwsSecretsManagerRemoteConfig>("aws_secrets_manager")
     {
-        candidates.push(PluginCandidate {
-            plugin: Box::new(aws_secrets_manager::AwsSecretsManagerPlugin::new(
+        candidates.push(RemoteCandidate {
+            remote: Box::new(aws_secrets_manager::AwsSecretsManagerRemote::new(
                 config, asm_config, runner,
             )),
             ok_message: "CLI available",
@@ -222,17 +222,17 @@ fn needs_cli_secret_arg_warning(name: &str) -> bool {
 
 /// Check the health of all configured plugins without filtering.
 /// Returns one entry per configured plugin with preflight pass/fail.
-pub fn check_plugin_health(config: &Config, runner: &dyn CommandRunner) -> Vec<PluginHealth> {
+pub fn check_remote_health(config: &Config, runner: &dyn CommandRunner) -> Vec<RemoteHealth> {
     let mut health = Vec::new();
-    for candidate in plugin_candidates(config, runner) {
-        let name = candidate.plugin.name().to_string();
-        match candidate.plugin.preflight() {
-            Ok(()) => health.push(PluginHealth {
+    for candidate in remote_candidates(config, runner) {
+        let name = candidate.remote.name().to_string();
+        match candidate.remote.preflight() {
+            Ok(()) => health.push(RemoteHealth {
                 name,
                 ok: true,
                 message: candidate.ok_message.to_string(),
             }),
-            Err(e) => health.push(PluginHealth {
+            Err(e) => health.push(RemoteHealth {
                 name,
                 ok: false,
                 message: e.to_string(),
@@ -248,39 +248,39 @@ static OP_WARNING: Once = Once::new();
 
 /// Build all configured plugins from the config.
 /// Runs preflight checks and filters out plugins that fail, printing warnings.
-pub fn build_plugins<'a>(
+pub fn build_remotes<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
-) -> Vec<Box<dyn StoragePlugin + 'a>> {
-    let mut plugins: Vec<Box<dyn StoragePlugin + 'a>> = Vec::new();
+) -> Vec<Box<dyn SyncRemote + 'a>> {
+    let mut remotes: Vec<Box<dyn SyncRemote + 'a>> = Vec::new();
 
-    for candidate in plugin_candidates(config, runner) {
-        let plugin = candidate.plugin;
-        match plugin.preflight() {
+    for candidate in remote_candidates(config, runner) {
+        let remote = candidate.remote;
+        match remote.preflight() {
             Ok(()) => {
-                if needs_cli_secret_arg_warning(plugin.name()) {
+                if needs_cli_secret_arg_warning(remote.name()) {
                     OP_WARNING.call_once(|| {
                         let _ = cliclack::log::warning(format!(
                             "{}: security note: secret values are passed as CLI args and may be visible in local process listings\n",
-                            plugin.name()
+                            remote.name()
                         ));
                     });
                 }
-                plugins.push(plugin);
+                remotes.push(remote);
             }
             Err(e) => {
-                let _ = cliclack::log::warning(format!("Skipping {} plugin: {}", plugin.name(), e));
+                let _ = cliclack::log::warning(format!("Skipping {} remote: {}", remote.name(), e));
             }
         }
     }
 
-    plugins
+    remotes
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::{CommandOpts, CommandOutput};
+    use crate::targets::{CommandOpts, CommandOutput};
     use crate::test_support::ErrorCommandRunner;
 
     struct DummyRunner;
@@ -324,23 +324,23 @@ mod tests {
     }
 
     #[test]
-    fn build_plugins_empty_config() {
+    fn build_remotes_empty_config() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, "project: x\nenvironments: [dev]").unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_plugins(&config, &runner);
+        let plugins = build_remotes(&config, &runner);
         assert!(plugins.is_empty());
     }
 
     #[test]
-    fn build_plugins_with_onepassword() {
+    fn build_remotes_with_onepassword() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -349,20 +349,20 @@ plugins:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_plugins(&config, &runner);
+        let plugins = build_remotes(&config, &runner);
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name(), "1password");
     }
 
     #[test]
-    fn build_plugins_with_cloud_file() {
+    fn build_remotes_with_cloud_file() {
         let dir = tempfile::tempdir().unwrap();
         let cloud_dir = tempfile::tempdir().unwrap();
         let yaml = format!(
             r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   dropbox:
     type: cloud_file
     path: {}
@@ -374,13 +374,13 @@ plugins:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_plugins(&config, &runner);
+        let plugins = build_remotes(&config, &runner);
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name(), "dropbox");
     }
 
     #[test]
-    fn build_plugins_filters_failing_preflight() {
+    fn build_remotes_filters_failing_preflight() {
         let dir = tempfile::tempdir().unwrap();
         // onepassword will fail (runner fails), cloud_file with existing dir will pass
         let cloud_dir = tempfile::tempdir().unwrap();
@@ -388,7 +388,7 @@ plugins:
             r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -404,19 +404,19 @@ plugins:
         let config = Config::load(&path).unwrap();
 
         let runner = ErrorCommandRunner::new("not found");
-        let plugins = build_plugins(&config, &runner);
+        let plugins = build_remotes(&config, &runner);
         // onepassword fails preflight, cloud_file with existing dir passes
         assert_eq!(plugins.len(), 1);
         assert_eq!(plugins[0].name(), "testcloud");
     }
 
     #[test]
-    fn build_plugins_filters_cloud_file_missing_dir() {
+    fn build_remotes_filters_cloud_file_missing_dir() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   testcloud:
     type: cloud_file
     path: /nonexistent/path/nowhere
@@ -426,17 +426,17 @@ plugins:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_plugins(&config, &runner);
+        let plugins = build_remotes(&config, &runner);
         assert!(plugins.is_empty());
     }
 
     #[test]
-    fn check_plugin_health_op_ok() {
+    fn check_remote_health_op_ok() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -445,19 +445,19 @@ plugins:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
 
-        let health = check_plugin_health(&config, &DummyRunner);
+        let health = check_remote_health(&config, &DummyRunner);
         assert_eq!(health.len(), 1);
         assert!(health[0].ok);
         assert_eq!(health[0].name, "1password");
     }
 
     #[test]
-    fn check_plugin_health_op_fails() {
+    fn check_remote_health_op_fails() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -467,26 +467,26 @@ plugins:
         let config = Config::load(&path).unwrap();
 
         let runner = ErrorCommandRunner::new("op not found");
-        let health = check_plugin_health(&config, &runner);
+        let health = check_remote_health(&config, &runner);
         assert_eq!(health.len(), 1);
         assert!(!health[0].ok);
         assert!(health[0].message.contains("op) is not installed"));
     }
 
     #[test]
-    fn check_plugin_health_no_plugins() {
+    fn check_remote_health_no_plugins() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = "project: x\nenvironments: [dev]";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
 
-        let health = check_plugin_health(&config, &DummyRunner);
+        let health = check_remote_health(&config, &DummyRunner);
         assert!(health.is_empty());
     }
 
     #[test]
-    fn build_plugins_mixed() {
+    fn build_remotes_mixed() {
         let dir = tempfile::tempdir().unwrap();
         let cloud_dir1 = tempfile::tempdir().unwrap();
         let cloud_dir2 = tempfile::tempdir().unwrap();
@@ -494,7 +494,7 @@ plugins:
             r#"
 project: x
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -514,7 +514,7 @@ plugins:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
-        let plugins = build_plugins(&config, &runner);
+        let plugins = build_remotes(&config, &runner);
         assert_eq!(plugins.len(), 3);
     }
 }

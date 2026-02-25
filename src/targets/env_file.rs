@@ -2,7 +2,7 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use tempfile::NamedTempFile;
 
-use crate::adapters::{SecretValue, SyncAdapter, SyncMode, SyncResult};
+use crate::targets::{SecretValue, DeployTarget, DeployMode, DeployResult};
 use crate::config::{Config, ResolvedTarget};
 
 /// Format a value for safe inclusion in a .env file.
@@ -40,17 +40,17 @@ fn validate_env_file_value(key: &str, value: &str) -> Result<()> {
     Ok(())
 }
 
-pub struct EnvFileAdapter<'a> {
+pub struct EnvFileTarget<'a> {
     pub config: &'a Config,
 }
 
-impl<'a> SyncAdapter for EnvFileAdapter<'a> {
+impl<'a> DeployTarget for EnvFileTarget<'a> {
     fn name(&self) -> &str {
         "env"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Batch
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Batch
     }
 
     fn sync_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
@@ -60,13 +60,13 @@ impl<'a> SyncAdapter for EnvFileAdapter<'a> {
     }
 
     /// Override: regenerate the entire env file for this (app, env) pair.
-    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<SyncResult> {
+    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         let app = match &target.app {
             Some(a) => a,
             None => {
                 return secrets
                     .iter()
-                    .map(|s| SyncResult {
+                    .map(|s| DeployResult {
                         key: s.key.clone(),
                         target: target.clone(),
                         success: false,
@@ -79,7 +79,7 @@ impl<'a> SyncAdapter for EnvFileAdapter<'a> {
         match self.write_env_file(app, &target.environment, secrets) {
             Ok(()) => secrets
                 .iter()
-                .map(|s| SyncResult {
+                .map(|s| DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
                     success: true,
@@ -88,7 +88,7 @@ impl<'a> SyncAdapter for EnvFileAdapter<'a> {
                 .collect(),
             Err(e) => secrets
                 .iter()
-                .map(|s| SyncResult {
+                .map(|s| DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
                     success: false,
@@ -99,7 +99,7 @@ impl<'a> SyncAdapter for EnvFileAdapter<'a> {
     }
 }
 
-impl<'a> EnvFileAdapter<'a> {
+impl<'a> EnvFileTarget<'a> {
     fn write_env_file(&self, app: &str, env: &str, secrets: &[SecretValue]) -> Result<()> {
         let path = self.config.resolve_env_path(app, env)?;
 
@@ -161,7 +161,7 @@ impl<'a> EnvFileAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::SecretValue;
+    use crate::targets::SecretValue;
 
     fn make_config(dir: &std::path::Path) -> Config {
         let yaml = r#"
@@ -170,7 +170,7 @@ environments: [dev, prod]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -184,7 +184,7 @@ adapters:
 
     fn make_target(app: Option<&str>, env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "env".to_string(),
+            service: "env".to_string(),
             app: app.map(String::from),
             environment: env.to_string(),
         }
@@ -202,7 +202,7 @@ adapters:
     fn sync_secret_is_noop() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         adapter
             .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap();
@@ -212,7 +212,7 @@ adapters:
     fn sync_batch_no_app_errors() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("A", "1", "G"), make_secret("B", "2", "G")];
         let results = adapter.sync_batch(&secrets, &make_target(None, "dev"));
         assert!(results.iter().all(|r| !r.success));
@@ -228,7 +228,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("KEY", "value123", "General")];
         let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results.iter().all(|r| r.success));
@@ -241,7 +241,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("K", "v", "G")];
         adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
         let content = std::fs::read_to_string(dir.path().join("apps/web/.env.local")).unwrap();
@@ -253,7 +253,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![
             make_secret("A", "1", "Stripe"),
             make_secret("B", "2", "Convex"),
@@ -269,7 +269,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![
             make_secret("ZEBRA", "z", "G"),
             make_secret("APPLE", "a", "G"),
@@ -286,7 +286,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         // Don't pre-create apps/web — adapter should create it
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("K", "v", "G")];
         let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results[0].success);
@@ -298,7 +298,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![
             make_secret("A", "1", "G"),
             make_secret("B", "2", "G"),
@@ -349,7 +349,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("CERT", "line1\nline2", "General")];
         let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results.iter().all(|r| !r.success));
@@ -368,7 +368,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("KEY", "value", "General")];
         let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results.iter().all(|r| r.success));
@@ -387,7 +387,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env"
 "#;
@@ -396,7 +396,7 @@ adapters:
         let mut config = Config::load(&path).unwrap();
         // Point root to a read-only location to force write failure
         config.root = std::path::PathBuf::from("/nonexistent/root");
-        let adapter = EnvFileAdapter { config: &config };
+        let adapter = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("K", "v", "G")];
         let results = adapter.sync_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(!results[0].success);

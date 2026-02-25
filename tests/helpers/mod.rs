@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use esk::adapters::{CommandOpts, CommandOutput, CommandRunner};
+use esk::targets::{CommandOpts, CommandOutput, CommandRunner};
 use esk::config::Config;
 use esk::store::SecretStore;
 use std::path::{Path, PathBuf};
@@ -41,12 +41,12 @@ impl TestProject {
         SecretStore::open(self.root())
     }
 
-    pub fn sync_index_path(&self) -> PathBuf {
-        self.dir.path().join(".esk/sync-index.json")
+    pub fn deploy_index_path(&self) -> PathBuf {
+        self.dir.path().join(".esk/deploy-index.json")
     }
 
-    pub fn plugin_index_path(&self) -> PathBuf {
-        self.dir.path().join(".esk/plugin-index.json")
+    pub fn remote_index_path(&self) -> PathBuf {
+        self.dir.path().join(".esk/remote-index.json")
     }
 }
 
@@ -67,7 +67,7 @@ apps:
   api:
     path: apps/api
 
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -82,7 +82,7 @@ adapters:
     env_flags:
       prod: "--prod"
 
-plugins:
+remotes:
   1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
@@ -117,7 +117,7 @@ apps:
   web:
     path: apps/web
 
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -143,7 +143,7 @@ apps:
   web:
     path: apps/web
 
-adapters:
+targets:
   cloudflare:
     env_flags:
       prod: "--env production"
@@ -163,7 +163,7 @@ pub const CONVEX_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   convex:
     path: apps/api
     deployment_source: apps/api/.env.local
@@ -182,7 +182,7 @@ pub const ONEPASSWORD_PLUGIN_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-plugins:
+remotes:
   1password:
     vault: Engineering
     item_pattern: "{project} - {Environment}"
@@ -198,7 +198,7 @@ pub const PLUGIN_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-plugins:
+remotes:
   1password:
     vault: Test
     item_pattern: "{project} - {Environment}"
@@ -213,7 +213,7 @@ apps:
   web:
     path: apps/web
 
-adapters:
+targets:
   fly:
     app_names:
       web: my-fly-app
@@ -232,7 +232,7 @@ pub const NETLIFY_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   netlify:
     site: my-site-id
     env_flags:
@@ -250,7 +250,7 @@ pub const VERCEL_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   vercel:
     env_names:
       dev: development
@@ -270,7 +270,7 @@ pub const GITHUB_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   github:
     repo: owner/repo
     env_flags:
@@ -292,7 +292,7 @@ apps:
   web:
     path: apps/web
 
-adapters:
+targets:
   heroku:
     app_names:
       web: my-heroku-app
@@ -311,7 +311,7 @@ pub const SUPABASE_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   supabase:
     project_ref: abcdef123456
     env_flags:
@@ -329,7 +329,7 @@ pub const RAILWAY_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   railway:
     env_flags:
       prod: "--environment production"
@@ -346,7 +346,7 @@ pub const AWS_SSM_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   aws_ssm:
     path_prefix: "/{project}/{environment}/"
     region: us-east-1
@@ -365,7 +365,7 @@ pub const KUBERNETES_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   kubernetes:
     namespace:
       dev: testapp-dev
@@ -386,7 +386,7 @@ pub const GITLAB_CONFIG: &str = r#"
 project: testapp
 environments: [dev, prod]
 
-adapters:
+targets:
   gitlab:
     env_flags:
       prod: "--masked"

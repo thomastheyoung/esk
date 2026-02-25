@@ -2,25 +2,25 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::adapters::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
-    SyncMode,
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
+    DeployMode,
 };
-use crate::config::{Config, ConvexAdapterConfig, ResolvedTarget};
+use crate::config::{Config, ConvexTargetConfig, ResolvedTarget};
 
-pub struct ConvexAdapter<'a> {
+pub struct ConvexTarget<'a> {
     pub config: &'a Config,
-    pub adapter_config: &'a ConvexAdapterConfig,
+    pub target_config: &'a ConvexTargetConfig,
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> ConvexAdapter<'a> {
+impl<'a> ConvexTarget<'a> {
     /// Resolve the cwd and env vars needed for convex commands.
     fn resolve_deployment_context(&self) -> Result<(PathBuf, Vec<(String, String)>)> {
-        let cwd = self.config.root.join(&self.adapter_config.path);
+        let cwd = self.config.root.join(&self.target_config.path);
         let mut env_vars: Vec<(String, String)> = Vec::new();
 
-        if let Some(source) = &self.adapter_config.deployment_source {
+        if let Some(source) = &self.target_config.deployment_source {
             let source_path = self.config.root.join(source);
             if source_path.is_file() {
                 let contents = std::fs::read_to_string(&source_path)
@@ -39,13 +39,13 @@ impl<'a> ConvexAdapter<'a> {
     }
 }
 
-impl<'a> SyncAdapter for ConvexAdapter<'a> {
+impl<'a> DeployTarget for ConvexTarget<'a> {
     fn name(&self) -> &str {
         "convex"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Individual
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Individual
     }
 
     fn preflight(&self) -> Result<()> {
@@ -77,7 +77,7 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let (cwd, env_vars) = self.resolve_deployment_context()?;
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["convex", "env", "set", key, value];
         append_env_flags(&mut args, &flag_parts);
 
@@ -105,7 +105,7 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let (cwd, env_vars) = self.resolve_deployment_context()?;
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["convex", "env", "unset", key];
         append_env_flags(&mut args, &flag_parts);
 
@@ -134,7 +134,7 @@ impl<'a> SyncAdapter for ConvexAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (
@@ -157,7 +157,7 @@ mod tests {
             r#"
 project: x
 environments: [dev, prod]
-adapters:
+targets:
   convex:
     path: apps/api
 "#,
@@ -173,7 +173,7 @@ adapters:
 
     fn make_target(env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "convex".to_string(),
+            service: "convex".to_string(),
             app: None,
             environment: env.to_string(),
         }
@@ -184,7 +184,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -197,9 +197,9 @@ adapters:
                 stderr: vec![],
             },
         ]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
@@ -214,7 +214,7 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -227,9 +227,9 @@ adapters:
                 stderr: b"deployment not found".to_vec(),
             },
         ]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -241,12 +241,12 @@ adapters:
     fn convex_preflight_missing_npx() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), None);
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
 
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -259,15 +259,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -290,15 +290,15 @@ adapters:
         let source = dir.path().join("apps/api/.env.local");
         std::fs::write(&source, "CONVEX_DEPLOYMENT=dev:my-deploy-123\n").unwrap();
         let config = make_config(dir.path(), Some("apps/api/.env.local"));
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -317,15 +317,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), Some("apps/api/.env.local"));
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -343,15 +343,15 @@ adapters:
         let source = dir.path().join("apps/api/.env.local");
         std::fs::write(&source, "OTHER_VAR=foo\nSOMETHING=bar\n").unwrap();
         let config = make_config(dir.path(), Some("apps/api/.env.local"));
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -369,15 +369,15 @@ adapters:
         let source = dir.path().join("apps/api/.env.local");
         std::fs::write(&source, "CONVEX_DEPLOYMENT=\"my-deploy\"\n").unwrap();
         let config = make_config(dir.path(), Some("apps/api/.env.local"));
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -395,15 +395,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -424,15 +424,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -446,15 +446,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
         let config = make_config(dir.path(), None);
-        let adapter_config = config.adapters.convex.as_ref().unwrap();
+        let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"deploy error".to_vec(),
         }]);
-        let adapter = ConvexAdapter {
+        let adapter = ConvexTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter

@@ -1,35 +1,35 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 
-use crate::adapters::{CommandOpts, CommandRunner};
-use crate::config::{Config, DopplerPluginConfig};
+use crate::targets::{CommandOpts, CommandRunner};
+use crate::config::{Config, DopplerRemoteConfig};
 use crate::store::StorePayload;
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct DopplerPlugin<'a> {
+pub struct DopplerRemote<'a> {
     #[allow(dead_code)]
     config: &'a Config,
-    plugin_config: DopplerPluginConfig,
+    remote_config: DopplerRemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
-impl<'a> DopplerPlugin<'a> {
+impl<'a> DopplerRemote<'a> {
     pub fn new(
         config: &'a Config,
-        plugin_config: DopplerPluginConfig,
+        remote_config: DopplerRemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
             config,
-            plugin_config,
+            remote_config,
             runner,
         }
     }
 
     /// Resolve the Doppler config name for an environment.
     fn config_name(&self, env: &str) -> Result<String> {
-        self.plugin_config
+        self.remote_config
             .config_map
             .get(env)
             .cloned()
@@ -39,13 +39,13 @@ impl<'a> DopplerPlugin<'a> {
     }
 }
 
-impl<'a> StoragePlugin for DopplerPlugin<'a> {
+impl<'a> SyncRemote for DopplerRemote<'a> {
     fn name(&self) -> &str {
         "doppler"
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::adapters::check_command(self.runner, "doppler").map_err(|_| {
+        crate::targets::check_command(self.runner, "doppler").map_err(|_| {
             anyhow::anyhow!(
                 "Doppler CLI (doppler) is not installed or not in PATH. Install it from: https://docs.doppler.com/docs/install-cli"
             )
@@ -69,7 +69,7 @@ impl<'a> StoragePlugin for DopplerPlugin<'a> {
         };
 
         let doppler_config = self.config_name(env)?;
-        let project = &self.plugin_config.project;
+        let project = &self.remote_config.project;
 
         // Build JSON payload with all secrets + version metadata, upload in a single call
         // via stdin to avoid exposing values in process arguments.
@@ -107,7 +107,7 @@ impl<'a> StoragePlugin for DopplerPlugin<'a> {
 
     fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let doppler_config = self.config_name(env)?;
-        let project = &self.plugin_config.project;
+        let project = &self.remote_config.project;
 
         let output = self
             .runner
@@ -156,7 +156,7 @@ impl<'a> StoragePlugin for DopplerPlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
@@ -182,7 +182,7 @@ mod tests {
         r#"
 project: myapp
 environments: [dev, prod]
-plugins:
+remotes:
   doppler:
     project: myapp-doppler
     config_map:
@@ -208,9 +208,9 @@ plugins:
     #[test]
     fn config_name_resolution() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         assert_eq!(plugin.config_name("dev").unwrap(), "dev_config");
         assert_eq!(plugin.config_name("prod").unwrap(), "prd");
     }
@@ -218,9 +218,9 @@ plugins:
     #[test]
     fn config_name_missing_env() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         let err = plugin.config_name("staging").unwrap_err();
         assert!(err.to_string().contains("staging"));
     }
@@ -228,7 +228,7 @@ plugins:
     #[test]
     fn preflight_success() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -241,7 +241,7 @@ plugins:
                 stderr: Vec::new(),
             },
         ]);
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -252,9 +252,9 @@ plugins:
     #[test]
     fn preflight_missing_doppler() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("Doppler CLI"));
         assert!(err.to_string().contains("not installed"));
@@ -263,7 +263,7 @@ plugins:
     #[test]
     fn preflight_auth_failure() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -276,7 +276,7 @@ plugins:
                 stderr: b"Unable to authenticate".to_vec(),
             },
         ]);
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("not authenticated"));
     }
@@ -284,13 +284,13 @@ plugins:
     #[test]
     fn push_uploads_via_stdin() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: Vec::new(),
             stderr: Vec::new(),
         }]);
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
         plugin.push(&payload, &config, "dev").unwrap();
 
@@ -323,9 +323,9 @@ plugins:
     #[test]
     fn push_skips_empty_env() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         plugin.push(&payload, &config, "dev").unwrap();
 
@@ -336,7 +336,7 @@ plugins:
     #[test]
     fn pull_success() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let json = serde_json::json!({
             "API_KEY": "sk_test",
             "DB_URL": "postgres://localhost",
@@ -347,7 +347,7 @@ plugins:
             stdout: serde_json::to_vec(&json).unwrap(),
             stderr: Vec::new(),
         }]);
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
 
         assert_eq!(version, 7);
@@ -361,13 +361,13 @@ plugins:
     #[test]
     fn pull_not_found_returns_none() {
         let config = make_config(doppler_yaml());
-        let plugin_config: DopplerPluginConfig = config.plugin_config("doppler").unwrap();
+        let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: Vec::new(),
             stderr: b"config not found".to_vec(),
         }]);
-        let plugin = DopplerPlugin::new(&config, plugin_config, &runner);
+        let plugin = DopplerRemote::new(&config, remote_config, &runner);
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
     }
 }

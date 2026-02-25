@@ -1,8 +1,8 @@
 mod helpers;
 
-use esk::adapter_tracker::SyncIndex;
+use esk::deploy_tracker::DeployIndex;
 use esk::cli;
-use esk::plugin_tracker::PluginIndex;
+use esk::remote_tracker::RemoteIndex;
 use esk::reconcile::ConflictPreference;
 use helpers::*;
 use serde_json::json;
@@ -16,8 +16,8 @@ fn init_creates_all_files() {
     assert!(dir.path().join("esk.yaml").is_file());
     assert!(dir.path().join(".esk/store.enc").is_file());
     assert!(dir.path().join(".esk/store.key").is_file());
-    assert!(dir.path().join(".esk/sync-index.json").is_file());
-    assert!(dir.path().join(".esk/plugin-index.json").is_file());
+    assert!(dir.path().join(".esk/deploy-index.json").is_file());
+    assert!(dir.path().join(".esk/remote-index.json").is_file());
 }
 
 #[test]
@@ -39,7 +39,7 @@ fn init_updates_gitignore_with_esk_entries() {
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(
         gitignore,
-        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/sync-index.json\n.esk/plugin-index.json\n"
+        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/remote-index.json\n"
     );
 }
 
@@ -48,7 +48,7 @@ fn init_gitignore_update_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join(".gitignore"),
-        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/sync-index.json\n.esk/plugin-index.json\n",
+        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/remote-index.json\n",
     )
     .unwrap();
 
@@ -57,8 +57,8 @@ fn init_gitignore_update_is_idempotent() {
 
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(gitignore.matches(".esk/store.key").count(), 1);
-    assert_eq!(gitignore.matches(".esk/sync-index.json").count(), 1);
-    assert_eq!(gitignore.matches(".esk/plugin-index.json").count(), 1);
+    assert_eq!(gitignore.matches(".esk/deploy-index.json").count(), 1);
+    assert_eq!(gitignore.matches(".esk/remote-index.json").count(), 1);
 }
 
 #[test]
@@ -71,7 +71,7 @@ fn init_creates_gitignore_when_missing() {
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(
         gitignore,
-        "# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/sync-index.json\n.esk/plugin-index.json\n"
+        "# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/remote-index.json\n"
     );
 }
 
@@ -360,10 +360,10 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env.local"
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -409,10 +409,10 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env.local"
-plugins:
+remotes:
   1password:
     vault: V
     item_pattern: test
@@ -533,7 +533,7 @@ fn plugin_sync_no_plugins() {
         },
     )
     .unwrap_err();
-    assert!(err.to_string().contains("no plugins configured"));
+    assert!(err.to_string().contains("no remotes configured"));
 }
 
 // === sync ===
@@ -571,8 +571,8 @@ fn sync_dry_run_no_side_effects() {
 
     // No env file should be created
     assert!(!project.root().join("apps/web/.env.local").is_file());
-    // No sync index should exist
-    assert!(!project.sync_index_path().is_file());
+    // No deploy index should exist
+    assert!(!project.deploy_index_path().is_file());
 }
 
 #[test]
@@ -615,7 +615,7 @@ environments: [dev]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -655,7 +655,7 @@ environments: [dev]
 apps:
   web:
     path: /nonexistent/path/that/wont/work
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env"
 secrets:
@@ -740,7 +740,7 @@ fn sync_records_to_tracker() {
 
     cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(!index.records.is_empty());
     // Should have records for each synced secret
     let keys: Vec<&String> = index.records.keys().collect();
@@ -752,9 +752,9 @@ fn sync_records_to_tracker() {
 
 #[test]
 fn cloud_file_push_pull_cleartext() {
-    use esk::config::{CloudFileFormat, CloudFilePluginConfig};
-    use esk::plugins::cloud_file::CloudFilePlugin;
-    use esk::plugins::StoragePlugin;
+    use esk::config::{CloudFileFormat, CloudFileRemoteConfig};
+    use esk::remotes::cloud_file::CloudFileRemote;
+    use esk::remotes::SyncRemote;
 
     let project_dir = tempfile::tempdir().unwrap();
     let cloud_dir = tempfile::tempdir().unwrap();
@@ -768,10 +768,10 @@ fn cloud_file_push_pull_cleartext() {
     store.set("KEY", "dev", "val123").unwrap();
     let payload = store.payload().unwrap();
 
-    let plugin = CloudFilePlugin::new(
+    let plugin = CloudFileRemote::new(
         "test_cloud".to_string(),
         "testapp".to_string(),
-        CloudFilePluginConfig {
+        CloudFileRemoteConfig {
             path: cloud_dir.path().to_string_lossy().to_string(),
             format: CloudFileFormat::Cleartext,
         },
@@ -787,9 +787,9 @@ fn cloud_file_push_pull_cleartext() {
 
 #[test]
 fn cloud_file_push_pull_encrypted() {
-    use esk::config::{CloudFileFormat, CloudFilePluginConfig};
-    use esk::plugins::cloud_file::CloudFilePlugin;
-    use esk::plugins::StoragePlugin;
+    use esk::config::{CloudFileFormat, CloudFileRemoteConfig};
+    use esk::remotes::cloud_file::CloudFileRemote;
+    use esk::remotes::SyncRemote;
 
     let project_dir = tempfile::tempdir().unwrap();
     let cloud_dir = tempfile::tempdir().unwrap();
@@ -803,10 +803,10 @@ fn cloud_file_push_pull_encrypted() {
     store.set("SECRET", "dev", "encrypted_val").unwrap();
     let payload = store.payload().unwrap();
 
-    let plugin = CloudFilePlugin::new(
+    let plugin = CloudFileRemote::new(
         "test_enc".to_string(),
         "testapp".to_string(),
-        CloudFilePluginConfig {
+        CloudFileRemoteConfig {
             path: cloud_dir.path().to_string_lossy().to_string(),
             format: CloudFileFormat::Encrypted,
         },
@@ -826,7 +826,7 @@ fn plugin_sync_only_flag() {
     let yaml = r#"
 project: testapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: Test
     item_pattern: test
@@ -848,7 +848,7 @@ plugins:
         &runner,
     )
     .unwrap_err();
-    assert!(err.to_string().contains("unknown plugin"));
+    assert!(err.to_string().contains("unknown remote"));
 }
 
 // === cloudflare adapter integration ===
@@ -917,7 +917,7 @@ fn sync_cloudflare_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(!index.records.is_empty());
     assert!(index
         .records
@@ -942,7 +942,7 @@ fn sync_cloudflare_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -1117,7 +1117,7 @@ fn sync_convex_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -1144,9 +1144,9 @@ fn push_onepassword_creates_item() {
     // op item create → success
     runner.push_success(b"", b"");
 
-    let plugins = esk::plugins::build_plugins(&config, &runner);
-    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
-    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
+    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
+    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1188,9 +1188,9 @@ fn push_onepassword_edits_existing() {
     // op item edit → success
     runner.push_success(b"", b"");
 
-    let plugins = esk::plugins::build_plugins(&config, &runner);
-    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
-    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
+    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
+    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1217,9 +1217,9 @@ fn push_onepassword_version_metadata() {
     // op item create → success
     runner.push_success(b"", b"");
 
-    let plugins = esk::plugins::build_plugins(&config, &runner);
-    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
-    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
+    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
+    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
 
     let calls = runner.take_calls();
     // The create call should include version metadata
@@ -1422,7 +1422,7 @@ fn sync_cloudflare_force_resyncs() {
 // === plugin tracker integration ===
 
 #[test]
-fn push_records_plugin_index() {
+fn push_records_remote_index() {
     let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1435,20 +1435,20 @@ fn push_records_plugin_index() {
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_success(b"", b""); // op item create
 
-    let plugins = esk::plugins::build_plugins(&config, &runner);
-    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
-    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
-    plugin_index.save().unwrap();
+    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
+    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+    remote_index.save().unwrap();
 
-    let index = PluginIndex::load(&project.plugin_index_path());
+    let index = RemoteIndex::load(&project.remote_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
-    assert_eq!(record.plugin, "1password");
+    assert_eq!(record.remote, "1password");
     assert_eq!(record.environment, "dev");
     assert_eq!(record.pushed_version, 1);
     assert_eq!(
         record.last_push_status,
-        esk::plugin_tracker::PushStatus::Success
+        esk::remote_tracker::PushStatus::Success
     );
 }
 
@@ -1469,12 +1469,12 @@ fn push_records_env_scoped_version_when_global_is_higher() {
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_success(b"", b""); // op item create
 
-    let plugins = esk::plugins::build_plugins(&config, &runner);
-    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
-    cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
-    plugin_index.save().unwrap();
+    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
+    cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+    remote_index.save().unwrap();
 
-    let index = PluginIndex::load(&project.plugin_index_path());
+    let index = RemoteIndex::load(&project.remote_index_path());
     let record = &index.records["1password:dev"];
     assert_eq!(record.pushed_version, 1);
 }
@@ -1486,7 +1486,7 @@ fn sync_repairs_equal_version_plugin_drift() {
         r#"
 project: testapp
 environments: [dev]
-plugins:
+remotes:
   dropbox:
     type: cloud_file
     path: "{}"
@@ -1530,17 +1530,17 @@ plugins:
     assert_eq!(repaired["secrets"]["KEY"], "local_val");
     assert_eq!(repaired["version"], 1);
 
-    let plugin_index = PluginIndex::load(&project.plugin_index_path());
-    let record = plugin_index.records.get("dropbox:dev").unwrap();
+    let remote_index = RemoteIndex::load(&project.remote_index_path());
+    let record = remote_index.records.get("dropbox:dev").unwrap();
     assert_eq!(record.pushed_version, 1);
 }
 
 #[test]
-fn push_records_failure_in_plugin_index() {
+fn push_records_failure_in_remote_index() {
     let yaml = r#"
 project: testapp
 environments: [dev]
-plugins:
+remotes:
   1password:
     vault: Test
     item_pattern: test
@@ -1557,19 +1557,19 @@ plugins:
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_failure(b"op create failed"); // op item create fails
 
-    let plugins = esk::plugins::build_plugins(&config, &runner);
-    let mut plugin_index = PluginIndex::load(&project.plugin_index_path());
+    let plugins = esk::remotes::build_remotes(&config, &runner);
+    let mut remote_index = RemoteIndex::load(&project.remote_index_path());
     let failures =
-        cli::sync::push_to_plugins(&plugins, &payload, &config, "dev", &mut plugin_index).unwrap();
-    plugin_index.save().unwrap();
+        cli::sync::push_to_remotes(&plugins, &payload, &config, "dev", &mut remote_index).unwrap();
+    remote_index.save().unwrap();
     assert!(failures > 0);
 
-    let index = PluginIndex::load(&project.plugin_index_path());
+    let index = RemoteIndex::load(&project.remote_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(
         record.last_push_status,
-        esk::plugin_tracker::PushStatus::Failed
+        esk::remote_tracker::PushStatus::Failed
     );
     assert!(record.last_error.is_some());
 }
@@ -1590,8 +1590,8 @@ fn status_shows_pushed_plugin() {
     let store = project.store().unwrap();
     let payload = store.payload().unwrap();
 
-    // Manually write a plugin index with a pushed record
-    let mut index = PluginIndex::new(&project.plugin_index_path());
+    // Manually write a remote index with a pushed record
+    let mut index = RemoteIndex::new(&project.remote_index_path());
     index.record_success("1password", "dev", payload.version);
     index.save().unwrap();
 
@@ -1605,7 +1605,7 @@ fn status_shows_stale_plugin() {
     let store = project.store().unwrap();
 
     // Push at v0, then bump store version
-    let mut index = PluginIndex::new(&project.plugin_index_path());
+    let mut index = RemoteIndex::new(&project.remote_index_path());
     index.record_success("1password", "dev", 0);
     index.save().unwrap();
 
@@ -1619,7 +1619,7 @@ fn status_plugin_env_filter() {
     let project = TestProject::with_store(PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    let mut index = PluginIndex::new(&project.plugin_index_path());
+    let mut index = RemoteIndex::new(&project.remote_index_path());
     index.record_success("1password", "dev", 1);
     index.record_success("1password", "prod", 1);
     index.save().unwrap();
@@ -1698,7 +1698,7 @@ fn status_dashboard_next_steps() {
 }
 
 #[test]
-fn set_auto_push_records_plugin_index() {
+fn set_auto_push_records_remote_index() {
     let project = TestProject::with_store(ONEPASSWORD_PLUGIN_CONFIG).unwrap();
     let config = project.config().unwrap();
 
@@ -1708,7 +1708,7 @@ fn set_auto_push_records_plugin_index() {
     runner.push_failure(b"isn't an item in vault"); // op item get
     runner.push_success(b"", b""); // op item create
 
-    // no_sync=false so auto-push runs (no adapters configured, sync is a no-op)
+    // no_sync=false so auto-push runs (no targets configured, sync is a no-op)
     cli::set::run_with_runner(
         &config,
         "STRIPE_KEY",
@@ -1721,12 +1721,12 @@ fn set_auto_push_records_plugin_index() {
     )
     .unwrap();
 
-    let index = PluginIndex::load(&project.plugin_index_path());
+    let index = RemoteIndex::load(&project.remote_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(
         record.last_push_status,
-        esk::plugin_tracker::PushStatus::Success
+        esk::remote_tracker::PushStatus::Success
     );
 }
 
@@ -1756,13 +1756,13 @@ fn sync_records_tombstone_delete_success() {
     runner.push_success(b"", b""); // delete_secret STRIPE_KEY
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
-    let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
+    let index = DeployIndex::load(&project.deploy_index_path());
+    let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
-    assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
+    assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Success
+        esk::deploy_tracker::DeployStatus::Success
     );
 }
 
@@ -1783,13 +1783,13 @@ fn sync_records_tombstone_delete_failure() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
-    let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
+    let index = DeployIndex::load(&project.deploy_index_path());
+    let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
-    assert_eq!(record.value_hash, SyncIndex::TOMBSTONE_HASH);
+    assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
@@ -1816,12 +1816,12 @@ fn sync_retries_failed_tombstone_delete() {
     runner.push_success(b"", b""); // delete_secret succeeds
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
-    let tracker_key = SyncIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
+    let index = DeployIndex::load(&project.deploy_index_path());
+    let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Success
+        esk::deploy_tracker::DeployStatus::Success
     );
 }
 
@@ -1953,7 +1953,7 @@ fn sync_fly_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -1976,7 +1976,7 @@ fn sync_fly_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -1984,7 +1984,7 @@ fn sync_fly_failure_tracked() {
         .unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
@@ -2080,7 +2080,7 @@ fn sync_netlify_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2103,7 +2103,7 @@ fn sync_netlify_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -2111,7 +2111,7 @@ fn sync_netlify_failure_tracked() {
         .unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
@@ -2206,7 +2206,7 @@ fn sync_vercel_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2229,7 +2229,7 @@ fn sync_vercel_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -2237,7 +2237,7 @@ fn sync_vercel_failure_tracked() {
         .unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
@@ -2332,7 +2332,7 @@ fn sync_github_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2355,7 +2355,7 @@ fn sync_github_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -2363,7 +2363,7 @@ fn sync_github_failure_tracked() {
         .unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
@@ -2456,7 +2456,7 @@ fn sync_heroku_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2479,7 +2479,7 @@ fn sync_heroku_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -2487,7 +2487,7 @@ fn sync_heroku_failure_tracked() {
         .unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
@@ -2584,7 +2584,7 @@ fn sync_supabase_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2607,7 +2607,7 @@ fn sync_supabase_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -2615,7 +2615,7 @@ fn sync_supabase_failure_tracked() {
         .unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
@@ -2707,7 +2707,7 @@ fn sync_railway_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2730,7 +2730,7 @@ fn sync_railway_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -2738,7 +2738,7 @@ fn sync_railway_failure_tracked() {
         .unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
@@ -2829,7 +2829,7 @@ fn sync_gitlab_records_tracker() {
 
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2852,7 +2852,7 @@ fn sync_gitlab_failure_tracked() {
         .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let index = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -2860,7 +2860,7 @@ fn sync_gitlab_failure_tracked() {
         .unwrap();
     assert_eq!(
         record.last_sync_status,
-        esk::adapter_tracker::SyncStatus::Failed
+        esk::deploy_tracker::DeployStatus::Failed
     );
 }
 

@@ -1,24 +1,24 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{
+use crate::targets::{
     append_env_flags, check_command, resolve_env_flags, validate_stdin_kv_value, CommandOpts,
-    CommandRunner, SyncAdapter, SyncMode,
+    CommandRunner, DeployTarget, DeployMode,
 };
-use crate::config::{Config, ResolvedTarget, SupabaseAdapterConfig};
+use crate::config::{Config, ResolvedTarget, SupabaseTargetConfig};
 
-pub struct SupabaseAdapter<'a> {
+pub struct SupabaseTarget<'a> {
     pub config: &'a Config,
-    pub adapter_config: &'a SupabaseAdapterConfig,
+    pub target_config: &'a SupabaseTargetConfig,
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> SyncAdapter for SupabaseAdapter<'a> {
+impl<'a> DeployTarget for SupabaseTarget<'a> {
     fn name(&self) -> &str {
         "supabase"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Individual
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Individual
     }
 
     fn preflight(&self) -> Result<()> {
@@ -28,7 +28,7 @@ impl<'a> SyncAdapter for SupabaseAdapter<'a> {
             )
         })?;
 
-        let project_ref = &self.adapter_config.project_ref;
+        let project_ref = &self.target_config.project_ref;
         let output = self
             .runner
             .run(
@@ -49,10 +49,10 @@ impl<'a> SyncAdapter for SupabaseAdapter<'a> {
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         validate_stdin_kv_value(key, value, "supabase")?;
-        let project_ref = &self.adapter_config.project_ref;
+        let project_ref = &self.target_config.project_ref;
         let stdin_data = format!("{key}={value}\n");
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secrets", "set", "--project-ref", project_ref];
         append_env_flags(&mut args, &flag_parts);
 
@@ -77,9 +77,9 @@ impl<'a> SyncAdapter for SupabaseAdapter<'a> {
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
-        let project_ref = &self.adapter_config.project_ref;
+        let project_ref = &self.target_config.project_ref;
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secrets", "unset", key, "--project-ref", project_ref];
         append_env_flags(&mut args, &flag_parts);
 
@@ -100,7 +100,7 @@ impl<'a> SyncAdapter for SupabaseAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
@@ -117,7 +117,7 @@ mod tests {
         let yaml = r#"
 project: x
 environments: [dev, prod]
-adapters:
+targets:
   supabase:
     project_ref: abcdef123456
     env_flags:
@@ -130,7 +130,7 @@ adapters:
 
     fn make_target(env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "supabase".to_string(),
+            service: "supabase".to_string(),
             app: None,
             environment: env.to_string(),
         }
@@ -140,7 +140,7 @@ adapters:
     fn supabase_preflight_success() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -153,9 +153,9 @@ adapters:
                 stderr: vec![],
             },
         ]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
@@ -172,7 +172,7 @@ adapters:
     fn supabase_preflight_auth_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -185,9 +185,9 @@ adapters:
                 stderr: b"Unauthorized".to_vec(),
             },
         ]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -198,11 +198,11 @@ adapters:
     fn supabase_preflight_missing_cli() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -213,15 +213,15 @@ adapters:
     fn supabase_sync_uses_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -245,15 +245,15 @@ adapters:
     fn supabase_sync_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -277,15 +277,15 @@ adapters:
     fn supabase_delete_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -308,15 +308,15 @@ adapters:
     fn supabase_delete_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -329,11 +329,11 @@ adapters:
     fn supabase_rejects_newline_in_value() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -346,11 +346,11 @@ adapters:
     fn supabase_rejects_cr_in_value() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -363,15 +363,15 @@ adapters:
     fn supabase_nonzero_exit() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.supabase.as_ref().unwrap();
+        let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"api error".to_vec(),
         }]);
-        let adapter = SupabaseAdapter {
+        let adapter = SupabaseTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter

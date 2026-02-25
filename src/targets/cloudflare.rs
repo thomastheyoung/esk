@@ -1,26 +1,26 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
-    SyncMode,
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
+    DeployMode,
 };
-use crate::config::{CloudflareAdapterConfig, Config, ResolvedTarget};
+use crate::config::{CloudflareTargetConfig, Config, ResolvedTarget};
 
-pub struct CloudflareAdapter<'a> {
+pub struct CloudflareTarget<'a> {
     pub config: &'a Config,
-    pub adapter_config: &'a CloudflareAdapterConfig,
+    pub target_config: &'a CloudflareTargetConfig,
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> CloudflareAdapter<'a> {
+impl<'a> CloudflareTarget<'a> {
     fn sync_pages_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let project = self
-            .adapter_config
+            .target_config
             .pages_project
             .as_deref()
             .context("cloudflare pages_project is required when mode is 'pages'")?;
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["pages", "secret", "put", key, "--project", project];
         append_env_flags(&mut args, &flag_parts);
 
@@ -46,12 +46,12 @@ impl<'a> CloudflareAdapter<'a> {
 
     fn delete_pages_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let project = self
-            .adapter_config
+            .target_config
             .pages_project
             .as_deref()
             .context("cloudflare pages_project is required when mode is 'pages'")?;
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec![
             "pages",
             "secret",
@@ -77,13 +77,13 @@ impl<'a> CloudflareAdapter<'a> {
     }
 }
 
-impl<'a> SyncAdapter for CloudflareAdapter<'a> {
+impl<'a> DeployTarget for CloudflareTarget<'a> {
     fn name(&self) -> &str {
         "cloudflare"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Individual
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Individual
     }
 
     fn preflight(&self) -> Result<()> {
@@ -103,7 +103,7 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
-        if self.adapter_config.mode == "pages" {
+        if self.target_config.mode == "pages" {
             return self.sync_pages_secret(key, value, target);
         }
 
@@ -118,7 +118,7 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
             .with_context(|| format!("unknown app '{app}'"))?;
         let app_path = self.config.root.join(&app_config.path);
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "put", key];
         append_env_flags(&mut args, &flag_parts);
 
@@ -144,7 +144,7 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
-        if self.adapter_config.mode == "pages" {
+        if self.target_config.mode == "pages" {
             return self.delete_pages_secret(key, target);
         }
 
@@ -159,7 +159,7 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
             .with_context(|| format!("unknown app '{app}'"))?;
         let app_path = self.config.root.join(&app_config.path);
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "delete", key, "--force"];
         append_env_flags(&mut args, &flag_parts);
 
@@ -187,7 +187,7 @@ impl<'a> SyncAdapter for CloudflareAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (
@@ -212,7 +212,7 @@ environments: [dev, prod]
 apps:
   web:
     path: apps/web
-adapters:
+targets:
   cloudflare:
     env_flags:
       prod: "--env production"
@@ -224,7 +224,7 @@ adapters:
 
     fn make_target(app: Option<&str>, env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "cloudflare".to_string(),
+            service: "cloudflare".to_string(),
             app: app.map(String::from),
             environment: env.to_string(),
         }
@@ -234,7 +234,7 @@ adapters:
     fn cloudflare_preflight_success() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -247,9 +247,9 @@ adapters:
                 stderr: vec![],
             },
         ]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
@@ -263,7 +263,7 @@ adapters:
     fn cloudflare_preflight_not_authenticated() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -276,9 +276,9 @@ adapters:
                 stderr: b"not logged in".to_vec(),
             },
         ]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -290,12 +290,12 @@ adapters:
     fn cloudflare_preflight_missing_wrangler() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
 
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -307,11 +307,11 @@ adapters:
     fn cloudflare_requires_app() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -324,11 +324,11 @@ adapters:
     fn cloudflare_unknown_app() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -342,15 +342,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -372,15 +372,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -396,15 +396,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -421,15 +421,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -457,15 +457,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -478,11 +478,11 @@ adapters:
     fn cloudflare_delete_requires_app() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -496,15 +496,15 @@ adapters:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"auth error".to_vec(),
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -519,7 +519,7 @@ adapters:
         let yaml = r#"
 project: x
 environments: [dev, prod]
-adapters:
+targets:
   cloudflare:
     mode: pages
     pages_project: my-pages-app
@@ -535,15 +535,15 @@ adapters:
     fn pages_sync_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_pages_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -569,15 +569,15 @@ adapters:
     fn pages_sync_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_pages_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -603,15 +603,15 @@ adapters:
     fn pages_delete_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_pages_config(dir.path());
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -638,18 +638,18 @@ adapters:
         let yaml = r#"
 project: x
 environments: [dev]
-adapters:
+targets:
   cloudflare:
     mode: pages
 "#;
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
-        let adapter_config = config.adapters.cloudflare.as_ref().unwrap();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let adapter = CloudflareAdapter {
+        let adapter = CloudflareTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter

@@ -1,24 +1,24 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
-    SyncMode,
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
+    DeployMode,
 };
-use crate::config::{Config, GithubAdapterConfig, ResolvedTarget};
+use crate::config::{Config, GithubTargetConfig, ResolvedTarget};
 
-pub struct GithubAdapter<'a> {
+pub struct GithubTarget<'a> {
     pub config: &'a Config,
-    pub adapter_config: &'a GithubAdapterConfig,
+    pub target_config: &'a GithubTargetConfig,
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> SyncAdapter for GithubAdapter<'a> {
+impl<'a> DeployTarget for GithubTarget<'a> {
     fn name(&self) -> &str {
         "github"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Individual
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Individual
     }
 
     fn preflight(&self) -> Result<()> {
@@ -38,9 +38,9 @@ impl<'a> SyncAdapter for GithubAdapter<'a> {
     }
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "set", key];
-        if let Some(repo) = &self.adapter_config.repo {
+        if let Some(repo) = &self.target_config.repo {
             args.push("-R");
             args.push(repo);
         }
@@ -67,9 +67,9 @@ impl<'a> SyncAdapter for GithubAdapter<'a> {
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "delete", key];
-        if let Some(repo) = &self.adapter_config.repo {
+        if let Some(repo) = &self.target_config.repo {
             args.push("-R");
             args.push(repo);
         }
@@ -92,7 +92,7 @@ impl<'a> SyncAdapter for GithubAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
@@ -110,7 +110,7 @@ mod tests {
             r#"
 project: x
 environments: [dev, prod]
-adapters:
+targets:
   github:
     repo: owner/repo
     env_flags:
@@ -120,7 +120,7 @@ adapters:
             r#"
 project: x
 environments: [dev, prod]
-adapters:
+targets:
   github:
     env_flags:
       prod: "--env production"
@@ -131,7 +131,7 @@ adapters:
 
     fn make_target(env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "github".to_string(),
+            service: "github".to_string(),
             app: None,
             environment: env.to_string(),
         }
@@ -141,7 +141,7 @@ adapters:
     fn github_preflight_success() {
         let fixture = make_config(true);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -154,9 +154,9 @@ adapters:
                 stderr: vec![],
             },
         ]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
@@ -168,7 +168,7 @@ adapters:
     fn github_preflight_auth_failure() {
         let fixture = make_config(true);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -181,9 +181,9 @@ adapters:
                 stderr: b"not logged in".to_vec(),
             },
         ]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -194,11 +194,11 @@ adapters:
     fn github_preflight_missing_cli() {
         let fixture = make_config(false);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -209,15 +209,15 @@ adapters:
     fn github_sync_correct_args_with_repo() {
         let fixture = make_config(true);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -235,15 +235,15 @@ adapters:
     fn github_passes_value_via_stdin() {
         let fixture = make_config(true);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -257,15 +257,15 @@ adapters:
     fn github_sync_without_repo() {
         let fixture = make_config(false);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -279,15 +279,15 @@ adapters:
     fn github_sync_with_env_flags() {
         let fixture = make_config(true);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -312,15 +312,15 @@ adapters:
     fn github_delete_correct_args() {
         let fixture = make_config(true);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -337,15 +337,15 @@ adapters:
     fn github_delete_failure() {
         let fixture = make_config(true);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -358,15 +358,15 @@ adapters:
     fn github_nonzero_exit() {
         let fixture = make_config(false);
         let config = fixture.config();
-        let adapter_config = config.adapters.github.as_ref().unwrap();
+        let target_config = config.targets.github.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"auth error".to_vec(),
         }]);
-        let adapter = GithubAdapter {
+        let adapter = GithubTarget {
             config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter

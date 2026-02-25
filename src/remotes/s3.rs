@@ -1,27 +1,27 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 
-use crate::adapters::{CommandOpts, CommandRunner};
-use crate::config::{CloudFileFormat, Config, S3PluginConfig};
+use crate::targets::{CommandOpts, CommandRunner};
+use crate::config::{CloudFileFormat, Config, S3RemoteConfig};
 use crate::store::{SecretStore, StorePayload};
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct S3Plugin<'a> {
+pub struct S3Remote<'a> {
     config: &'a Config,
-    plugin_config: S3PluginConfig,
+    remote_config: S3RemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
-impl<'a> S3Plugin<'a> {
+impl<'a> S3Remote<'a> {
     pub fn new(
         config: &'a Config,
-        plugin_config: S3PluginConfig,
+        remote_config: S3RemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
             config,
-            plugin_config,
+            remote_config,
             runner,
         }
     }
@@ -29,15 +29,15 @@ impl<'a> S3Plugin<'a> {
     /// Build base args for --region, --profile, --endpoint-url.
     fn base_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        if let Some(region) = &self.plugin_config.region {
+        if let Some(region) = &self.remote_config.region {
             args.push("--region".to_string());
             args.push(region.clone());
         }
-        if let Some(profile) = &self.plugin_config.profile {
+        if let Some(profile) = &self.remote_config.profile {
             args.push("--profile".to_string());
             args.push(profile.clone());
         }
-        if let Some(endpoint) = &self.plugin_config.endpoint {
+        if let Some(endpoint) = &self.remote_config.endpoint {
             args.push("--endpoint-url".to_string());
             args.push(endpoint.clone());
         }
@@ -46,18 +46,18 @@ impl<'a> S3Plugin<'a> {
 
     /// Build the S3 URI for a given environment.
     fn s3_uri(&self, env: &str) -> String {
-        let ext = match self.plugin_config.format {
+        let ext = match self.remote_config.format {
             CloudFileFormat::Encrypted => "enc",
             CloudFileFormat::Cleartext => "json",
         };
-        let prefix = self.plugin_config.prefix.as_deref().unwrap_or("");
+        let prefix = self.remote_config.prefix.as_deref().unwrap_or("");
         if prefix.is_empty() {
-            format!("s3://{}/secrets-{env}.{ext}", self.plugin_config.bucket)
+            format!("s3://{}/secrets-{env}.{ext}", self.remote_config.bucket)
         } else {
             let prefix = prefix.trim_end_matches('/');
             format!(
                 "s3://{}/{prefix}/secrets-{env}.{ext}",
-                self.plugin_config.bucket
+                self.remote_config.bucket
             )
         }
     }
@@ -99,13 +99,13 @@ impl<'a> S3Plugin<'a> {
     }
 }
 
-impl<'a> StoragePlugin for S3Plugin<'a> {
+impl<'a> SyncRemote for S3Remote<'a> {
     fn name(&self) -> &str {
         "s3"
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::adapters::check_command(self.runner, "aws").map_err(|_| {
+        crate::targets::check_command(self.runner, "aws").map_err(|_| {
             anyhow::anyhow!(
                 "AWS CLI (aws) is not installed or not in PATH. Install it from: https://aws.amazon.com/cli/"
             )
@@ -137,7 +137,7 @@ impl<'a> StoragePlugin for S3Plugin<'a> {
         let s3_uri = self.s3_uri(env);
         let base_args = self.base_args();
 
-        let content = match self.plugin_config.format {
+        let content = match self.remote_config.format {
             CloudFileFormat::Encrypted => {
                 let store = SecretStore::open(&self.config.root)?;
                 let json = serde_json::to_string(&env_payload)
@@ -213,7 +213,7 @@ impl<'a> StoragePlugin for S3Plugin<'a> {
             return Ok(None);
         }
 
-        let payload = match self.plugin_config.format {
+        let payload = match self.remote_config.format {
             CloudFileFormat::Encrypted => {
                 let store = SecretStore::open(&self.config.root)?;
                 store.decrypt_raw(content)?
@@ -233,7 +233,7 @@ impl<'a> StoragePlugin for S3Plugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>);
@@ -276,17 +276,17 @@ mod tests {
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-secrets-bucket
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             ok_output(b"{\"Account\": \"123456789012\"}"),
         ]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -299,19 +299,19 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-secrets-bucket
     region: us-west-2
     profile: myprofile
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             ok_output(b"{\"Account\": \"123456789012\"}"),
         ]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -329,17 +329,17 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-secrets-bucket
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             fail_output(b"Unable to locate credentials"),
         ]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS authentication failed"));
     }
@@ -349,14 +349,14 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-secrets-bucket
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
     }
@@ -366,13 +366,13 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
     prefix: "esk/myapp"
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
 
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -385,7 +385,7 @@ plugins:
             }
         }
 
-        let plugin = S3Plugin::new(&config, plugin_config, &DummyRunner);
+        let plugin = S3Remote::new(&config, remote_config, &DummyRunner);
         assert_eq!(
             plugin.s3_uri("dev"),
             "s3://my-bucket/esk/myapp/secrets-dev.enc"
@@ -401,12 +401,12 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
 
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -419,7 +419,7 @@ plugins:
             }
         }
 
-        let plugin = S3Plugin::new(&config, plugin_config, &DummyRunner);
+        let plugin = S3Remote::new(&config, remote_config, &DummyRunner);
         assert_eq!(plugin.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
     }
 
@@ -428,13 +428,13 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
     format: encrypted
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
 
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -447,7 +447,7 @@ plugins:
             }
         }
 
-        let plugin = S3Plugin::new(&config, plugin_config, &DummyRunner);
+        let plugin = S3Remote::new(&config, remote_config, &DummyRunner);
         assert_eq!(plugin.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
     }
 
@@ -456,16 +456,16 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
     prefix: backups
     format: cleartext
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -492,15 +492,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
     format: cleartext
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:prod".to_string(), "val".to_string());
@@ -521,13 +521,13 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
     format: cleartext
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
 
         let payload = StorePayload {
             secrets: {
@@ -543,7 +543,7 @@ plugins:
         };
         let json = serde_json::to_string(&payload).unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(json.as_bytes())]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 7);
@@ -556,16 +556,16 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
     format: cleartext
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![fail_output(b"An error occurred (NoSuchKey)")]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
 
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
     }
@@ -575,16 +575,16 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
     format: cleartext
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![fail_output(b"Unable to locate credentials")]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
 
         let err = plugin.pull(&config, "dev").unwrap_err();
         assert!(err.to_string().contains("Unable to locate credentials"));
@@ -595,7 +595,7 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   s3:
     bucket: my-bucket
     region: us-west-2
@@ -604,9 +604,9 @@ plugins:
     format: cleartext
 "#;
         let config = make_config(yaml);
-        let plugin_config: S3PluginConfig = config.plugin_config("s3").unwrap();
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let plugin = S3Plugin::new(&config, plugin_config, &runner);
+        let plugin = S3Remote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:dev".to_string(), "val".to_string());

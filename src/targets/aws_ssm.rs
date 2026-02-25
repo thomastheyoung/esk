@@ -1,21 +1,21 @@
 use anyhow::{Context, Result};
 
-use crate::adapters::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SyncAdapter,
-    SyncMode,
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
+    DeployMode,
 };
-use crate::config::{AwsSsmAdapterConfig, Config, ResolvedTarget};
+use crate::config::{AwsSsmTargetConfig, Config, ResolvedTarget};
 
-pub struct AwsSsmAdapter<'a> {
+pub struct AwsSsmTarget<'a> {
     pub config: &'a Config,
-    pub adapter_config: &'a AwsSsmAdapterConfig,
+    pub target_config: &'a AwsSsmTargetConfig,
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> AwsSsmAdapter<'a> {
+impl<'a> AwsSsmTarget<'a> {
     fn resolve_path(&self, key: &str, target: &ResolvedTarget) -> String {
         let prefix = self
-            .adapter_config
+            .target_config
             .path_prefix
             .replace("{project}", &self.config.project)
             .replace("{environment}", &target.environment);
@@ -24,11 +24,11 @@ impl<'a> AwsSsmAdapter<'a> {
 
     fn base_args(&self) -> Vec<String> {
         let mut args = Vec::new();
-        if let Some(region) = &self.adapter_config.region {
+        if let Some(region) = &self.target_config.region {
             args.push("--region".to_string());
             args.push(region.clone());
         }
-        if let Some(profile) = &self.adapter_config.profile {
+        if let Some(profile) = &self.target_config.profile {
             args.push("--profile".to_string());
             args.push(profile.clone());
         }
@@ -36,13 +36,13 @@ impl<'a> AwsSsmAdapter<'a> {
     }
 }
 
-impl<'a> SyncAdapter for AwsSsmAdapter<'a> {
+impl<'a> DeployTarget for AwsSsmTarget<'a> {
     fn name(&self) -> &str {
         "aws_ssm"
     }
 
-    fn sync_mode(&self) -> SyncMode {
-        SyncMode::Individual
+    fn sync_mode(&self) -> DeployMode {
+        DeployMode::Individual
     }
 
     fn preflight(&self) -> Result<()> {
@@ -68,7 +68,7 @@ impl<'a> SyncAdapter for AwsSsmAdapter<'a> {
 
     fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let param_path = self.resolve_path(key, target);
-        let param_type = &self.adapter_config.parameter_type;
+        let param_type = &self.target_config.parameter_type;
         let base = self.base_args();
 
         // Use --cli-input-json via stdin to avoid exposing value in ps output
@@ -79,7 +79,7 @@ impl<'a> SyncAdapter for AwsSsmAdapter<'a> {
             "Overwrite": true,
         });
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec![
             "ssm",
             "put-parameter",
@@ -115,7 +115,7 @@ impl<'a> SyncAdapter for AwsSsmAdapter<'a> {
         let param_path = self.resolve_path(key, target);
         let base = self.base_args();
 
-        let flag_parts = resolve_env_flags(&self.adapter_config.env_flags, &target.environment);
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["ssm", "delete-parameter", "--name", &param_path];
         for a in &base {
             args.push(a);
@@ -139,7 +139,7 @@ impl<'a> SyncAdapter for AwsSsmAdapter<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
@@ -156,7 +156,7 @@ mod tests {
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
-adapters:
+targets:
   aws_ssm:
     path_prefix: "/{project}/{environment}/"
     region: us-east-1
@@ -170,7 +170,7 @@ adapters:
 
     fn make_target(env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            adapter: "aws_ssm".to_string(),
+            service: "aws_ssm".to_string(),
             app: None,
             environment: env.to_string(),
         }
@@ -180,7 +180,7 @@ adapters:
     fn preflight_success() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -193,9 +193,9 @@ adapters:
                 stderr: vec![],
             },
         ]);
-        let adapter = AwsSsmAdapter {
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         assert!(adapter.preflight().is_ok());
@@ -211,7 +211,7 @@ adapters:
     fn preflight_auth_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -224,9 +224,9 @@ adapters:
                 stderr: b"not configured".to_vec(),
             },
         ]);
-        let adapter = AwsSsmAdapter {
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -237,11 +237,11 @@ adapters:
     fn preflight_missing_cli() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let adapter = AwsSsmAdapter {
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter.preflight().unwrap_err();
@@ -252,15 +252,15 @@ adapters:
     fn sync_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = AwsSsmAdapter {
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -292,15 +292,15 @@ adapters:
     fn sync_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = AwsSsmAdapter {
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -314,15 +314,15 @@ adapters:
     fn delete_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: vec![],
             stderr: vec![],
         }]);
-        let adapter = AwsSsmAdapter {
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         adapter
@@ -346,15 +346,15 @@ adapters:
     fn delete_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"not found".to_vec(),
         }]);
-        let adapter = AwsSsmAdapter {
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -367,15 +367,15 @@ adapters:
     fn sync_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: vec![],
             stderr: b"access denied".to_vec(),
         }]);
-        let adapter = AwsSsmAdapter {
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &runner,
         };
         let err = adapter
@@ -388,10 +388,10 @@ adapters:
     fn path_interpolation() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let adapter_config = config.adapters.aws_ssm.as_ref().unwrap();
-        let adapter = AwsSsmAdapter {
+        let target_config = config.targets.aws_ssm.as_ref().unwrap();
+        let adapter = AwsSsmTarget {
             config: &config,
-            adapter_config,
+            target_config,
             runner: &MockCommandRunner::from_outputs(vec![]),
         };
         let path = adapter.resolve_path("DB_PASSWORD", &make_target("prod"));

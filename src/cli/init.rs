@@ -2,15 +2,15 @@ use anyhow::{Context, Result};
 use console::style;
 use std::path::Path;
 
-use crate::adapter_tracker::SyncIndex;
-use crate::plugin_tracker::PluginIndex;
+use crate::deploy_tracker::DeployIndex;
+use crate::remote_tracker::RemoteIndex;
 use crate::store::SecretStore;
 
 const ESK_GITIGNORE_COMMENT: &str = "# esk (store.enc is safe to commit)";
 const ESK_GITIGNORE_ENTRIES: &[&str] = &[
     ".esk/store.key",
-    ".esk/sync-index.json",
-    ".esk/plugin-index.json",
+    ".esk/deploy-index.json",
+    ".esk/remote-index.json",
 ];
 
 pub fn run(cwd: &Path) -> Result<()> {
@@ -18,7 +18,7 @@ pub fn run(cwd: &Path) -> Result<()> {
     let esk_dir = cwd.join(".esk");
     let store_path = esk_dir.join("store.enc");
     let key_path = esk_dir.join("store.key");
-    let sync_index_path = esk_dir.join("sync-index.json");
+    let deploy_index_path = esk_dir.join("deploy-index.json");
 
     cliclack::intro(style("esk init").bold())?;
 
@@ -32,7 +32,7 @@ apps:
   web:
     path: apps/web
 
-adapters:
+targets:
   env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
@@ -66,34 +66,34 @@ secrets:
         cliclack::log::remark(format!("Exists  {}", style(store_path.display()).dim()))?;
     }
 
-    // Create empty sync index
-    if !sync_index_path.is_file() {
-        let index = SyncIndex::new(&sync_index_path);
+    // Create empty deploy index
+    if !deploy_index_path.is_file() {
+        let index = DeployIndex::new(&deploy_index_path);
         index.save()?;
         cliclack::log::success(format!(
             "Created {}",
-            style(sync_index_path.display()).dim()
+            style(deploy_index_path.display()).dim()
         ))?;
     } else {
         cliclack::log::remark(format!(
             "Exists  {}",
-            style(sync_index_path.display()).dim()
+            style(deploy_index_path.display()).dim()
         ))?;
     }
 
-    // Create empty plugin index
-    let plugin_index_path = esk_dir.join("plugin-index.json");
-    if !plugin_index_path.is_file() {
-        let index = PluginIndex::new(&plugin_index_path);
+    // Create empty remote index
+    let remote_index_path = esk_dir.join("remote-index.json");
+    if !remote_index_path.is_file() {
+        let index = RemoteIndex::new(&remote_index_path);
         index.save()?;
         cliclack::log::success(format!(
             "Created {}",
-            style(plugin_index_path.display()).dim()
+            style(remote_index_path.display()).dim()
         ))?;
     } else {
         cliclack::log::remark(format!(
             "Exists  {}",
-            style(plugin_index_path.display()).dim()
+            style(remote_index_path.display()).dim()
         ))?;
     }
 

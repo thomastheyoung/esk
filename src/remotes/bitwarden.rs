@@ -2,34 +2,34 @@ use anyhow::{Context, Result};
 use serde_json::Value;
 use std::collections::BTreeMap;
 
-use crate::adapters::{CommandOpts, CommandRunner};
-use crate::config::{BitwardenPluginConfig, Config};
+use crate::targets::{CommandOpts, CommandRunner};
+use crate::config::{BitwardenRemoteConfig, Config};
 use crate::store::StorePayload;
 
-use super::StoragePlugin;
+use super::SyncRemote;
 
-pub struct BitwardenPlugin<'a> {
+pub struct BitwardenRemote<'a> {
     config: &'a Config,
-    plugin_config: BitwardenPluginConfig,
+    remote_config: BitwardenRemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
-impl<'a> BitwardenPlugin<'a> {
+impl<'a> BitwardenRemote<'a> {
     pub fn new(
         config: &'a Config,
-        plugin_config: BitwardenPluginConfig,
+        remote_config: BitwardenRemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
             config,
-            plugin_config,
+            remote_config,
             runner,
         }
     }
 
     /// Resolve the secret name for an environment.
     fn secret_name(&self, env: &str) -> String {
-        self.plugin_config
+        self.remote_config
             .secret_name
             .replace("{project}", &self.config.project)
             .replace("{environment}", env)
@@ -37,7 +37,7 @@ impl<'a> BitwardenPlugin<'a> {
 
     /// List secrets in the project, returning the raw JSON array.
     fn list_secrets(&self) -> Result<Vec<Value>> {
-        let project_id = &self.plugin_config.project_id;
+        let project_id = &self.remote_config.project_id;
         let output = self
             .runner
             .run(
@@ -77,20 +77,20 @@ impl<'a> BitwardenPlugin<'a> {
     }
 }
 
-impl<'a> StoragePlugin for BitwardenPlugin<'a> {
+impl<'a> SyncRemote for BitwardenRemote<'a> {
     fn name(&self) -> &str {
         "bitwarden"
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::adapters::check_command(self.runner, "bws").map_err(|_| {
+        crate::targets::check_command(self.runner, "bws").map_err(|_| {
             anyhow::anyhow!(
                 "Bitwarden Secrets Manager CLI (bws) is not installed or not in PATH. Install it from: https://bitwarden.com/help/secrets-manager-cli/"
             )
         })?;
 
         // Verify auth by listing secrets (requires BWS_ACCESS_TOKEN)
-        let project_id = &self.plugin_config.project_id;
+        let project_id = &self.remote_config.project_id;
         let output = self
             .runner
             .run(
@@ -150,7 +150,7 @@ impl<'a> StoragePlugin for BitwardenPlugin<'a> {
             }
         } else {
             // Create new secret
-            let project_id = &self.plugin_config.project_id;
+            let project_id = &self.remote_config.project_id;
             let output = self
                 .runner
                 .run(
@@ -221,7 +221,7 @@ impl<'a> StoragePlugin for BitwardenPlugin<'a> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::adapters::CommandOutput;
+    use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
@@ -266,16 +266,16 @@ mod tests {
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(b"bws 0.4.0"), ok_output(b"[]")]);
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
         assert!(plugin.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -288,15 +288,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("bws) is not installed"));
     }
@@ -306,18 +306,18 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"bws 0.4.0"),
             fail_output(b"Unauthorized"),
         ]);
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
         let err = plugin.preflight().unwrap_err();
         assert!(err.to_string().contains("Bitwarden authentication failed"));
     }
@@ -327,17 +327,17 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
 
         // list returns empty array (no existing secret), then create succeeds
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"[]"), ok_output(b"{}")]);
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -364,13 +364,13 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
 
         let existing = json!([
             {"id": "secret-456", "key": "myapp-dev", "value": "{}"}
@@ -379,7 +379,7 @@ plugins:
             ok_output(&serde_json::to_vec(&existing).unwrap()),
             ok_output(b"{}"),
         ]);
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -406,15 +406,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:prod".to_string(), "val".to_string());
@@ -435,22 +435,22 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
 
-        let inner_value = json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", crate::plugins::ESK_VERSION_KEY: 7});
+        let inner_value = json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", crate::remotes::ESK_VERSION_KEY: 7});
         let items = json!([
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()},
             {"id": "s2", "key": "myapp-prod", "value": "{}"}
         ]);
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 7);
@@ -464,15 +464,15 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"[]")]);
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
 
         assert!(plugin.pull(&config, "dev").unwrap().is_none());
     }
@@ -482,13 +482,13 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
 
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -501,7 +501,7 @@ plugins:
             }
         }
 
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &DummyRunner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &DummyRunner);
         assert_eq!(plugin.secret_name("dev"), "myapp-dev");
         assert_eq!(plugin.secret_name("prod"), "myapp-prod");
     }
@@ -511,21 +511,21 @@ plugins:
         let yaml = r#"
 project: myapp
 environments: [dev]
-plugins:
+remotes:
   bitwarden:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
         let config = make_config(yaml);
-        let plugin_config: BitwardenPluginConfig = config.plugin_config("bitwarden").unwrap();
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
 
-        let inner_value = json!({"KEY": "val", crate::plugins::ESK_VERSION_KEY: "42"});
+        let inner_value = json!({"KEY": "val", crate::remotes::ESK_VERSION_KEY: "42"});
         let items = json!([
             {"id": "s1", "key": "myapp-dev", "value": serde_json::to_string(&inner_value).unwrap()}
         ]);
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
-        let plugin = BitwardenPlugin::new(&config, plugin_config, &runner);
+        let plugin = BitwardenRemote::new(&config, remote_config, &runner);
 
         let (secrets, version) = plugin.pull(&config, "dev").unwrap().unwrap();
         assert_eq!(version, 42);
