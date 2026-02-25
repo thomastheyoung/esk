@@ -187,6 +187,31 @@ impl Flags {
     }
 }
 
+struct ReleaseFlags {
+    dry_run: bool,
+    skip_checks: bool,
+    allow_dirty: bool,
+}
+
+impl ReleaseFlags {
+    fn parse(args: &[String]) -> Result<Self> {
+        let mut flags = ReleaseFlags {
+            dry_run: false,
+            skip_checks: false,
+            allow_dirty: false,
+        };
+        for arg in args {
+            match arg.as_str() {
+                "--dry-run" => flags.dry_run = true,
+                "--skip-checks" => flags.skip_checks = true,
+                "--allow-dirty" => flags.allow_dirty = true,
+                other => bail!("unknown flag: {other}"),
+            }
+        }
+        Ok(flags)
+    }
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     match args.first().map(|s| s.as_str()) {
@@ -219,8 +244,14 @@ fn main() -> Result<()> {
             print_instructions(root);
             Ok(())
         }
+        Some("release") => {
+            let flags = ReleaseFlags::parse(&args[1..])?;
+            release(flags)
+        }
         Some(cmd) => bail!("unknown command: {cmd}"),
-        None => bail!("usage: cargo xtask sandbox [--skip-build] [--reset] [--clean]"),
+        None => bail!(
+            "usage:\n  cargo xtask sandbox [--skip-build] [--reset] [--clean]\n  cargo xtask release [--dry-run] [--skip-checks] [--allow-dirty]"
+        ),
     }
 }
 
@@ -241,6 +272,143 @@ fn build_release() -> Result<()> {
         bail!("cargo build failed");
     }
     Ok(())
+}
+
+fn release(flags: ReleaseFlags) -> Result<()> {
+    let root = workspace_root();
+    ensure_on_main_branch(&root)?;
+    if !flags.allow_dirty {
+        ensure_clean_worktree(&root)?;
+    }
+
+    let version = cargo_package_version(&root)?;
+    let tag = format!("v{version}");
+    ensure_local_tag_missing(&root, &tag)?;
+    ensure_remote_tag_missing(&root, &tag)?;
+
+    if flags.dry_run {
+        eprintln!("Dry run:");
+        eprintln!("  version: {version}");
+        eprintln!("  tag: {tag}");
+        eprintln!(
+            "  checks: {}",
+            if flags.skip_checks { "skip" } else { "run" }
+        );
+        eprintln!("  commands:");
+        eprintln!("    git pull --rebase origin main");
+        if !flags.skip_checks {
+            eprintln!("    cargo fmt --check");
+            eprintln!("    cargo clippy -- -D warnings");
+            eprintln!("    cargo test");
+        }
+        eprintln!("    git push origin main");
+        eprintln!("    git tag -a {tag} -m \"release {tag}\"");
+        eprintln!("    git push origin {tag}");
+        return Ok(());
+    }
+
+    run_cmd(&root, "git", &["pull", "--rebase", "origin", "main"])?;
+    if !flags.skip_checks {
+        run_cmd(&root, "cargo", &["fmt", "--check"])?;
+        run_cmd(&root, "cargo", &["clippy", "--", "-D", "warnings"])?;
+        run_cmd(&root, "cargo", &["test"])?;
+    }
+    run_cmd(&root, "git", &["push", "origin", "main"])?;
+    run_cmd(
+        &root,
+        "git",
+        &["tag", "-a", &tag, "-m", &format!("release {tag}")],
+    )?;
+    run_cmd(&root, "git", &["push", "origin", &tag])?;
+    eprintln!("Released {tag}. GitHub Actions should now run the Release workflow.");
+    Ok(())
+}
+
+fn run_cmd(root: &Path, program: &str, args: &[&str]) -> Result<()> {
+    let status = Command::new(program)
+        .current_dir(root)
+        .args(args)
+        .status()
+        .with_context(|| format!("failed to run command: {program} {}", args.join(" ")))?;
+    if !status.success() {
+        bail!(
+            "command failed (exit {}): {program} {}",
+            status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".to_string()),
+            args.join(" ")
+        );
+    }
+    Ok(())
+}
+
+fn capture_stdout(root: &Path, program: &str, args: &[&str]) -> Result<String> {
+    let output = Command::new(program)
+        .current_dir(root)
+        .args(args)
+        .output()
+        .with_context(|| format!("failed to run command: {program} {}", args.join(" ")))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        bail!(
+            "command failed (exit {}): {program} {}\n{}",
+            output
+                .status
+                .code()
+                .map(|code| code.to_string())
+                .unwrap_or_else(|| "signal".to_string()),
+            args.join(" "),
+            stderr.trim()
+        );
+    }
+    String::from_utf8(output.stdout)
+        .context("command produced non-utf8 output")
+        .map(|s| s.trim().to_string())
+}
+
+fn ensure_clean_worktree(root: &Path) -> Result<()> {
+    let status = capture_stdout(root, "git", &["status", "--porcelain"])?;
+    if !status.is_empty() {
+        bail!("working tree is dirty; commit or stash changes first (or use --allow-dirty)");
+    }
+    Ok(())
+}
+
+fn ensure_on_main_branch(root: &Path) -> Result<()> {
+    let branch = capture_stdout(root, "git", &["branch", "--show-current"])?;
+    if branch != "main" {
+        bail!("release must run from main branch (current: {branch})");
+    }
+    Ok(())
+}
+
+fn ensure_local_tag_missing(root: &Path, tag: &str) -> Result<()> {
+    let output = Command::new("git")
+        .current_dir(root)
+        .args(["rev-parse", "-q", "--verify", &format!("refs/tags/{tag}")])
+        .output()
+        .context("failed to check local tag")?;
+    if output.status.success() {
+        bail!("tag already exists locally: {tag}");
+    }
+    Ok(())
+}
+
+fn ensure_remote_tag_missing(root: &Path, tag: &str) -> Result<()> {
+    let output = capture_stdout(root, "git", &["ls-remote", "--tags", "origin", tag])?;
+    if !output.is_empty() {
+        bail!("tag already exists on origin: {tag}");
+    }
+    Ok(())
+}
+
+fn cargo_package_version(root: &Path) -> Result<String> {
+    let pkgid = capture_stdout(root, "cargo", &["pkgid", "-p", "esk"])?;
+    let (_, version) = pkgid
+        .rsplit_once('#')
+        .with_context(|| format!("unexpected cargo pkgid output: {pkgid}"))?;
+    Ok(version.to_string())
 }
 
 pub fn setup(root: &Path, workspace: &Path) -> Result<()> {

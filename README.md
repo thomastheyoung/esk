@@ -203,6 +203,24 @@ cargo xtask sandbox
 cargo xtask sandbox --clean
 ```
 
+Release from `Cargo.toml` version in one command:
+
+```bash
+cargo release-tag
+```
+
+This command:
+- verifies you are on `main` and your working tree is clean
+- reads the crate version and tags `v<version>`
+- runs `fmt`, `clippy`, and `test`
+- pushes `main` and the release tag
+
+Preview without changes:
+
+```bash
+cargo xtask release --dry-run
+```
+
 ## License
 
 MIT
