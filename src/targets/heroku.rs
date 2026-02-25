@@ -13,11 +13,11 @@
 
 use anyhow::{Context, Result};
 
-use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
-    DeployMode,
-};
 use crate::config::{Config, HerokuTargetConfig, ResolvedTarget};
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
+    DeployTarget,
+};
 
 pub struct HerokuTarget<'a> {
     pub config: &'a Config,

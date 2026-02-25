@@ -3,8 +3,8 @@ use console::style;
 use std::path::Path;
 
 use crate::deploy_tracker::DeployIndex;
-use crate::sync_tracker::SyncIndex;
 use crate::store::SecretStore;
+use crate::sync_tracker::SyncIndex;
 
 const ESK_GITIGNORE_COMMENT: &str = "# esk (store.enc is safe to commit)";
 const ESK_GITIGNORE_ENTRIES: &[&str] = &[

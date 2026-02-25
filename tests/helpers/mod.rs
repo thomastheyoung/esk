@@ -1,9 +1,9 @@
 #![allow(dead_code)]
 
 use anyhow::Result;
-use esk::targets::{CommandOpts, CommandOutput, CommandRunner};
 use esk::config::Config;
 use esk::store::SecretStore;
+use esk::targets::{CommandOpts, CommandOutput, CommandRunner};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tempfile::TempDir;

@@ -1,11 +1,11 @@
 use anyhow::{bail, Result};
 
-use crate::targets::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
-use crate::sync_tracker::SyncIndex;
 use crate::remotes;
 use crate::store::SecretStore;
 use crate::suggest;
+use crate::sync_tracker::SyncIndex;
+use crate::targets::{CommandRunner, RealCommandRunner};
 
 pub fn run(config: &Config, key: &str, env: &str, no_sync: bool, strict: bool) -> Result<()> {
     run_with_runner(config, key, env, no_sync, strict, &RealCommandRunner)

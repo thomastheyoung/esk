@@ -16,11 +16,11 @@
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
-use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, SecretValue,
-    DeployTarget, DeployMode, DeployResult,
-};
 use crate::config::{Config, KubernetesTargetConfig, ResolvedTarget};
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
+    DeployResult, DeployTarget, SecretValue,
+};
 
 /// Validate a Kubernetes resource name or namespace.
 ///

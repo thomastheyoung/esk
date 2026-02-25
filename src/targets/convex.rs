@@ -16,11 +16,11 @@ use std::path::PathBuf;
 
 use anyhow::{Context, Result};
 
-use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
-    DeployMode,
-};
 use crate::config::{Config, ConvexTargetConfig, ResolvedTarget};
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
+    DeployTarget,
+};
 
 pub struct ConvexTarget<'a> {
     pub config: &'a Config,

@@ -2,12 +2,10 @@ use anyhow::Result;
 use console::style;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 
-use crate::deploy_tracker::DeployIndex;
-use crate::targets::{
-    build_targets, CommandRunner, RealCommandRunner, SecretValue, DeployMode,
-};
 use crate::config::Config;
+use crate::deploy_tracker::DeployIndex;
 use crate::store::SecretStore;
+use crate::targets::{build_targets, CommandRunner, DeployMode, RealCommandRunner, SecretValue};
 use crate::ui;
 
 /// A single sync result entry for display.

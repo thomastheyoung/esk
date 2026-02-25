@@ -393,8 +393,7 @@ pub fn build_targets<'a>(
                 targets.push(target);
             }
             Err(e) => {
-                let _ =
-                    cliclack::log::warning(format!("Skipping {} target: {}", target.name(), e));
+                let _ = cliclack::log::warning(format!("Skipping {} target: {}", target.name(), e));
             }
         }
     }

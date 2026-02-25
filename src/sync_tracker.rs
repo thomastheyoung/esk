@@ -44,10 +44,7 @@ impl SyncIndex {
         let contents = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!(
-                    "Warning: could not read sync index ({}), starting fresh",
-                    e
-                );
+                eprintln!("Warning: could not read sync index ({}), starting fresh", e);
                 return Self::new(path);
             }
         };
@@ -71,9 +68,8 @@ impl SyncIndex {
             .context("sync index path has no parent")?;
         let tmp = NamedTempFile::new_in(dir)?;
         std::fs::write(tmp.path(), json)?;
-        tmp.persist(&self.path).with_context(|| {
-            format!("failed to persist sync index to {}", self.path.display())
-        })?;
+        tmp.persist(&self.path)
+            .with_context(|| format!("failed to persist sync index to {}", self.path.display()))?;
         Ok(())
     }
 
@@ -183,10 +179,7 @@ mod tests {
 
     #[test]
     fn tracker_key_format() {
-        assert_eq!(
-            SyncIndex::tracker_key("1password", "dev"),
-            "1password:dev"
-        );
+        assert_eq!(SyncIndex::tracker_key("1password", "dev"), "1password:dev");
         assert_eq!(SyncIndex::tracker_key("dropbox", "prod"), "dropbox:prod");
     }
 

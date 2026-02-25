@@ -1,8 +1,8 @@
 mod helpers;
 
-use esk::targets::env_file::EnvFileTarget;
-use esk::targets::{SecretValue, DeployTarget};
 use esk::config::ResolvedTarget;
+use esk::targets::env_file::EnvFileTarget;
+use esk::targets::{DeployTarget, SecretValue};
 use helpers::*;
 
 fn make_target(app: &str, env: &str) -> ResolvedTarget {

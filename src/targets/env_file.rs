@@ -12,8 +12,8 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use tempfile::NamedTempFile;
 
-use crate::targets::{SecretValue, DeployTarget, DeployMode, DeployResult};
 use crate::config::{Config, ResolvedTarget};
+use crate::targets::{DeployMode, DeployResult, DeployTarget, SecretValue};
 
 /// Format a value for safe inclusion in a .env file.
 ///

@@ -13,11 +13,11 @@
 
 use anyhow::{Context, Result};
 
-use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployTarget,
-    DeployMode,
-};
 use crate::config::{Config, ResolvedTarget, VercelTargetConfig};
+use crate::targets::{
+    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
+    DeployTarget,
+};
 
 pub struct VercelTarget<'a> {
     pub config: &'a Config,

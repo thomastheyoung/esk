@@ -3,12 +3,12 @@ use chrono::Utc;
 use console::style;
 use std::collections::BTreeSet;
 
-use crate::deploy_tracker::{DeployIndex, DeployStatus};
-use crate::targets::{check_target_health, TargetHealth, CommandRunner, RealCommandRunner};
 use crate::config::{Config, ResolvedTarget};
-use crate::sync_tracker::{SyncIndex, SyncStatus};
+use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::remotes::{check_remote_health, RemoteHealth};
 use crate::store::SecretStore;
+use crate::sync_tracker::{SyncIndex, SyncStatus};
+use crate::targets::{check_target_health, CommandRunner, RealCommandRunner, TargetHealth};
 
 // ---------------------------------------------------------------------------
 // Custom theme (same as list.rs — prevents dim from clobbering inline ANSI)
@@ -713,8 +713,8 @@ fn relative_time(timestamp: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
     use crate::store::SecretStore;
+    use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
 
     #[test]
     fn relative_time_days() {

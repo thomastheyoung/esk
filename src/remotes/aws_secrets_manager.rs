@@ -17,9 +17,9 @@
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 
-use crate::targets::{CommandOpts, CommandRunner};
 use crate::config::{AwsSecretsManagerRemoteConfig, Config};
 use crate::store::StorePayload;
+use crate::targets::{CommandOpts, CommandRunner};
 
 use super::SyncRemote;
 

@@ -48,7 +48,10 @@ impl DeployIndex {
         let contents = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("Warning: could not read deploy index ({}), starting fresh", e);
+                eprintln!(
+                    "Warning: could not read deploy index ({}), starting fresh",
+                    e
+                );
                 return Self::new(path);
             }
         };
@@ -72,8 +75,9 @@ impl DeployIndex {
             .context("deploy index path has no parent")?;
         let tmp = NamedTempFile::new_in(dir)?;
         std::fs::write(tmp.path(), json)?;
-        tmp.persist(&self.path)
-            .with_context(|| format!("failed to persist deploy index to {}", self.path.display()))?;
+        tmp.persist(&self.path).with_context(|| {
+            format!("failed to persist deploy index to {}", self.path.display())
+        })?;
         Ok(())
     }
 

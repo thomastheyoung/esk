@@ -1,12 +1,12 @@
 use anyhow::{bail, Result};
 use std::io::IsTerminal;
 
-use crate::targets::{CommandRunner, RealCommandRunner};
 use crate::config::{self, Config};
-use crate::sync_tracker::SyncIndex;
 use crate::remotes;
 use crate::store::SecretStore;
 use crate::suggest;
+use crate::sync_tracker::SyncIndex;
+use crate::targets::{CommandRunner, RealCommandRunner};
 
 pub fn run(
     config: &Config,

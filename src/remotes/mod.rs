@@ -4,17 +4,17 @@ pub mod bitwarden;
 pub mod cloud_file;
 pub mod doppler;
 pub mod gcp_secret_manager;
+pub mod hashicorp_vault;
 pub mod onepassword;
 pub mod s3;
 pub mod sops;
-pub mod hashicorp_vault;
 
 use anyhow::Result;
 use std::collections::BTreeMap;
 
-use crate::targets::CommandRunner;
 use crate::config::Config;
 use crate::store::{validate_key, StorePayload};
+use crate::targets::CommandRunner;
 
 /// The key used to store version metadata in remote payloads.
 pub const ESK_VERSION_KEY: &str = "_esk_version";
@@ -149,9 +149,15 @@ fn remote_candidates<'a>(
         });
     }
 
-    if let Some(vault_config) = config.remote_config::<crate::config::HashicorpVaultRemoteConfig>("vault") {
+    if let Some(vault_config) =
+        config.remote_config::<crate::config::HashicorpVaultRemoteConfig>("vault")
+    {
         candidates.push(RemoteCandidate {
-            remote: Box::new(hashicorp_vault::HashicorpVaultRemote::new(config, vault_config, runner)),
+            remote: Box::new(hashicorp_vault::HashicorpVaultRemote::new(
+                config,
+                vault_config,
+                runner,
+            )),
             ok_message: "authenticated",
         });
     }
@@ -172,16 +178,26 @@ fn remote_candidates<'a>(
         });
     }
 
-    if let Some(gcp_config) = config.remote_config::<crate::config::GcpSecretManagerRemoteConfig>("gcp") {
+    if let Some(gcp_config) =
+        config.remote_config::<crate::config::GcpSecretManagerRemoteConfig>("gcp")
+    {
         candidates.push(RemoteCandidate {
-            remote: Box::new(gcp_secret_manager::GcpSecretManagerRemote::new(config, gcp_config, runner)),
+            remote: Box::new(gcp_secret_manager::GcpSecretManagerRemote::new(
+                config, gcp_config, runner,
+            )),
             ok_message: "authenticated",
         });
     }
 
-    if let Some(azure_config) = config.remote_config::<crate::config::AzureKeyVaultRemoteConfig>("azure") {
+    if let Some(azure_config) =
+        config.remote_config::<crate::config::AzureKeyVaultRemoteConfig>("azure")
+    {
         candidates.push(RemoteCandidate {
-            remote: Box::new(azure_key_vault::AzureKeyVaultRemote::new(config, azure_config, runner)),
+            remote: Box::new(azure_key_vault::AzureKeyVaultRemote::new(
+                config,
+                azure_config,
+                runner,
+            )),
             ok_message: "authenticated",
         });
     }

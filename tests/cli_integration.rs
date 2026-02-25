@@ -1,9 +1,9 @@
 mod helpers;
 
-use esk::deploy_tracker::DeployIndex;
 use esk::cli;
-use esk::sync_tracker::SyncIndex;
+use esk::deploy_tracker::DeployIndex;
 use esk::reconcile::ConflictPreference;
+use esk::sync_tracker::SyncIndex;
 use helpers::*;
 use serde_json::json;
 

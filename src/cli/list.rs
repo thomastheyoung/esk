@@ -2,8 +2,8 @@ use anyhow::Result;
 use console::style;
 use std::collections::{BTreeMap, BTreeSet};
 
-use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::config::Config;
+use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
 
 /// Custom theme that renders note body text without dim styling.

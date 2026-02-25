@@ -3,13 +3,13 @@ use console::style;
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 
-use crate::targets::{CommandRunner, RealCommandRunner};
 use crate::config::Config;
-use crate::sync_tracker::SyncIndex;
-use crate::remotes::{self, SyncRemote};
 use crate::reconcile::{self, ConflictPreference};
+use crate::remotes::{self, SyncRemote};
 use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
+use crate::sync_tracker::SyncIndex;
+use crate::targets::{CommandRunner, RealCommandRunner};
 use crate::ui;
 
 pub struct SyncOptions<'a> {
@@ -62,11 +62,7 @@ pub fn push_to_remotes(
                 sync_index.record_success(rem.name(), env, pushed_version);
             }
             Err(e) => {
-                spinner.error(format!(
-                    "↑ {}  {} — {e}",
-                    rem.name(),
-                    style("failed").red()
-                ));
+                spinner.error(format!("↑ {}  {} — {e}", rem.name(), style("failed").red()));
                 sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                 fail_count += 1;
             }

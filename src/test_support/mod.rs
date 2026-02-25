@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tempfile::TempDir;
 
-use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
 use crate::config::Config;
+use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
 
 #[derive(Debug, Clone)]
 pub struct RecordedCall {

@@ -15,11 +15,11 @@
 
 use anyhow::{Context, Result};
 
+use crate::config::{Config, ResolvedTarget, SupabaseTargetConfig};
 use crate::targets::{
     append_env_flags, check_command, resolve_env_flags, validate_stdin_kv_value, CommandOpts,
-    CommandRunner, DeployTarget, DeployMode,
+    CommandRunner, DeployMode, DeployTarget,
 };
-use crate::config::{Config, ResolvedTarget, SupabaseTargetConfig};
 
 pub struct SupabaseTarget<'a> {
     pub config: &'a Config,
@@ -303,9 +303,7 @@ targets:
             target_config,
             runner: &runner,
         };
-        target
-            .delete_secret("MY_KEY", &make_target("dev"))
-            .unwrap();
+        target.delete_secret("MY_KEY", &make_target("dev")).unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
             calls[0].1,

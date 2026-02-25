@@ -14,11 +14,11 @@
 
 use anyhow::{Context, Result};
 
+use crate::config::{Config, FlyTargetConfig, ResolvedTarget};
 use crate::targets::{
     append_env_flags, check_command, resolve_env_flags, validate_stdin_kv_value, CommandOpts,
-    CommandRunner, DeployTarget, DeployMode,
+    CommandRunner, DeployMode, DeployTarget,
 };
-use crate::config::{Config, FlyTargetConfig, ResolvedTarget};
 
 pub struct FlyTarget<'a> {
     pub config: &'a Config,
