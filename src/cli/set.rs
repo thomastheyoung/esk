@@ -15,7 +15,7 @@ pub fn run(
     value: Option<&str>,
     group: Option<&str>,
     no_sync: bool,
-    strict: bool,
+    bail: bool,
 ) -> Result<()> {
     run_with_runner(
         config,
@@ -24,7 +24,7 @@ pub fn run(
         value,
         group,
         no_sync,
-        strict,
+        bail,
         &RealCommandRunner,
     )
 }
@@ -37,7 +37,7 @@ pub fn run_with_runner(
     value: Option<&str>,
     group: Option<&str>,
     no_sync: bool,
-    strict: bool,
+    bail: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
@@ -125,9 +125,9 @@ pub fn run_with_runner(
             super::sync::push_to_remotes(&all_remotes, &payload, config, env, &mut sync_index)?;
         sync_index.save()?;
 
-        if remote_failures > 0 && strict {
+        if remote_failures > 0 && bail {
             bail!(
-                "{remote_failures} remote(s) failed to push (--strict). Target deploy skipped.\n\
+                "{remote_failures} remote(s) failed to push (--bail). Target deploy skipped.\n\
                  Fix the remote issue, then run:\n  \
                  esk sync --env {env}\n  \
                  esk deploy --env {env}"

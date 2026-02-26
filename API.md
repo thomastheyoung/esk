@@ -32,7 +32,7 @@ Idempotent — skips files that already exist. Updates `.gitignore` to include:
 Delete a secret value from an environment.
 
 ```bash
-esk delete <KEY> --env <ENV> [--no-sync] [--strict]
+esk delete <KEY> --env <ENV> [--no-sync] [--bail]
 ```
 
 | Argument    | Required | Description                                            |
@@ -40,7 +40,7 @@ esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 | `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)            |
 | `--env`     | Yes      | Environment to delete from                             |
 | `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy |
-| `--strict`  | No       | Fail if any remote push fails and skip deploy          |
+| `--bail`    | No       | Fail if any remote push fails and skip deploy          |
 
 **Behavior:**
 
@@ -49,15 +49,15 @@ esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 3. Removes the value from the encrypted store and records a tombstone, incrementing the version counter.
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
 5. Unless `--no-sync`: runs `deploy` for the affected environment (batch targets regenerate without the deleted key; individual targets call their delete command).
-6. With `--strict`: if any remote push fails, exits with an error and skips deploy entirely.
-7. Without `--strict`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
+6. With `--bail`: if any remote push fails, exits with an error and skips deploy entirely.
+7. Without `--bail`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
 
 **Examples:**
 
 ```bash
 esk delete API_KEY --env dev                     # Delete + auto-deploy
 esk delete API_KEY --env dev --no-sync           # Store only, skip sync and deploy
-esk delete API_KEY --env dev --strict            # Fail hard on remote errors
+esk delete API_KEY --env dev --bail              # Fail hard on remote errors
 ```
 
 ---
@@ -105,7 +105,7 @@ SHA-256 hash of each secret value is tracked per (secret, target, app, environme
 Set a secret value for an environment.
 
 ```bash
-esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--strict]
+esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--bail]
 ```
 
 | Argument    | Required | Description                                                          |
@@ -115,7 +115,7 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--str
 | `--value`   | No       | Secret value. If omitted, prompts interactively (hidden input)       |
 | `--group`   | No       | Config group to register the secret under (skips interactive prompt) |
 | `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy               |
-| `--strict`  | No       | Fail if any remote push fails and skip deploy                        |
+| `--bail`    | No       | Fail if any remote push fails and skip deploy                        |
 
 **Behavior:**
 
@@ -127,8 +127,8 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--str
 3. Stores the value in the encrypted store, incrementing the version counter.
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
 5. Unless `--no-sync`: runs `deploy` for the affected environment.
-6. With `--strict`: if any remote push fails, exits with an error and skips deploy entirely.
-7. Without `--strict`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
+6. With `--bail`: if any remote push fails, exits with an error and skips deploy entirely.
+7. Without `--bail`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
 
 **Examples:**
 
@@ -137,7 +137,7 @@ esk set API_KEY --env dev                        # Interactive prompt for value
 esk set API_KEY --env dev --value sk_test_123    # Inline value
 esk set API_KEY --env dev --group Stripe          # Register under Stripe group
 esk set API_KEY --env dev --no-sync              # Store only, skip sync and deploy
-esk set API_KEY --env dev --strict               # Fail hard on remote errors
+esk set API_KEY --env dev --bail                 # Fail hard on remote errors
 ```
 
 ---
@@ -292,7 +292,7 @@ esk generate --runtime --output src/env.ts
 Sync secrets with configured remotes. Pulls from remotes, reconciles with the local store, then pushes merged data to stale or drifted remotes.
 
 ```bash
-esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--no-partial] [--force] [--with-deploy] [--prefer <local|remote>]
+esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--bail] [--force] [--with-deploy] [--prefer <local|remote>]
 ```
 
 | Argument        | Required | Description                                                                 |
@@ -300,12 +300,10 @@ esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--no-partial] [--force] [-
 | `--env`         | No       | Environment to sync (omit to sync all configured environments)              |
 | `--only`        | No       | Sync a specific remote only                                                 |
 | `--dry-run`     | No       | Show what would change without modifying anything                           |
-| `--no-partial`  | No       | Fail if any remote is unreachable (no partial reconciliation)               |
+| `--bail`        | No       | Fail if any remote is unreachable (no partial reconciliation)               |
 | `--force`       | No       | Bypass version jump protection — skip interactive prompt (use with caution) |
 | `--with-deploy` | No       | Auto-run `deploy` after syncing                                             |
 | `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)         |
-
-Compatibility aliases: `--strict` for `--no-partial`, and `--deploy` for `--with-deploy`.
 
 **Requires:** At least one remote configured in `esk.yaml`. Remotes that fail preflight are skipped; if none remain, sync exits with a warning and no changes.
 

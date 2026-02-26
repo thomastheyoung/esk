@@ -20,12 +20,12 @@ fn run() -> Result<()> {
             key,
             env,
             no_sync,
-            strict,
+            bail,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            esk::cli::delete::run(&config, key, env, *no_sync, *strict)?;
+            esk::cli::delete::run(&config, key, env, *no_sync, *bail)?;
         }
         Commands::Deploy {
             env,
@@ -48,7 +48,7 @@ fn run() -> Result<()> {
             value,
             group,
             no_sync,
-            strict,
+            bail,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
@@ -60,7 +60,7 @@ fn run() -> Result<()> {
                 value.as_deref(),
                 group.as_deref(),
                 *no_sync,
-                *strict,
+                *bail,
             )?;
         }
         Commands::Get { key, env } => {
@@ -91,7 +91,7 @@ fn run() -> Result<()> {
             env,
             only,
             dry_run,
-            no_partial,
+            bail,
             force,
             with_deploy,
             prefer,
@@ -105,7 +105,7 @@ fn run() -> Result<()> {
                     env: env.as_deref(),
                     only: only.as_deref(),
                     dry_run: *dry_run,
-                    no_partial: *no_partial,
+                    bail: *bail,
                     force: *force,
                     auto_deploy: *with_deploy,
                     prefer: *prefer,

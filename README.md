@@ -101,7 +101,7 @@ By default, `esk set` and `esk delete` do more than update local storage:
 2. Push to configured remotes
 3. Deploy to configured targets
 
-Use `--no-sync` to skip steps 2 and 3. Use `--strict` to fail before deploy if any remote push fails.
+Use `--no-sync` to skip steps 2 and 3. Use `--bail` to fail before deploy if any remote push fails.
 
 ## Minimal config (`esk.yaml`)
 

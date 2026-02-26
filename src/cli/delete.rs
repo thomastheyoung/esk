@@ -7,8 +7,8 @@ use crate::suggest;
 use crate::sync_tracker::SyncIndex;
 use crate::targets::{CommandRunner, RealCommandRunner};
 
-pub fn run(config: &Config, key: &str, env: &str, no_sync: bool, strict: bool) -> Result<()> {
-    run_with_runner(config, key, env, no_sync, strict, &RealCommandRunner)
+pub fn run(config: &Config, key: &str, env: &str, no_sync: bool, bail: bool) -> Result<()> {
+    run_with_runner(config, key, env, no_sync, bail, &RealCommandRunner)
 }
 
 pub fn run_with_runner(
@@ -16,7 +16,7 @@ pub fn run_with_runner(
     key: &str,
     env: &str,
     no_sync: bool,
-    strict: bool,
+    bail: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
@@ -46,9 +46,9 @@ pub fn run_with_runner(
             super::sync::push_to_remotes(&all_remotes, &payload, config, env, &mut sync_index)?;
         sync_index.save()?;
 
-        if remote_failures > 0 && strict {
+        if remote_failures > 0 && bail {
             bail!(
-                "{remote_failures} remote(s) failed to push (--strict). Target deploy skipped.\n\
+                "{remote_failures} remote(s) failed to push (--bail). Target deploy skipped.\n\
                  Fix the remote issue, then run:\n  \
                  esk sync --env {env}\n  \
                  esk deploy --env {env}"

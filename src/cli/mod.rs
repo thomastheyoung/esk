@@ -36,7 +36,7 @@ pub enum Commands {
         no_sync: bool,
         /// Fail if any remote push fails (skip target deploy)
         #[arg(long)]
-        strict: bool,
+        bail: bool,
     },
     /// Deploy secrets to configured targets
     Deploy {
@@ -73,7 +73,7 @@ pub enum Commands {
         no_sync: bool,
         /// Fail if any remote push fails (skip target deploy)
         #[arg(long)]
-        strict: bool,
+        bail: bool,
     },
     /// Retrieve a secret value
     Get {
@@ -119,13 +119,13 @@ pub enum Commands {
         #[arg(long)]
         dry_run: bool,
         /// Fail if any remote is unreachable (no partial reconciliation)
-        #[arg(long = "no-partial", alias = "strict")]
-        no_partial: bool,
+        #[arg(long)]
+        bail: bool,
         /// Bypass version jump protection (use with caution)
         #[arg(long)]
         force: bool,
         /// Auto-deploy targets after syncing
-        #[arg(long = "with-deploy", alias = "deploy")]
+        #[arg(long = "with-deploy")]
         with_deploy: bool,
         /// When versions match but content differs, prefer this side
         #[arg(long, value_enum, default_value_t = ConflictPreference::Local)]

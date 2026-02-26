@@ -353,7 +353,7 @@ fn delete_creates_tombstone() {
 }
 
 #[test]
-fn set_strict_remote_failure_blocks_target_sync() {
+fn set_bail_remote_failure_blocks_target_sync() {
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -393,7 +393,7 @@ secrets:
         &runner,
     )
     .unwrap_err();
-    assert!(err.to_string().contains("--strict"));
+    assert!(err.to_string().contains("--bail"));
     assert!(err.to_string().contains("Target deploy skipped"));
 
     // Env file should NOT have been written
@@ -402,7 +402,7 @@ secrets:
 }
 
 #[test]
-fn delete_strict_remote_failure_blocks_target_sync() {
+fn delete_bail_remote_failure_blocks_target_sync() {
     let yaml = r#"
 project: testapp
 environments: [dev]
@@ -454,7 +454,7 @@ secrets:
 
     let err = cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, true, &runner)
         .unwrap_err();
-    assert!(err.to_string().contains("--strict"));
+    assert!(err.to_string().contains("--bail"));
     assert!(err.to_string().contains("Target deploy skipped"));
 
     // Env file should still contain MY_SECRET (sync was skipped)
@@ -506,7 +506,7 @@ fn remote_sync_unknown_env_errors() {
             env: Some("staging"),
             only: None,
             dry_run: false,
-            no_partial: false,
+            bail: false,
             force: false,
             auto_deploy: false,
             prefer: ConflictPreference::Local,
@@ -526,7 +526,7 @@ fn remote_sync_no_remotes() {
             env: Some("dev"),
             only: None,
             dry_run: false,
-            no_partial: false,
+            bail: false,
             force: false,
             auto_deploy: false,
             prefer: ConflictPreference::Local,

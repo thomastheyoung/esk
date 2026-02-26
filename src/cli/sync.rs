@@ -16,7 +16,7 @@ pub struct SyncOptions<'a> {
     pub env: Option<&'a str>,
     pub only: Option<&'a str>,
     pub dry_run: bool,
-    pub no_partial: bool,
+    pub bail: bool,
     pub force: bool,
     pub auto_deploy: bool,
     pub prefer: ConflictPreference,
@@ -90,7 +90,7 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
             envs[0],
             options.only,
             options.dry_run,
-            options.no_partial,
+            options.bail,
             options.force,
             options.auto_deploy,
             options.prefer,
@@ -105,13 +105,13 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
             env,
             options.only,
             options.dry_run,
-            options.no_partial,
+            options.bail,
             options.force,
             options.auto_deploy,
             options.prefer,
             &runner,
         ) {
-            if options.no_partial {
+            if options.bail {
                 bail!("sync failed for environment '{env}': {e}");
             }
             cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
@@ -136,7 +136,7 @@ pub fn run_with_runner(
     env: &str,
     only: Option<&str>,
     dry_run: bool,
-    no_partial: bool,
+    bail: bool,
     force: bool,
     auto_deploy: bool,
     prefer: ConflictPreference,
@@ -216,9 +216,9 @@ pub fn run_with_runner(
         }
     }
 
-    if !pull_failures.is_empty() && no_partial {
+    if !pull_failures.is_empty() && bail {
         bail!(
-            "{} remote(s) failed to respond: {}. Use without --no-partial to reconcile with partial data.",
+            "{} remote(s) failed to respond: {}. Use without --bail to reconcile with partial data.",
             pull_failures.len(),
             pull_failures.join(", ")
         );
