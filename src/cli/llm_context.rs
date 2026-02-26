@@ -28,8 +28,7 @@ mod tests {
             }
 
             assert!(
-                doc.contains(&format!("`esk {name}"))
-                    || doc.contains(&format!("esk {name}")),
+                doc.contains(&format!("`esk {name}")) || doc.contains(&format!("esk {name}")),
                 "subcommand `esk {name}` not found in docs/llm.md"
             );
 

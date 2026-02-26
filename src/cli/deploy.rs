@@ -143,17 +143,15 @@ impl DeployReport {
                 if self.verbose {
                     let mut skip_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
                     for entry in &self.skipped {
-                        let label =
-                            format!("{} {}", style("✔").dim(), style(&entry.key).dim());
+                        let label = format!("{} {}", style("✔").dim(), style(&entry.key).dim());
                         // Keep dim checkmark for skipped (not icon_success — intentionally subdued)
-                        skip_map
-                            .entry(entry.env.clone())
-                            .or_default()
-                            .push(ui::format_dashboard_line(
+                        skip_map.entry(entry.env.clone()).or_default().push(
+                            ui::format_dashboard_line(
                                 &label,
                                 &format!("{} (up to date)", entry.target),
                                 width,
-                            ));
+                            ),
+                        );
                     }
                     for (env_name, lines) in skip_map {
                         cliclack::note(format!("{env_name} (up to date)"), lines.join("\n"))?;

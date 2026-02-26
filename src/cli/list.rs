@@ -19,9 +19,7 @@ struct ListReport {
 impl ListReport {
     fn render(&self) -> Result<()> {
         if self.groups.is_empty() {
-            cliclack::log::info(
-                "No secrets stored. Run `esk set <KEY> --env <ENV>` to add one.",
-            )?;
+            cliclack::log::info("No secrets stored. Run `esk set <KEY> --env <ENV>` to add one.")?;
             return Ok(());
         }
 

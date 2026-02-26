@@ -87,13 +87,8 @@ pub fn run_with_runner(
         let sync_index_path = config.root.join(".esk/sync-index.json");
         let mut sync_index = SyncIndex::load(&sync_index_path);
         let all_remotes = remotes::build_remotes(config, runner);
-        push_results = super::sync::push_to_remotes(
-            &all_remotes,
-            &payload,
-            config,
-            env,
-            &mut sync_index,
-        )?;
+        push_results =
+            super::sync::push_to_remotes(&all_remotes, &payload, config, env, &mut sync_index)?;
         sync_index.save()?;
     }
 

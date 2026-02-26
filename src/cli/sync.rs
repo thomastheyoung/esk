@@ -505,12 +505,7 @@ pub fn run_with_runner(
                         });
                     }
                     Err(e) => {
-                        sync_index.record_failure(
-                            rem.name(),
-                            env,
-                            pushed_version,
-                            e.to_string(),
-                        );
+                        sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                         pushes.push(RemotePushResult {
                             remote: rem.name().to_string(),
                             success: false,
