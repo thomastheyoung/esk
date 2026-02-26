@@ -184,7 +184,7 @@ remotes:
     fn make_payload(secrets: &[(&str, &str)], version: u64) -> StorePayload {
         let mut map = BTreeMap::new();
         for (k, v) in secrets {
-            map.insert(k.to_string(), v.to_string());
+            map.insert((*k).to_string(), (*v).to_string());
         }
         StorePayload {
             secrets: map,
@@ -373,6 +373,30 @@ remotes:
 
     #[test]
     fn push_uses_env_version() {
+        // Capture stdin to verify version
+        struct StdinCapture {
+            calls: Mutex<Vec<StdinCall>>,
+        }
+        impl CommandRunner for StdinCapture {
+            fn run(
+                &self,
+                program: &str,
+                args: &[&str],
+                opts: CommandOpts,
+            ) -> Result<CommandOutput> {
+                self.calls.lock().unwrap().push((
+                    program.to_string(),
+                    args.iter().map(|s| (*s).to_string()).collect(),
+                    opts.stdin,
+                ));
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: b"encrypted".to_vec(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+
         let dir = tempfile::tempdir().unwrap();
         let yaml = format!(
             r#"
@@ -387,29 +411,6 @@ remotes:
         let config = make_config(&yaml);
         let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
 
-        // Capture stdin to verify version
-        struct StdinCapture {
-            calls: Mutex<Vec<StdinCall>>,
-        }
-        impl CommandRunner for StdinCapture {
-            fn run(
-                &self,
-                program: &str,
-                args: &[&str],
-                opts: CommandOpts,
-            ) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
-                    program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
-                    opts.stdin,
-                ));
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: b"encrypted".to_vec(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
         let runner = StdinCapture {
             calls: Mutex::new(Vec::new()),
         };

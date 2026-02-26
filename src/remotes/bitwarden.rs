@@ -493,17 +493,6 @@ remotes:
 
     #[test]
     fn secret_name_interpolation() {
-        let yaml = r#"
-project: myapp
-environments: [dev, prod]
-remotes:
-  bitwarden:
-    project_id: "proj-123"
-    secret_name: "{project}-{environment}"
-"#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
-
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -514,6 +503,17 @@ remotes:
                 })
             }
         }
+
+        let yaml = r#"
+project: myapp
+environments: [dev, prod]
+remotes:
+  bitwarden:
+    project_id: "proj-123"
+    secret_name: "{project}-{environment}"
+"#;
+        let config = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
 
         let remote = BitwardenRemote::new(&config, remote_config, &DummyRunner);
         assert_eq!(remote.secret_name("dev"), "myapp-dev");

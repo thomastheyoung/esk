@@ -333,14 +333,14 @@ mod tests {
     #[test]
     fn build_remotes_with_onepassword() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 remotes:
   1password:
     vault: V
     item_pattern: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -355,7 +355,7 @@ remotes:
         let dir = tempfile::tempdir().unwrap();
         let cloud_dir = tempfile::tempdir().unwrap();
         let yaml = format!(
-            r#"
+            r"
 project: x
 environments: [dev]
 remotes:
@@ -363,7 +363,7 @@ remotes:
     type: cloud_file
     path: {}
     format: encrypted
-"#,
+",
             cloud_dir.path().display()
         );
         let path = dir.path().join("esk.yaml");
@@ -381,7 +381,7 @@ remotes:
         // onepassword will fail (runner fails), cloud_file with existing dir will pass
         let cloud_dir = tempfile::tempdir().unwrap();
         let yaml = format!(
-            r#"
+            r"
 project: x
 environments: [dev]
 remotes:
@@ -392,7 +392,7 @@ remotes:
     type: cloud_file
     path: {}
     format: cleartext
-"#,
+",
             cloud_dir.path().display()
         );
         let path = dir.path().join("esk.yaml");
@@ -409,7 +409,7 @@ remotes:
     #[test]
     fn build_remotes_filters_cloud_file_missing_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 remotes:
@@ -417,7 +417,7 @@ remotes:
     type: cloud_file
     path: /nonexistent/path/nowhere
     format: cleartext
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -429,14 +429,14 @@ remotes:
     #[test]
     fn check_remote_health_op_ok() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 remotes:
   1password:
     vault: V
     item_pattern: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -450,14 +450,14 @@ remotes:
     #[test]
     fn check_remote_health_op_fails() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 remotes:
   1password:
     vault: V
     item_pattern: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -487,7 +487,7 @@ remotes:
         let cloud_dir1 = tempfile::tempdir().unwrap();
         let cloud_dir2 = tempfile::tempdir().unwrap();
         let yaml = format!(
-            r#"
+            r"
 project: x
 environments: [dev]
 remotes:
@@ -502,7 +502,7 @@ remotes:
     type: cloud_file
     path: {}
     format: cleartext
-"#,
+",
             cloud_dir1.path().display(),
             cloud_dir2.path().display()
         );

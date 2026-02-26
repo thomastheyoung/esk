@@ -514,7 +514,7 @@ mod tests {
     fn make_payload(secrets: &[(&str, &str)], version: u64) -> StorePayload {
         let mut map = BTreeMap::new();
         for (k, v) in secrets {
-            map.insert(k.to_string(), v.to_string());
+            map.insert((*k).to_string(), (*v).to_string());
         }
         StorePayload {
             secrets: map,
@@ -528,7 +528,7 @@ mod tests {
     fn make_remote(secrets: &[(&str, &str)]) -> BTreeMap<String, String> {
         secrets
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect()
     }
 
@@ -705,11 +705,11 @@ mod tests {
     ) -> StorePayload {
         let mut map = BTreeMap::new();
         for (k, v) in secrets {
-            map.insert(k.to_string(), v.to_string());
+            map.insert((*k).to_string(), (*v).to_string());
         }
         let mut tomb_map = BTreeMap::new();
         for (k, v) in tombstones {
-            tomb_map.insert(k.to_string(), *v);
+            tomb_map.insert((*k).to_string(), *v);
         }
         StorePayload {
             secrets: map,
@@ -850,7 +850,7 @@ mod tests {
     fn make_composite(secrets: &[(&str, &str)]) -> BTreeMap<String, String> {
         secrets
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect()
     }
 

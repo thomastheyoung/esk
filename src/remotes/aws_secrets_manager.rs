@@ -268,6 +268,17 @@ mod tests {
 
     #[test]
     fn secret_name_substitution() {
+        struct DummyRunner;
+        impl CommandRunner for DummyRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: myapp
@@ -282,16 +293,6 @@ remotes:
         let remote_config: AwsSecretsManagerRemoteConfig =
             config.remote_config("aws_secrets_manager").unwrap();
 
-        struct DummyRunner;
-        impl CommandRunner for DummyRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
         let runner = DummyRunner;
         let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         assert_eq!(remote.secret_name("dev"), "myapp/dev");
@@ -300,22 +301,6 @@ remotes:
 
     #[test]
     fn base_args_with_region_and_profile() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
-project: myapp
-environments: [dev]
-remotes:
-  aws_secrets_manager:
-    secret_name: test
-    region: us-west-2
-    profile: staging
-"#;
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        let config = Config::load(&path).unwrap();
-        let remote_config: AwsSecretsManagerRemoteConfig =
-            config.remote_config("aws_secrets_manager").unwrap();
-
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -326,6 +311,23 @@ remotes:
                 })
             }
         }
+
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r"
+project: myapp
+environments: [dev]
+remotes:
+  aws_secrets_manager:
+    secret_name: test
+    region: us-west-2
+    profile: staging
+";
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
+
         let runner = DummyRunner;
         let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         let args = remote.base_args();
@@ -334,20 +336,6 @@ remotes:
 
     #[test]
     fn base_args_empty_when_no_options() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
-project: myapp
-environments: [dev]
-remotes:
-  aws_secrets_manager:
-    secret_name: test
-"#;
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        let config = Config::load(&path).unwrap();
-        let remote_config: AwsSecretsManagerRemoteConfig =
-            config.remote_config("aws_secrets_manager").unwrap();
-
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -358,6 +346,21 @@ remotes:
                 })
             }
         }
+
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r"
+project: myapp
+environments: [dev]
+remotes:
+  aws_secrets_manager:
+    secret_name: test
+";
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
+
         let runner = DummyRunner;
         let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         assert!(remote.base_args().is_empty());
@@ -366,13 +369,13 @@ remotes:
     #[test]
     fn preflight_success() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   aws_secrets_manager:
     secret_name: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -402,13 +405,13 @@ remotes:
     #[test]
     fn preflight_missing_aws_cli() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   aws_secrets_manager:
     secret_name: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -424,13 +427,13 @@ remotes:
     #[test]
     fn preflight_auth_failure() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   aws_secrets_manager:
     secret_name: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();

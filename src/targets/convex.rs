@@ -161,13 +161,13 @@ mod tests {
 
     fn make_config(dir: &std::path::Path, deployment_source: Option<&str>) -> Config {
         let mut yaml = String::from(
-            r#"
+            r"
 project: x
 environments: [dev, prod]
 targets:
   convex:
     path: apps/api
-"#,
+",
         );
         if let Some(s) = deployment_source {
             yaml.push_str(&format!("    deployment_source: {s}\n"));

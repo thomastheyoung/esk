@@ -986,7 +986,7 @@ mod tests {
     fn secrets(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
         pairs
             .iter()
-            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect()
     }
 
@@ -1170,7 +1170,7 @@ mod tests {
         let specs: BTreeMap<&str, &Validation> = BTreeMap::from([("A", &spec_a), ("B", &spec_b)]);
         let err = detect_cross_field_cycles(&specs).unwrap_err();
         assert!(err.to_string().contains("circular cross-field reference"));
-        assert!(err.to_string().contains("A") && err.to_string().contains("B"));
+        assert!(err.to_string().contains('A') && err.to_string().contains('B'));
     }
 
     #[test]

@@ -451,7 +451,7 @@ targets:
     #[test]
     fn custom_secret_name() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 targets:
@@ -459,7 +459,7 @@ targets:
     namespace:
       dev: ns
     secret_name: custom-secret
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();

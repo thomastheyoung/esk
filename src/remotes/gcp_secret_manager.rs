@@ -240,7 +240,7 @@ remotes:
     fn make_payload(secrets: &[(&str, &str)], version: u64) -> StorePayload {
         let mut map = BTreeMap::new();
         for (k, v) in secrets {
-            map.insert(k.to_string(), v.to_string());
+            map.insert((*k).to_string(), (*v).to_string());
         }
         StorePayload {
             secrets: map,
@@ -423,9 +423,6 @@ remotes:
 
     #[test]
     fn push_uses_env_version() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
-
         // Capture stdin to verify version
         struct StdinCapture {
             calls: Mutex<Vec<StdinCall>>,
@@ -439,7 +436,7 @@ remotes:
             ) -> Result<CommandOutput> {
                 self.calls.lock().unwrap().push((
                     program.to_string(),
-                    args.iter().map(|s| s.to_string()).collect(),
+                    args.iter().map(|s| (*s).to_string()).collect(),
                     opts.stdin,
                 ));
                 Ok(CommandOutput {
@@ -449,6 +446,9 @@ remotes:
                 })
             }
         }
+
+        let config = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
         let runner = StdinCapture {
             calls: Mutex::new(Vec::new()),
         };

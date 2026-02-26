@@ -287,13 +287,13 @@ mod tests {
 
     #[test]
     fn preflight_success() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   s3:
     bucket: my-secrets-bucket
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
@@ -310,7 +310,7 @@ remotes:
 
     #[test]
     fn preflight_success_with_profile_region() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
@@ -318,7 +318,7 @@ remotes:
     bucket: my-secrets-bucket
     region: us-west-2
     profile: myprofile
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
@@ -340,13 +340,13 @@ remotes:
 
     #[test]
     fn preflight_auth_failure() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   s3:
     bucket: my-secrets-bucket
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
@@ -360,13 +360,13 @@ remotes:
 
     #[test]
     fn preflight_aws_not_installed() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   s3:
     bucket: my-secrets-bucket
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = ErrorCommandRunner::missing_command();
@@ -377,17 +377,6 @@ remotes:
 
     #[test]
     fn s3_uri_with_prefix() {
-        let yaml = r#"
-project: myapp
-environments: [dev]
-remotes:
-  s3:
-    bucket: my-bucket
-    prefix: "esk/myapp"
-"#;
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
-
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -398,6 +387,17 @@ remotes:
                 })
             }
         }
+
+        let yaml = r#"
+project: myapp
+environments: [dev]
+remotes:
+  s3:
+    bucket: my-bucket
+    prefix: "esk/myapp"
+"#;
+        let config = make_config(yaml);
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
 
         let remote = S3Remote::new(&config, remote_config, &DummyRunner);
         assert_eq!(
@@ -412,16 +412,6 @@ remotes:
 
     #[test]
     fn s3_uri_without_prefix() {
-        let yaml = r#"
-project: myapp
-environments: [dev]
-remotes:
-  s3:
-    bucket: my-bucket
-"#;
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
-
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -432,6 +422,16 @@ remotes:
                 })
             }
         }
+
+        let yaml = r"
+project: myapp
+environments: [dev]
+remotes:
+  s3:
+    bucket: my-bucket
+";
+        let config = make_config(yaml);
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
 
         let remote = S3Remote::new(&config, remote_config, &DummyRunner);
         assert_eq!(remote.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
@@ -439,17 +439,6 @@ remotes:
 
     #[test]
     fn s3_uri_encrypted_format() {
-        let yaml = r#"
-project: myapp
-environments: [dev]
-remotes:
-  s3:
-    bucket: my-bucket
-    format: encrypted
-"#;
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
-
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -461,13 +450,24 @@ remotes:
             }
         }
 
+        let yaml = r"
+project: myapp
+environments: [dev]
+remotes:
+  s3:
+    bucket: my-bucket
+    format: encrypted
+";
+        let config = make_config(yaml);
+        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+
         let remote = S3Remote::new(&config, remote_config, &DummyRunner);
         assert_eq!(remote.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
     }
 
     #[test]
     fn push_cleartext_sends_to_s3() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
@@ -475,7 +475,7 @@ remotes:
     bucket: my-bucket
     prefix: backups
     format: cleartext
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
@@ -503,14 +503,14 @@ remotes:
 
     #[test]
     fn push_skips_empty_env() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev, prod]
 remotes:
   s3:
     bucket: my-bucket
     format: cleartext
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
@@ -532,14 +532,14 @@ remotes:
 
     #[test]
     fn pull_cleartext_parses_response() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   s3:
     bucket: my-bucket
     format: cleartext
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
 
@@ -567,14 +567,14 @@ remotes:
 
     #[test]
     fn pull_not_found_returns_none() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   s3:
     bucket: my-bucket
     format: cleartext
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner =
@@ -586,14 +586,14 @@ remotes:
 
     #[test]
     fn pull_auth_error_propagates() {
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   s3:
     bucket: my-bucket
     format: cleartext
-"#;
+";
         let config = make_config(yaml);
         let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
         let runner =

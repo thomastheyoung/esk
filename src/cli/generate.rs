@@ -390,6 +390,7 @@ fn pattern_matches(pattern: &str, path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::{Required, TargetsConfig};
     use std::collections::BTreeMap;
 
     fn collect_keys(config: &Config) -> BTreeSet<String> {
@@ -406,7 +407,7 @@ mod tests {
             project: "test".to_string(),
             environments: vec!["dev".to_string(), "prod".to_string()],
             apps: BTreeMap::new(),
-            targets: Default::default(),
+            targets: TargetsConfig::default(),
             remotes: BTreeMap::new(),
             secrets,
             generate: Vec::new(),
@@ -419,7 +420,7 @@ mod tests {
             description: None,
             targets: BTreeMap::new(),
             validate: None,
-            required: Default::default(),
+            required: Required::default(),
             allow_empty: false,
         }
     }
@@ -429,7 +430,7 @@ mod tests {
             description: Some(desc.to_string()),
             targets: BTreeMap::new(),
             validate: None,
-            required: Default::default(),
+            required: Required::default(),
             allow_empty: false,
         }
     }
@@ -439,7 +440,7 @@ mod tests {
             description: None,
             targets: BTreeMap::new(),
             validate: Some(v),
-            required: Default::default(),
+            required: Required::default(),
             allow_empty: false,
         }
     }

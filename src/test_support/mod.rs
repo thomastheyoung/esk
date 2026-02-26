@@ -97,7 +97,7 @@ impl CommandRunner for MockCommandRunner {
             .expect("runner calls mutex poisoned")
             .push(RecordedCall {
                 program: program.to_string(),
-                args: args.iter().map(|s| s.to_string()).collect(),
+                args: args.iter().map(|s| (*s).to_string()).collect(),
                 cwd: opts.cwd,
                 stdin: opts.stdin,
                 env: opts.env,

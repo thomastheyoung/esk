@@ -129,7 +129,7 @@ mod tests {
     use super::*;
 
     fn envs(v: &[&str]) -> Vec<String> {
-        v.iter().map(|s| s.to_string()).collect()
+        v.iter().map(|s| (*s).to_string()).collect()
     }
 
     fn strip(s: &str) -> String {

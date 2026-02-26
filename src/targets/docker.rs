@@ -634,12 +634,12 @@ targets:
     #[test]
     fn default_name_pattern() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 targets:
   docker: {}
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();

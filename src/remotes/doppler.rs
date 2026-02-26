@@ -191,7 +191,7 @@ mod tests {
     }
 
     fn doppler_yaml() -> &'static str {
-        r#"
+        r"
 project: myapp
 environments: [dev, prod]
 remotes:
@@ -200,13 +200,13 @@ remotes:
     config_map:
       dev: dev_config
       prod: prd
-"#
+"
     }
 
     fn make_payload(secrets: &[(&str, &str)], version: u64) -> StorePayload {
         let mut map = BTreeMap::new();
         for (k, v) in secrets {
-            map.insert(k.to_string(), v.to_string());
+            map.insert((*k).to_string(), (*v).to_string());
         }
         StorePayload {
             secrets: map,

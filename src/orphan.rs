@@ -96,7 +96,7 @@ mod tests {
             description: None,
             targets: vec![ResolvedTarget {
                 service: service.to_string(),
-                app: app.map(|s| s.to_string()),
+                app: app.map(std::string::ToString::to_string),
                 environment: env.to_string(),
             }],
             validate: None,

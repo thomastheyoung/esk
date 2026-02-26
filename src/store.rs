@@ -775,7 +775,7 @@ mod tests {
         // No temp files left behind
         let entries: Vec<_> = std::fs::read_dir(dir.path())
             .unwrap()
-            .filter_map(|e| e.ok())
+            .filter_map(std::result::Result::ok)
             .filter(|e| e.file_name().to_string_lossy().starts_with(".tmp"))
             .collect();
         assert!(entries.is_empty());
@@ -1057,7 +1057,7 @@ mod tests {
             env_versions: BTreeMap::new(),
             env_last_changed_at: BTreeMap::new(),
         };
-        let debug = format!("{:?}", payload);
+        let debug = format!("{payload:?}");
         assert!(!debug.contains("super_secret_value"));
         assert!(debug.contains("1 entries"));
     }
@@ -1066,7 +1066,7 @@ mod tests {
     fn secret_store_debug_redacts_key() {
         let dir = tmp_root();
         let store = SecretStore::load_or_create(dir.path()).unwrap();
-        let debug = format!("{:?}", store);
+        let debug = format!("{store:?}");
         assert!(!debug.contains(&hex::encode(&store.key)));
         assert!(debug.contains("store_path"));
     }

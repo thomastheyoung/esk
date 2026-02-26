@@ -443,7 +443,7 @@ mod tests {
     }
 
     impl DeployTarget for TestTarget {
-        fn name(&self) -> &str {
+        fn name(&self) -> &'static str {
             "test"
         }
 
@@ -555,6 +555,17 @@ targets:
 
     #[test]
     fn check_target_health_all_ok() {
+        struct OkRunner;
+        impl CommandRunner for OkRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: b"1.0.0".to_vec(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -571,17 +582,6 @@ targets:
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = crate::config::Config::load(&path).unwrap();
-
-        struct OkRunner;
-        impl CommandRunner for OkRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: b"1.0.0".to_vec(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
 
         let health = check_target_health(&config, &OkRunner);
         assert_eq!(health.len(), 2);
@@ -637,12 +637,6 @@ targets:
 
     #[test]
     fn check_target_health_no_targets() {
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = "project: x\nenvironments: [dev]";
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        let config = crate::config::Config::load(&path).unwrap();
-
         struct OkRunner;
         impl CommandRunner for OkRunner {
             fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
@@ -653,6 +647,12 @@ targets:
                 })
             }
         }
+
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]";
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = crate::config::Config::load(&path).unwrap();
 
         let health = check_target_health(&config, &OkRunner);
         assert!(health.is_empty());

@@ -1337,7 +1337,7 @@ secrets:
     #[test]
     fn validate_service_known_but_unconfigured() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
@@ -1345,7 +1345,7 @@ secrets:
     KEY:
       targets:
         env: [dev]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         let chain = console::strip_ansi_codes(&format!("{err:?}")).to_string();
@@ -1430,7 +1430,7 @@ secrets:
     #[test]
     fn validate_onepassword_under_adapters_gives_helpful_error() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
@@ -1438,7 +1438,7 @@ secrets:
     KEY:
       targets:
         1password: [dev]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         let chain = format!("{err:?}");
@@ -1448,14 +1448,14 @@ secrets:
     #[test]
     fn validate_remotes_onepassword() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 remotes:
   1password:
     vault: V
     item_pattern: test
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let op = config.onepassword_remote_config().unwrap();
@@ -1488,13 +1488,13 @@ remotes:
     #[test]
     fn validate_remotes_unknown_type_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 remotes:
   foo:
     type: unknown_thing
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         assert!(err.to_string().contains("unknown remote type"));
@@ -1503,13 +1503,13 @@ remotes:
     #[test]
     fn validate_remotes_unknown_name_no_type_errors() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 remotes:
   foo:
     bar: baz
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         assert!(err.to_string().contains("unknown remote 'foo'"));
@@ -2018,7 +2018,7 @@ targets:
     #[test]
     fn parse_validate_block() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
@@ -2027,7 +2027,7 @@ secrets:
       validate:
         format: integer
         range: [1, 65535]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("PORT").unwrap();
@@ -2039,7 +2039,7 @@ secrets:
     #[test]
     fn parse_validate_with_enum() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
@@ -2047,7 +2047,7 @@ secrets:
     NODE_ENV:
       validate:
         enum: [development, staging, production]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("NODE_ENV").unwrap();
@@ -2075,7 +2075,7 @@ secrets:
     #[test]
     fn validate_rejects_range_on_string_format() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
@@ -2084,7 +2084,7 @@ secrets:
       validate:
         format: string
         range: [1, 10]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         assert!(Config::load(&path).is_err());
     }
@@ -2092,13 +2092,13 @@ secrets:
     #[test]
     fn no_validate_block_is_none() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
   General:
     KEY: {}
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("KEY").unwrap();
@@ -2110,13 +2110,13 @@ secrets:
     #[test]
     fn required_defaults_to_all() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
   General:
     KEY: {}
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("KEY").unwrap();
@@ -2126,14 +2126,14 @@ secrets:
     #[test]
     fn required_true_parses() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
   General:
     KEY:
       required: true
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("KEY").unwrap();
@@ -2143,14 +2143,14 @@ secrets:
     #[test]
     fn required_false_parses() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
   General:
     KEY:
       required: false
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("KEY").unwrap();
@@ -2160,7 +2160,7 @@ secrets:
     #[test]
     fn required_environments_parses() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev, prod, staging]
 targets:
@@ -2172,7 +2172,7 @@ secrets:
       required: [prod, staging]
       targets:
         netlify: [dev, prod, staging]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("KEY").unwrap();
@@ -2185,20 +2185,19 @@ secrets:
     #[test]
     fn required_unknown_env_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev, prod]
 secrets:
   General:
     KEY:
       required: [prod, nonexistent]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         assert!(
             err.to_string().contains("nonexistent"),
-            "expected error about nonexistent env, got: {}",
-            err
+            "expected error about nonexistent env, got: {err}"
         );
     }
 
@@ -2229,7 +2228,7 @@ secrets:
     #[test]
     fn check_requirements_finds_missing() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev, prod]
 targets:
@@ -2240,7 +2239,7 @@ secrets:
     KEY:
       targets:
         netlify: [dev, prod]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2254,7 +2253,7 @@ secrets:
     #[test]
     fn check_requirements_satisfied() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev, prod]
 targets:
@@ -2265,7 +2264,7 @@ secrets:
     KEY:
       targets:
         netlify: [dev, prod]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2279,7 +2278,7 @@ secrets:
     #[test]
     fn check_requirements_optional_missing() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev, prod]
 targets:
@@ -2291,7 +2290,7 @@ secrets:
       required: false
       targets:
         netlify: [dev, prod]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2303,7 +2302,7 @@ secrets:
     #[test]
     fn check_requirements_env_scoped() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev, prod]
 targets:
@@ -2315,7 +2314,7 @@ secrets:
       required: [prod]
       targets:
         netlify: [dev, prod]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2330,7 +2329,7 @@ secrets:
     #[test]
     fn check_requirements_respects_env_filter() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev, prod]
 targets:
@@ -2341,7 +2340,7 @@ secrets:
     KEY:
       targets:
         netlify: [dev, prod]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2355,7 +2354,7 @@ secrets:
     #[test]
     fn check_requirements_deduplicates_across_targets() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 targets:
@@ -2368,7 +2367,7 @@ secrets:
       targets:
         netlify: [dev]
         railway: [dev]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2381,7 +2380,7 @@ secrets:
     #[test]
     fn check_requirements_respects_target_filter() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 targets:
@@ -2400,7 +2399,7 @@ secrets:
       targets:
         netlify: [dev]
         railway: [dev]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2419,7 +2418,7 @@ secrets:
     #[test]
     fn check_requirements_populates_targets() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 targets:
@@ -2432,7 +2431,7 @@ secrets:
       targets:
         netlify: [dev]
         railway: [dev]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2446,7 +2445,7 @@ secrets:
     #[test]
     fn required_env_without_target_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev, prod]
 targets:
@@ -2458,28 +2457,27 @@ secrets:
       required: [prod]
       targets:
         netlify: [dev]
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         assert!(
             err.to_string()
                 .contains("required in 'prod' but has no target"),
-            "expected target mismatch error, got: {}",
-            err
+            "expected target mismatch error, got: {err}"
         );
     }
 
     #[test]
     fn allow_empty_defaults_to_false() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: test
 environments: [dev]
 secrets:
   General:
     MY_KEY:
       targets: {}
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("MY_KEY").unwrap();
@@ -2489,7 +2487,7 @@ secrets:
     #[test]
     fn allow_empty_parses_true() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: test
 environments: [dev]
 secrets:
@@ -2497,7 +2495,7 @@ secrets:
     MY_KEY:
       allow_empty: true
       targets: {}
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("MY_KEY").unwrap();
@@ -2507,7 +2505,7 @@ secrets:
     #[test]
     fn allow_empty_propagates_to_resolved() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: test
 environments: [dev]
 secrets:
@@ -2517,7 +2515,7 @@ secrets:
     ALLOWED:
       allow_empty: true
       targets: {}
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
@@ -2566,7 +2564,7 @@ secrets:
     #[test]
     fn cross_field_rejects_unknown_key() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: x
 environments: [dev]
 secrets:
@@ -2575,7 +2573,7 @@ secrets:
       validate:
         required_with: [NONEXISTENT]
       targets: {}
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         let chain = format!("{err:?}");
@@ -2612,14 +2610,14 @@ secrets:
     #[test]
     fn generate_section_parses() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: testapp
 environments: [dev]
 generate:
   - format: dts
   - format: env-example
     output: config/.env.example
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         assert_eq!(config.generate.len(), 2);
@@ -2643,20 +2641,19 @@ generate:
     #[test]
     fn generate_duplicate_output_path_rejected() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: testapp
 environments: [dev]
 generate:
   - format: dts
   - format: ts
     output: env.d.ts
-"#;
+";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         assert!(
             err.to_string().contains("duplicate generate output path"),
-            "got: {}",
-            err
+            "got: {err}"
         );
     }
 }

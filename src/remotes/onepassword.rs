@@ -439,14 +439,14 @@ mod tests {
     #[test]
     fn onepassword_preflight_success() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   1password:
     vault: V
     item_pattern: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -475,14 +475,14 @@ remotes:
     #[test]
     fn onepassword_preflight_vault_inaccessible() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   1password:
     vault: SecretVault
     item_pattern: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -511,14 +511,14 @@ remotes:
     #[test]
     fn onepassword_preflight_missing_op() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   1password:
     vault: V
     item_pattern: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -534,6 +534,18 @@ remotes:
 
     #[test]
     fn item_name_substitution() {
+        use crate::targets::{CommandOpts, CommandOutput};
+        struct DummyRunner;
+        impl CommandRunner for DummyRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: myapp
@@ -547,7 +559,13 @@ remotes:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_remote_config().unwrap();
+        let runner = DummyRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name("dev"), "myapp - Dev");
+    }
 
+    #[test]
+    fn item_name_lowercase() {
         use crate::targets::{CommandOpts, CommandOutput};
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -559,13 +577,7 @@ remotes:
                 })
             }
         }
-        let runner = DummyRunner;
-        let remote = OnePasswordRemote::new(&config, op_config, &runner);
-        assert_eq!(remote.item_name("dev"), "myapp - Dev");
-    }
 
-    #[test]
-    fn item_name_lowercase() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: myapp
@@ -579,7 +591,13 @@ remotes:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_remote_config().unwrap();
+        let runner = DummyRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name("dev"), "dev");
+    }
 
+    #[test]
+    fn item_name_empty_env() {
         use crate::targets::{CommandOpts, CommandOutput};
         struct DummyRunner;
         impl CommandRunner for DummyRunner {
@@ -591,13 +609,7 @@ remotes:
                 })
             }
         }
-        let runner = DummyRunner;
-        let remote = OnePasswordRemote::new(&config, op_config, &runner);
-        assert_eq!(remote.item_name("dev"), "dev");
-    }
 
-    #[test]
-    fn item_name_empty_env() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: myapp
@@ -611,18 +623,6 @@ remotes:
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let op_config = config.onepassword_remote_config().unwrap();
-
-        use crate::targets::{CommandOpts, CommandOutput};
-        struct DummyRunner;
-        impl CommandRunner for DummyRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
         let runner = DummyRunner;
         let remote = OnePasswordRemote::new(&config, op_config, &runner);
         assert_eq!(remote.item_name(""), "myapp - ");
@@ -645,7 +645,7 @@ remotes:
     #[test]
     fn push_item_removes_stale_fields() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
@@ -659,7 +659,7 @@ secrets:
   AWS:
     SECRET:
       targets: {}
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -703,7 +703,7 @@ secrets:
     #[test]
     fn push_item_no_delete_when_no_stale_fields() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
@@ -714,7 +714,7 @@ secrets:
   Stripe:
     API_KEY:
       targets: {}
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -753,14 +753,14 @@ secrets:
     #[test]
     fn push_item_stale_field_uses_remote_section() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   1password:
     vault: V
     item_pattern: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
@@ -801,14 +801,14 @@ remotes:
     #[test]
     fn push_item_create_path_no_delete() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
+        let yaml = r"
 project: myapp
 environments: [dev]
 remotes:
   1password:
     vault: V
     item_pattern: test
-"#;
+";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
