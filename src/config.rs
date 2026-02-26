@@ -517,7 +517,9 @@ impl Config {
             .with_context(|| format!("failed to read {}", path.display()))?;
         let mut config: Config = serde_yaml::from_str(&contents)
             .with_context(|| format!("failed to parse {}", path.display()))?;
-        config.root = path.parent().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        config.root = path
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         config.validate()?;
         Ok(config)
     }
@@ -583,8 +585,11 @@ impl Config {
 
                 // Validate required environment references
                 if let Required::Environments(ref envs) = def.required {
-                    let env_set: BTreeSet<&str> =
-                        self.environments.iter().map(std::string::String::as_str).collect();
+                    let env_set: BTreeSet<&str> = self
+                        .environments
+                        .iter()
+                        .map(std::string::String::as_str)
+                        .collect();
                     for req_env in envs {
                         if !env_set.contains(req_env.as_str()) {
                             bail!(
@@ -1141,7 +1146,6 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
 
     Ok(())
 }
-
 
 #[cfg(test)]
 mod tests {

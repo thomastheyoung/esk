@@ -114,7 +114,8 @@ impl<'a> OnePasswordRemote<'a> {
         for (key, value) in secrets {
             let vendor = self
                 .config
-                .find_secret(key).map_or_else(|| "General".to_string(), |(v, _)| v);
+                .find_secret(key)
+                .map_or_else(|| "General".to_string(), |(v, _)| v);
             by_vendor
                 .entry(vendor)
                 .or_default()

@@ -145,7 +145,11 @@ pub fn run_with_runner(
         if !cross_field_specs.is_empty() {
             let envs: Vec<&str> = match env {
                 Some(e) => vec![e],
-                None => config.environments.iter().map(std::string::String::as_str).collect(),
+                None => config
+                    .environments
+                    .iter()
+                    .map(std::string::String::as_str)
+                    .collect(),
             };
             let mut cross_errors: Vec<String> = Vec::new();
             for &env_name in &envs {

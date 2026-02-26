@@ -68,7 +68,11 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
             config.validate_env(e)?;
             vec![e]
         }
-        None => config.environments.iter().map(std::string::String::as_str).collect(),
+        None => config
+            .environments
+            .iter()
+            .map(std::string::String::as_str)
+            .collect(),
     };
 
     if envs.len() == 1 {

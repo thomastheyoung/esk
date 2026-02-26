@@ -36,7 +36,11 @@ pub fn run_with_runner(
     // Warn if deleting a required secret
     if let Some((_, def)) = config.find_secret(key) {
         if def.required.is_required_in(env) && std::io::stdin().is_terminal() {
-            let targets: Vec<String> = def.targets.keys().map(std::string::ToString::to_string).collect();
+            let targets: Vec<String> = def
+                .targets
+                .keys()
+                .map(std::string::ToString::to_string)
+                .collect();
             let target_list = if targets.is_empty() {
                 String::new()
             } else {

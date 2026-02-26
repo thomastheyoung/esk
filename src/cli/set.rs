@@ -74,9 +74,7 @@ pub fn run_with_runner(
                 };
 
                 config::add_secret_to_config(&config_path, key, &chosen_group)?;
-                cliclack::log::success(format!(
-                    "Added '{key}' to esk.yaml under {chosen_group}"
-                ))?;
+                cliclack::log::success(format!("Added '{key}' to esk.yaml under {chosen_group}"))?;
             } else {
                 cliclack::log::warning(format!("Secret '{key}' is not defined in esk.yaml"))?;
             }
@@ -99,9 +97,7 @@ pub fn run_with_runner(
     }
 
     if !opts.force && crate::validate::is_effectively_empty(&secret_value) {
-        let allow = config
-            .find_secret(key)
-            .is_some_and(|(_, d)| d.allow_empty);
+        let allow = config.find_secret(key).is_some_and(|(_, d)| d.allow_empty);
         if !allow {
             let kind = if secret_value.is_empty() {
                 "empty"

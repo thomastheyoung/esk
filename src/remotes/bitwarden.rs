@@ -84,7 +84,9 @@ impl<'a> BitwardenRemote<'a> {
         items.iter().find_map(|item| {
             let item_name = item.get("key")?.as_str()?;
             if item_name == name {
-                item.get("id")?.as_str().map(std::string::ToString::to_string)
+                item.get("id")?
+                    .as_str()
+                    .map(std::string::ToString::to_string)
             } else {
                 None
             }

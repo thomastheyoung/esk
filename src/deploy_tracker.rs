@@ -58,9 +58,7 @@ impl DeployIndex {
         let contents = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!(
-                    "Warning: could not read deploy index ({e}), starting fresh"
-                );
+                eprintln!("Warning: could not read deploy index ({e}), starting fresh");
                 return Self::new(path);
             }
         };

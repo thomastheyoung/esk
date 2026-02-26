@@ -301,7 +301,9 @@ pub fn validate_cross_field(
         }
 
         let composite = format!("{key}:{env}");
-        let value = secrets.get(&composite).map_or("", std::string::String::as_str);
+        let value = secrets
+            .get(&composite)
+            .map_or("", std::string::String::as_str);
         let has_value = !value.is_empty();
 
         // required_if: all conditions match (AND) → secret must have a non-empty value

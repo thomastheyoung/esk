@@ -117,7 +117,11 @@ impl Dashboard {
 
         let envs: Vec<&str> = match env {
             Some(e) => vec![e],
-            None => config.environments.iter().map(std::string::String::as_str).collect(),
+            None => config
+                .environments
+                .iter()
+                .map(std::string::String::as_str)
+                .collect(),
         };
 
         // 1. Health checks
@@ -588,12 +592,7 @@ impl Dashboard {
                         .unwrap_or_default();
                     deploy_lines.push(ui::section_entry(
                         &format!("{}:{}", entry.key, entry.env),
-                        &format!(
-                            "→ {}  {}{}",
-                            entry.target,
-                            style(freshness).dim(),
-                            err_text,
-                        ),
+                        &format!("→ {}  {}{}", entry.target, style(freshness).dim(), err_text,),
                     ));
                 }
             }
@@ -918,7 +917,10 @@ mod tests {
 
     #[test]
     fn relative_time_invalid() {
-        assert_eq!(crate::ui::format_relative_time("not-a-timestamp"), "not-a-timestamp");
+        assert_eq!(
+            crate::ui::format_relative_time("not-a-timestamp"),
+            "not-a-timestamp"
+        );
     }
 
     struct OkRunner;

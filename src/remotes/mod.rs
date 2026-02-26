@@ -36,12 +36,16 @@ pub fn parse_pulled_secrets(
     env: &str,
 ) -> (BTreeMap<String, String>, u64) {
     let version: u64 = match data.get(ESK_VERSION_KEY) {
-        Some(v) => if let Ok(n) = v.parse() { n } else {
-            let _ = cliclack::log::warning(format!(
+        Some(v) => {
+            if let Ok(n) = v.parse() {
+                n
+            } else {
+                let _ = cliclack::log::warning(format!(
                 "Remote returned unparseable {ESK_VERSION_KEY}: '{v}'. Defaulting to version 0."
             ));
-            0
-        },
+                0
+            }
+        }
         None => {
             let _ = cliclack::log::warning(format!(
                 "Remote did not include {ESK_VERSION_KEY}. Defaulting to version 0."

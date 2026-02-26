@@ -172,7 +172,10 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
                     "file:///dev/stdin".to_string(),
                 ];
                 create_args.extend(self.base_args());
-                let create_ref: Vec<&str> = create_args.iter().map(std::string::String::as_str).collect();
+                let create_ref: Vec<&str> = create_args
+                    .iter()
+                    .map(std::string::String::as_str)
+                    .collect();
 
                 let create_output = self
                     .runner

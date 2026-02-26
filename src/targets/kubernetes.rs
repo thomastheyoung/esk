@@ -406,7 +406,11 @@ targets:
         let secrets = vec![make_secret("KEY", "val")];
         let results = target.deploy_batch(&secrets, &make_target("dev"));
         assert!(!results[0].outcome.is_success());
-        assert!(results[0].outcome.error_message().unwrap().contains("forbidden"));
+        assert!(results[0]
+            .outcome
+            .error_message()
+            .unwrap()
+            .contains("forbidden"));
     }
 
     #[test]

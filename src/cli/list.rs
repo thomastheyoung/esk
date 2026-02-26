@@ -27,7 +27,11 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
     let envs: Vec<&str> = match env {
         Some(e) => vec![e],
-        None => config.environments.iter().map(std::string::String::as_str).collect(),
+        None => config
+            .environments
+            .iter()
+            .map(std::string::String::as_str)
+            .collect(),
     };
 
     // Build deploy status map: (key, env) → worst status across all targets
@@ -67,7 +71,10 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         .unwrap_or(0);
 
     for (vendor, vendor_secrets) in &config.secrets {
-        let keys: Vec<&str> = vendor_secrets.keys().map(std::string::String::as_str).collect();
+        let keys: Vec<&str> = vendor_secrets
+            .keys()
+            .map(std::string::String::as_str)
+            .collect();
         if keys.is_empty() {
             continue;
         }
@@ -188,9 +195,7 @@ fn render_table(
 
     // Data rows
     for key in keys {
-        let mut row = style(format!("{key:<key_width$}"))
-            .dim()
-            .to_string();
+        let mut row = style(format!("{key:<key_width$}")).dim().to_string();
         for (e, w) in envs.iter().zip(&col_widths) {
             let pad_left = *w / 2;
             let pad_right = *w - pad_left - 1;

@@ -24,9 +24,9 @@ pub fn run(cwd: &Path) -> Result<()> {
 
     // Scaffold esk.yaml if it doesn't exist
     if config_path.is_file() {
-            cliclack::log::remark(format!("Exists  {}", style(config_path.display()).dim()))?;
-        } else {
-            let scaffold = r#"project: myapp
+        cliclack::log::remark(format!("Exists  {}", style(config_path.display()).dim()))?;
+    } else {
+        let scaffold = r#"project: myapp
 
     environments: [dev, prod]
 
@@ -48,9 +48,9 @@ pub fn run(cwd: &Path) -> Result<()> {
         #   targets:
         #     env: [web:dev, web:prod]
     "#;
-            std::fs::write(&config_path, scaffold).context("failed to write esk.yaml")?;
-            cliclack::log::success(format!("Created {}", style(config_path.display()).dim()))?;
-        }
+        std::fs::write(&config_path, scaffold).context("failed to write esk.yaml")?;
+        cliclack::log::success(format!("Created {}", style(config_path.display()).dim()))?;
+    }
 
     // Create store (generates key + empty encrypted store)
     if !key_path.is_file() || !store_path.is_file() {
