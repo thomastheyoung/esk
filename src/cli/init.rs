@@ -23,34 +23,34 @@ pub fn run(cwd: &Path) -> Result<()> {
     cliclack::intro(style("esk init").bold())?;
 
     // Scaffold esk.yaml if it doesn't exist
-    if !config_path.is_file() {
-        let scaffold = r#"project: myapp
+    if config_path.is_file() {
+            cliclack::log::remark(format!("Exists  {}", style(config_path.display()).dim()))?;
+        } else {
+            let scaffold = r#"project: myapp
 
-environments: [dev, prod]
+    environments: [dev, prod]
 
-apps:
-  web:
-    path: apps/web
+    apps:
+      web:
+        path: apps/web
 
-targets:
-  env:
-    pattern: "{app_path}/.env{env_suffix}.local"
-    env_suffix:
-      dev: ""
-      prod: ".production"
+    targets:
+      env:
+        pattern: "{app_path}/.env{env_suffix}.local"
+        env_suffix:
+          dev: ""
+          prod: ".production"
 
-secrets:
-  General:
-    # EXAMPLE_SECRET:
-    #   description: An example secret
-    #   targets:
-    #     env: [web:dev, web:prod]
-"#;
-        std::fs::write(&config_path, scaffold).context("failed to write esk.yaml")?;
-        cliclack::log::success(format!("Created {}", style(config_path.display()).dim()))?;
-    } else {
-        cliclack::log::remark(format!("Exists  {}", style(config_path.display()).dim()))?;
-    }
+    secrets:
+      General:
+        # EXAMPLE_SECRET:
+        #   description: An example secret
+        #   targets:
+        #     env: [web:dev, web:prod]
+    "#;
+            std::fs::write(&config_path, scaffold).context("failed to write esk.yaml")?;
+            cliclack::log::success(format!("Created {}", style(config_path.display()).dim()))?;
+        }
 
     // Create store (generates key + empty encrypted store)
     if !key_path.is_file() || !store_path.is_file() {
@@ -67,32 +67,32 @@ secrets:
     }
 
     // Create empty deploy index
-    if !deploy_index_path.is_file() {
+    if deploy_index_path.is_file() {
+        cliclack::log::remark(format!(
+            "Exists  {}",
+            style(deploy_index_path.display()).dim()
+        ))?;
+    } else {
         let index = DeployIndex::new(&deploy_index_path);
         index.save()?;
         cliclack::log::success(format!(
             "Created {}",
             style(deploy_index_path.display()).dim()
         ))?;
-    } else {
-        cliclack::log::remark(format!(
-            "Exists  {}",
-            style(deploy_index_path.display()).dim()
-        ))?;
     }
 
     // Create empty sync index
     let sync_index_path = esk_dir.join("sync-index.json");
-    if !sync_index_path.is_file() {
+    if sync_index_path.is_file() {
+        cliclack::log::remark(format!(
+            "Exists  {}",
+            style(sync_index_path.display()).dim()
+        ))?;
+    } else {
         let index = SyncIndex::new(&sync_index_path);
         index.save()?;
         cliclack::log::success(format!(
             "Created {}",
-            style(sync_index_path.display()).dim()
-        ))?;
-    } else {
-        cliclack::log::remark(format!(
-            "Exists  {}",
             style(sync_index_path.display()).dim()
         ))?;
     }

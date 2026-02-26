@@ -25,8 +25,8 @@ pub struct RailwayTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> DeployTarget for RailwayTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for RailwayTarget<'_> {
+    fn name(&self) -> &'static str {
         "railway"
     }
 

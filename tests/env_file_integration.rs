@@ -38,7 +38,7 @@ fn env_file_end_to_end() {
         },
     ];
     let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
-    assert!(results.iter().all(|r| r.success));
+    assert!(results.iter().all(|r| r.outcome.is_success()));
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
     assert!(content.contains("MY_SECRET=secret_dev"));
@@ -71,7 +71,7 @@ fn env_file_multiple_vendors() {
         },
     ];
     let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
-    assert!(results.iter().all(|r| r.success));
+    assert!(results.iter().all(|r| r.outcome.is_success()));
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
     assert!(content.contains("# === Stripe ==="));

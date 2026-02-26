@@ -24,18 +24,18 @@ pub struct VercelTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> VercelTarget<'a> {
+impl VercelTarget<'_> {
     fn resolve_env_name(&self, env: &str) -> Result<&str> {
         self.target_config
             .env_names
             .get(env)
-            .map(|s| s.as_str())
+            .map(std::string::String::as_str)
             .with_context(|| format!("no vercel env_names mapping for '{env}'"))
     }
 }
 
-impl<'a> DeployTarget for VercelTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for VercelTarget<'_> {
+    fn name(&self) -> &'static str {
         "vercel"
     }
 

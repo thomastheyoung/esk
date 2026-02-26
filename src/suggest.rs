@@ -29,7 +29,7 @@ fn levenshtein(a: &str, b: &str) -> usize {
 fn join<S: AsRef<str>>(items: &[S]) -> String {
     items
         .iter()
-        .map(|s| s.as_ref())
+        .map(std::convert::AsRef::as_ref)
         .collect::<Vec<_>>()
         .join(", ")
 }

@@ -27,7 +27,7 @@ pub struct ConvexTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> ConvexTarget<'a> {
+impl ConvexTarget<'_> {
     /// Resolve the cwd and env vars needed for convex commands.
     fn resolve_deployment_context(&self) -> Result<(PathBuf, Vec<(String, String)>)> {
         let cwd = self.config.root.join(&self.target_config.path);
@@ -52,8 +52,8 @@ impl<'a> ConvexTarget<'a> {
     }
 }
 
-impl<'a> DeployTarget for ConvexTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for ConvexTarget<'_> {
+    fn name(&self) -> &'static str {
         "convex"
     }
 

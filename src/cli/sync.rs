@@ -27,7 +27,7 @@ fn env_version_label(payload: &StorePayload, env: &str) -> String {
     let version = payload.env_version(env);
     match payload.env_last_changed_at(env) {
         Some(ts) => format!("v{} ({})", version, ui::format_relative_time(ts)),
-        None => format!("v{}", version),
+        None => format!("v{version}"),
     }
 }
 
@@ -80,7 +80,7 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
             config.validate_env(e)?;
             vec![e]
         }
-        None => config.environments.iter().map(|s| s.as_str()).collect(),
+        None => config.environments.iter().map(std::string::String::as_str).collect(),
     };
 
     if envs.len() == 1 {
@@ -98,7 +98,7 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
                 bail!("sync failed for environment '{env}': {e}");
             }
             cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
-            failures.push(env.to_string());
+            failures.push((*env).to_string());
         }
     }
 
@@ -139,12 +139,11 @@ pub fn run_with_runner(
     if all_remotes.is_empty() {
         if config.remotes.is_empty() {
             bail!("no remotes configured in esk.yaml");
-        } else {
-            cliclack::log::warning(
-                "No remotes available after preflight checks. Fix the issues above and try again.",
-            )?;
-            return Ok(());
         }
+        cliclack::log::warning(
+            "No remotes available after preflight checks. Fix the issues above and try again.",
+        )?;
+        return Ok(());
     }
 
     // Filter by --only if provided
@@ -292,17 +291,15 @@ pub fn run_with_runner(
             if crate::validate::is_effectively_empty(value) {
                 let bare_key = composite
                     .rsplit_once(':')
-                    .map(|(k, _)| k)
-                    .unwrap_or(composite);
-                let is_allowed = resolved.iter().any(|s| s.key == bare_key && s.allow_empty);
+                    .map_or(composite.as_str(), |(k, _)| k);
+                let is_allowed = resolved.iter().any(|s| s.key == *bare_key && s.allow_empty);
                 if is_allowed {
                     continue;
                 }
                 let was_empty_locally = payload
                     .secrets
                     .get(composite)
-                    .map(|v| crate::validate::is_effectively_empty(v))
-                    .unwrap_or(false); // didn't exist = not "was empty"
+                    .is_some_and(|v| crate::validate::is_effectively_empty(v)); // didn't exist = not "was empty"
                 if !was_empty_locally {
                     empty_from_remote.push(composite.clone());
                 }
@@ -346,7 +343,7 @@ pub fn run_with_runner(
 
         let stale_remotes: Vec<_> = target_remotes
             .iter()
-            .filter(|p| result.sources_to_update.contains(&p.name().to_string()))
+            .filter(|p| result.sources_to_update.iter().any(|s| s == p.name()))
             .collect();
         let pushed_version = updated_payload.env_version(env);
 

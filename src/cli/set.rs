@@ -42,14 +42,14 @@ pub fn run_with_runner(
         let config_path = config.root.join("esk.yaml");
         if let Some(group) = group {
             config::add_secret_to_config(&config_path, key, group)?;
-            cliclack::log::success(format!("Added '{}' to esk.yaml under {}", key, group))?;
+            cliclack::log::success(format!("Added '{key}' to esk.yaml under {group}"))?;
         } else if std::io::stdin().is_terminal() {
-            let add = cliclack::confirm(format!("Secret '{}' is not in esk.yaml. Add it?", key))
+            let add = cliclack::confirm(format!("Secret '{key}' is not in esk.yaml. Add it?"))
                 .initial_value(true)
                 .interact()?;
 
             if add {
-                let mut groups = config::secret_group_names(config);
+                let mut groups = config.secret_group_names();
                 let has_groups = !groups.is_empty();
 
                 let chosen_group = if has_groups {
@@ -75,20 +75,19 @@ pub fn run_with_runner(
 
                 config::add_secret_to_config(&config_path, key, &chosen_group)?;
                 cliclack::log::success(format!(
-                    "Added '{}' to esk.yaml under {}",
-                    key, chosen_group
+                    "Added '{key}' to esk.yaml under {chosen_group}"
                 ))?;
             } else {
-                cliclack::log::warning(format!("Secret '{}' is not defined in esk.yaml", key))?;
+                cliclack::log::warning(format!("Secret '{key}' is not defined in esk.yaml"))?;
             }
         } else {
-            cliclack::log::warning(format!("Secret '{}' is not defined in esk.yaml", key))?;
+            cliclack::log::warning(format!("Secret '{key}' is not defined in esk.yaml"))?;
         }
     }
 
     let secret_value = match value {
         Some(v) => v.to_string(),
-        None => cliclack::password(format!("Value for {} ({})", key, env))
+        None => cliclack::password(format!("Value for {key} ({env})"))
             .mask('*')
             .interact()?,
     };
@@ -102,8 +101,7 @@ pub fn run_with_runner(
     if !opts.force && crate::validate::is_effectively_empty(&secret_value) {
         let allow = config
             .find_secret(key)
-            .map(|(_, d)| d.allow_empty)
-            .unwrap_or(false);
+            .is_some_and(|(_, d)| d.allow_empty);
         if !allow {
             let kind = if secret_value.is_empty() {
                 "empty"

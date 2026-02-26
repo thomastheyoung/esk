@@ -125,7 +125,7 @@ fn generate_dts(metas: &[SecretMeta]) -> String {
         if let Some(ref values) = m.enum_values {
             let union = values
                 .iter()
-                .map(|v| format!("\"{}\"", v))
+                .map(|v| format!("\"{v}\""))
                 .collect::<Vec<_>>()
                 .join(" | ");
             if m.optional {
@@ -277,7 +277,7 @@ fn generate_env_example(metas: &[SecretMeta]) -> String {
             out.push('\n');
         }
         if let Some(ref desc) = m.description {
-            out.push_str(&format!("# {}\n", desc));
+            out.push_str(&format!("# {desc}\n"));
         }
         if let Some(ref values) = m.enum_values {
             out.push_str(&format!("# Allowed: {}\n", values.join(", ")));

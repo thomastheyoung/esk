@@ -142,7 +142,7 @@ pub fn reconcile_with_jump_limit(
                     merged_tombstones.remove(&composite);
                 }
                 let local_val = merged.get(&composite);
-                if local_val.map(|v| v.as_str()) != Some(value.as_str()) {
+                if local_val.map(std::string::String::as_str) != Some(value.as_str()) {
                     merged.insert(composite, value.clone());
                     pulled.push(key.clone());
                 }
@@ -186,14 +186,13 @@ pub fn reconcile_with_jump_limit(
         }
         std::cmp::Ordering::Greater => {
             // Local is newer — compute what to push
-            let mut pushed = Vec::new();
-
-            for (key, value) in &local_env_secrets {
-                let remote_val = remote_secrets.get(key);
-                if remote_val.map(|v| v.as_str()) != Some(value.as_str()) {
-                    pushed.push(key.clone());
-                }
-            }
+            let pushed: Vec<String> = local_env_secrets
+                .iter()
+                .filter(|(key, value)| {
+                    remote_secrets.get(*key).map(String::as_str) != Some(value.as_str())
+                })
+                .map(|(key, _)| key.clone())
+                .collect();
 
             ReconcileResult {
                 action: ReconcileAction::PushLocal,
@@ -210,7 +209,7 @@ pub fn reconcile_with_jump_limit(
 
             for (key, value) in &local_env_secrets {
                 let remote_val = remote_secrets.get(key);
-                if remote_val.map(|v| v.as_str()) != Some(value.as_str()) {
+                if remote_val.map(std::string::String::as_str) != Some(value.as_str()) {
                     pushed.push(key.clone());
                     drift = true;
                 }
@@ -344,7 +343,7 @@ pub fn reconcile_multi_with_jump_limit(
                         merged_tombstones.remove(key);
                     }
                     let existing = merged.get(key);
-                    if existing.map(|v| v.as_str()) != Some(value.as_str()) {
+                    if existing.map(std::string::String::as_str) != Some(value.as_str()) {
                         merged.insert(key.clone(), value.clone());
                         had_merge = true;
                     }
@@ -448,21 +447,21 @@ pub fn reconcile_multi_with_jump_limit(
 
     let merged_scope = scoped_composite_secrets(&merged, env);
     for (name, secrets, version) in remotes {
-        let needs_update = if *version < final_version {
-            true
-        } else if *version == final_version {
-            let remote_scope = scoped_composite_secrets(secrets, env);
-            let drifted = remote_scope != merged_scope;
-            if drifted {
-                has_drift = true;
+        let needs_update = match (*version).cmp(&final_version) {
+            std::cmp::Ordering::Less => true,
+            std::cmp::Ordering::Equal => {
+                let remote_scope = scoped_composite_secrets(secrets, env);
+                let drifted = remote_scope != merged_scope;
+                if drifted {
+                    has_drift = true;
+                }
+                drifted
             }
-            drifted
-        } else {
-            false
+            std::cmp::Ordering::Greater => false,
         };
 
         if needs_update {
-            sources_to_update.push(name.to_string());
+            sources_to_update.push((*name).to_string());
         }
     }
 

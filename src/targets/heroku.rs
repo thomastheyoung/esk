@@ -24,7 +24,7 @@ pub struct HerokuTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> HerokuTarget<'a> {
+impl HerokuTarget<'_> {
     fn resolve_app(&self, target: &ResolvedTarget) -> Result<&str> {
         let app = target
             .app
@@ -33,13 +33,13 @@ impl<'a> HerokuTarget<'a> {
         self.target_config
             .app_names
             .get(app)
-            .map(|s| s.as_str())
+            .map(std::string::String::as_str)
             .with_context(|| format!("no heroku app_names mapping for '{app}'"))
     }
 }
 
-impl<'a> DeployTarget for HerokuTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for HerokuTarget<'_> {
+    fn name(&self) -> &'static str {
         "heroku"
     }
 

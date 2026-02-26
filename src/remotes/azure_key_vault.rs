@@ -64,8 +64,8 @@ impl<'a> AzureKeyVaultRemote<'a> {
     }
 }
 
-impl<'a> SyncRemote for AzureKeyVaultRemote<'a> {
-    fn name(&self) -> &str {
+impl SyncRemote for AzureKeyVaultRemote<'_> {
+    fn name(&self) -> &'static str {
         "azure"
     }
 
@@ -88,9 +88,8 @@ impl<'a> SyncRemote for AzureKeyVaultRemote<'a> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let (env_secrets, version) = match super::extract_env_secrets(payload, env) {
-            Some(v) => v,
-            None => return Ok(()),
+        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+            return Ok(());
         };
 
         // Build JSON payload with bare keys + version metadata.

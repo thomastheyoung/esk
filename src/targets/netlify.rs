@@ -24,8 +24,8 @@ pub struct NetlifyTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> DeployTarget for NetlifyTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for NetlifyTarget<'_> {
+    fn name(&self) -> &'static str {
         "netlify"
     }
 

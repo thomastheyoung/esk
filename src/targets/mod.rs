@@ -19,12 +19,30 @@ use std::path::PathBuf;
 
 use crate::config::{Config, ResolvedTarget};
 
+/// Whether a deploy succeeded or failed.
+pub enum DeployOutcome {
+    Success,
+    Failed(String),
+}
+
+impl DeployOutcome {
+    pub fn is_success(&self) -> bool {
+        matches!(self, Self::Success)
+    }
+
+    pub fn error_message(&self) -> Option<&str> {
+        match self {
+            Self::Success => None,
+            Self::Failed(e) => Some(e),
+        }
+    }
+}
+
 pub struct DeployResult {
     pub key: String,
     #[allow(dead_code)]
     pub target: ResolvedTarget,
-    pub success: bool,
-    pub error: Option<String>,
+    pub outcome: DeployOutcome,
 }
 
 /// Secret with its key and value, ready for deploying.
@@ -143,14 +161,12 @@ pub trait DeployTarget {
                 Ok(()) => DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
-                    success: true,
-                    error: None,
+                    outcome: DeployOutcome::Success,
                 },
                 Err(e) => DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
-                    success: false,
-                    error: Some(e.to_string()),
+                    outcome: DeployOutcome::Failed(e.to_string()),
                 },
             })
             .collect()
@@ -464,7 +480,7 @@ mod tests {
         let target = TestTarget { fail_keys: vec![] };
         let secrets = vec![make_secret("A"), make_secret("B")];
         let results = target.deploy_batch(&secrets, &make_target());
-        assert!(results.iter().all(|r| r.success));
+        assert!(results.iter().all(|r| r.outcome.is_success()));
         assert_eq!(results.len(), 2);
     }
 
@@ -475,10 +491,10 @@ mod tests {
         };
         let secrets = vec![make_secret("A"), make_secret("B"), make_secret("C")];
         let results = target.deploy_batch(&secrets, &make_target());
-        assert!(results[0].success);
-        assert!(!results[1].success);
-        assert!(results[1].error.is_some());
-        assert!(results[2].success);
+        assert!(results[0].outcome.is_success());
+        assert!(!results[1].outcome.is_success());
+        assert!(results[1].outcome.error_message().is_some());
+        assert!(results[2].outcome.is_success());
     }
 
     #[test]

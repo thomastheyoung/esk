@@ -18,8 +18,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::config::{Config, KubernetesTargetConfig, ResolvedTarget};
 use crate::targets::{
-    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployResult,
-    DeployTarget, SecretValue,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployOutcome,
+    DeployResult, DeployTarget, SecretValue,
 };
 
 /// Validate a Kubernetes resource name or namespace.
@@ -63,12 +63,12 @@ pub struct KubernetesTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> KubernetesTarget<'a> {
+impl KubernetesTarget<'_> {
     fn resolve_namespace(&self, env: &str) -> Result<&str> {
         self.target_config
             .namespace
             .get(env)
-            .map(|s| s.as_str())
+            .map(std::string::String::as_str)
             .with_context(|| format!("no kubernetes namespace mapping for '{env}'"))
     }
 
@@ -102,8 +102,8 @@ impl<'a> KubernetesTarget<'a> {
     }
 }
 
-impl<'a> DeployTarget for KubernetesTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for KubernetesTarget<'_> {
+    fn name(&self) -> &'static str {
         "kubernetes"
     }
 
@@ -145,8 +145,7 @@ impl<'a> DeployTarget for KubernetesTarget<'a> {
                     .map(|s| DeployResult {
                         key: s.key.clone(),
                         target: target.clone(),
-                        success: false,
-                        error: Some(e.to_string()),
+                        outcome: DeployOutcome::Failed(e.to_string()),
                     })
                     .collect();
             }
@@ -179,8 +178,7 @@ impl<'a> DeployTarget for KubernetesTarget<'a> {
                 .map(|s| DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
-                    success: true,
-                    error: None,
+                    outcome: DeployOutcome::Success,
                 })
                 .collect(),
             Ok(output) => {
@@ -190,8 +188,7 @@ impl<'a> DeployTarget for KubernetesTarget<'a> {
                     .map(|s| DeployResult {
                         key: s.key.clone(),
                         target: target.clone(),
-                        success: false,
-                        error: Some(stderr.clone()),
+                        outcome: DeployOutcome::Failed(stderr.clone()),
                     })
                     .collect()
             }
@@ -200,8 +197,7 @@ impl<'a> DeployTarget for KubernetesTarget<'a> {
                 .map(|s| DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
-                    success: false,
-                    error: Some(e.to_string()),
+                    outcome: DeployOutcome::Failed(e.to_string()),
                 })
                 .collect(),
         }
@@ -350,7 +346,7 @@ targets:
             make_secret("DB_PASS", "s3cret"),
         ];
         let results = target.deploy_batch(&secrets, &make_target("dev"));
-        assert!(results.iter().all(|r| r.success));
+        assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "kubectl");
@@ -409,8 +405,8 @@ targets:
 
         let secrets = vec![make_secret("KEY", "val")];
         let results = target.deploy_batch(&secrets, &make_target("dev"));
-        assert!(!results[0].success);
-        assert!(results[0].error.as_ref().unwrap().contains("forbidden"));
+        assert!(!results[0].outcome.is_success());
+        assert!(results[0].outcome.error_message().unwrap().contains("forbidden"));
     }
 
     #[test]
@@ -427,10 +423,10 @@ targets:
 
         let secrets = vec![make_secret("KEY", "val")];
         let results = target.deploy_batch(&secrets, &make_target("staging"));
-        assert!(!results[0].success);
+        assert!(!results[0].outcome.is_success());
         assert!(results[0]
-            .error
-            .as_ref()
+            .outcome
+            .error_message()
             .unwrap()
             .contains("no kubernetes namespace mapping"));
     }

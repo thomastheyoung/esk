@@ -59,8 +59,7 @@ impl DeployIndex {
             Ok(c) => c,
             Err(e) => {
                 eprintln!(
-                    "Warning: could not read deploy index ({}), starting fresh",
-                    e
+                    "Warning: could not read deploy index ({e}), starting fresh"
                 );
                 return Self::new(path);
             }
@@ -71,7 +70,7 @@ impl DeployIndex {
                 index
             }
             Err(e) => {
-                eprintln!("Warning: deploy index corrupted ({}), starting fresh", e);
+                eprintln!("Warning: deploy index corrupted ({e}), starting fresh");
                 Self::new(path)
             }
         }

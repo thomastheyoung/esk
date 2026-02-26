@@ -20,33 +20,12 @@ use crate::targets::CommandRunner;
 pub const ESK_VERSION_KEY: &str = "_esk_version";
 
 /// Extract bare-key secrets for a specific environment from a store payload.
-/// Returns the filtered secrets (with `:env` suffix stripped) and the resolved version.
-/// Returns `None` if no secrets match the given environment.
+/// Delegates to `StorePayload::env_secrets`.
 pub fn extract_env_secrets(
     payload: &StorePayload,
     env: &str,
 ) -> Option<(BTreeMap<String, String>, u64)> {
-    let suffix = format!(":{env}");
-    let env_secrets: BTreeMap<String, String> = payload
-        .secrets
-        .iter()
-        .filter_map(|(k, v)| {
-            k.strip_suffix(&suffix)
-                .map(|bare| (bare.to_string(), v.clone()))
-        })
-        .collect();
-
-    if env_secrets.is_empty() {
-        return None;
-    }
-
-    let version = payload
-        .env_versions
-        .get(env)
-        .copied()
-        .unwrap_or(payload.version);
-
-    Some((env_secrets, version))
+    payload.env_secrets(env)
 }
 
 /// Parse a pulled string-valued secret map back into composite-key secrets.
@@ -57,14 +36,11 @@ pub fn parse_pulled_secrets(
     env: &str,
 ) -> (BTreeMap<String, String>, u64) {
     let version: u64 = match data.get(ESK_VERSION_KEY) {
-        Some(v) => match v.parse() {
-            Ok(n) => n,
-            Err(_) => {
-                let _ = cliclack::log::warning(format!(
-                    "Remote returned unparseable {ESK_VERSION_KEY}: '{v}'. Defaulting to version 0."
-                ));
-                0
-            }
+        Some(v) => if let Ok(n) = v.parse() { n } else {
+            let _ = cliclack::log::warning(format!(
+                "Remote returned unparseable {ESK_VERSION_KEY}: '{v}'. Defaulting to version 0."
+            ));
+            0
         },
         None => {
             let _ = cliclack::log::warning(format!(

@@ -23,8 +23,8 @@ pub struct GitlabTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> DeployTarget for GitlabTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for GitlabTarget<'_> {
+    fn name(&self) -> &'static str {
         "gitlab"
     }
 

@@ -23,7 +23,15 @@ fn run() -> Result<()> {
             bail,
         } => {
             let config = Config::find_and_load()?;
-            esk::cli::delete::run(&config, key, env, *no_sync, *bail)?;
+            esk::cli::delete::run(
+                &config,
+                &esk::cli::delete::DeleteOptions {
+                    key,
+                    env,
+                    no_sync: *no_sync,
+                    bail: *bail,
+                },
+            )?;
         }
         Commands::Deploy {
             env,

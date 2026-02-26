@@ -25,8 +25,7 @@ pub fn run_with_runner(
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     let dashboard = Dashboard::build(config, env, runner)?;
-    dashboard.render(all)?;
-    Ok(())
+    dashboard.render(all)
 }
 
 // ---------------------------------------------------------------------------
@@ -117,7 +116,7 @@ impl Dashboard {
 
         let envs: Vec<&str> = match env {
             Some(e) => vec![e],
-            None => config.environments.iter().map(|s| s.as_str()).collect(),
+            None => config.environments.iter().map(std::string::String::as_str).collect(),
         };
 
         // 1. Health checks
@@ -289,7 +288,7 @@ impl Dashboard {
         let config_keys: BTreeSet<&str> = config
             .secrets
             .values()
-            .flat_map(|vs| vs.keys().map(|k| k.as_str()))
+            .flat_map(|vs| vs.keys().map(std::string::String::as_str))
             .collect();
 
         let mut orphans = Vec::new();
@@ -343,7 +342,7 @@ impl Dashboard {
                     None => RemoteStatus::NeverSynced,
                 };
                 remote_states.push(RemoteState {
-                    name: remote_name.to_string(),
+                    name: (*remote_name).to_string(),
                     env: env_name.to_string(),
                     status,
                 });

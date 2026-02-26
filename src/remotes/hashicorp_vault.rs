@@ -65,8 +65,8 @@ impl<'a> HashicorpVaultRemote<'a> {
     }
 }
 
-impl<'a> SyncRemote for HashicorpVaultRemote<'a> {
-    fn name(&self) -> &str {
+impl SyncRemote for HashicorpVaultRemote<'_> {
+    fn name(&self) -> &'static str {
         "vault"
     }
 
@@ -91,9 +91,8 @@ impl<'a> SyncRemote for HashicorpVaultRemote<'a> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let (env_secrets, version) = match super::extract_env_secrets(payload, env) {
-            Some(v) => v,
-            None => return Ok(()),
+        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+            return Ok(());
         };
 
         // Build a JSON object with secrets + _esk_version

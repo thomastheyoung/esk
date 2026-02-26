@@ -52,8 +52,8 @@ impl<'a> DopplerRemote<'a> {
     }
 }
 
-impl<'a> SyncRemote for DopplerRemote<'a> {
-    fn name(&self) -> &str {
+impl SyncRemote for DopplerRemote<'_> {
+    fn name(&self) -> &'static str {
         "doppler"
     }
 
@@ -76,9 +76,8 @@ impl<'a> SyncRemote for DopplerRemote<'a> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let (env_secrets, version) = match super::extract_env_secrets(payload, env) {
-            Some(v) => v,
-            None => return Ok(()),
+        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+            return Ok(());
         };
 
         let doppler_config = self.config_name(env)?;

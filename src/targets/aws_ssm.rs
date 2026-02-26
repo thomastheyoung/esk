@@ -26,7 +26,7 @@ pub struct AwsSsmTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> AwsSsmTarget<'a> {
+impl AwsSsmTarget<'_> {
     fn resolve_path(&self, key: &str, target: &ResolvedTarget) -> String {
         let prefix = self
             .target_config
@@ -50,8 +50,8 @@ impl<'a> AwsSsmTarget<'a> {
     }
 }
 
-impl<'a> DeployTarget for AwsSsmTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for AwsSsmTarget<'_> {
+    fn name(&self) -> &'static str {
         "aws_ssm"
     }
 

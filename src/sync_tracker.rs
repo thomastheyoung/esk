@@ -44,7 +44,7 @@ impl SyncIndex {
         let contents = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("Warning: could not read sync index ({}), starting fresh", e);
+                eprintln!("Warning: could not read sync index ({e}), starting fresh");
                 return Self::new(path);
             }
         };
@@ -54,7 +54,7 @@ impl SyncIndex {
                 index
             }
             Err(e) => {
-                eprintln!("Warning: sync index corrupted ({}), starting fresh", e);
+                eprintln!("Warning: sync index corrupted ({e}), starting fresh");
                 Self::new(path)
             }
         }

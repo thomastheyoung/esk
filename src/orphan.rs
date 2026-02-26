@@ -17,10 +17,7 @@ pub struct TargetOrphan {
 impl TargetOrphan {
     /// Display the target as "service" or "service:app" (no env).
     pub fn target_display(&self) -> String {
-        match &self.app {
-            Some(a) => format!("{}:{}", self.service, a),
-            None => self.service.clone(),
-        }
+        crate::config::format_target_label(&self.service, self.app.as_deref())
     }
 }
 

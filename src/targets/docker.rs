@@ -26,7 +26,7 @@ pub struct DockerTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> DockerTarget<'a> {
+impl DockerTarget<'_> {
     fn resolve_name(&self, key: &str, target: &ResolvedTarget) -> String {
         self.target_config
             .name_pattern
@@ -44,8 +44,8 @@ impl<'a> DockerTarget<'a> {
     }
 }
 
-impl<'a> DeployTarget for DockerTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for DockerTarget<'_> {
+    fn name(&self) -> &'static str {
         "docker"
     }
 

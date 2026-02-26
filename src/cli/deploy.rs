@@ -143,7 +143,7 @@ pub fn run_with_runner(
         if !cross_field_specs.is_empty() {
             let envs: Vec<&str> = match env {
                 Some(e) => vec![e],
-                None => config.environments.iter().map(|s| s.as_str()).collect(),
+                None => config.environments.iter().map(std::string::String::as_str).collect(),
             };
             let mut cross_errors: Vec<String> = Vec::new();
             for &env_name in &envs {
@@ -253,7 +253,7 @@ pub fn run_with_runner(
                     cliclack::log::warning(w)?;
                 }
             } else if std::io::stdin().is_terminal() {
-                cliclack::log::warning(format!("Empty values detected:\n{}", detail))?;
+                cliclack::log::warning(format!("Empty values detected:\n{detail}"))?;
                 let proceed = cliclack::confirm(
                     "Empty values can break defaults and type coercion. Continue?",
                 )
@@ -264,8 +264,7 @@ pub fn run_with_runner(
                 }
             } else {
                 anyhow::bail!(
-                    "Empty values would be deployed:\n{}\n  Use --allow-empty to proceed",
-                    detail
+                    "Empty values would be deployed:\n{detail}\n  Use --allow-empty to proceed"
                 );
             }
         }
@@ -374,23 +373,20 @@ pub fn run_with_runner(
             };
 
             let composite = format!("{}:{}", secret.key, target.environment);
-            let value = match payload.secrets.get(&composite) {
-                Some(v) => v,
-                None => {
-                    unset.push(DeployEntry {
-                        key: secret.key.clone(),
-                        env: target.environment.clone(),
-                        target: target.target_display(),
-                        error: None,
-                    });
-                    if verbose {
-                        cliclack::log::remark(format!(
-                            "{}:{} — no value set",
-                            secret.key, target.environment
-                        ))?;
-                    }
-                    continue;
+            let Some(value) = payload.secrets.get(&composite) else {
+                unset.push(DeployEntry {
+                    key: secret.key.clone(),
+                    env: target.environment.clone(),
+                    target: target.target_display(),
+                    error: None,
+                });
+                if verbose {
+                    cliclack::log::remark(format!(
+                        "{}:{} — no value set",
+                        secret.key, target.environment
+                    ))?;
                 }
+                continue;
             };
 
             let value_hash = DeployIndex::hash_value(value);
@@ -561,11 +557,10 @@ pub fn run_with_runner(
             let value = payload
                 .secrets
                 .get(&composite)
-                .map(|v| v.as_str())
-                .unwrap_or("");
+                .map_or("", std::string::String::as_str);
             let value_hash = DeployIndex::hash_value(value);
 
-            if result.success {
+            if result.outcome.is_success() {
                 index.record_success(tracker_key, target.to_string(), value_hash);
                 deployed.push(DeployEntry {
                     key: result.key.clone(),
@@ -574,7 +569,11 @@ pub fn run_with_runner(
                     error: None,
                 });
             } else {
-                let error = result.error.clone().unwrap_or_default();
+                let error = result
+                    .outcome
+                    .error_message()
+                    .unwrap_or_default()
+                    .to_string();
                 index.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
                 failed.push(DeployEntry {
                     key: result.key.clone(),
@@ -996,7 +995,7 @@ pub fn run_with_runner(
                         ));
                 }
                 for (env_name, lines) in skip_map {
-                    cliclack::note(format!("{} (up to date)", env_name), lines.join("\n"))?;
+                    cliclack::note(format!("{env_name} (up to date)"), lines.join("\n"))?;
                 }
             } else {
                 cliclack::log::remark(format!(

@@ -114,9 +114,7 @@ impl<'a> OnePasswordRemote<'a> {
         for (key, value) in secrets {
             let vendor = self
                 .config
-                .find_secret(key)
-                .map(|(v, _)| v)
-                .unwrap_or_else(|| "General".to_string());
+                .find_secret(key).map_or_else(|| "General".to_string(), |(v, _)| v);
             by_vendor
                 .entry(vendor)
                 .or_default()
@@ -139,8 +137,7 @@ impl<'a> OnePasswordRemote<'a> {
                     let section = item
                         .sections
                         .get(remote_key)
-                        .map(|s| s.as_str())
-                        .unwrap_or("General");
+                        .map_or("General", std::string::String::as_str);
                     assignments.push(format!("{section}.{remote_key}[delete]"));
                 }
             }
@@ -158,7 +155,7 @@ impl<'a> OnePasswordRemote<'a> {
             for assignment in &assignments {
                 args.push(assignment.clone());
             }
-            let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
             let output = self
                 .runner
                 .run("op", &args_ref, CommandOpts::default())
@@ -182,7 +179,7 @@ impl<'a> OnePasswordRemote<'a> {
             for assignment in &assignments {
                 args.push(assignment.clone());
             }
-            let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+            let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
             let output = self
                 .runner
                 .run("op", &args_ref, CommandOpts::default())
@@ -198,16 +195,15 @@ impl<'a> OnePasswordRemote<'a> {
 
     /// Pull secrets from a 1Password item.
     pub fn pull_item(&self, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
-        let item = match self.get_item(env)? {
-            Some(item) => item,
-            None => return Ok(None),
+        let Some(item) = self.get_item(env)? else {
+            return Ok(None);
         };
         Ok(Some((item.secrets, item.version)))
     }
 }
 
-impl<'a> SyncRemote for OnePasswordRemote<'a> {
-    fn name(&self) -> &str {
+impl SyncRemote for OnePasswordRemote<'_> {
+    fn name(&self) -> &'static str {
         "1password"
     }
 

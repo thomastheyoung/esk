@@ -298,10 +298,12 @@ fn delete_removes_secret() {
     store.set("MY_SECRET", "dev", "val").unwrap();
     cli::delete::run_with_runner(
         &config,
-        "MY_SECRET",
-        "dev",
-        true,
-        false,
+        &cli::delete::DeleteOptions {
+            key: "MY_SECRET",
+            env: "dev",
+            no_sync: true,
+            bail: false,
+        },
         &MockCommandRunner::new(),
     )
     .unwrap();
@@ -314,10 +316,12 @@ fn delete_unknown_env_errors() {
     let config = project.config().unwrap();
     let err = cli::delete::run_with_runner(
         &config,
-        "MY_SECRET",
-        "staging",
-        true,
-        false,
+        &cli::delete::DeleteOptions {
+            key: "MY_SECRET",
+            env: "staging",
+            no_sync: true,
+            bail: false,
+        },
         &MockCommandRunner::new(),
     )
     .unwrap_err();
@@ -330,10 +334,12 @@ fn delete_nonexistent_secret_errors() {
     let config = project.config().unwrap();
     let err = cli::delete::run_with_runner(
         &config,
-        "MY_SECRET",
-        "dev",
-        true,
-        false,
+        &cli::delete::DeleteOptions {
+            key: "MY_SECRET",
+            env: "dev",
+            no_sync: true,
+            bail: false,
+        },
         &MockCommandRunner::new(),
     )
     .unwrap_err();
@@ -373,7 +379,17 @@ fn delete_auto_syncs_env_file() {
     assert!(contents.contains("OTHER_SECRET=val2"));
 
     // Delete MY_SECRET
-    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, false, &runner).unwrap();
+    cli::delete::run_with_runner(
+        &config,
+        &cli::delete::DeleteOptions {
+            key: "MY_SECRET",
+            env: "dev",
+            no_sync: false,
+            bail: false,
+        },
+        &runner,
+    )
+    .unwrap();
 
     // Env file should no longer contain MY_SECRET
     let contents = std::fs::read_to_string(&env_path).unwrap();
@@ -411,7 +427,17 @@ fn delete_last_secret_regenerates_batch_target() {
     let contents = std::fs::read_to_string(&env_path).unwrap();
     assert!(contents.contains("MY_SECRET=val1"));
 
-    cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, false, &runner).unwrap();
+    cli::delete::run_with_runner(
+        &config,
+        &cli::delete::DeleteOptions {
+            key: "MY_SECRET",
+            env: "dev",
+            no_sync: false,
+            bail: false,
+        },
+        &runner,
+    )
+    .unwrap();
 
     let contents = std::fs::read_to_string(&env_path).unwrap();
     assert!(!contents.contains("MY_SECRET=val1"));
@@ -425,10 +451,12 @@ fn delete_creates_tombstone() {
     store.set("MY_SECRET", "dev", "val").unwrap();
     cli::delete::run_with_runner(
         &config,
-        "MY_SECRET",
-        "dev",
-        true,
-        false,
+        &cli::delete::DeleteOptions {
+            key: "MY_SECRET",
+            env: "dev",
+            no_sync: true,
+            bail: false,
+        },
         &MockCommandRunner::new(),
     )
     .unwrap();
@@ -547,8 +575,17 @@ secrets:
     runner.push_success(b"", b""); // preflight: op vault get
     runner.push_failure(b"push failed"); // op item get fails => push fails
 
-    let err = cli::delete::run_with_runner(&config, "MY_SECRET", "dev", false, true, &runner)
-        .unwrap_err();
+    let err = cli::delete::run_with_runner(
+        &config,
+        &cli::delete::DeleteOptions {
+            key: "MY_SECRET",
+            env: "dev",
+            no_sync: false,
+            bail: true,
+        },
+        &runner,
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("--bail"));
     assert!(err.to_string().contains("Target deploy skipped"));
 

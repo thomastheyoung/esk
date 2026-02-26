@@ -104,6 +104,29 @@ impl StorePayload {
     pub fn env_last_changed_at(&self, env: &str) -> Option<&str> {
         self.env_last_changed_at.get(env).map(String::as_str)
     }
+
+    /// Extract bare-key secrets for a specific environment.
+    /// Returns the filtered secrets (with `:env` suffix stripped) and the resolved version.
+    /// Returns `None` if no secrets match the given environment.
+    pub fn env_secrets(&self, env: &str) -> Option<(BTreeMap<String, String>, u64)> {
+        let suffix = format!(":{env}");
+        let env_secrets: BTreeMap<String, String> = self
+            .secrets
+            .iter()
+            .filter_map(|(k, v)| {
+                k.strip_suffix(&suffix)
+                    .map(|bare| (bare.to_string(), v.clone()))
+            })
+            .collect();
+
+        if env_secrets.is_empty() {
+            return None;
+        }
+
+        let version = self.env_version(env);
+
+        Some((env_secrets, version))
+    }
 }
 
 impl std::fmt::Debug for StorePayload {

@@ -13,7 +13,7 @@ use std::collections::BTreeMap;
 use tempfile::NamedTempFile;
 
 use crate::config::{Config, ResolvedTarget};
-use crate::targets::{DeployMode, DeployResult, DeployTarget, SecretValue};
+use crate::targets::{DeployMode, DeployOutcome, DeployResult, DeployTarget, SecretValue};
 
 /// Format a value for safe inclusion in a .env file.
 ///
@@ -38,7 +38,7 @@ fn format_env_value(value: &str) -> String {
         .replace('\n', "\\n")
         .replace('\r', "\\r")
         .replace('"', "\\\"");
-    format!("\"{}\"", escaped)
+    format!("\"{escaped}\"")
 }
 
 fn validate_env_file_value(key: &str, value: &str) -> Result<()> {
@@ -54,8 +54,8 @@ pub struct EnvFileTarget<'a> {
     pub config: &'a Config,
 }
 
-impl<'a> DeployTarget for EnvFileTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for EnvFileTarget<'_> {
+    fn name(&self) -> &'static str {
         "env"
     }
 
@@ -71,19 +71,15 @@ impl<'a> DeployTarget for EnvFileTarget<'a> {
 
     /// Override: regenerate the entire env file for this (app, env) pair.
     fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
-        let app = match &target.app {
-            Some(a) => a,
-            None => {
-                return secrets
-                    .iter()
-                    .map(|s| DeployResult {
-                        key: s.key.clone(),
-                        target: target.clone(),
-                        success: false,
-                        error: Some("env target requires an app".to_string()),
-                    })
-                    .collect();
-            }
+        let Some(app) = &target.app else {
+            return secrets
+                .iter()
+                .map(|s| DeployResult {
+                    key: s.key.clone(),
+                    target: target.clone(),
+                    outcome: DeployOutcome::Failed("env target requires an app".to_string()),
+                })
+                .collect();
         };
 
         match self.write_env_file(app, &target.environment, secrets) {
@@ -92,8 +88,7 @@ impl<'a> DeployTarget for EnvFileTarget<'a> {
                 .map(|s| DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
-                    success: true,
-                    error: None,
+                    outcome: DeployOutcome::Success,
                 })
                 .collect(),
             Err(e) => secrets
@@ -101,15 +96,14 @@ impl<'a> DeployTarget for EnvFileTarget<'a> {
                 .map(|s| DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
-                    success: false,
-                    error: Some(e.to_string()),
+                    outcome: DeployOutcome::Failed(e.to_string()),
                 })
                 .collect(),
         }
     }
 }
 
-impl<'a> EnvFileTarget<'a> {
+impl EnvFileTarget<'_> {
     fn write_env_file(&self, app: &str, env: &str, secrets: &[SecretValue]) -> Result<()> {
         let path = self.config.resolve_env_path(app, env)?;
 
@@ -225,10 +219,10 @@ targets:
         let target = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("A", "1", "G"), make_secret("B", "2", "G")];
         let results = target.deploy_batch(&secrets, &make_target(None, "dev"));
-        assert!(results.iter().all(|r| !r.success));
+        assert!(results.iter().all(|r| !r.outcome.is_success()));
         assert!(results[0]
-            .error
-            .as_ref()
+            .outcome
+            .error_message()
             .unwrap()
             .contains("requires an app"));
     }
@@ -241,7 +235,7 @@ targets:
         let target = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("KEY", "value123", "General")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
-        assert!(results.iter().all(|r| r.success));
+        assert!(results.iter().all(|r| r.outcome.is_success()));
         let content = std::fs::read_to_string(dir.path().join("apps/web/.env.local")).unwrap();
         assert!(content.contains("KEY=value123"));
     }
@@ -299,7 +293,7 @@ targets:
         let target = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("K", "v", "G")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
-        assert!(results[0].success);
+        assert!(results[0].outcome.is_success());
         assert!(dir.path().join("apps/web/.env.local").is_file());
     }
 
@@ -316,7 +310,7 @@ targets:
         ];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         assert_eq!(results.len(), 3);
-        assert!(results.iter().all(|r| r.success));
+        assert!(results.iter().all(|r| r.outcome.is_success()));
     }
 
     #[test]
@@ -362,10 +356,10 @@ targets:
         let target = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("CERT", "line1\nline2", "General")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
-        assert!(results.iter().all(|r| !r.success));
+        assert!(results.iter().all(|r| !r.outcome.is_success()));
         assert!(results[0]
-            .error
-            .as_ref()
+            .outcome
+            .error_message()
             .unwrap()
             .contains("contains newlines"));
         assert!(!dir.path().join("apps/web/.env.local").exists());
@@ -381,7 +375,7 @@ targets:
         let target = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("KEY", "value", "General")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
-        assert!(results.iter().all(|r| r.success));
+        assert!(results.iter().all(|r| r.outcome.is_success()));
         let metadata = std::fs::metadata(dir.path().join("apps/web/.env.local")).unwrap();
         let mode = metadata.permissions().mode() & 0o777;
         assert_eq!(mode, 0o400);
@@ -409,7 +403,7 @@ targets:
         let target = EnvFileTarget { config: &config };
         let secrets = vec![make_secret("K", "v", "G")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
-        assert!(!results[0].success);
-        assert!(results[0].error.is_some());
+        assert!(!results[0].outcome.is_success());
+        assert!(results[0].outcome.error_message().is_some());
     }
 }

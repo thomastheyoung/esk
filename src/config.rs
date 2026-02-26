@@ -381,8 +381,7 @@ impl<'de> Deserialize<'de> for Required {
                         serde_yaml::Value::String(s) => envs.push(s),
                         other => {
                             return Err(serde::de::Error::custom(format!(
-                                "expected string in required list, got {:?}",
-                                other
+                                "expected string in required list, got {other:?}"
                             )));
                         }
                     }
@@ -395,8 +394,7 @@ impl<'de> Deserialize<'de> for Required {
                 Ok(Required::Environments(envs))
             }
             other => Err(serde::de::Error::custom(format!(
-                "expected bool or list for 'required', got {:?}",
-                other
+                "expected bool or list for 'required', got {other:?}"
             ))),
         }
     }
@@ -479,7 +477,7 @@ fn nearest_existing_ancestor(path: &Path) -> Option<&Path> {
 impl Config {
     /// Validate that `env` is a known environment, suggesting corrections if not.
     pub fn validate_env(&self, env: &str) -> Result<()> {
-        if !self.environments.contains(&env.to_string()) {
+        if !self.environments.iter().any(|e| e == env) {
             bail!("{}", crate::suggest::unknown_env(env, &self.environments));
         }
         Ok(())
@@ -515,10 +513,7 @@ impl Config {
             .with_context(|| format!("failed to read {}", path.display()))?;
         let mut config: Config = serde_yaml::from_str(&contents)
             .with_context(|| format!("failed to parse {}", path.display()))?;
-        config.root = path
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
+        config.root = path.parent().map_or_else(|| PathBuf::from("."), Path::to_path_buf);
         config.validate()?;
         Ok(config)
     }
@@ -585,7 +580,7 @@ impl Config {
                 // Validate required environment references
                 if let Required::Environments(ref envs) = def.required {
                     let env_set: BTreeSet<&str> =
-                        self.environments.iter().map(|s| s.as_str()).collect();
+                        self.environments.iter().map(std::string::String::as_str).collect();
                     for req_env in envs {
                         if !env_set.contains(req_env.as_str()) {
                             bail!(
@@ -666,9 +661,8 @@ impl Config {
                     .unwrap_or(entry.format.default_output());
                 if !seen_paths.insert(path.to_string()) {
                     bail!(
-                        "duplicate generate output path '{}' — \
-                         use different 'output' values to disambiguate",
-                        path
+                        "duplicate generate output path '{path}' — \
+                         use different 'output' values to disambiguate"
                     );
                 }
             }
@@ -965,60 +959,46 @@ impl Config {
 
     /// Get the set of configured target names.
     pub fn target_names(&self) -> Vec<&str> {
-        let mut names = Vec::new();
-        if self.targets.env.is_some() {
-            names.push("env");
-        }
-        if self.targets.cloudflare.is_some() {
-            names.push("cloudflare");
-        }
-        if self.targets.convex.is_some() {
-            names.push("convex");
-        }
-        if self.targets.fly.is_some() {
-            names.push("fly");
-        }
-        if self.targets.netlify.is_some() {
-            names.push("netlify");
-        }
-        if self.targets.vercel.is_some() {
-            names.push("vercel");
-        }
-        if self.targets.github.is_some() {
-            names.push("github");
-        }
-        if self.targets.heroku.is_some() {
-            names.push("heroku");
-        }
-        if self.targets.supabase.is_some() {
-            names.push("supabase");
-        }
-        if self.targets.railway.is_some() {
-            names.push("railway");
-        }
-        if self.targets.gitlab.is_some() {
-            names.push("gitlab");
-        }
-        if self.targets.aws_ssm.is_some() {
-            names.push("aws_ssm");
-        }
-        if self.targets.kubernetes.is_some() {
-            names.push("kubernetes");
-        }
-        if self.targets.docker.is_some() {
-            names.push("docker");
-        }
-        names
+        [
+            ("env", self.targets.env.is_some()),
+            ("cloudflare", self.targets.cloudflare.is_some()),
+            ("convex", self.targets.convex.is_some()),
+            ("fly", self.targets.fly.is_some()),
+            ("netlify", self.targets.netlify.is_some()),
+            ("vercel", self.targets.vercel.is_some()),
+            ("github", self.targets.github.is_some()),
+            ("heroku", self.targets.heroku.is_some()),
+            ("supabase", self.targets.supabase.is_some()),
+            ("railway", self.targets.railway.is_some()),
+            ("gitlab", self.targets.gitlab.is_some()),
+            ("aws_ssm", self.targets.aws_ssm.is_some()),
+            ("kubernetes", self.targets.kubernetes.is_some()),
+            ("docker", self.targets.docker.is_some()),
+        ]
+        .into_iter()
+        .filter(|(_, present)| *present)
+        .map(|(name, _)| name)
+        .collect()
+    }
+
+    /// Return the sorted list of group (vendor) names from config secrets.
+    pub fn secret_group_names(&self) -> Vec<String> {
+        self.secrets.keys().cloned().collect()
+    }
+}
+
+/// Format a target label as "service" or "service:app".
+pub fn format_target_label(service: &str, app: Option<&str>) -> String {
+    match app {
+        Some(a) => format!("{service}:{a}"),
+        None => service.to_string(),
     }
 }
 
 impl ResolvedTarget {
     /// Display as "service" or "service:app" (without environment).
     pub fn target_display(&self) -> String {
-        match &self.app {
-            Some(a) => format!("{}:{}", self.service, a),
-            None => self.service.clone(),
-        }
+        format_target_label(&self.service, self.app.as_deref())
     }
 }
 
@@ -1059,11 +1039,10 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
                         && !line.starts_with('#')
                         && !line.starts_with('\t')
                 })
-                .map(|(i, _)| i)
-                .unwrap_or(lines.len());
+                .map_or(lines.len(), |(i, _)| i);
 
             // Look for the group within the secrets section
-            let group_line = format!("  {}:", group);
+            let group_line = format!("  {group}:");
             let group_idx = lines
                 .iter()
                 .enumerate()
@@ -1075,7 +1054,7 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
             match group_idx {
                 Some(group_idx) => {
                     // Check if key already exists in this group
-                    let key_line = format!("    {}:", key);
+                    let key_line = format!("    {key}:");
                     let group_end = lines
                         .iter()
                         .enumerate()
@@ -1086,8 +1065,7 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
                                     && !line.starts_with("    ")
                                     && !line.starts_with('#'))
                         })
-                        .map(|(i, _)| i)
-                        .unwrap_or(lines.len());
+                        .map_or(lines.len(), |(i, _)| i);
 
                     let key_exists = lines
                         .iter()
@@ -1107,11 +1085,11 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
                     // Insert after last line of this group
                     let mut parts = Vec::new();
                     for line in &lines[..group_end] {
-                        parts.push(line.to_string());
+                        parts.push((*line).to_string());
                     }
-                    parts.push(format!("    {}: {{}}", key));
+                    parts.push(format!("    {key}: {{}}"));
                     for line in &lines[group_end..] {
-                        parts.push(line.to_string());
+                        parts.push((*line).to_string());
                     }
                     let mut out = parts.join("\n");
                     if content.ends_with('\n') {
@@ -1123,12 +1101,12 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
                     // Group doesn't exist — insert at end of secrets section
                     let mut parts = Vec::new();
                     for line in &lines[..secrets_end] {
-                        parts.push(line.to_string());
+                        parts.push((*line).to_string());
                     }
-                    parts.push(format!("  {}:", group));
-                    parts.push(format!("    {}: {{}}", key));
+                    parts.push(format!("  {group}:"));
+                    parts.push(format!("    {key}: {{}}"));
                     for line in &lines[secrets_end..] {
-                        parts.push(line.to_string());
+                        parts.push((*line).to_string());
                     }
                     let mut out = parts.join("\n");
                     if content.ends_with('\n') {
@@ -1144,7 +1122,7 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
             if !out.ends_with('\n') {
                 out.push('\n');
             }
-            out.push_str(&format!("secrets:\n  {}:\n    {}: {{}}\n", group, key));
+            out.push_str(&format!("secrets:\n  {group}:\n    {key}: {{}}\n"));
             out
         }
     };
@@ -1160,10 +1138,6 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
     Ok(())
 }
 
-/// Return the sorted list of group (vendor) names from config secrets.
-pub fn secret_group_names(config: &Config) -> Vec<String> {
-    config.secrets.keys().cloned().collect()
-}
 
 #[cfg(test)]
 mod tests {

@@ -26,7 +26,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
     let envs: Vec<&str> = match env {
         Some(e) => vec![e],
-        None => config.environments.iter().map(|s| s.as_str()).collect(),
+        None => config.environments.iter().map(std::string::String::as_str).collect(),
     };
 
     // Build deploy status map: (key, env) → worst status across all targets
@@ -34,12 +34,12 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
     // Build set of (key, env) pairs that have at least one configured target
     let resolved = config.resolve_secrets()?;
-    let targeted: BTreeSet<(String, String)> = resolved
+    let targeted: BTreeSet<(&str, &str)> = resolved
         .iter()
         .flat_map(|s| {
             s.targets
                 .iter()
-                .map(move |t| (s.key.clone(), t.environment.clone()))
+                .map(move |t| (s.key.as_str(), t.environment.as_str()))
         })
         .collect();
 
@@ -60,24 +60,24 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let global_key_width = config
         .secrets
         .values()
-        .flat_map(|vs| vs.keys().map(|k| k.len()))
-        .chain(uncat_keys.iter().map(|k| k.len()))
+        .flat_map(|vs| vs.keys().map(std::string::String::len))
+        .chain(uncat_keys.iter().map(std::string::String::len))
         .max()
         .unwrap_or(0);
 
     for (vendor, vendor_secrets) in &config.secrets {
-        let keys: Vec<&str> = vendor_secrets.keys().map(|k| k.as_str()).collect();
+        let keys: Vec<&str> = vendor_secrets.keys().map(std::string::String::as_str).collect();
         if keys.is_empty() {
             continue;
         }
         for k in &keys {
-            shown_keys.insert(k.to_string());
+            shown_keys.insert((*k).to_string());
         }
 
         let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
             let has_value = all_secrets.contains_key(&composite);
-            let is_targeted = targeted.contains(&(key.to_string(), e.to_string()));
+            let is_targeted = targeted.contains(&(key, e));
 
             if !has_value && !is_targeted {
                 CellStatus::NotTargeted
@@ -95,15 +95,15 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     }
 
     if !uncat_keys.is_empty() {
-        let keys: Vec<&str> = uncat_keys.iter().map(|s| s.as_str()).collect();
+        let keys: Vec<&str> = uncat_keys.iter().map(std::string::String::as_str).collect();
 
         let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
-            if !all_secrets.contains_key(&composite) {
-                CellStatus::NotTargeted
-            } else {
+            if all_secrets.contains_key(&composite) {
                 // Uncategorized keys have no configured targets
                 CellStatus::Deployed
+            } else {
+                CellStatus::NotTargeted
             }
         });
 
@@ -187,7 +187,7 @@ fn render_table(
 
     // Data rows
     for key in keys {
-        let mut row = style(format!("{:<width$}", key, width = key_width))
+        let mut row = style(format!("{key:<key_width$}"))
             .dim()
             .to_string();
         for (e, w) in envs.iter().zip(&col_widths) {

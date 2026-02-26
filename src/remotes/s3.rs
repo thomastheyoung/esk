@@ -113,8 +113,8 @@ impl<'a> S3Remote<'a> {
     }
 }
 
-impl<'a> SyncRemote for S3Remote<'a> {
-    fn name(&self) -> &str {
+impl SyncRemote for S3Remote<'_> {
+    fn name(&self) -> &'static str {
         "s3"
     }
 
@@ -127,7 +127,7 @@ impl<'a> SyncRemote for S3Remote<'a> {
 
         let mut args: Vec<String> = vec!["sts".to_string(), "get-caller-identity".to_string()];
         args.extend(self.base_args());
-        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
 
         let output = self
             .runner
@@ -169,7 +169,7 @@ impl<'a> SyncRemote for S3Remote<'a> {
             s3_uri.clone(),
         ];
         args.extend(base_args);
-        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
 
         let output = self
             .runner
@@ -202,7 +202,7 @@ impl<'a> SyncRemote for S3Remote<'a> {
             "-".to_string(),
         ];
         args.extend(base_args);
-        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
 
         let output = self
             .runner

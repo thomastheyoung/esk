@@ -48,7 +48,7 @@ pub fn format_dashboard_line(label: &str, value: &str, width: usize) -> String {
     let value_len = console::strip_ansi_codes(value).chars().count();
 
     if label_len + value_len + 2 >= width {
-        return format!("{}  {}", label, value);
+        return format!("{label}  {value}");
     }
 
     let dots = ".".repeat(width - label_len - value_len - 2);

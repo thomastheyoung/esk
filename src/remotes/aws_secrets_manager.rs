@@ -65,8 +65,8 @@ impl<'a> AwsSecretsManagerRemote<'a> {
     }
 }
 
-impl<'a> SyncRemote for AwsSecretsManagerRemote<'a> {
-    fn name(&self) -> &str {
+impl SyncRemote for AwsSecretsManagerRemote<'_> {
+    fn name(&self) -> &'static str {
         "aws_secrets_manager"
     }
 
@@ -79,7 +79,7 @@ impl<'a> SyncRemote for AwsSecretsManagerRemote<'a> {
 
         let mut args: Vec<String> = vec!["sts".to_string(), "get-caller-identity".to_string()];
         args.extend(self.base_args());
-        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
 
         let output = self
             .runner
@@ -144,7 +144,7 @@ impl<'a> SyncRemote for AwsSecretsManagerRemote<'a> {
             "file:///dev/stdin".to_string(),
         ];
         args.extend(self.base_args());
-        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
 
         let output = self
             .runner
@@ -172,7 +172,7 @@ impl<'a> SyncRemote for AwsSecretsManagerRemote<'a> {
                     "file:///dev/stdin".to_string(),
                 ];
                 create_args.extend(self.base_args());
-                let create_ref: Vec<&str> = create_args.iter().map(|s| s.as_str()).collect();
+                let create_ref: Vec<&str> = create_args.iter().map(std::string::String::as_str).collect();
 
                 let create_output = self
                     .runner
@@ -210,7 +210,7 @@ impl<'a> SyncRemote for AwsSecretsManagerRemote<'a> {
             "json".to_string(),
         ];
         args.extend(self.base_args());
-        let args_ref: Vec<&str> = args.iter().map(|s| s.as_str()).collect();
+        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
 
         let output = self
             .runner

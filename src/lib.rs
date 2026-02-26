@@ -1,3 +1,15 @@
+#![warn(clippy::pedantic)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
+#![allow(clippy::module_name_repetitions)]
+#![allow(clippy::must_use_candidate)]
+#![allow(clippy::match_same_arms)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::struct_excessive_bools)]
+#![allow(clippy::format_push_string)]
+#![allow(clippy::single_match_else)]
+
 pub mod cli;
 pub mod config;
 pub mod deploy_tracker;

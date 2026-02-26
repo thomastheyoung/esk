@@ -105,7 +105,7 @@ pub fn resolve_enum_values(raw: &[serde_yaml::Value]) -> Result<Vec<String>> {
             serde_yaml::Value::Bool(b) => result.push(b.to_string()),
             serde_yaml::Value::Number(n) => result.push(n.to_string()),
             serde_yaml::Value::String(s) => result.push(s.clone()),
-            other => bail!("unsupported enum value: {:?}", other),
+            other => bail!("unsupported enum value: {other:?}"),
         }
     }
     Ok(result)
@@ -116,7 +116,7 @@ pub fn validate_spec(key: &str, spec: &Validation, known_keys: &BTreeSet<&str>) 
     // range only valid on numeric formats
     if let Some((min, max)) = spec.range {
         match spec.format {
-            Some(Format::Integer) | Some(Format::Number) => {}
+            Some(Format::Integer | Format::Number) => {}
             _ => bail!("secret '{key}': range constraint requires format 'integer' or 'number'"),
         }
         if min > max {
@@ -249,13 +249,13 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
     if let Some(min) = spec.min_length {
         let len = value.chars().count();
         if len < min {
-            errors.push(format!("length {} is below minimum {}", len, min));
+            errors.push(format!("length {len} is below minimum {min}"));
         }
     }
     if let Some(max) = spec.max_length {
         let len = value.chars().count();
         if len > max {
-            errors.push(format!("length {} exceeds maximum {}", len, max));
+            errors.push(format!("length {len} exceeds maximum {max}"));
         }
     }
 
@@ -301,7 +301,7 @@ pub fn validate_cross_field(
         }
 
         let composite = format!("{key}:{env}");
-        let value = secrets.get(&composite).map(|s| s.as_str()).unwrap_or("");
+        let value = secrets.get(&composite).map_or("", std::string::String::as_str);
         let has_value = !value.is_empty();
 
         // required_if: all conditions match (AND) → secret must have a non-empty value
@@ -310,8 +310,7 @@ pub fn validate_cross_field(
                 let cond_composite = format!("{cond_key}:{env}");
                 let actual = secrets
                     .get(&cond_composite)
-                    .map(|s| s.as_str())
-                    .unwrap_or("");
+                    .map_or("", std::string::String::as_str);
                 if cond_val == "*" {
                     !actual.is_empty()
                 } else {
@@ -345,8 +344,7 @@ pub fn validate_cross_field(
                     let peer_composite = format!("{peer}:{env}");
                     let peer_val = secrets
                         .get(&peer_composite)
-                        .map(|s| s.as_str())
-                        .unwrap_or("");
+                        .map_or("", std::string::String::as_str);
                     if !peer_val.is_empty() {
                         violations.push(CrossFieldViolation {
                             key: key.to_string(),
@@ -366,8 +364,7 @@ pub fn validate_cross_field(
                     let alt_composite = format!("{alt}:{env}");
                     let alt_val = secrets
                         .get(&alt_composite)
-                        .map(|s| s.as_str())
-                        .unwrap_or("");
+                        .map_or("", std::string::String::as_str);
                     !alt_val.is_empty()
                 });
 
@@ -391,6 +388,11 @@ pub fn validate_cross_field(
 /// Only `required_if` and `required_unless` participate in cycle detection.
 /// `required_with` is excluded because mutual declaration is the intended pattern.
 pub fn detect_cross_field_cycles(specs: &BTreeMap<&str, &Validation>) -> Result<()> {
+    // Standard three-color DFS
+    const WHITE: u8 = 0;
+    const GRAY: u8 = 1;
+    const BLACK: u8 = 2;
+
     // Build adjacency list from required_if and required_unless only
     let mut graph: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
     for (&key, spec) in specs {
@@ -409,11 +411,6 @@ pub fn detect_cross_field_cycles(specs: &BTreeMap<&str, &Validation>) -> Result<
             graph.insert(key, refs);
         }
     }
-
-    // Standard three-color DFS
-    const WHITE: u8 = 0;
-    const GRAY: u8 = 1;
-    const BLACK: u8 = 2;
 
     let mut color: BTreeMap<&str, u8> = BTreeMap::new();
     let mut parent: BTreeMap<&str, &str> = BTreeMap::new();
@@ -485,13 +482,13 @@ fn validate_format(value: &str, format: Format) -> Result<(), String> {
         }
         Format::Integer => {
             if value.parse::<i64>().is_err() {
-                return Err(format!("expected integer, got {:?}", value));
+                return Err(format!("expected integer, got {value:?}"));
             }
             Ok(())
         }
         Format::Number => {
             if value.parse::<f64>().is_err() {
-                return Err(format!("expected number, got {:?}", value));
+                return Err(format!("expected number, got {value:?}"));
             }
             Ok(())
         }
@@ -499,8 +496,7 @@ fn validate_format(value: &str, format: Format) -> Result<(), String> {
             let lower = value.to_lowercase();
             if !["true", "false", "1", "0", "yes", "no"].contains(&lower.as_str()) {
                 return Err(format!(
-                    "expected boolean (true/false/1/0/yes/no), got {:?}",
-                    value
+                    "expected boolean (true/false/1/0/yes/no), got {value:?}"
                 ));
             }
             Ok(())
@@ -508,13 +504,13 @@ fn validate_format(value: &str, format: Format) -> Result<(), String> {
         Format::Email => {
             let parts: Vec<&str> = value.splitn(2, '@').collect();
             if parts.len() != 2 || parts[0].is_empty() || !parts[1].contains('.') {
-                return Err(format!("expected email address, got {:?}", value));
+                return Err(format!("expected email address, got {value:?}"));
             }
             Ok(())
         }
         Format::Json => {
             if serde_json::from_str::<serde_json::Value>(value).is_err() {
-                return Err(format!("expected valid JSON, got {:?}", value));
+                return Err(format!("expected valid JSON, got {value:?}"));
             }
             Ok(())
         }
@@ -524,7 +520,7 @@ fn validate_format(value: &str, format: Format) -> Result<(), String> {
                 .decode(value)
                 .is_err()
             {
-                return Err(format!("expected valid base64, got {:?}", value));
+                return Err(format!("expected valid base64, got {value:?}"));
             }
             Ok(())
         }

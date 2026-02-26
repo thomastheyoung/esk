@@ -27,8 +27,8 @@ pub struct SupabaseTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> DeployTarget for SupabaseTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for SupabaseTarget<'_> {
+    fn name(&self) -> &'static str {
         "supabase"
     }
 

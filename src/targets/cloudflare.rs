@@ -23,7 +23,7 @@ pub struct CloudflareTarget<'a> {
     pub runner: &'a dyn CommandRunner,
 }
 
-impl<'a> CloudflareTarget<'a> {
+impl CloudflareTarget<'_> {
     fn deploy_pages_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let project = self
             .target_config
@@ -80,8 +80,8 @@ impl<'a> CloudflareTarget<'a> {
     }
 }
 
-impl<'a> DeployTarget for CloudflareTarget<'a> {
-    fn name(&self) -> &str {
+impl DeployTarget for CloudflareTarget<'_> {
+    fn name(&self) -> &'static str {
         "cloudflare"
     }
 

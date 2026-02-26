@@ -79,11 +79,12 @@ impl<'a> BitwardenRemote<'a> {
     }
 
     /// Find a secret by name in the list, returning its ID.
+    #[allow(clippy::unused_self)]
     fn find_secret_id(&self, items: &[Value], name: &str) -> Option<String> {
         items.iter().find_map(|item| {
             let item_name = item.get("key")?.as_str()?;
             if item_name == name {
-                item.get("id")?.as_str().map(|s| s.to_string())
+                item.get("id")?.as_str().map(std::string::ToString::to_string)
             } else {
                 None
             }
@@ -91,8 +92,8 @@ impl<'a> BitwardenRemote<'a> {
     }
 }
 
-impl<'a> SyncRemote for BitwardenRemote<'a> {
-    fn name(&self) -> &str {
+impl SyncRemote for BitwardenRemote<'_> {
+    fn name(&self) -> &'static str {
         "bitwarden"
     }
 
@@ -123,9 +124,8 @@ impl<'a> SyncRemote for BitwardenRemote<'a> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let (env_secrets, version) = match super::extract_env_secrets(payload, env) {
-            Some(v) => v,
-            None => return Ok(()),
+        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+            return Ok(());
         };
 
         // Build JSON payload with bare keys + version
@@ -194,14 +194,12 @@ impl<'a> SyncRemote for BitwardenRemote<'a> {
         let items = self.list_secrets()?;
 
         // Find the secret by name
-        let item = match items.iter().find(|item| {
+        let Some(item) = items.iter().find(|item| {
             item.get("key")
                 .and_then(|v| v.as_str())
-                .map(|s| s == secret_name)
-                .unwrap_or(false)
-        }) {
-            Some(item) => item,
-            None => return Ok(None),
+                .is_some_and(|s| s == secret_name)
+        }) else {
+            return Ok(None);
         };
 
         // Parse the value as JSON
