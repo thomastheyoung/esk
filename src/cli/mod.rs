@@ -10,6 +10,7 @@ pub mod sync;
 
 use clap::{Parser, Subcommand};
 
+use crate::config::GenerateFormat;
 use crate::reconcile::ConflictPreference;
 
 #[derive(Parser)]
@@ -116,12 +117,12 @@ pub enum Commands {
         #[arg(long)]
         all: bool,
     },
-    /// Generate TypeScript type declarations for secrets
+    /// Generate code or config files from secret definitions
     Generate {
-        /// Generate runtime validator instead of .d.ts
-        #[arg(long)]
-        runtime: bool,
-        /// Output file path (defaults to env.d.ts or env.ts)
+        /// Output format (omit to run all configured outputs, or dts if none configured)
+        #[arg(value_enum)]
+        format: Option<GenerateFormat>,
+        /// Output file path (requires a format argument)
         #[arg(long, short)]
         output: Option<String>,
     },

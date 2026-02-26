@@ -558,6 +558,30 @@ secrets:
         env: [web:dev, web:prod]
 "#;
 
+/// Config with generate section for testing multi-output generation.
+pub const GENERATE_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+generate:
+  - format: dts
+  - format: env-example
+
+secrets:
+  General:
+    STRIPE_KEY:
+      description: Your Stripe API key
+      targets: {}
+    NODE_ENV:
+      validate:
+        enum: [development, staging, production]
+      targets: {}
+    FEATURE_FLAG:
+      validate:
+        optional: true
+      targets: {}
+"#;
+
 /// Records calls made to a mock command runner.
 #[derive(Debug, Clone)]
 pub struct RecordedCall {

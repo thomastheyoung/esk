@@ -83,9 +83,9 @@ fn run() -> Result<()> {
             let config = Config::find_and_load()?;
             esk::cli::get::run(&config, key, env)?;
         }
-        Commands::Generate { runtime, output } => {
+        Commands::Generate { format, output } => {
             let config = Config::find_and_load()?;
-            esk::cli::generate::run(&config, *runtime, output.as_deref())?;
+            esk::cli::generate::run(&config, format.as_ref(), output.as_deref())?;
         }
         Commands::List { env } => {
             let config = Config::find_and_load()?;

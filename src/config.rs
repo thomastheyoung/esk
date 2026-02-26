@@ -6,6 +6,31 @@ use std::path::{Path, PathBuf};
 use crate::store::{validate_app, validate_environment, validate_key, validate_project};
 use crate::suggest;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum GenerateFormat {
+    Dts,
+    Ts,
+    EnvExample,
+}
+
+impl GenerateFormat {
+    pub fn default_output(&self) -> &'static str {
+        match self {
+            Self::Dts => "env.d.ts",
+            Self::Ts => "env.ts",
+            Self::EnvExample => ".env.example",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GenerateOutput {
+    pub format: GenerateFormat,
+    #[serde(default)]
+    pub output: Option<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Config {
     pub project: String,
@@ -18,6 +43,8 @@ pub struct Config {
     pub remotes: BTreeMap<String, serde_yaml::Value>,
     #[serde(default)]
     pub secrets: BTreeMap<String, BTreeMap<String, SecretDef>>,
+    #[serde(default)]
+    pub generate: Vec<GenerateOutput>,
     /// Root directory containing esk.yaml
     #[serde(skip)]
     pub root: PathBuf,
@@ -625,6 +652,24 @@ impl Config {
                             ));
                         }
                     }
+                }
+            }
+        }
+
+        // --- Validate generate outputs ---
+        if self.generate.len() > 1 {
+            let mut seen_paths = BTreeSet::new();
+            for entry in &self.generate {
+                let path = entry
+                    .output
+                    .as_deref()
+                    .unwrap_or(entry.format.default_output());
+                if !seen_paths.insert(path.to_string()) {
+                    bail!(
+                        "duplicate generate output path '{}' — \
+                         use different 'output' values to disambiguate",
+                        path
+                    );
                 }
             }
         }
@@ -2572,5 +2617,56 @@ secrets:
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         assert!(err.to_string().contains("circular cross-field reference"));
+    }
+
+    #[test]
+    fn generate_section_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: testapp
+environments: [dev]
+generate:
+  - format: dts
+  - format: env-example
+    output: config/.env.example
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.generate.len(), 2);
+        assert_eq!(config.generate[0].format, GenerateFormat::Dts);
+        assert!(config.generate[0].output.is_none());
+        assert_eq!(config.generate[1].format, GenerateFormat::EnvExample);
+        assert_eq!(
+            config.generate[1].output.as_deref(),
+            Some("config/.env.example")
+        );
+    }
+
+    #[test]
+    fn generate_section_defaults_empty() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(dir.path(), "project: testapp\nenvironments: [dev]");
+        let config = Config::load(&path).unwrap();
+        assert!(config.generate.is_empty());
+    }
+
+    #[test]
+    fn generate_duplicate_output_path_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: testapp
+environments: [dev]
+generate:
+  - format: dts
+  - format: ts
+    output: env.d.ts
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("duplicate generate output path"),
+            "got: {}",
+            err
+        );
     }
 }
