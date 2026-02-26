@@ -7,6 +7,33 @@ use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
 use crate::ui;
 
+struct ListGroup {
+    name: String,
+    table: String,
+}
+
+struct ListReport {
+    groups: Vec<ListGroup>,
+    empty: bool,
+}
+
+impl ListReport {
+    fn render(&self) -> Result<()> {
+        if self.empty {
+            cliclack::log::info(
+                "No secrets stored. Run `esk set <KEY> --env <ENV>` to add one.",
+            )?;
+            return Ok(());
+        }
+
+        for group in &self.groups {
+            cliclack::note(&group.name, &group.table)?;
+        }
+
+        Ok(())
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CellStatus {
     NotTargeted,
@@ -21,8 +48,11 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let all_secrets = store.list()?;
 
     if all_secrets.is_empty() {
-        cliclack::log::info("No secrets stored. Run `esk set <KEY> --env <ENV>` to add one.")?;
-        return Ok(());
+        let report = ListReport {
+            groups: Vec::new(),
+            empty: true,
+        };
+        return report.render();
     }
 
     let envs: Vec<&str> = match env {
@@ -70,6 +100,8 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         .max()
         .unwrap_or(0);
 
+    let mut groups: Vec<ListGroup> = Vec::new();
+
     for (vendor, vendor_secrets) in &config.secrets {
         let keys: Vec<&str> = vendor_secrets
             .keys()
@@ -99,7 +131,10 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
             }
         });
 
-        cliclack::note(vendor, body)?;
+        groups.push(ListGroup {
+            name: vendor.clone(),
+            table: body,
+        });
     }
 
     if !uncat_keys.is_empty() {
@@ -108,17 +143,23 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         let body = render_table(&keys, &envs, global_key_width, |key, e| {
             let composite = format!("{key}:{e}");
             if all_secrets.contains_key(&composite) {
-                // Uncategorized keys have no configured targets
                 CellStatus::Deployed
             } else {
                 CellStatus::NotTargeted
             }
         });
 
-        cliclack::note("Uncategorized (not in esk.yaml)", body)?;
+        groups.push(ListGroup {
+            name: "Uncategorized (not in esk.yaml)".to_string(),
+            table: body,
+        });
     }
 
-    Ok(())
+    let report = ListReport {
+        groups,
+        empty: false,
+    };
+    report.render()
 }
 
 /// Compute the worst deploy status for each (key, env) pair across all its targets.

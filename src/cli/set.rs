@@ -18,6 +18,28 @@ pub struct SetOptions<'a> {
     pub force: bool,
 }
 
+struct SetReport {
+    key: String,
+    env: String,
+    version: u64,
+    push_results: Vec<super::sync::RemotePushResult>,
+}
+
+impl SetReport {
+    #[allow(clippy::cast_possible_truncation)]
+    fn remote_failure_count(&self) -> u32 {
+        self.push_results.iter().filter(|r| !r.success).count() as u32
+    }
+
+    fn render(&self) -> Result<()> {
+        cliclack::log::success(format!(
+            "Set {}:{} (v{})",
+            self.key, self.env, self.version
+        ))?;
+        Ok(())
+    }
+}
+
 pub fn run(config: &Config, opts: &SetOptions<'_>) -> Result<()> {
     run_with_runner(config, opts, &RealCommandRunner)
 }
@@ -135,30 +157,43 @@ pub fn run_with_runner(
     let store = SecretStore::open(&config.root)?;
     let payload = store.set(key, env, &secret_value)?;
 
-    cliclack::log::success(format!("Set {}:{} (v{})", key, env, payload.version))?;
+    let mut push_results = Vec::new();
+    if !no_sync && !config.remotes.is_empty() {
+        let sync_index_path = config.root.join(".esk/sync-index.json");
+        let mut sync_index = SyncIndex::load(&sync_index_path);
+        let all_remotes = remotes::build_remotes(config, runner);
+        push_results = super::sync::push_to_remotes(
+            &all_remotes,
+            &payload,
+            config,
+            env,
+            &mut sync_index,
+            false,
+        )?;
+        sync_index.save()?;
+    }
+
+    let report = SetReport {
+        key: key.to_string(),
+        env: env.to_string(),
+        version: payload.version,
+        push_results,
+    };
+
+    report.render()?;
 
     if no_sync {
         return Ok(());
     }
 
-    // Auto-push to all configured remotes
-    let mut remote_failures = 0u32;
-    if !config.remotes.is_empty() {
-        let sync_index_path = config.root.join(".esk/sync-index.json");
-        let mut sync_index = SyncIndex::load(&sync_index_path);
-        let all_remotes = remotes::build_remotes(config, runner);
-        remote_failures =
-            super::sync::push_to_remotes(&all_remotes, &payload, config, env, &mut sync_index)?;
-        sync_index.save()?;
-
-        if remote_failures > 0 && bail {
-            bail!(
-                "{remote_failures} remote(s) failed to push (--bail). Target deploy skipped.\n\
-                 Fix the remote issue, then run:\n  \
-                 esk sync --env {env}\n  \
-                 esk deploy --env {env}"
-            );
-        }
+    let remote_failures = report.remote_failure_count();
+    if remote_failures > 0 && bail {
+        bail!(
+            "{remote_failures} remote(s) failed to push (--bail). Target deploy skipped.\n\
+             Fix the remote issue, then run:\n  \
+             esk sync --env {env}\n  \
+             esk deploy --env {env}"
+        );
     }
 
     // Auto-deploy affected targets (skip validation — already validated above)

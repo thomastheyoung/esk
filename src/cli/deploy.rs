@@ -43,6 +43,140 @@ struct DeployEntry {
     error: Option<String>,
 }
 
+pub(crate) struct DeployReport {
+    deployed: Vec<DeployEntry>,
+    failed: Vec<DeployEntry>,
+    skipped: Vec<DeployEntry>,
+    unset: Vec<DeployEntry>,
+    pruned: Vec<DeployEntry>,
+    dry_run: bool,
+    verbose: bool,
+}
+
+impl DeployReport {
+    fn is_empty(&self) -> bool {
+        self.deployed.is_empty()
+            && self.failed.is_empty()
+            && self.skipped.is_empty()
+            && self.unset.is_empty()
+            && self.pruned.is_empty()
+    }
+
+    fn has_failures(&self) -> bool {
+        !self.failed.is_empty()
+    }
+
+    fn render(&self) -> Result<()> {
+        let width = DEPLOY_LINE_WIDTH;
+
+        if self.is_empty() {
+            cliclack::log::info("Nothing to deploy.")?;
+        } else {
+            // Group everything by environment for framed output
+            let mut env_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+            let mut env_status: BTreeMap<String, EnvStatus> = BTreeMap::new();
+
+            for entry in &self.deployed {
+                let label = format!("{} {}", ui::icon_success(), style(&entry.key).dim());
+                env_map
+                    .entry(entry.env.clone())
+                    .or_default()
+                    .push(ui::format_dashboard_line(&label, &entry.target, width));
+                env_status.entry(entry.env.clone()).or_default().deployed += 1;
+            }
+
+            for entry in &self.failed {
+                let label = format!("{} {}", ui::icon_failure(), style(&entry.key).dim());
+                let lines = env_map.entry(entry.env.clone()).or_default();
+                lines.push(ui::format_dashboard_line(&label, &entry.target, width));
+                if let Some(err) = &entry.error {
+                    lines.push(format!("      {}", style(format!("({err})")).red().dim()));
+                }
+                env_status.entry(entry.env.clone()).or_default().failed += 1;
+            }
+
+            for entry in &self.unset {
+                let label = format!("{} {}", ui::icon_unset(), style(&entry.key).dim());
+                env_map
+                    .entry(entry.env.clone())
+                    .or_default()
+                    .push(ui::format_dashboard_line(&label, &entry.target, width));
+                env_status.entry(entry.env.clone()).or_default().unset += 1;
+            }
+
+            for entry in &self.pruned {
+                let label = format!("{} {}", ui::icon_pruned(), style(&entry.key).dim());
+                env_map
+                    .entry(entry.env.clone())
+                    .or_default()
+                    .push(ui::format_dashboard_line(
+                        &label,
+                        &format!("{} (pruned)", entry.target),
+                        width,
+                    ));
+                env_status.entry(entry.env.clone()).or_default().pruned += 1;
+            }
+
+            for (env_name, mut lines) in env_map {
+                let es = env_status.get(&env_name).unwrap();
+                let status_summary = ui::format_count_summary(&[
+                    ("failed", es.failed),
+                    ("deployed", es.deployed),
+                    ("unset", es.unset),
+                    ("pruned", es.pruned),
+                ]);
+
+                lines.push(String::new());
+                let status_icon = if es.failed > 0 {
+                    ui::icon_failure()
+                } else {
+                    ui::icon_success()
+                };
+                lines.push(format!(
+                    "{status_icon} Deployment complete ({status_summary})"
+                ));
+
+                cliclack::note(env_name, lines.join("\n"))?;
+            }
+
+            if !self.skipped.is_empty() {
+                if self.verbose {
+                    let mut skip_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
+                    for entry in &self.skipped {
+                        let label =
+                            format!("{} {}", style("✔").dim(), style(&entry.key).dim());
+                        // Keep dim checkmark for skipped (not icon_success — intentionally subdued)
+                        skip_map
+                            .entry(entry.env.clone())
+                            .or_default()
+                            .push(ui::format_dashboard_line(
+                                &label,
+                                &format!("{} (up to date)", entry.target),
+                                width,
+                            ));
+                    }
+                    for (env_name, lines) in skip_map {
+                        cliclack::note(format!("{env_name} (up to date)"), lines.join("\n"))?;
+                    }
+                } else {
+                    let skip_count = self.skipped.len();
+                    cliclack::log::remark(format!(
+                        "{} targets up to date  {}",
+                        style(skip_count).bold(),
+                        style("(use --verbose to show)").dim()
+                    ))?;
+                }
+            }
+        }
+
+        if self.dry_run {
+            cliclack::log::warning("Dry run — no changes made".to_string())?;
+        }
+
+        Ok(())
+    }
+}
+
 pub fn run(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
     run_with_runner(config, opts, &RealCommandRunner)
 }
@@ -888,129 +1022,25 @@ pub fn run_with_runner(
         index.save()?;
     }
 
-    let deploy_count = deployed.len();
-    let skip_count = skipped.len();
-    let fail_count = failed.len();
-    let unset_count = unset.len();
-    let prune_count = pruned.len();
+    let report = DeployReport {
+        deployed,
+        failed,
+        skipped,
+        unset,
+        pruned,
+        dry_run,
+        verbose,
+    };
 
     // Stop spinner before printing results
     if let Some(s) = spinner {
         s.stop("Deploying secrets...");
     }
 
-    // Output
-    let width = DEPLOY_LINE_WIDTH;
+    report.render()?;
 
-    if deploy_count == 0
-        && skip_count == 0
-        && fail_count == 0
-        && unset_count == 0
-        && prune_count == 0
-    {
-        cliclack::log::info("Nothing to deploy.")?;
-    } else {
-        // Group everything by environment for framed output
-        let mut env_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut env_status: BTreeMap<String, EnvStatus> = BTreeMap::new();
-
-        for entry in &deployed {
-            let label = format!("{} {}", ui::icon_success(), style(&entry.key).dim());
-            env_map
-                .entry(entry.env.clone())
-                .or_default()
-                .push(ui::format_dashboard_line(&label, &entry.target, width));
-            env_status.entry(entry.env.clone()).or_default().deployed += 1;
-        }
-
-        for entry in &failed {
-            let label = format!("{} {}", ui::icon_failure(), style(&entry.key).dim());
-            let lines = env_map.entry(entry.env.clone()).or_default();
-            lines.push(ui::format_dashboard_line(&label, &entry.target, width));
-            if let Some(err) = &entry.error {
-                lines.push(format!("      {}", style(format!("({err})")).red().dim()));
-            }
-            env_status.entry(entry.env.clone()).or_default().failed += 1;
-        }
-
-        for entry in &unset {
-            let label = format!("{} {}", ui::icon_unset(), style(&entry.key).dim());
-            env_map
-                .entry(entry.env.clone())
-                .or_default()
-                .push(ui::format_dashboard_line(&label, &entry.target, width));
-            env_status.entry(entry.env.clone()).or_default().unset += 1;
-        }
-
-        for entry in &pruned {
-            let label = format!("{} {}", ui::icon_pruned(), style(&entry.key).dim());
-            env_map
-                .entry(entry.env.clone())
-                .or_default()
-                .push(ui::format_dashboard_line(
-                    &label,
-                    &format!("{} (pruned)", entry.target),
-                    width,
-                ));
-            env_status.entry(entry.env.clone()).or_default().pruned += 1;
-        }
-
-        for (env_name, mut lines) in env_map {
-            let es = env_status.get(&env_name).unwrap();
-            let status_summary = ui::format_count_summary(&[
-                ("failed", es.failed),
-                ("deployed", es.deployed),
-                ("unset", es.unset),
-                ("pruned", es.pruned),
-            ]);
-
-            lines.push(String::new());
-            let status_icon = if es.failed > 0 {
-                ui::icon_failure()
-            } else {
-                ui::icon_success()
-            };
-            lines.push(format!(
-                "{status_icon} Deployment complete ({status_summary})"
-            ));
-
-            cliclack::note(env_name, lines.join("\n"))?;
-        }
-
-        if skip_count > 0 {
-            if verbose {
-                let mut skip_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
-                for entry in &skipped {
-                    let label = format!("{} {}", style("✔").dim(), style(&entry.key).dim());
-                    // Keep dim checkmark for skipped (not icon_success — intentionally subdued)
-                    skip_map
-                        .entry(entry.env.clone())
-                        .or_default()
-                        .push(ui::format_dashboard_line(
-                            &label,
-                            &format!("{} (up to date)", entry.target),
-                            width,
-                        ));
-                }
-                for (env_name, lines) in skip_map {
-                    cliclack::note(format!("{env_name} (up to date)"), lines.join("\n"))?;
-                }
-            } else {
-                cliclack::log::remark(format!(
-                    "{} targets up to date  {}",
-                    style(skip_count).bold(),
-                    style("(use --verbose to show)").dim()
-                ))?;
-            }
-        }
-    }
-
-    if dry_run {
-        cliclack::log::warning("Dry run — no changes made".to_string())?;
-    }
-
-    if fail_count > 0 {
-        anyhow::bail!("{fail_count} deploy(s) failed");
+    if report.has_failures() {
+        anyhow::bail!("{} deploy(s) failed", report.failed.len());
     }
 
     Ok(())

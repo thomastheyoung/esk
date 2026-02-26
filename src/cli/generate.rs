@@ -13,21 +13,65 @@ struct SecretMeta {
     enum_values: Option<Vec<String>>,
 }
 
+struct GenerateResult {
+    relative_path: String,
+    secret_count: usize,
+    gitignore_warning: bool,
+}
+
+struct GenerateReport {
+    results: Vec<GenerateResult>,
+    empty: bool,
+}
+
+impl GenerateReport {
+    fn render(&self) -> Result<()> {
+        if self.empty {
+            cliclack::log::warning("No secrets defined in config")?;
+            return Ok(());
+        }
+
+        for result in &self.results {
+            cliclack::log::success(format!(
+                "Wrote {} secrets to {}",
+                result.secret_count, result.relative_path
+            ))?;
+
+            if result.gitignore_warning {
+                cliclack::log::info(format!(
+                    "Consider adding {} to .gitignore",
+                    result.relative_path
+                ))?;
+            }
+        }
+
+        Ok(())
+    }
+}
+
 pub fn run(config: &Config, format: Option<&GenerateFormat>, output: Option<&str>) -> Result<()> {
     let metas = collect_secret_metas(config);
 
     if metas.is_empty() {
-        cliclack::log::warning("No secrets defined in config")?;
-        return Ok(());
+        let report = GenerateReport {
+            results: Vec::new(),
+            empty: true,
+        };
+        return report.render();
     }
 
     let outputs = resolve_outputs(format, output, &config.generate)?;
 
+    let mut results = Vec::new();
     for entry in &outputs {
-        generate_one(config, &metas, entry)?;
+        results.push(generate_one(config, &metas, entry)?);
     }
 
-    Ok(())
+    let report = GenerateReport {
+        results,
+        empty: false,
+    };
+    report.render()
 }
 
 fn resolve_outputs(
@@ -70,7 +114,11 @@ fn is_esk_generated(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
-fn generate_one(config: &Config, metas: &[SecretMeta], entry: &GenerateOutput) -> Result<()> {
+fn generate_one(
+    config: &Config,
+    metas: &[SecretMeta],
+    entry: &GenerateOutput,
+) -> Result<GenerateResult> {
     let default_name = entry.format.default_output();
     let out_path = match &entry.output {
         Some(p) => config.root.join(p),
@@ -101,21 +149,14 @@ fn generate_one(config: &Config, metas: &[SecretMeta], entry: &GenerateOutput) -
     std::fs::write(&out_path, content)?;
 
     let relative = out_path.strip_prefix(&config.root).unwrap_or(&out_path);
+    let gitignore_warning =
+        entry.format.should_warn_gitignore() && !is_gitignored(&config.root, relative);
 
-    cliclack::log::success(format!(
-        "Wrote {} secrets to {}",
-        metas.len(),
-        relative.display()
-    ))?;
-
-    if entry.format.should_warn_gitignore() && !is_gitignored(&config.root, relative) {
-        cliclack::log::info(format!(
-            "Consider adding {} to .gitignore",
-            relative.display()
-        ))?;
-    }
-
-    Ok(())
+    Ok(GenerateResult {
+        relative_path: relative.display().to_string(),
+        secret_count: metas.len(),
+        gitignore_warning,
+    })
 }
 
 fn collect_secret_metas(config: &Config) -> Vec<SecretMeta> {

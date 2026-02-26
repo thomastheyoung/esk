@@ -25,40 +25,195 @@ pub struct SyncOptions<'a> {
 
 const SYNC_LINE_WIDTH: usize = 30;
 
+pub struct RemotePushResult {
+    pub remote: String,
+    pub success: bool,
+    pub error: Option<String>,
+}
+
 fn env_version_label(payload: &StorePayload, env: &str) -> String {
     ui::format_version_label(payload.env_version(env), payload.env_last_changed_at(env))
 }
 
+struct PullResult {
+    remote: String,
+    outcome: PullOutcome,
+}
+
+enum PullOutcome {
+    Fetched { version: u64, secret_count: usize },
+    Empty,
+    Failed,
+}
+
+enum ReconcileOutcome {
+    Merged { version_label: String },
+    UpToDate { version_label: String },
+    DriftRepair { version_label: String },
+}
+
+struct SyncReport {
+    env: String,
+    pulls: Vec<PullResult>,
+    reconcile: ReconcileOutcome,
+    pushes: Vec<RemotePushResult>,
+    dry_run: bool,
+}
+
+impl SyncReport {
+    fn has_push_failures(&self) -> bool {
+        self.pushes.iter().any(|r| !r.success)
+    }
+
+    fn push_failure_count(&self) -> usize {
+        self.pushes.iter().filter(|r| !r.success).count()
+    }
+
+    fn render(&self) -> Result<()> {
+        let mut lines = Vec::new();
+
+        // Pull lines
+        for pull in &self.pulls {
+            let line = match &pull.outcome {
+                PullOutcome::Fetched {
+                    version,
+                    secret_count,
+                } => ui::format_dashboard_line(
+                    &format!("↓ {}", pull.remote),
+                    &format!("v{version}, {secret_count} secrets"),
+                    SYNC_LINE_WIDTH,
+                ),
+                PullOutcome::Empty => ui::format_dashboard_line(
+                    &format!("↓ {}", pull.remote),
+                    &style("no data").dim().to_string(),
+                    SYNC_LINE_WIDTH,
+                ),
+                PullOutcome::Failed => ui::format_dashboard_line(
+                    &format!("↓ {}", pull.remote),
+                    &style("failed").red().to_string(),
+                    SYNC_LINE_WIDTH,
+                ),
+            };
+            lines.push(line);
+        }
+
+        // Push lines
+        if self.dry_run {
+            for push in &self.pushes {
+                lines.push(ui::format_dashboard_line(
+                    &format!("↑ {}", push.remote),
+                    &style("would push").dim().to_string(),
+                    SYNC_LINE_WIDTH,
+                ));
+            }
+        } else {
+            for push in &self.pushes {
+                if push.success {
+                    lines.push(ui::format_dashboard_line(
+                        &format!("↑ {}", push.remote),
+                        &style("synced").green().to_string(),
+                        SYNC_LINE_WIDTH,
+                    ));
+                } else {
+                    lines.push(ui::format_dashboard_line(
+                        &format!("↑ {}", push.remote),
+                        &style("failed").red().to_string(),
+                        SYNC_LINE_WIDTH,
+                    ));
+                }
+            }
+        }
+
+        // Status line
+        let status_line = if self.dry_run {
+            match &self.reconcile {
+                ReconcileOutcome::Merged { version_label } => {
+                    format!("{} Would merge → {}", ui::icon_merge(), version_label)
+                }
+                ReconcileOutcome::UpToDate { version_label } => {
+                    format!("{} Up to date → {}", ui::icon_success(), version_label)
+                }
+                ReconcileOutcome::DriftRepair { version_label } => {
+                    format!(
+                        "{} Current ({}), would repair drift",
+                        ui::icon_merge(),
+                        version_label
+                    )
+                }
+            }
+        } else {
+            match &self.reconcile {
+                ReconcileOutcome::Merged { version_label } => {
+                    format!("{} Merged → {}", ui::icon_merge(), version_label)
+                }
+                ReconcileOutcome::UpToDate { version_label } => {
+                    format!("{} Up to date → {}", ui::icon_success(), version_label)
+                }
+                ReconcileOutcome::DriftRepair { .. } => {
+                    format!("{} Stale remotes (repairing...)", ui::icon_merge())
+                }
+            }
+        };
+
+        lines.push(String::new());
+        lines.push(status_line);
+        cliclack::note(&self.env, lines.join("\n"))?;
+
+        Ok(())
+    }
+}
+
 /// Push a payload to the given remotes, recording results in the remote index.
-/// Returns the number of failures.
+///
+/// When `quiet` is false (used by set/delete), shows spinners per remote.
+/// When `quiet` is true (used by sync report), skips spinners — the caller renders.
 pub fn push_to_remotes(
     remotes: &[Box<dyn SyncRemote + '_>],
     payload: &StorePayload,
     config: &Config,
     env: &str,
     sync_index: &mut SyncIndex,
-) -> Result<u32> {
-    let mut fail_count = 0u32;
+    quiet: bool,
+) -> Result<Vec<RemotePushResult>> {
+    let mut results = Vec::new();
     let pushed_version = payload.env_version(env);
 
     for rem in remotes {
-        let spinner = cliclack::spinner();
-        spinner.start(format!("↑ {}...", rem.name()));
+        let spinner = if quiet {
+            None
+        } else {
+            let s = cliclack::spinner();
+            s.start(format!("↑ {}...", rem.name()));
+            Some(s)
+        };
 
         match rem.push(payload, config, env) {
             Ok(()) => {
-                spinner.stop(format!("↑ {}  {}", rem.name(), style("done").green()));
+                if let Some(s) = spinner {
+                    s.stop(format!("↑ {}  {}", rem.name(), style("done").green()));
+                }
                 sync_index.record_success(rem.name(), env, pushed_version);
+                results.push(RemotePushResult {
+                    remote: rem.name().to_string(),
+                    success: true,
+                    error: None,
+                });
             }
             Err(e) => {
-                spinner.error(format!("↑ {}  {} — {e}", rem.name(), style("failed").red()));
+                if let Some(s) = spinner {
+                    s.error(format!("↑ {}  {} — {e}", rem.name(), style("failed").red()));
+                }
                 sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
-                fail_count += 1;
+                results.push(RemotePushResult {
+                    remote: rem.name().to_string(),
+                    success: false,
+                    error: Some(e.to_string()),
+                });
             }
         }
     }
 
-    Ok(fail_count)
+    Ok(results)
 }
 
 pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
@@ -114,7 +269,7 @@ pub fn run_with_runner(
     config.validate_env(env)?;
     let only = opts.only;
     let dry_run = opts.dry_run;
-    let bail = opts.bail;
+    let bail_on_err = opts.bail;
     let force = opts.force;
     let auto_deploy = opts.auto_deploy;
     let prefer = opts.prefer;
@@ -153,41 +308,40 @@ pub fn run_with_runner(
         all_remotes
     };
 
-    let mut lines = Vec::new();
-
-    // Pull from all target remotes
+    // Phase 1: Pull from all target remotes
+    let mut pulls: Vec<PullResult> = Vec::new();
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
     let mut pull_failures: Vec<String> = Vec::new();
 
     for rem in &target_remotes {
         match rem.pull(config, env) {
             Ok(Some((secrets, version))) => {
-                lines.push(ui::format_dashboard_line(
-                    &format!("↓ {}", rem.name()),
-                    &format!("v{}, {} secrets", version, secrets.len()),
-                    SYNC_LINE_WIDTH,
-                ));
+                pulls.push(PullResult {
+                    remote: rem.name().to_string(),
+                    outcome: PullOutcome::Fetched {
+                        version,
+                        secret_count: secrets.len(),
+                    },
+                });
                 remote_data.push((rem.name().to_string(), secrets, version));
             }
             Ok(None) => {
-                lines.push(ui::format_dashboard_line(
-                    &format!("↓ {}", rem.name()),
-                    &style("no data").dim().to_string(),
-                    SYNC_LINE_WIDTH,
-                ));
+                pulls.push(PullResult {
+                    remote: rem.name().to_string(),
+                    outcome: PullOutcome::Empty,
+                });
             }
             Err(_) => {
-                lines.push(ui::format_dashboard_line(
-                    &format!("↓ {}", rem.name()),
-                    &style("failed").red().to_string(),
-                    SYNC_LINE_WIDTH,
-                ));
+                pulls.push(PullResult {
+                    remote: rem.name().to_string(),
+                    outcome: PullOutcome::Failed,
+                });
                 pull_failures.push(rem.name().to_string());
             }
         }
     }
 
-    if !pull_failures.is_empty() && bail {
+    if !pull_failures.is_empty() && bail_on_err {
         bail!(
             "{} remote(s) failed to respond: {}. Use without --bail to reconcile with partial data.",
             pull_failures.len(),
@@ -200,15 +354,15 @@ pub fn run_with_runner(
         return Ok(());
     }
 
-    // Multi-source reconciliation
-    let remotes: Vec<(&str, &BTreeMap<String, String>, u64)> = remote_data
+    // Phase 2: Multi-source reconciliation (interactive prompts stay here)
+    let remotes_ref: Vec<(&str, &BTreeMap<String, String>, u64)> = remote_data
         .iter()
         .map(|(name, secrets, version)| (name.as_str(), secrets, *version))
         .collect();
 
     let result = match reconcile::reconcile_multi_with_jump_limit(
         &payload,
-        &remotes,
+        &remotes_ref,
         Some(env),
         prefer,
         !force,
@@ -230,7 +384,7 @@ pub fn run_with_runner(
             }
             reconcile::reconcile_multi_with_jump_limit(
                 &payload,
-                &remotes,
+                &remotes_ref,
                 Some(env),
                 prefer,
                 false,
@@ -239,145 +393,169 @@ pub fn run_with_runner(
         Err(e) => return Err(e),
     };
 
-    let mut status_line = String::new();
+    // Phase 3: Compute reconcile outcome + execute merge/push
+    let reconcile_outcome;
+    let mut pushes: Vec<RemotePushResult> = Vec::new();
 
-    // Dry-run exit point
     if dry_run {
+        // Dry-run: compute outcome, fake pushes for sources_to_update
         if result.local_changed {
             let label = env_version_label(&result.merged_payload, env);
-            status_line = format!("{} Would merge → {}", ui::icon_merge(), label);
-        } else if result.sources_to_update.is_empty() {
-            let label = env_version_label(&payload, env);
-            status_line = format!("{} Up to date → {}", ui::icon_success(), label);
-        }
-
-        if !result.sources_to_update.is_empty() {
-            for name in &result.sources_to_update {
-                lines.push(ui::format_dashboard_line(
-                    &format!("↑ {name}"),
-                    &style("would push").dim().to_string(),
-                    SYNC_LINE_WIDTH,
-                ));
-            }
             if result.has_drift {
-                let label = env_version_label(&payload, env);
-                status_line = format!(
-                    "{} Current ({}), would repair drift",
-                    ui::icon_merge(),
-                    label
-                );
+                reconcile_outcome = ReconcileOutcome::DriftRepair {
+                    version_label: label,
+                };
+            } else {
+                reconcile_outcome = ReconcileOutcome::Merged {
+                    version_label: label,
+                };
+            }
+        } else if !result.sources_to_update.is_empty() {
+            let label = env_version_label(&payload, env);
+            if result.has_drift {
+                reconcile_outcome = ReconcileOutcome::DriftRepair {
+                    version_label: label,
+                };
+            } else {
+                reconcile_outcome = ReconcileOutcome::UpToDate {
+                    version_label: label,
+                };
+            }
+        } else {
+            let label = env_version_label(&payload, env);
+            reconcile_outcome = ReconcileOutcome::UpToDate {
+                version_label: label,
+            };
+        }
+
+        // In dry-run, represent sources_to_update as push entries (rendered as "would push")
+        for name in &result.sources_to_update {
+            pushes.push(RemotePushResult {
+                remote: name.clone(),
+                success: true,
+                error: None,
+            });
+        }
+    } else {
+        // Live mode: merge + push
+        if result.local_changed {
+            // Detect values that became empty from remote merge (skip allow_empty secrets)
+            let resolved = config.resolve_secrets()?;
+            let mut empty_from_remote: Vec<String> = Vec::new();
+            for (composite, value) in &result.merged_payload.secrets {
+                if crate::validate::is_effectively_empty(value) {
+                    let bare_key = composite
+                        .rsplit_once(':')
+                        .map_or(composite.as_str(), |(k, _)| k);
+                    let is_allowed = resolved.iter().any(|s| s.key == *bare_key && s.allow_empty);
+                    if is_allowed {
+                        continue;
+                    }
+                    let was_empty_locally = payload
+                        .secrets
+                        .get(composite)
+                        .is_some_and(|v| crate::validate::is_effectively_empty(v));
+                    if !was_empty_locally {
+                        empty_from_remote.push(composite.clone());
+                    }
+                }
+            }
+            if !empty_from_remote.is_empty() {
+                empty_from_remote.sort();
+                cliclack::log::warning(format!(
+                    "Remote introduced {} empty value{}: {}",
+                    empty_from_remote.len(),
+                    if empty_from_remote.len() == 1 {
+                        ""
+                    } else {
+                        "s"
+                    },
+                    empty_from_remote.join(", ")
+                ))?;
+            }
+
+            store.set_payload(&result.merged_payload)?;
+            let label = env_version_label(&result.merged_payload, env);
+            reconcile_outcome = ReconcileOutcome::Merged {
+                version_label: label,
+            };
+        } else {
+            let label = env_version_label(&payload, env);
+            if result.has_drift {
+                reconcile_outcome = ReconcileOutcome::DriftRepair {
+                    version_label: label,
+                };
+            } else {
+                reconcile_outcome = ReconcileOutcome::UpToDate {
+                    version_label: label,
+                };
             }
         }
-        lines.push(String::new());
-        lines.push(status_line);
-        cliclack::note(env, lines.join("\n"))?;
-        return Ok(());
-    }
 
-    if result.local_changed {
-        // Detect values that became empty from remote merge (skip allow_empty secrets)
-        let resolved = config.resolve_secrets()?;
-        let mut empty_from_remote: Vec<String> = Vec::new();
-        for (composite, value) in &result.merged_payload.secrets {
-            if crate::validate::is_effectively_empty(value) {
-                let bare_key = composite
-                    .rsplit_once(':')
-                    .map_or(composite.as_str(), |(k, _)| k);
-                let is_allowed = resolved.iter().any(|s| s.key == *bare_key && s.allow_empty);
-                if is_allowed {
+        // Push merged/current result back to stale remotes
+        if !result.sources_to_update.is_empty() {
+            let updated_payload = if result.local_changed {
+                &result.merged_payload
+            } else {
+                &payload
+            };
+            let sync_index_path = config.root.join(".esk/sync-index.json");
+            let mut sync_index = SyncIndex::load(&sync_index_path);
+            let pushed_version = updated_payload.env_version(env);
+
+            for rem in &target_remotes {
+                if !result.sources_to_update.iter().any(|s| s == rem.name()) {
                     continue;
                 }
-                let was_empty_locally = payload
-                    .secrets
-                    .get(composite)
-                    .is_some_and(|v| crate::validate::is_effectively_empty(v)); // didn't exist = not "was empty"
-                if !was_empty_locally {
-                    empty_from_remote.push(composite.clone());
+                match rem.push(updated_payload, config, env) {
+                    Ok(()) => {
+                        sync_index.record_success(rem.name(), env, pushed_version);
+                        pushes.push(RemotePushResult {
+                            remote: rem.name().to_string(),
+                            success: true,
+                            error: None,
+                        });
+                    }
+                    Err(e) => {
+                        sync_index.record_failure(
+                            rem.name(),
+                            env,
+                            pushed_version,
+                            e.to_string(),
+                        );
+                        pushes.push(RemotePushResult {
+                            remote: rem.name().to_string(),
+                            success: false,
+                            error: Some(e.to_string()),
+                        });
+                    }
                 }
             }
-        }
-        if !empty_from_remote.is_empty() {
-            empty_from_remote.sort();
-            cliclack::log::warning(format!(
-                "Remote introduced {} empty value{}: {}",
-                empty_from_remote.len(),
-                if empty_from_remote.len() == 1 {
-                    ""
-                } else {
-                    "s"
-                },
-                empty_from_remote.join(", ")
-            ))?;
-        }
-
-        store.set_payload(&result.merged_payload)?;
-        let label = env_version_label(&result.merged_payload, env);
-        status_line = format!("{} Merged → {}", ui::icon_merge(), label);
-    } else {
-        let label = env_version_label(&payload, env);
-        if result.has_drift {
-            status_line = format!("{} Stale remotes (repairing...)", ui::icon_merge());
-        } else {
-            status_line = format!("{} Up to date → {}", ui::icon_success(), label);
+            sync_index.save()?;
         }
     }
 
-    // Push merged/current result back to stale remotes (no interactive prompt)
-    if !result.sources_to_update.is_empty() {
-        let updated_payload = if result.local_changed {
-            &result.merged_payload
-        } else {
-            &payload
-        };
-        let sync_index_path = config.root.join(".esk/sync-index.json");
-        let mut sync_index = SyncIndex::load(&sync_index_path);
+    // Phase 4: Render report
+    let report = SyncReport {
+        env: env.to_string(),
+        pulls,
+        reconcile: reconcile_outcome,
+        pushes,
+        dry_run,
+    };
 
-        let stale_remotes: Vec<_> = target_remotes
-            .iter()
-            .filter(|p| result.sources_to_update.iter().any(|s| s == p.name()))
-            .collect();
-        let pushed_version = updated_payload.env_version(env);
+    report.render()?;
 
-        let mut pushback_failures = 0u32;
-        for rem in &stale_remotes {
-            match rem.push(updated_payload, config, env) {
-                Ok(()) => {
-                    lines.push(ui::format_dashboard_line(
-                        &format!("↑ {}", rem.name()),
-                        &style("synced").green().to_string(),
-                        SYNC_LINE_WIDTH,
-                    ));
-                    sync_index.record_success(rem.name(), env, pushed_version);
-                }
-                Err(e) => {
-                    lines.push(ui::format_dashboard_line(
-                        &format!("↑ {}", rem.name()),
-                        &style("failed").red().to_string(),
-                        SYNC_LINE_WIDTH,
-                    ));
-                    sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
-                    pushback_failures += 1;
-                }
-            }
-        }
-        sync_index.save()?;
-        if pushback_failures > 0 {
-            lines.push(String::new());
-            lines.push(status_line);
-            cliclack::note(env, lines.join("\n"))?;
-            bail!(
-                "{pushback_failures} remote(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
-            );
-        }
+    if report.has_push_failures() {
+        let fail_count = report.push_failure_count();
+        bail!(
+            "{fail_count} remote(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
+        );
     }
 
-    lines.push(String::new());
-    lines.push(status_line);
-    cliclack::note(env, lines.join("\n"))?;
-
+    // Auto-deploy stays after render
     if auto_deploy && result.local_changed {
         cliclack::log::step("Running deploy...")?;
-        // allow_empty: user already saw the sync warning about empty values
         crate::cli::deploy::run_with_runner(
             config,
             &crate::cli::deploy::DeployOptions {
