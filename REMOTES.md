@@ -569,7 +569,7 @@ When multiple remotes are configured, `esk sync` reconciles across all of them:
 
 1. Pull from every configured remote (or just `--only <name>`).
 2. Find the source with the highest version (including local).
-3. Start with that as the base.
+3. Overlay the highest-version secrets onto the local store.
 4. Merge unique secrets from lower-version sources.
 5. Write the merged result to the local store.
 6. Push merged/current data back to stale remotes, including equal-version drift repair (even when local content was already current).

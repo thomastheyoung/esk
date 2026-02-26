@@ -21,8 +21,10 @@ Creates:
 Idempotent — skips files that already exist. Updates `.gitignore` to include:
 
 ```gitignore
-# esk
-.esk/
+# esk (store.enc is safe to commit)
+.esk/store.key
+.esk/deploy-index.json
+.esk/sync-index.json
 ```
 
 ---
@@ -46,7 +48,7 @@ esk delete <KEY> --env <ENV> [--no-sync] [--bail]
 
 1. Validates the environment exists in config.
 2. Warns if the key isn't defined in `esk.yaml`.
-3. Removes the value from the encrypted store and records a tombstone, incrementing the version counter.
+3. Removes the value from the encrypted store and records a tombstone, incrementing the version counter. Errors if the key has no stored value for the environment.
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
 5. Unless `--no-sync`: runs `deploy` for the affected environment (batch targets regenerate without the deleted key; individual targets call their delete command).
 6. With `--bail`: if any remote push fails, exits with an error and skips deploy entirely.
@@ -216,7 +218,7 @@ esk status [--env <ENV>] [--all]
 | Argument | Required | Description                              |
 | -------- | -------- | ---------------------------------------- |
 | `--env`  | No       | Filter to a single environment           |
-| `--all`  | No       | Show all entries including deployed ones |
+| `--all`  | No       | Show all targets including deployed ones |
 
 Displays a multi-section dashboard with the following sections:
 
@@ -235,8 +237,8 @@ The dashboard closes with the current store version.
   myapp · v5 · 6 targets (3 deployed, 2 pending, 1 unset)
 
   Targets
-    ✔ env            writable
-    ✔ cloudflare     wrangler authenticated
+    ✓ env            writable
+    ✓ cloudflare     wrangler authenticated
 
   Deploy (targets)
     ● 2 pending
@@ -244,7 +246,7 @@ The dashboard closes with the current store version.
        API_KEY:dev  → env:web  never deployed
     ○ 1 unset
        DATABASE_URL:dev  → env:web:dev
-    ✔ 3 deployed  (--all to show)
+    ✓ 3 deployed  (--all to show)
 
   Next steps
     esk deploy --env prod  deploy 1 pending change
@@ -275,7 +277,7 @@ esk generate [--runtime] [--output <PATH>]
 2. Writes `env.d.ts` by default with `NodeJS.ProcessEnv` declarations.
 3. With `--runtime`, writes `env.ts` containing a `requireEnv` helper and typed `env` object.
 4. Creates parent directories for the output path if needed.
-5. Warns when no secrets are defined, and warns if the output path does not appear in `.gitignore`.
+5. Warns when no secrets are defined, and suggests adding the output path to `.gitignore` if it isn't already listed.
 
 **Examples:**
 
@@ -300,8 +302,8 @@ esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--bail] [--force] [--with-
 | `--env`         | No       | Environment to sync (omit to sync all configured environments)              |
 | `--only`        | No       | Sync a specific remote only                                                 |
 | `--dry-run`     | No       | Show what would change without modifying anything                           |
-| `--bail`        | No       | Fail if any remote is unreachable (no partial reconciliation)               |
-| `--force`       | No       | Bypass version jump protection — skip interactive prompt (use with caution) |
+| `--bail`        | No       | Fail on first error (remote pull failure or per-environment failure)         |
+| `--force`       | No       | Bypass version jump protection (use with caution)                           |
 | `--with-deploy` | No       | Auto-run `deploy` after syncing                                             |
 | `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)         |
 
@@ -314,8 +316,9 @@ esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--bail] [--force] [--with-
 3. Uses the highest version as the base and merges unique keys from lower versions.
 4. Updates local store state when reconciliation changes it.
 5. Pushes merged/current data to stale remotes, including equal-version drift repair (no interactive push prompt).
-6. With `--with-deploy`, runs `esk deploy --env <ENV>` only for environments where local store state changed.
-7. With `--dry-run`, shows what would change without modifying store or remote state.
+6. With `--bail`: aborts on the first remote pull failure or the first environment sync failure. Without `--bail`: logs failing environments and continues; exits non-zero if any failed.
+7. With `--with-deploy`, runs `esk deploy --env <ENV>` only for environments where local store state changed.
+8. With `--dry-run`, shows what would change without modifying store or remote state.
 
 **Examples:**
 
@@ -337,8 +340,8 @@ esk sync --env prod --dry-run           # Preview changes
 | `esk.yaml`               | Project configuration                     | Yes            |
 | `.esk/store.enc`         | AES-256-GCM encrypted secret store        | Yes            |
 | `.esk/store.key`         | 32-byte encryption key (hex)              | **No**         |
-| `.esk/deploy-index.json` | Deploy state (hashes, timestamps, status) | Optional       |
-| `.esk/sync-index.json`   | Sync state (versions, timestamps)         | Optional       |
+| `.esk/deploy-index.json` | Deploy state (hashes, timestamps, status) | No (gitignored) |
+| `.esk/sync-index.json`   | Sync state (versions, timestamps)         | No (gitignored) |
 
 ## Exit codes
 

@@ -14,6 +14,9 @@ src/
 ├── sync_tracker.rs      # Sync tracking (version + status per remote/env)
 ├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
 ├── suggest.rs           # Typo suggestions (Levenshtein distance)
+├── ui.rs                # Custom cliclack theme (EskTheme)
+├── test_support/
+│   └── mod.rs           # Unit test helpers (MockCommandRunner, ErrorCommandRunner, ConfigFixture)
 ├── targets/
 │   ├── mod.rs           # DeployTarget + CommandRunner traits, build_targets()
 │   ├── env_file.rs      # .env file generation (batch deploy)
@@ -59,7 +62,7 @@ tests/
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (122)
+└── cli_integration.rs      # CLI command tests (124)
 ```
 
 ## Core design
@@ -81,7 +84,7 @@ Project-level config defines everything: environments, apps, target settings, re
 - Random 32-byte key in `.esk/store.key` (gitignored)
 - Per-encryption 12-byte nonce
 - Storage format: `nonce:ciphertext:tag` (hex-encoded)
-- JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N, "tombstones": { "KEY:env": N }, "env_versions": { "env": N } }`
+- JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N, "tombstones": { "KEY:env": N }, "env_versions": { "env": N }, "env_last_changed_at": { "env": "ISO-8601" } }`
 - Safe to commit to git
 
 ### Deploy target trait
@@ -200,7 +203,7 @@ cargo test --test cli_integration  # Run CLI integration tests only
 ### Test infrastructure
 
 - **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `sync_index_path()`.
-- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG` — reusable YAML for tests.
+- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `REMOTE_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_REMOTE_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.

@@ -82,8 +82,8 @@ esk status --env dev
 | `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets) | Yes           |
 | `.esk/store.enc`         | Encrypted secret store                                         | Yes           |
 | `.esk/store.key`         | Local encryption key (32-byte hex)                             | No            |
-| `.esk/deploy-index.json` | Deploy state tracker                                           | Optional      |
-| `.esk/sync-index.json`   | Sync state tracker                                             | Optional      |
+| `.esk/deploy-index.json` | Deploy state tracker                                           | No (gitignored) |
+| `.esk/sync-index.json`   | Sync state tracker                                             | No (gitignored) |
 
 ## Mental model
 
@@ -217,9 +217,10 @@ cargo release-tag
 This command:
 
 - verifies you are on `main` and your working tree is clean
-- reads the crate version and tags `v<version>`
-- runs `fmt`, `clippy`, and `test`
-- pushes `main` and the release tag
+- reads the crate version and checks the tag doesn't already exist
+- pulls with rebase from origin
+- runs `fmt --check`, `clippy`, and `test`
+- pushes `main`, then creates and pushes the `v<version>` tag
 
 Preview without changes:
 
