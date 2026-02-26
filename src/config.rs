@@ -22,9 +22,13 @@ impl GenerateFormat {
             Self::EnvExample => ".env.example",
         }
     }
+
+    pub fn should_warn_gitignore(&self) -> bool {
+        !matches!(self, Self::EnvExample)
+    }
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct GenerateOutput {
     pub format: GenerateFormat,
     #[serde(default)]

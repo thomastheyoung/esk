@@ -4371,6 +4371,43 @@ fn generate_output_without_format_errors() {
     assert!(err.to_string().contains("--output requires a format"));
 }
 
+#[test]
+fn generate_env_example_no_gitignore_warning() {
+    // env-example files are safe to commit, so no gitignore suggestion should appear.
+    // Verify by checking no .gitignore exists yet the command succeeds without error.
+    let project = TestProject::with_store(FULL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    // No .gitignore at all — dts would warn, but env-example should not
+    assert!(!project.root().join(".gitignore").is_file());
+    cli::generate::run(&config, Some(&GenerateFormat::EnvExample), None).unwrap();
+
+    let output_path = project.root().join(".env.example");
+    assert!(output_path.is_file());
+}
+
+#[test]
+fn generate_env_example_multiline_description() {
+    let yaml = r#"
+project: testapp
+environments: [dev, prod]
+
+secrets:
+  General:
+    DB_URL:
+      description: "Connection string\nfor the database"
+      targets: {}
+"#;
+    let project = TestProject::with_store(yaml).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, Some(&GenerateFormat::EnvExample), None).unwrap();
+
+    let content = std::fs::read_to_string(project.root().join(".env.example")).unwrap();
+    assert!(content.contains("# Connection string\n# for the database\n"));
+    assert!(content.contains("DB_URL=\n"));
+}
+
 // === validation: set ===
 
 #[test]

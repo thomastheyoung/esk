@@ -77,7 +77,7 @@ fn generate_one(config: &Config, metas: &[SecretMeta], entry: &GenerateOutput) -
         relative.display()
     ))?;
 
-    if !is_gitignored(&config.root, relative) {
+    if entry.format.should_warn_gitignore() && !is_gitignored(&config.root, relative) {
         cliclack::log::info(format!(
             "Consider adding {} to .gitignore",
             relative.display()
@@ -277,7 +277,9 @@ fn generate_env_example(metas: &[SecretMeta]) -> String {
             out.push('\n');
         }
         if let Some(ref desc) = m.description {
-            out.push_str(&format!("# {desc}\n"));
+            for line in desc.lines() {
+                out.push_str(&format!("# {line}\n"));
+            }
         }
         if let Some(ref values) = m.enum_values {
             out.push_str(&format!("# Allowed: {}\n", values.join(", ")));
@@ -707,8 +709,9 @@ mod tests {
         let output = generate_env_example(&metas);
         assert!(output.contains("# Optional\n"));
         assert!(output.contains("# FEATURE_FLAG=\n"));
-        // Should NOT contain an uncommented FEATURE_FLAG=
-        assert!(!output.contains("\nFEATURE_FLAG=\n"));
+        // Only one occurrence of FEATURE_FLAG=, and it's commented
+        assert_eq!(output.matches("FEATURE_FLAG=").count(), 1);
+        assert!(output.contains("# FEATURE_FLAG="));
     }
 
     // --- resolve_outputs tests ---
@@ -779,5 +782,37 @@ mod tests {
 
         let no_desc = metas.iter().find(|m| m.key == "NO_DESC").unwrap();
         assert!(no_desc.description.is_none());
+    }
+
+    // --- should_warn_gitignore ---
+
+    #[test]
+    fn should_warn_gitignore_true_for_dts() {
+        assert!(GenerateFormat::Dts.should_warn_gitignore());
+    }
+
+    #[test]
+    fn should_warn_gitignore_true_for_ts() {
+        assert!(GenerateFormat::Ts.should_warn_gitignore());
+    }
+
+    #[test]
+    fn should_warn_gitignore_false_for_env_example() {
+        assert!(!GenerateFormat::EnvExample.should_warn_gitignore());
+    }
+
+    // --- env-example multi-line description ---
+
+    #[test]
+    fn env_example_multiline_description() {
+        let metas = vec![SecretMeta {
+            key: "DB_URL".to_string(),
+            description: Some("Connection string\nfor the database".to_string()),
+            format: None,
+            optional: false,
+            enum_values: None,
+        }];
+        let output = generate_env_example(&metas);
+        assert!(output.contains("# Connection string\n# for the database\n"));
     }
 }
