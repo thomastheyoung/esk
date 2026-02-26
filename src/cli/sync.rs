@@ -547,7 +547,7 @@ pub fn run_with_runner(
                 dry_run: false,
                 verbose: false,
                 skip_validation: false,
-                skip_requirements: true,
+                bail: false,
                 allow_empty: true,
                 prune: false,
             },

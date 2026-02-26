@@ -58,9 +58,9 @@ pub enum Commands {
         /// Skip value validation
         #[arg(long)]
         skip_validation: bool,
-        /// Skip required-secret checks
+        /// Fail if any required secrets are missing (default: warn and deploy available)
         #[arg(long)]
-        skip_requirements: bool,
+        bail: bool,
         /// Allow deploying empty/whitespace-only values
         #[arg(long)]
         allow_empty: bool,

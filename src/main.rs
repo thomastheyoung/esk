@@ -39,7 +39,7 @@ fn run() -> Result<()> {
             dry_run,
             verbose,
             skip_validation,
-            skip_requirements,
+            bail,
             allow_empty,
             prune,
         } => {
@@ -52,7 +52,7 @@ fn run() -> Result<()> {
                     dry_run: *dry_run,
                     verbose: *verbose,
                     skip_validation: *skip_validation,
-                    skip_requirements: *skip_requirements,
+                    bail: *bail,
                     allow_empty: *allow_empty,
                     prune: *prune,
                 },

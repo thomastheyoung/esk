@@ -187,7 +187,7 @@ pub fn run_with_runner(
     }
 
     // Auto-deploy affected targets (skip validation — already validated above)
-    // skip_requirements: user may be setting secrets incrementally
+    // bail: false — user may be setting secrets incrementally
     // allow_empty: user already confirmed at set time, don't double-prompt
     crate::cli::deploy::run_with_runner(
         config,
@@ -197,7 +197,7 @@ pub fn run_with_runner(
             dry_run: false,
             verbose: false,
             skip_validation: true,
-            skip_requirements: true,
+            bail: false,
             allow_empty: true,
             prune: false,
         },

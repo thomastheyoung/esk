@@ -116,7 +116,7 @@ pub fn run_with_runner(
     }
 
     // Auto-deploy targets (env files regenerate without deleted key; individual targets delete)
-    // skip_requirements: the user intentionally deleted this secret
+    // bail: false — the user intentionally deleted this secret
     crate::cli::deploy::run_with_runner(
         config,
         &crate::cli::deploy::DeployOptions {
@@ -125,7 +125,7 @@ pub fn run_with_runner(
             dry_run: false,
             verbose: false,
             skip_validation: false,
-            skip_requirements: true,
+            bail: false,
             allow_empty: true,
             prune: false,
         },
