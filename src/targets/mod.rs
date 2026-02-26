@@ -40,8 +40,6 @@ impl DeployOutcome {
 
 pub struct DeployResult {
     pub key: String,
-    #[allow(dead_code)]
-    pub target: ResolvedTarget,
     pub outcome: DeployOutcome,
 }
 
@@ -160,12 +158,10 @@ pub trait DeployTarget {
             .map(|s| match self.deploy_secret(&s.key, &s.value, target) {
                 Ok(()) => DeployResult {
                     key: s.key.clone(),
-                    target: target.clone(),
                     outcome: DeployOutcome::Success,
                 },
                 Err(e) => DeployResult {
                     key: s.key.clone(),
-                    target: target.clone(),
                     outcome: DeployOutcome::Failed(e.to_string()),
                 },
             })

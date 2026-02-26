@@ -186,7 +186,7 @@ fn remote_candidates<'a>(
         config.remote_config::<crate::config::DopplerRemoteConfig>("doppler")
     {
         candidates.push(RemoteCandidate {
-            remote: Box::new(doppler::DopplerRemote::new(config, doppler_config, runner)),
+            remote: Box::new(doppler::DopplerRemote::new(doppler_config, runner)),
             ok_message: "authenticated",
         });
     }

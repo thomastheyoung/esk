@@ -266,7 +266,6 @@ mod tests {
         }
     }
 
-    #[allow(dead_code)]
     fn fail_output(stderr: &[u8]) -> CommandOutput {
         CommandOutput {
             success: false,

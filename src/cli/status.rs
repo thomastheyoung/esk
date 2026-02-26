@@ -4,7 +4,6 @@ use std::collections::BTreeSet;
 
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
-use crate::remotes::{check_remote_health, RemoteHealth};
 use crate::store::SecretStore;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
 use crate::targets::{check_target_health, CommandRunner, RealCommandRunner, TargetHealth};
@@ -89,8 +88,6 @@ pub(crate) struct Dashboard {
     pub(crate) filtered_env: Option<String>,
     pub(crate) env_versions: Vec<(String, u64)>,
     pub(crate) target_health: Vec<TargetHealth>,
-    #[allow(dead_code)]
-    pub(crate) remote_health: Vec<RemoteHealth>,
     pub(crate) failed: Vec<DeployEntry>,
     pub(crate) pending: Vec<DeployEntry>,
     pub(crate) deployed: Vec<DeployEntry>,
@@ -130,8 +127,6 @@ impl Dashboard {
 
         // 1. Health checks
         let target_health = check_target_health(config, runner);
-        let remote_health = check_remote_health(config, runner);
-
         // 2. Deploy entries
         let mut failed = Vec::new();
         let mut pending = Vec::new();
@@ -488,7 +483,6 @@ impl Dashboard {
             filtered_env,
             env_versions,
             target_health,
-            remote_health,
             failed,
             pending,
             deployed,

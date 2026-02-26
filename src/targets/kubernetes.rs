@@ -144,7 +144,6 @@ impl DeployTarget for KubernetesTarget<'_> {
                     .iter()
                     .map(|s| DeployResult {
                         key: s.key.clone(),
-                        target: target.clone(),
                         outcome: DeployOutcome::Failed(e.to_string()),
                     })
                     .collect();
@@ -177,7 +176,6 @@ impl DeployTarget for KubernetesTarget<'_> {
                 .iter()
                 .map(|s| DeployResult {
                     key: s.key.clone(),
-                    target: target.clone(),
                     outcome: DeployOutcome::Success,
                 })
                 .collect(),
@@ -187,7 +185,6 @@ impl DeployTarget for KubernetesTarget<'_> {
                     .iter()
                     .map(|s| DeployResult {
                         key: s.key.clone(),
-                        target: target.clone(),
                         outcome: DeployOutcome::Failed(stderr.clone()),
                     })
                     .collect()
@@ -196,7 +193,6 @@ impl DeployTarget for KubernetesTarget<'_> {
                 .iter()
                 .map(|s| DeployResult {
                     key: s.key.clone(),
-                    target: target.clone(),
                     outcome: DeployOutcome::Failed(e.to_string()),
                 })
                 .collect(),

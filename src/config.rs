@@ -443,7 +443,6 @@ pub struct ResolvedTarget {
 pub struct ResolvedSecret {
     pub key: String,
     pub vendor: String,
-    #[allow(dead_code)]
     pub description: Option<String>,
     pub targets: Vec<ResolvedTarget>,
     pub validate: Option<crate::validate::Validation>,

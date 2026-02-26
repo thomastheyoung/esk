@@ -144,7 +144,6 @@ impl std::fmt::Debug for StorePayload {
 pub struct SecretStore {
     key: Vec<u8>,
     store_path: PathBuf,
-    #[allow(dead_code)]
     key_path: PathBuf,
 }
 
@@ -231,16 +230,6 @@ impl SecretStore {
             store_path,
             key_path,
         })
-    }
-
-    #[allow(dead_code)]
-    pub fn store_path(&self) -> &Path {
-        &self.store_path
-    }
-
-    #[allow(dead_code)]
-    pub fn key_path(&self) -> &Path {
-        &self.key_path
     }
 
     /// Acquire an exclusive file lock on store.key, run the closure, then release.

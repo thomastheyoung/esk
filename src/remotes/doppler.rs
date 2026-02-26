@@ -21,20 +21,16 @@ use crate::targets::{CommandOpts, CommandRunner};
 use super::SyncRemote;
 
 pub struct DopplerRemote<'a> {
-    #[allow(dead_code)]
-    config: &'a Config,
     remote_config: DopplerRemoteConfig,
     runner: &'a dyn CommandRunner,
 }
 
 impl<'a> DopplerRemote<'a> {
     pub fn new(
-        config: &'a Config,
         remote_config: DopplerRemoteConfig,
         runner: &'a dyn CommandRunner,
     ) -> Self {
         Self {
-            config,
             remote_config,
             runner,
         }
@@ -222,7 +218,7 @@ remotes:
         let config = make_config(doppler_yaml());
         let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         assert_eq!(remote.config_name("dev").unwrap(), "dev_config");
         assert_eq!(remote.config_name("prod").unwrap(), "prd");
     }
@@ -232,7 +228,7 @@ remotes:
         let config = make_config(doppler_yaml());
         let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         let err = remote.config_name("staging").unwrap_err();
         assert!(err.to_string().contains("staging"));
     }
@@ -253,7 +249,7 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -266,7 +262,7 @@ remotes:
         let config = make_config(doppler_yaml());
         let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("Doppler CLI"));
         assert!(err.to_string().contains("not installed"));
@@ -288,7 +284,7 @@ remotes:
                 stderr: b"Unable to authenticate".to_vec(),
             },
         ]);
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("not authenticated"));
     }
@@ -302,7 +298,7 @@ remotes:
             stdout: Vec::new(),
             stderr: Vec::new(),
         }]);
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
         remote.push(&payload, &config, "dev").unwrap();
 
@@ -337,7 +333,7 @@ remotes:
         let config = make_config(doppler_yaml());
         let remote_config: DopplerRemoteConfig = config.remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         remote.push(&payload, &config, "dev").unwrap();
 
@@ -359,7 +355,7 @@ remotes:
             stdout: serde_json::to_vec(&json).unwrap(),
             stderr: Vec::new(),
         }]);
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
 
         assert_eq!(version, 7);
@@ -379,7 +375,7 @@ remotes:
             stdout: Vec::new(),
             stderr: b"config not found".to_vec(),
         }]);
-        let remote = DopplerRemote::new(&config, remote_config, &runner);
+        let remote = DopplerRemote::new(remote_config, &runner);
         assert!(remote.pull(&config, "dev").unwrap().is_none());
     }
 }

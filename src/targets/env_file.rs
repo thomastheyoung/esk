@@ -76,7 +76,6 @@ impl DeployTarget for EnvFileTarget<'_> {
                 .iter()
                 .map(|s| DeployResult {
                     key: s.key.clone(),
-                    target: target.clone(),
                     outcome: DeployOutcome::Failed("env target requires an app".to_string()),
                 })
                 .collect();
@@ -87,7 +86,6 @@ impl DeployTarget for EnvFileTarget<'_> {
                 .iter()
                 .map(|s| DeployResult {
                     key: s.key.clone(),
-                    target: target.clone(),
                     outcome: DeployOutcome::Success,
                 })
                 .collect(),
@@ -95,7 +93,6 @@ impl DeployTarget for EnvFileTarget<'_> {
                 .iter()
                 .map(|s| DeployResult {
                     key: s.key.clone(),
-                    target: target.clone(),
                     outcome: DeployOutcome::Failed(e.to_string()),
                 })
                 .collect(),

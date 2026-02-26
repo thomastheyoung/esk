@@ -23,7 +23,6 @@ use crate::targets::{CommandOpts, CommandRunner};
 use super::SyncRemote;
 
 pub struct SopsRemote<'a> {
-    #[allow(dead_code)]
     config: &'a Config,
     remote_config: SopsRemoteConfig,
     runner: &'a dyn CommandRunner,
