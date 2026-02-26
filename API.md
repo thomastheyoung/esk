@@ -72,15 +72,15 @@ Deploy secrets to configured targets.
 esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose] [--skip-validation] [--skip-requirements] [--allow-empty] [--prune]
 ```
 
-| Argument              | Required | Description                                          |
-| --------------------- | -------- | ---------------------------------------------------- |
-| `--env`               | No       | Filter to a single environment                       |
-| `--force`             | No       | Deploy all secrets, ignoring change detection hashes |
-| `--dry-run`           | No       | Show what would be deployed without making changes   |
-| `--verbose` / `-v`    | No       | Show detailed output including skipped secrets       |
-| `--skip-validation`   | No       | Bypass `validate:` checks before deploying           |
-| `--skip-requirements` | No       | Bypass `required:` checks (missing secret errors)    |
-| `--allow-empty`       | No       | Allow deploying empty/whitespace-only values         |
+| Argument              | Required | Description                                                             |
+| --------------------- | -------- | ----------------------------------------------------------------------- |
+| `--env`               | No       | Filter to a single environment                                          |
+| `--force`             | No       | Deploy all secrets, ignoring change detection hashes                    |
+| `--dry-run`           | No       | Show what would be deployed without making changes                      |
+| `--verbose` / `-v`    | No       | Show detailed output including skipped secrets                          |
+| `--skip-validation`   | No       | Bypass `validate:` checks before deploying                              |
+| `--skip-requirements` | No       | Bypass `required:` checks (missing secret errors)                       |
+| `--allow-empty`       | No       | Allow deploying empty/whitespace-only values                            |
 | `--prune`             | No       | Remove orphaned secrets from targets (deployed but no longer in config) |
 
 **Pre-deploy checks:**
@@ -296,11 +296,11 @@ esk generate [<FORMAT>] [--output <PATH>]
 
 **Formats:**
 
-| Format        | Default output    | Description                                                                     |
-| ------------- | ----------------- | ------------------------------------------------------------------------------- |
-| `dts`         | `env.d.ts`        | TypeScript type declarations (`NodeJS.ProcessEnv` interface)                    |
-| `ts`          | `env.ts`          | Runtime TypeScript module with typed helpers (`requireEnv`, `envInt`, etc.)      |
-| `env-example` | `.env.example`    | Template file with key names, descriptions, allowed values, and optional markers |
+| Format        | Default output | Description                                                                      |
+| ------------- | -------------- | -------------------------------------------------------------------------------- |
+| `dts`         | `env.d.ts`     | TypeScript type declarations (`NodeJS.ProcessEnv` interface)                     |
+| `ts`          | `env.ts`       | Runtime TypeScript module with typed helpers (`requireEnv`, `envInt`, etc.)      |
+| `env-example` | `.env.example` | Template file with key names, descriptions, allowed values, and optional markers |
 
 **Behavior:**
 
@@ -417,33 +417,33 @@ secrets:
 
 Optional block that checks values at `esk set` and before `esk deploy`. Bypass with `--skip-validation`.
 
-| Field        | Type            | Description                                                     |
-| ------------ | --------------- | --------------------------------------------------------------- |
-| `format`     | string          | Value format: `string`, `url`, `integer`, `number`, `boolean`, `email`, `json`, `base64` |
-| `enum`       | list            | Allowed values (exact match)                                    |
-| `pattern`    | string          | Regex the value must match                                      |
-| `min_length` | integer         | Minimum character length                                        |
-| `max_length` | integer         | Maximum character length                                        |
-| `range`      | [min, max]      | Numeric range (requires `format: integer` or `number`)          |
-| `optional`   | boolean         | If `true`, empty values skip all other checks (default `false`) |
+| Field        | Type       | Description                                                                              |
+| ------------ | ---------- | ---------------------------------------------------------------------------------------- |
+| `format`     | string     | Value format: `string`, `url`, `integer`, `number`, `boolean`, `email`, `json`, `base64` |
+| `enum`       | list       | Allowed values (exact match)                                                             |
+| `pattern`    | string     | Regex the value must match                                                               |
+| `min_length` | integer    | Minimum character length                                                                 |
+| `max_length` | integer    | Maximum character length                                                                 |
+| `range`      | [min, max] | Numeric range (requires `format: integer` or `number`)                                   |
+| `optional`   | boolean    | If `true`, empty values skip all other checks (default `false`)                          |
 
 Cross-field constraints (evaluated at deploy with the full store context):
 
-| Field             | Type          | Description                                                    |
-| ----------------- | ------------- | -------------------------------------------------------------- |
-| `required_if`     | map           | Required when all listed keys match their values (`"*"` = any) |
-| `required_with`   | list          | Required when any listed key has a value                       |
-| `required_unless` | list          | Not required when any listed key has a value                   |
+| Field             | Type | Description                                                    |
+| ----------------- | ---- | -------------------------------------------------------------- |
+| `required_if`     | map  | Required when all listed keys match their values (`"*"` = any) |
+| `required_with`   | list | Required when any listed key has a value                       |
+| `required_unless` | list | Not required when any listed key has a value                   |
 
 ### `required:`
 
 Controls whether deploy fails when the secret has no stored value. Default: `true`.
 
-| Value              | Meaning                                         |
-| ------------------ | ----------------------------------------------- |
-| `true`             | Required in all targeted environments (default) |
-| `false`            | Never required                                  |
-| `[dev, prod]`      | Required only in listed environments            |
+| Value         | Meaning                                         |
+| ------------- | ----------------------------------------------- |
+| `true`        | Required in all targeted environments (default) |
+| `false`       | Never required                                  |
+| `[dev, prod]` | Required only in listed environments            |
 
 Bypass with `--skip-requirements` or `--force` on deploy. `esk delete` warns interactively when removing a required secret.
 

@@ -82,13 +82,13 @@ esk status --env dev
 
 `esk init` creates:
 
-| File                     | Purpose                                                        | Commit to git   |
-| ------------------------ | -------------------------------------------------------------- | --------------- |
+| File                     | Purpose                                                                  | Commit to git   |
+| ------------------------ | ------------------------------------------------------------------------ | --------------- |
 | `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets, generate) | Yes             |
-| `.esk/store.enc`         | Encrypted secret store                                         | Yes             |
-| `.esk/store.key`         | Local encryption key (32-byte hex)                             | No              |
-| `.esk/deploy-index.json` | Deploy state tracker                                           | No (gitignored) |
-| `.esk/sync-index.json`   | Sync state tracker                                             | No (gitignored) |
+| `.esk/store.enc`         | Encrypted secret store                                                   | Yes             |
+| `.esk/store.key`         | Local encryption key (32-byte hex)                                       | No              |
+| `.esk/deploy-index.json` | Deploy state tracker                                                     | No (gitignored) |
+| `.esk/sync-index.json`   | Sync state tracker                                                       | No (gitignored) |
 
 ## Mental model
 
@@ -140,17 +140,17 @@ When you need cloud deploy targets or shared sync, add target/remote blocks. See
 
 ## Commands you will use most
 
-| Command                        | Purpose                                        |
-| ------------------------------ | ---------------------------------------------- |
-| `esk init`                     | Initialize config and encrypted store          |
-| `esk set <KEY> --env <ENV>`    | Set a secret (auto-sync/deploy by default)     |
-| `esk get <KEY> --env <ENV>`    | Read a secret                                  |
-| `esk delete <KEY> --env <ENV>` | Delete a secret (auto-sync/deploy by default)  |
-| `esk list [--env <ENV>]`       | List secrets and deploy status                 |
-| `esk deploy [--env <ENV>]`     | Deploy to configured targets                   |
-| `esk status [--env <ENV>]`     | Show drift/sync dashboard                      |
-| `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state         |
-| `esk generate [<FORMAT>]`      | Generate code/config from secret definitions   |
+| Command                        | Purpose                                       |
+| ------------------------------ | --------------------------------------------- |
+| `esk init`                     | Initialize config and encrypted store         |
+| `esk set <KEY> --env <ENV>`    | Set a secret (auto-sync/deploy by default)    |
+| `esk get <KEY> --env <ENV>`    | Read a secret                                 |
+| `esk delete <KEY> --env <ENV>` | Delete a secret (auto-sync/deploy by default) |
+| `esk list [--env <ENV>]`       | List secrets and deploy status                |
+| `esk deploy [--env <ENV>]`     | Deploy to configured targets                  |
+| `esk status [--env <ENV>]`     | Show drift/sync dashboard                     |
+| `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state        |
+| `esk generate [<FORMAT>]`      | Generate code/config from secret definitions  |
 
 Full flags and behavior: [API.md](API.md).
 
@@ -203,6 +203,45 @@ The encrypted store file is safe to commit. The key file is not.
 - `encryption key not found`: run `esk init` to create `.esk/store.key`
 - Target/remote CLI errors: install and authenticate required CLIs (for example `wrangler`, `op`, `aws`)
 - Unknown environment/app in target: verify names match `environments` and `apps` in `esk.yaml`
+
+## MCP server
+
+esk includes an MCP (Model Context Protocol) server that exposes secret operations as structured tools over stdio. Any MCP-compatible client can use it — Claude Code, Claude Desktop, Cursor, Zed, etc.
+
+**Build:**
+
+```bash
+cargo install esk --features mcp
+# or from source
+cargo build --release --features mcp
+```
+
+**Configure** (example for Claude Code `~/.claude/settings.json`):
+
+```json
+{
+  "mcpServers": {
+    "esk": {
+      "command": "esk-mcp",
+      "args": []
+    }
+  }
+}
+```
+
+**Available tools:**
+
+| Tool           | Description                                      |
+| -------------- | ------------------------------------------------ |
+| `esk_get`      | Retrieve a secret value                          |
+| `esk_set`      | Set a secret value (no auto-deploy)              |
+| `esk_delete`   | Delete a secret value (no auto-deploy)           |
+| `esk_list`     | List secrets with deploy status per environment  |
+| `esk_status`   | Project health: drift, warnings, next steps      |
+| `esk_deploy`   | Deploy secrets to configured targets             |
+| `esk_generate` | Generate TypeScript declarations, `.env.example` |
+
+The MCP binary is feature-gated behind `mcp` to keep the main CLI binary lean.
 
 ## Development
 
