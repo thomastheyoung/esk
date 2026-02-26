@@ -1,0 +1,395 @@
+# =============================================================================
+# esk.yaml — complete reference
+# =============================================================================
+# This file showcases every available option. In practice you'd only include
+# the targets, remotes, and features your project actually uses.
+
+# ---------------------------------------------------------------------------
+# Project name (used in path interpolation for several targets/remotes)
+# ---------------------------------------------------------------------------
+project: my-saas-app
+
+# ---------------------------------------------------------------------------
+# Environments — arbitrary names, not limited to dev/prod
+# ---------------------------------------------------------------------------
+environments:
+  - dev
+  - staging
+  - prod
+
+# ---------------------------------------------------------------------------
+# Apps — optional, used by targets that deploy per-app (env, fly, heroku)
+# ---------------------------------------------------------------------------
+apps:
+  web:
+    path: apps/web
+  api:
+    path: apps/api
+
+# ---------------------------------------------------------------------------
+# Deploy targets
+# ---------------------------------------------------------------------------
+targets:
+
+  # .env file generation (batch deploy — regenerates full file on any change)
+  env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix:
+      dev: ""
+      staging: ".staging"
+      prod: ".production"
+
+  # Cloudflare Workers / Pages
+  cloudflare:
+    mode: workers               # "workers" (default) or "pages"
+    # pages_project: my-pages   # required when mode is "pages"
+    env_flags:
+      dev: "--env dev"
+      prod: "--env production"
+
+  # Convex
+  convex:
+    path: apps/web
+    deployment_source: apps/web/.env.local  # .env file containing CONVEX_DEPLOYMENT
+    env_flags:
+      prod: "--prod"
+
+  # Fly.io
+  fly:
+    app_names:
+      web: my-saas-web
+      api: my-saas-api
+    env_flags:
+      staging: "--app my-saas-web-staging"
+
+  # Netlify
+  netlify:
+    site: my-netlify-site       # site ID or name
+    env_flags:
+      prod: "--context production"
+
+  # Vercel
+  vercel:
+    env_names:
+      dev: development
+      staging: preview
+      prod: production
+    env_flags:
+      prod: "--force"
+
+  # GitHub Actions secrets
+  github:
+    repo: my-org/my-saas-app    # owner/repo format
+    env_flags:
+      prod: "--env production"
+
+  # Heroku
+  heroku:
+    app_names:
+      web: my-saas-web
+      api: my-saas-api
+    env_flags: {}
+
+  # Supabase
+  supabase:
+    project_ref: abcdefghijklmnop
+    env_flags: {}
+
+  # Railway
+  railway:
+    env_flags:
+      prod: "--environment production"
+
+  # GitLab CI/CD variables
+  gitlab:
+    env_flags:
+      prod: "--scope production"
+
+  # AWS Systems Manager Parameter Store
+  aws_ssm:
+    path_prefix: "/{project}/{environment}/"   # supports {project}, {environment}
+    region: us-east-1
+    profile: my-aws-profile
+    parameter_type: SecureString                # SecureString (default), String, StringList
+    env_flags: {}
+
+  # Kubernetes secrets (batch deploy — generates full Secret manifest)
+  kubernetes:
+    namespace:
+      dev: my-app-dev
+      staging: my-app-staging
+      prod: my-app-prod
+    secret_name: my-saas-secrets    # default: "{project}-secrets"
+    context:
+      dev: docker-desktop
+      prod: prod-cluster
+    env_flags: {}
+
+  # Docker Swarm secrets
+  docker:
+    name_pattern: "{project}-{environment}-{key}"   # supports {project}, {environment}, {key}
+    labels:
+      managed-by: esk
+      team: platform
+    env_flags: {}
+
+# ---------------------------------------------------------------------------
+# Sync remotes — bidirectional sync for team sharing and backup
+# ---------------------------------------------------------------------------
+remotes:
+
+  # 1Password
+  1password:
+    vault: Engineering
+    item_pattern: "{project} - {Environment}"   # supports {project}, {Environment}
+
+  # Cloud file storage (Dropbox, Google Drive, OneDrive, etc.)
+  dropbox:
+    type: cloud_file
+    path: ~/Dropbox/secrets/{project}           # supports {project}, ~
+    format: encrypted                           # encrypted (default) or cleartext
+
+  google-drive:
+    type: cloud_file
+    path: ~/Google Drive/secrets/{project}
+    format: cleartext
+
+  # HashiCorp Vault
+  vault:
+    path: secret/data/{project}/{environment}   # KV path with interpolation
+    addr: https://vault.example.com:8200
+    kv_version: 2                               # default: 2
+
+  # Bitwarden Secrets Manager
+  bitwarden:
+    project_id: bw-project-uuid-here
+    secret_name: "{project}-{environment}"      # supports {project}, {environment}
+
+  # S3-compatible storage (AWS S3, Cloudflare R2, MinIO, DigitalOcean Spaces)
+  s3:
+    bucket: my-secrets-bucket
+    prefix: esk-backups                         # optional key prefix
+    endpoint: https://my-minio.example.com      # for S3-compatible services
+    region: us-east-1
+    profile: my-aws-profile
+    format: encrypted                           # encrypted (default) or cleartext
+
+  # GCP Secret Manager
+  gcp:
+    gcp_project: my-gcp-project-id
+    secret_name: "{project}-{environment}"
+
+  # Azure Key Vault
+  azure:
+    vault_name: my-key-vault
+    secret_name: "{project}-{environment}"
+
+  # Doppler
+  doppler:
+    project: my-saas-app
+    config_map:
+      dev: dev
+      staging: stg
+      prod: prd
+
+  # Mozilla SOPS encrypted files
+  sops:
+    path: secrets/{environment}.enc.yaml        # supports {environment}
+
+  # AWS Secrets Manager
+  aws_secrets_manager:
+    secret_name: "{project}/{environment}"
+    region: us-east-1
+    profile: my-aws-profile
+
+# ---------------------------------------------------------------------------
+# Code generation outputs
+# ---------------------------------------------------------------------------
+generate:
+  - format: dts                         # TypeScript type declarations (default: env.d.ts)
+    output: packages/shared/env.d.ts   # custom output path
+  - format: ts                         # TypeScript runtime module (env.ts)
+    output: apps/web/src/env.ts
+  - format: env-example                # .env.example template
+
+# ---------------------------------------------------------------------------
+# Secrets — grouped by vendor/category
+# ---------------------------------------------------------------------------
+secrets:
+
+  # --- Database -----------------------------------------------------------
+  Database:
+
+    DATABASE_URL:
+      description: PostgreSQL connection string
+      targets:
+        env: [web:dev, web:prod, api:dev, api:prod]
+        fly: [api:prod]
+        heroku: [api:prod]
+      validate:
+        format: url
+      # required: true is the default — must have a value in all targeted envs
+
+    DATABASE_POOL_SIZE:
+      description: Max database connections
+      targets:
+        env: [api:dev, api:prod]
+      validate:
+        format: integer
+        range: [1, 100]
+
+    DB_HOST:
+      description: Database host (used when DATABASE_URL is not set)
+      targets:
+        env: [api:dev, api:prod]
+      validate:
+        required_unless: [DATABASE_URL]         # not required if DATABASE_URL is set
+
+    DB_PORT:
+      description: Database port
+      targets:
+        env: [api:dev, api:prod]
+      validate:
+        format: integer
+        range: [1, 65535]
+        required_if:                            # required when DB_HOST has any value
+          DB_HOST: "*"
+
+  # --- Auth ---------------------------------------------------------------
+  Auth:
+
+    AUTH_ENABLED:
+      description: Enable authentication
+      targets:
+        env: [web:dev, web:prod]
+      validate:
+        format: boolean
+
+    AUTH_SECRET:
+      description: JWT signing key
+      targets:
+        env: [web:dev, web:prod]
+        cloudflare: [dev, prod]
+      validate:
+        min_length: 32
+        max_length: 256
+        required_if:
+          AUTH_ENABLED: "true"                  # required when AUTH_ENABLED is "true"
+
+    AUTH_ISSUER:
+      description: |
+        JWT issuer URL.
+        Must be a valid HTTPS endpoint.
+      targets:
+        env: [web:prod]
+      validate:
+        format: url
+      required: [prod]                          # required only in prod
+
+  # --- OAuth --------------------------------------------------------------
+  OAuth:
+
+    OAUTH_CLIENT_ID:
+      targets:
+        env: [web:dev, web:prod]
+        vercel: [dev, staging, prod]
+      validate:
+        required_with: [OAUTH_CLIENT_SECRET]    # required when its pair exists
+
+    OAUTH_CLIENT_SECRET:
+      targets:
+        env: [web:dev, web:prod]
+        vercel: [dev, staging, prod]
+      validate:
+        pattern: "^[A-Za-z0-9_-]{20,}$"        # regex pattern validation
+        required_with: [OAUTH_CLIENT_ID]
+
+  # --- Third-party APIs ---------------------------------------------------
+  APIs:
+
+    STRIPE_SECRET_KEY:
+      description: Stripe API secret key
+      targets:
+        env: [api:dev, api:prod]
+        fly: [api:prod]
+        github: [prod]
+      validate:
+        pattern: "^sk_(test|live)_[A-Za-z0-9]+"
+
+    STRIPE_WEBHOOK_SECRET:
+      description: Stripe webhook signing secret
+      targets:
+        env: [api:dev, api:prod]
+      validate:
+        pattern: "^whsec_"
+
+    SENDGRID_API_KEY:
+      description: SendGrid email API key
+      targets:
+        env: [api:prod]
+        aws_ssm: [prod]
+      required: [prod]                          # only required in prod
+
+    ANALYTICS_TOKEN:
+      description: Optional analytics tracking token
+      targets:
+        env: [web:dev, web:prod]
+        netlify: [prod]
+      required: false                           # never required
+
+  # --- Application --------------------------------------------------------
+  Application:
+
+    NODE_ENV:
+      description: Runtime environment
+      targets:
+        env: [web:dev, web:prod, api:dev, api:prod]
+      validate:
+        enum: [development, staging, production]
+
+    LOG_LEVEL:
+      description: Application log level
+      targets:
+        env: [web:dev, web:prod, api:dev, api:prod]
+        railway: [dev, prod]
+      validate:
+        enum: [trace, debug, info, warn, error]
+
+    PORT:
+      description: Server listen port
+      targets:
+        env: [api:dev, api:prod]
+      validate:
+        format: integer
+        range: [1, 65535]
+
+    FEATURE_FLAGS:
+      description: JSON feature flag configuration
+      targets:
+        env: [web:dev, web:prod]
+      validate:
+        format: json
+        optional: true                          # empty values pass validation
+
+    ADMIN_EMAIL:
+      description: Admin notification email
+      targets:
+        env: [api:prod]
+      validate:
+        format: email
+      required: [prod]
+
+    ENCRYPTION_KEY:
+      description: Base64-encoded encryption key
+      targets:
+        env: [api:dev, api:prod]
+        kubernetes: [prod]
+      validate:
+        format: base64
+        min_length: 44                          # at least 32 bytes when decoded
+
+    ALLOWED_ORIGINS:
+      description: CORS allowed origins (whitespace-only values are rejected)
+      targets:
+        env: [api:dev, api:prod]
+      allow_empty: false                        # reject whitespace-only values (default)

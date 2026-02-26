@@ -136,7 +136,7 @@ secrets:
         env: [web:dev, web:prod]
 ```
 
-When you need cloud deploy targets or shared sync, add target/remote blocks. See [TARGETS.md](TARGETS.md) and [REMOTES.md](REMOTES.md).
+When you need cloud deploy targets or shared sync, add target/remote blocks. See [TARGETS.md](TARGETS.md) and [REMOTES.md](REMOTES.md), or browse the [full example config](docs/esk.example.yaml) showcasing every available option.
 
 ## Commands you will use most
 

@@ -393,6 +393,8 @@ esk sync --env prod --dry-run           # Preview changes
 
 ## Secret definitions
 
+For a complete `esk.yaml` showcasing every available option, see [docs/esk.example.yaml](docs/esk.example.yaml).
+
 Each secret in `esk.yaml` supports the following fields:
 
 ```yaml
