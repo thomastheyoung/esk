@@ -24,21 +24,21 @@ impl cliclack::Theme for EskTheme {
 
 /// Formats an RFC3339 timestamp into a human-friendly relative time.
 pub fn format_relative_time(ts: &str) -> String {
-    if let Ok(dt) = DateTime::parse_from_rfc3339(ts) {
-        let now = Utc::now();
-        let duration = now.signed_duration_since(dt.with_timezone(&Utc));
+    let Ok(dt) = DateTime::parse_from_rfc3339(ts) else {
+        return ts.to_string();
+    };
+    let delta = Utc::now().signed_duration_since(dt.with_timezone(&Utc));
 
-        if duration.num_seconds() < 60 {
-            "just now".to_string()
-        } else if duration.num_minutes() < 60 {
-            format!("{}m ago", duration.num_minutes())
-        } else if duration.num_hours() < 24 {
-            format!("{}h ago", duration.num_hours())
-        } else {
-            dt.format("%Y-%m-%d %H:%M").to_string()
-        }
+    if delta.num_seconds() < 60 {
+        "just now".to_string()
+    } else if delta.num_minutes() < 60 {
+        format!("{}m ago", delta.num_minutes())
+    } else if delta.num_hours() < 24 {
+        format!("{}h ago", delta.num_hours())
+    } else if delta.num_days() < 30 {
+        format!("{}d ago", delta.num_days())
     } else {
-        ts.to_string()
+        dt.format("%Y-%m-%d %H:%M").to_string()
     }
 }
 

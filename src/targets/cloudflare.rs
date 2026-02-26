@@ -14,8 +14,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{CloudflareTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct CloudflareTarget<'a> {
@@ -34,7 +33,7 @@ impl<'a> CloudflareTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["pages", "secret", "put", key, "--project", project];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -47,11 +46,7 @@ impl<'a> CloudflareTarget<'a> {
                 },
             )
             .with_context(|| format!("failed to run wrangler pages for {key}"))?;
-
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("wrangler pages secret put failed for {key}: {stderr}");
-        }
+        output.check("wrangler pages secret put", key)?;
 
         Ok(())
     }
@@ -73,17 +68,13 @@ impl<'a> CloudflareTarget<'a> {
             project,
             "--force",
         ];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("wrangler", &args, CommandOpts::default())
             .with_context(|| format!("failed to run wrangler pages delete for {key}"))?;
-
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("wrangler pages secret delete failed for {key}: {stderr}");
-        }
+        output.check("wrangler pages secret delete", key)?;
 
         Ok(())
     }
@@ -132,7 +123,7 @@ impl<'a> DeployTarget for CloudflareTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "put", key];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -146,11 +137,7 @@ impl<'a> DeployTarget for CloudflareTarget<'a> {
                 },
             )
             .with_context(|| format!("failed to run wrangler for {key}"))?;
-
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("wrangler secret put failed for {key}: {stderr}");
-        }
+        output.check("wrangler secret put", key)?;
 
         Ok(())
     }
@@ -173,7 +160,7 @@ impl<'a> DeployTarget for CloudflareTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "delete", key, "--force"];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -186,11 +173,7 @@ impl<'a> DeployTarget for CloudflareTarget<'a> {
                 },
             )
             .with_context(|| format!("failed to run wrangler delete for {key}"))?;
-
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("wrangler secret delete failed for {key}: {stderr}");
-        }
+        output.check("wrangler secret delete", key)?;
 
         Ok(())
     }

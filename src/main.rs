@@ -22,9 +22,7 @@ fn run() -> Result<()> {
             no_sync,
             bail,
         } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
+            let config = Config::find_and_load()?;
             esk::cli::delete::run(&config, key, env, *no_sync, *bail)?;
         }
         Commands::Deploy {
@@ -35,9 +33,7 @@ fn run() -> Result<()> {
             skip_validation,
             skip_requirements,
         } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
+            let config = Config::find_and_load()?;
             esk::cli::deploy::run(
                 &config,
                 &esk::cli::deploy::DeployOptions {
@@ -63,42 +59,34 @@ fn run() -> Result<()> {
             bail,
             skip_validation,
         } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
+            let config = Config::find_and_load()?;
             esk::cli::set::run(
                 &config,
-                key,
-                env,
-                value.as_deref(),
-                group.as_deref(),
-                *no_sync,
-                *bail,
-                *skip_validation,
+                &esk::cli::set::SetOptions {
+                    key,
+                    env,
+                    value: value.as_deref(),
+                    group: group.as_deref(),
+                    no_sync: *no_sync,
+                    bail: *bail,
+                    skip_validation: *skip_validation,
+                },
             )?;
         }
         Commands::Get { key, env } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
+            let config = Config::find_and_load()?;
             esk::cli::get::run(&config, key, env)?;
         }
         Commands::Generate { runtime, output } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
+            let config = Config::find_and_load()?;
             esk::cli::generate::run(&config, *runtime, output.as_deref())?;
         }
         Commands::List { env } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
+            let config = Config::find_and_load()?;
             esk::cli::list::run(&config, env.as_deref())?;
         }
         Commands::Status { env, all } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
+            let config = Config::find_and_load()?;
             esk::cli::status::run(&config, env.as_deref(), *all)?;
         }
         Commands::Sync {
@@ -110,9 +98,7 @@ fn run() -> Result<()> {
             with_deploy,
             prefer,
         } => {
-            let cwd = std::env::current_dir()?;
-            let config_path = Config::find(&cwd)?;
-            let config = Config::load(&config_path)?;
+            let config = Config::find_and_load()?;
             esk::cli::sync::run(
                 &config,
                 esk::cli::sync::SyncOptions {

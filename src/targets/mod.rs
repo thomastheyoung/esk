@@ -59,6 +59,17 @@ pub struct CommandOutput {
     pub stderr: Vec<u8>,
 }
 
+impl CommandOutput {
+    /// Check that the command succeeded, returning an error with stderr if it failed.
+    pub fn check(&self, command: &str, key: &str) -> Result<()> {
+        if !self.success {
+            let stderr = String::from_utf8_lossy(&self.stderr);
+            anyhow::bail!("{command} failed for {key}: {stderr}");
+        }
+        Ok(())
+    }
+}
+
 /// Abstraction over `std::process::Command` for testability.
 pub trait CommandRunner: Send + Sync {
     fn run(&self, program: &str, args: &[&str], opts: CommandOpts) -> Result<CommandOutput>;
@@ -168,13 +179,6 @@ pub fn resolve_env_flags(flags: &BTreeMap<String, String>, env: &str) -> Vec<Str
         .filter(|s| !s.is_empty())
         .map(|s| s.split_whitespace().map(String::from).collect())
         .unwrap_or_default()
-}
-
-/// Append resolved env flag parts to an args vector.
-pub fn append_env_flags<'a>(args: &mut Vec<&'a str>, flag_parts: &'a [String]) {
-    for part in flag_parts {
-        args.push(part);
-    }
 }
 
 /// Check that an external command is available via the CommandRunner.

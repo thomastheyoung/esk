@@ -17,8 +17,8 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, ResolvedTarget, SupabaseTargetConfig};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, validate_stdin_kv_value, CommandOpts,
-    CommandRunner, DeployMode, DeployTarget,
+    check_command, resolve_env_flags, validate_stdin_kv_value, CommandOpts, CommandRunner,
+    DeployMode, DeployTarget,
 };
 
 pub struct SupabaseTarget<'a> {
@@ -69,7 +69,7 @@ impl<'a> DeployTarget for SupabaseTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secrets", "set", "--project-ref", project_ref];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -83,10 +83,7 @@ impl<'a> DeployTarget for SupabaseTarget<'a> {
             )
             .with_context(|| format!("failed to run supabase for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("supabase secrets set failed for {key}: {stderr}");
-        }
+        output.check("supabase secrets set", key)?;
 
         Ok(())
     }
@@ -96,17 +93,14 @@ impl<'a> DeployTarget for SupabaseTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secrets", "unset", key, "--project-ref", project_ref];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("supabase", &args, CommandOpts::default())
             .with_context(|| format!("failed to run supabase delete for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("supabase secrets unset failed for {key}: {stderr}");
-        }
+        output.check("supabase secrets unset", key)?;
 
         Ok(())
     }

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::Utc;
 use console::style;
 use std::collections::BTreeSet;
 
@@ -9,22 +8,6 @@ use crate::remotes::{check_remote_health, RemoteHealth};
 use crate::store::SecretStore;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
 use crate::targets::{check_target_health, CommandRunner, RealCommandRunner, TargetHealth};
-
-// ---------------------------------------------------------------------------
-// Custom theme (same as list.rs — prevents dim from clobbering inline ANSI)
-// ---------------------------------------------------------------------------
-
-struct StatusTheme;
-
-impl cliclack::Theme for StatusTheme {
-    fn input_style(&self, state: &cliclack::ThemeState) -> console::Style {
-        match state {
-            cliclack::ThemeState::Cancel => console::Style::new().dim().strikethrough(),
-            cliclack::ThemeState::Submit => console::Style::new(),
-            _ => console::Style::new(),
-        }
-    }
-}
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -415,8 +398,6 @@ impl Dashboard {
     }
 
     fn render(&self, all: bool) -> Result<()> {
-        cliclack::set_theme(StatusTheme);
-
         // Summary line
         let total = self.failed.len() + self.pending.len() + self.deployed.len() + self.unset.len();
         let summary = if total == 0 {
@@ -768,8 +749,6 @@ impl Dashboard {
                 .to_string(),
         )?;
 
-        cliclack::reset_theme();
-
         Ok(())
     }
 }
@@ -787,26 +766,8 @@ fn format_target(target: &ResolvedTarget) -> String {
     s
 }
 
-/// Convert an RFC3339 timestamp to a human-readable relative time string.
 fn relative_time(timestamp: &str) -> String {
-    let Ok(parsed) = chrono::DateTime::parse_from_rfc3339(timestamp) else {
-        return String::new();
-    };
-    let delta = Utc::now().signed_duration_since(parsed);
-
-    let days = delta.num_days();
-    if days > 0 {
-        return format!("{days}d ago");
-    }
-    let hours = delta.num_hours();
-    if hours > 0 {
-        return format!("{hours}h ago");
-    }
-    let minutes = delta.num_minutes();
-    if minutes > 0 {
-        return format!("{minutes}m ago");
-    }
-    "just now".to_string()
+    crate::ui::format_relative_time(timestamp)
 }
 
 // ---------------------------------------------------------------------------
@@ -818,6 +779,7 @@ mod tests {
     use super::*;
     use crate::store::SecretStore;
     use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
+    use chrono::Utc;
 
     #[test]
     fn relative_time_days() {
@@ -845,7 +807,7 @@ mod tests {
 
     #[test]
     fn relative_time_invalid() {
-        assert_eq!(relative_time("not-a-timestamp"), "");
+        assert_eq!(relative_time("not-a-timestamp"), "not-a-timestamp");
     }
 
     struct OkRunner;

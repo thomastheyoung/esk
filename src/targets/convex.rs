@@ -18,8 +18,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, ConvexTargetConfig, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct ConvexTarget<'a> {
@@ -93,7 +92,7 @@ impl<'a> DeployTarget for ConvexTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["convex", "env", "set", key, value];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -108,10 +107,7 @@ impl<'a> DeployTarget for ConvexTarget<'a> {
             )
             .with_context(|| format!("failed to run convex for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("convex env set failed for {key}: {stderr}");
-        }
+        output.check("convex env set", key)?;
 
         Ok(())
     }
@@ -121,7 +117,7 @@ impl<'a> DeployTarget for ConvexTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["convex", "env", "unset", key];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -136,10 +132,7 @@ impl<'a> DeployTarget for ConvexTarget<'a> {
             )
             .with_context(|| format!("failed to run convex delete for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("convex env unset failed for {key}: {stderr}");
-        }
+        output.check("convex env unset", key)?;
 
         Ok(())
     }

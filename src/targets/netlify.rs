@@ -15,8 +15,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, NetlifyTargetConfig, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct NetlifyTarget<'a> {
@@ -60,17 +59,14 @@ impl<'a> DeployTarget for NetlifyTarget<'a> {
             args.push("--site");
             args.push(site);
         }
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("netlify", &args, CommandOpts::default())
             .with_context(|| format!("failed to run netlify for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("netlify env:set failed for {key}: {stderr}");
-        }
+        output.check("netlify env:set", key)?;
 
         Ok(())
     }
@@ -82,17 +78,14 @@ impl<'a> DeployTarget for NetlifyTarget<'a> {
             args.push("--site");
             args.push(site);
         }
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("netlify", &args, CommandOpts::default())
             .with_context(|| format!("failed to run netlify delete for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("netlify env:unset failed for {key}: {stderr}");
-        }
+        output.check("netlify env:unset", key)?;
 
         Ok(())
     }

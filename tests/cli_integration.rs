@@ -112,13 +112,15 @@ fn set_unknown_env_errors() {
     let config = project.config().unwrap();
     let err = cli::set::run(
         &config,
-        "KEY",
-        "staging",
-        Some("val"),
-        None,
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "KEY",
+            env: "staging",
+            value: Some("val"),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
@@ -130,13 +132,15 @@ fn set_with_value_flag() {
     let config = project.config().unwrap();
     cli::set::run(
         &config,
-        "TEST_KEY",
-        "dev",
-        Some("test_value"),
-        None,
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "TEST_KEY",
+            env: "dev",
+            value: Some("test_value"),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap();
 
@@ -154,13 +158,15 @@ fn set_warns_undeclared_key() {
     // KEY not in config, no --group, non-TTY — should warn but succeed
     cli::set::run(
         &config,
-        "UNDECLARED",
-        "dev",
-        Some("val"),
-        None,
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "UNDECLARED",
+            env: "dev",
+            value: Some("val"),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap();
     let store = project.store().unwrap();
@@ -174,7 +180,19 @@ fn set_warns_undeclared_key() {
 fn set_no_sync_flag() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    cli::set::run(&config, "KEY", "dev", Some("val"), None, true, false, false).unwrap();
+    cli::set::run(
+        &config,
+        &cli::set::SetOptions {
+            key: "KEY",
+            env: "dev",
+            value: Some("val"),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
+    )
+    .unwrap();
     // With no_sync=true, no sync should have happened — just verify set worked
     let store = project.store().unwrap();
     assert_eq!(store.get("KEY", "dev").unwrap(), Some("val".to_string()));
@@ -187,13 +205,15 @@ fn set_with_group_flag_adds_to_config() {
     let config = project.config().unwrap();
     cli::set::run(
         &config,
-        "NEW_KEY",
-        "dev",
-        Some("val"),
-        Some("Stripe"),
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "NEW_KEY",
+            env: "dev",
+            value: Some("val"),
+            group: Some("Stripe"),
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap();
 
@@ -217,13 +237,15 @@ fn set_with_group_flag_creates_new_group() {
     let config = project.config().unwrap();
     cli::set::run(
         &config,
-        "API_KEY",
-        "dev",
-        Some("val"),
-        Some("NewVendor"),
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "API_KEY",
+            env: "dev",
+            value: Some("val"),
+            group: Some("NewVendor"),
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap();
 
@@ -241,13 +263,15 @@ fn set_with_group_flag_existing_key_no_duplicate() {
     // SK already exists in config — --group should be a no-op for config registration
     cli::set::run(
         &config,
-        "SK",
-        "dev",
-        Some("val"),
-        Some("Stripe"),
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "SK",
+            env: "dev",
+            value: Some("val"),
+            group: Some("Stripe"),
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap();
 
@@ -433,13 +457,15 @@ secrets:
 
     let err = cli::set::run_with_runner(
         &config,
-        "MY_SECRET",
-        "dev",
-        Some("val"),
-        None,
-        false,
-        true,
-        false,
+        &cli::set::SetOptions {
+            key: "MY_SECRET",
+            env: "dev",
+            value: Some("val"),
+            group: None,
+            no_sync: false,
+            bail: true,
+            skip_validation: false,
+        },
         &runner,
     )
     .unwrap_err();
@@ -1014,13 +1040,15 @@ remotes:
     runner.push_success(b"", b""); // preflight: op vault get
     let err = cli::sync::run_with_runner(
         &config,
-        "dev",
-        Some("nonexistent"),
-        false,
-        false,
-        false,
-        false,
-        ConflictPreference::Local,
+        &cli::sync::SyncOptions {
+            env: Some("dev"),
+            only: Some("nonexistent"),
+            dry_run: false,
+            bail: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
         &runner,
     )
     .unwrap_err();
@@ -1574,13 +1602,15 @@ fn remote_sync_onepassword_merges_remote() {
 
     cli::sync::run_with_runner(
         &config,
-        "dev",
-        None,
-        false,
-        false,
-        false,
-        false,
-        ConflictPreference::Local,
+        &cli::sync::SyncOptions {
+            env: Some("dev"),
+            only: None,
+            dry_run: false,
+            bail: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
         &runner,
     )
     .unwrap();
@@ -1609,13 +1639,15 @@ fn remote_sync_onepassword_no_item() {
     // Should succeed — no remote data, nothing to reconcile
     cli::sync::run_with_runner(
         &config,
-        "dev",
-        None,
-        false,
-        false,
-        false,
-        false,
-        ConflictPreference::Local,
+        &cli::sync::SyncOptions {
+            env: Some("dev"),
+            only: None,
+            dry_run: false,
+            bail: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
         &runner,
     )
     .unwrap();
@@ -1651,13 +1683,15 @@ fn remote_sync_dry_run_no_mutation() {
 
     cli::sync::run_with_runner(
         &config,
-        "dev",
-        None,
-        true,
-        false,
-        false,
-        false,
-        ConflictPreference::Local,
+        &cli::sync::SyncOptions {
+            env: Some("dev"),
+            only: None,
+            dry_run: true,
+            bail: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
         &runner,
     )
     .unwrap();
@@ -1869,13 +1903,15 @@ remotes:
 
     cli::sync::run_with_runner(
         &config,
-        "dev",
-        None,
-        false,
-        false,
-        false,
-        false,
-        ConflictPreference::Local,
+        &cli::sync::SyncOptions {
+            env: Some("dev"),
+            only: None,
+            dry_run: false,
+            bail: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
         &MockCommandRunner::new(),
     )
     .unwrap();
@@ -2089,13 +2125,15 @@ fn set_auto_push_records_sync_index() {
     // no_sync=false so auto-push runs (no targets configured, sync is a no-op)
     cli::set::run_with_runner(
         &config,
-        "STRIPE_KEY",
-        "dev",
-        Some("val"),
-        None,
-        false,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "STRIPE_KEY",
+            env: "dev",
+            value: Some("val"),
+            group: None,
+            no_sync: false,
+            bail: false,
+            skip_validation: false,
+        },
         &runner,
     )
     .unwrap();
@@ -4039,13 +4077,15 @@ fn set_rejects_invalid_value_format() {
     let config = project.config().unwrap();
     let err = cli::set::run(
         &config,
-        "DATABASE_URL",
-        "dev",
-        Some("not-a-url"),
-        None,
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "DATABASE_URL",
+            env: "dev",
+            value: Some("not-a-url"),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap_err();
     assert!(err.to_string().contains("://"));
@@ -4057,13 +4097,15 @@ fn set_rejects_invalid_value_enum() {
     let config = project.config().unwrap();
     let err = cli::set::run(
         &config,
-        "NODE_ENV",
-        "dev",
-        Some("dev"),
-        None,
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "NODE_ENV",
+            env: "dev",
+            value: Some("dev"),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap_err();
     assert!(err.to_string().contains("expected one of"));
@@ -4075,13 +4117,15 @@ fn set_rejects_invalid_value_range() {
     let config = project.config().unwrap();
     let err = cli::set::run(
         &config,
-        "PORT",
-        "dev",
-        Some("99999"),
-        None,
-        true,
-        false,
-        false,
+        &cli::set::SetOptions {
+            key: "PORT",
+            env: "dev",
+            value: Some("99999"),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+        },
     )
     .unwrap_err();
     assert!(err.to_string().contains("outside range"));
@@ -4094,13 +4138,15 @@ fn set_skip_validation_allows_invalid() {
     // Would fail validation, but --skip-validation bypasses
     cli::set::run(
         &config,
-        "DATABASE_URL",
-        "dev",
-        Some("not-a-url"),
-        None,
-        true,
-        false,
-        true, // skip_validation
+        &cli::set::SetOptions {
+            key: "DATABASE_URL",
+            env: "dev",
+            value: Some("not-a-url"),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: true,
+        },
     )
     .unwrap();
     let store = project.store().unwrap();

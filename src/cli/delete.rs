@@ -5,7 +5,6 @@ use anyhow::{bail, Result};
 use crate::config::Config;
 use crate::remotes;
 use crate::store::SecretStore;
-use crate::suggest;
 use crate::sync_tracker::SyncIndex;
 use crate::targets::{CommandRunner, RealCommandRunner};
 
@@ -21,9 +20,7 @@ pub fn run_with_runner(
     bail: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
-    if !config.environments.contains(&env.to_string()) {
-        bail!("{}", suggest::unknown_env(env, &config.environments));
-    }
+    config.validate_env(env)?;
 
     if config.find_secret(key).is_none() {
         cliclack::log::warning(format!("Secret '{}' is not defined in esk.yaml", key))?;

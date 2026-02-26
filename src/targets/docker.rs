@@ -17,8 +17,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, DockerTargetConfig, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct DockerTarget<'a> {
@@ -91,7 +90,7 @@ impl<'a> DeployTarget for DockerTarget<'a> {
 
         // Remove existing secret (tolerate "no such secret" for first-time creates)
         let mut rm_args: Vec<&str> = vec!["secret", "rm", &resolved_name];
-        append_env_flags(&mut rm_args, &flag_parts);
+        rm_args.extend(flag_parts.iter().map(String::as_str));
 
         let rm_output = self
             .runner
@@ -114,7 +113,7 @@ impl<'a> DeployTarget for DockerTarget<'a> {
         }
         create_args.push(&resolved_name);
         create_args.push("-");
-        append_env_flags(&mut create_args, &flag_parts);
+        create_args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -128,10 +127,7 @@ impl<'a> DeployTarget for DockerTarget<'a> {
             )
             .with_context(|| format!("failed to run docker secret create for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("docker secret create failed for {key}: {stderr}");
-        }
+        output.check("docker secret create", key)?;
 
         Ok(())
     }
@@ -141,17 +137,14 @@ impl<'a> DeployTarget for DockerTarget<'a> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
 
         let mut args: Vec<&str> = vec!["secret", "rm", &resolved_name];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("docker", &args, CommandOpts::default())
             .with_context(|| format!("failed to run docker secret rm for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("docker secret rm failed for {key}: {stderr}");
-        }
+        output.check("docker secret rm", key)?;
 
         Ok(())
     }

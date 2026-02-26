@@ -15,8 +15,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, GithubTargetConfig, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct GithubTarget<'a> {
@@ -57,7 +56,7 @@ impl<'a> DeployTarget for GithubTarget<'a> {
             args.push("-R");
             args.push(repo);
         }
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -71,10 +70,7 @@ impl<'a> DeployTarget for GithubTarget<'a> {
             )
             .with_context(|| format!("failed to run gh for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("gh secret set failed for {key}: {stderr}");
-        }
+        output.check("gh secret set", key)?;
 
         Ok(())
     }
@@ -86,17 +82,14 @@ impl<'a> DeployTarget for GithubTarget<'a> {
             args.push("-R");
             args.push(repo);
         }
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("gh", &args, CommandOpts::default())
             .with_context(|| format!("failed to run gh delete for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("gh secret delete failed for {key}: {stderr}");
-        }
+        output.check("gh secret delete", key)?;
 
         Ok(())
     }

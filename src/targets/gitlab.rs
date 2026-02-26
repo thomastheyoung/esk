@@ -14,8 +14,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, GitlabTargetConfig, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct GitlabTarget<'a> {
@@ -52,7 +51,7 @@ impl<'a> DeployTarget for GitlabTarget<'a> {
     fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["variable", "set", key, "--scope", &target.environment];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -66,10 +65,7 @@ impl<'a> DeployTarget for GitlabTarget<'a> {
             )
             .with_context(|| format!("failed to run glab for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("glab variable set failed for {key}: {stderr}");
-        }
+        output.check("glab variable set", key)?;
 
         Ok(())
     }
@@ -77,17 +73,14 @@ impl<'a> DeployTarget for GitlabTarget<'a> {
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["variable", "delete", key, "--scope", &target.environment];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("glab", &args, CommandOpts::default())
             .with_context(|| format!("failed to run glab delete for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("glab variable delete failed for {key}: {stderr}");
-        }
+        output.check("glab variable delete", key)?;
 
         Ok(())
     }

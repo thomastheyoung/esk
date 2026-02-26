@@ -18,8 +18,8 @@ use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
 use crate::config::{Config, KubernetesTargetConfig, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployResult, DeployTarget, SecretValue,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployResult,
+    DeployTarget, SecretValue,
 };
 
 /// Validate a Kubernetes resource name or namespace.
@@ -162,7 +162,7 @@ impl<'a> DeployTarget for KubernetesTarget<'a> {
             args.push(ctx);
         }
 
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let result = self.runner.run(
             "kubectl",

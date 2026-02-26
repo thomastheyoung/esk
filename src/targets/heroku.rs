@@ -15,8 +15,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, HerokuTargetConfig, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct HerokuTarget<'a> {
@@ -73,17 +72,14 @@ impl<'a> DeployTarget for HerokuTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["config:set", &kv, "-a", heroku_app];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("heroku", &args, CommandOpts::default())
             .with_context(|| format!("failed to run heroku for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("heroku config:set failed for {key}: {stderr}");
-        }
+        output.check("heroku config:set", key)?;
 
         Ok(())
     }
@@ -93,17 +89,14 @@ impl<'a> DeployTarget for HerokuTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["config:unset", key, "-a", heroku_app];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("heroku", &args, CommandOpts::default())
             .with_context(|| format!("failed to run heroku delete for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("heroku config:unset failed for {key}: {stderr}");
-        }
+        output.check("heroku config:unset", key)?;
 
         Ok(())
     }

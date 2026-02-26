@@ -17,8 +17,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{AwsSsmTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct AwsSsmTarget<'a> {
@@ -104,7 +103,7 @@ impl<'a> DeployTarget for AwsSsmTarget<'a> {
         for a in &base {
             args.push(a);
         }
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -118,10 +117,7 @@ impl<'a> DeployTarget for AwsSsmTarget<'a> {
             )
             .with_context(|| format!("failed to run aws ssm put-parameter for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("aws ssm put-parameter failed for {key}: {stderr}");
-        }
+        output.check("aws ssm put-parameter", key)?;
 
         Ok(())
     }
@@ -135,17 +131,14 @@ impl<'a> DeployTarget for AwsSsmTarget<'a> {
         for a in &base {
             args.push(a);
         }
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("aws", &args, CommandOpts::default())
             .with_context(|| format!("failed to run aws ssm delete-parameter for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("aws ssm delete-parameter failed for {key}: {stderr}");
-        }
+        output.check("aws ssm delete-parameter", key)?;
 
         Ok(())
     }

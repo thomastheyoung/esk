@@ -12,6 +12,7 @@ use crate::sync_tracker::SyncIndex;
 use crate::targets::{CommandRunner, RealCommandRunner};
 use crate::ui;
 
+#[derive(Clone, Copy)]
 pub struct SyncOptions<'a> {
     pub env: Option<&'a str>,
     pub only: Option<&'a str>,
@@ -76,41 +77,23 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
     let runner = RealCommandRunner;
     let envs: Vec<&str> = match options.env {
         Some(e) => {
-            if !config.environments.contains(&e.to_string()) {
-                bail!("{}", suggest::unknown_env(e, &config.environments));
-            }
+            config.validate_env(e)?;
             vec![e]
         }
         None => config.environments.iter().map(|s| s.as_str()).collect(),
     };
 
     if envs.len() == 1 {
-        return run_with_runner(
-            config,
-            envs[0],
-            options.only,
-            options.dry_run,
-            options.bail,
-            options.force,
-            options.auto_deploy,
-            options.prefer,
-            &runner,
-        );
+        return run_with_runner(config, &options, &runner);
     }
 
     let mut failures: Vec<String> = Vec::new();
     for env in &envs {
-        if let Err(e) = run_with_runner(
-            config,
-            env,
-            options.only,
-            options.dry_run,
-            options.bail,
-            options.force,
-            options.auto_deploy,
-            options.prefer,
-            &runner,
-        ) {
+        let per_env_opts = SyncOptions {
+            env: Some(env),
+            ..options
+        };
+        if let Err(e) = run_with_runner(config, &per_env_opts, &runner) {
             if options.bail {
                 bail!("sync failed for environment '{env}': {e}");
             }
@@ -130,21 +113,19 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
     Ok(())
 }
 
-#[allow(clippy::too_many_arguments)]
 pub fn run_with_runner(
     config: &Config,
-    env: &str,
-    only: Option<&str>,
-    dry_run: bool,
-    bail: bool,
-    force: bool,
-    auto_deploy: bool,
-    prefer: ConflictPreference,
+    opts: &SyncOptions<'_>,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
-    if !config.environments.contains(&env.to_string()) {
-        bail!("{}", suggest::unknown_env(env, &config.environments));
-    }
+    let env = opts.env.expect("sync requires an environment");
+    config.validate_env(env)?;
+    let only = opts.only;
+    let dry_run = opts.dry_run;
+    let bail = opts.bail;
+    let force = opts.force;
+    let auto_deploy = opts.auto_deploy;
+    let prefer = opts.prefer;
 
     if config.remotes.is_empty() {
         bail!("no remotes configured in esk.yaml");

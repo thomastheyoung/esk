@@ -4,49 +4,37 @@ use std::io::IsTerminal;
 use crate::config::{self, Config};
 use crate::remotes;
 use crate::store::SecretStore;
-use crate::suggest;
 use crate::sync_tracker::SyncIndex;
 use crate::targets::{CommandRunner, RealCommandRunner};
 
-#[allow(clippy::too_many_arguments)]
-pub fn run(
-    config: &Config,
-    key: &str,
-    env: &str,
-    value: Option<&str>,
-    group: Option<&str>,
-    no_sync: bool,
-    bail: bool,
-    skip_validation: bool,
-) -> Result<()> {
-    run_with_runner(
-        config,
-        key,
-        env,
-        value,
-        group,
-        no_sync,
-        bail,
-        skip_validation,
-        &RealCommandRunner,
-    )
+pub struct SetOptions<'a> {
+    pub key: &'a str,
+    pub env: &'a str,
+    pub value: Option<&'a str>,
+    pub group: Option<&'a str>,
+    pub no_sync: bool,
+    pub bail: bool,
+    pub skip_validation: bool,
 }
 
-#[allow(clippy::too_many_arguments)]
+pub fn run(config: &Config, opts: &SetOptions<'_>) -> Result<()> {
+    run_with_runner(config, opts, &RealCommandRunner)
+}
+
 pub fn run_with_runner(
     config: &Config,
-    key: &str,
-    env: &str,
-    value: Option<&str>,
-    group: Option<&str>,
-    no_sync: bool,
-    bail: bool,
-    skip_validation: bool,
+    opts: &SetOptions<'_>,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
-    if !config.environments.contains(&env.to_string()) {
-        bail!("{}", suggest::unknown_env(env, &config.environments));
-    }
+    let key = opts.key;
+    let env = opts.env;
+    let value = opts.value;
+    let group = opts.group;
+    let no_sync = opts.no_sync;
+    let bail = opts.bail;
+    let skip_validation = opts.skip_validation;
+
+    config.validate_env(env)?;
 
     // If the key isn't in config, offer to register it
     if config.find_secret(key).is_none() {

@@ -15,8 +15,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, ResolvedTarget, VercelTargetConfig};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct VercelTarget<'a> {
@@ -65,7 +64,7 @@ impl<'a> DeployTarget for VercelTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["env", "add", key, vercel_env, "--force"];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -79,10 +78,7 @@ impl<'a> DeployTarget for VercelTarget<'a> {
             )
             .with_context(|| format!("failed to run vercel for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("vercel env add failed for {key}: {stderr}");
-        }
+        output.check("vercel env add", key)?;
 
         Ok(())
     }
@@ -92,17 +88,14 @@ impl<'a> DeployTarget for VercelTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["env", "rm", key, vercel_env, "--yes"];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("vercel", &args, CommandOpts::default())
             .with_context(|| format!("failed to run vercel delete for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("vercel env rm failed for {key}: {stderr}");
-        }
+        output.check("vercel env rm", key)?;
 
         Ok(())
     }

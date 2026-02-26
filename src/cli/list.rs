@@ -6,28 +6,6 @@ use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
 
-/// Custom theme that renders note body text without dim styling.
-///
-/// The default cliclack theme wraps each note body line with `Style::new().dim()`.
-/// When body lines contain their own ANSI styling (e.g. `style("✔").green()`),
-/// the inner `\e[0m` reset breaks the outer dim — causing the first styled
-/// fragment to inherit dim while subsequent ones don't. This produces
-/// inconsistent colors (dim green vs bright green).
-///
-/// By overriding `input_style` to return an unstyled `Style`, we take full
-/// control of per-fragment styling inside note bodies.
-struct ListTheme;
-
-impl cliclack::Theme for ListTheme {
-    fn input_style(&self, state: &cliclack::ThemeState) -> console::Style {
-        match state {
-            cliclack::ThemeState::Cancel => console::Style::new().dim().strikethrough(),
-            cliclack::ThemeState::Submit => console::Style::new(),
-            _ => console::Style::new(),
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CellStatus {
     NotTargeted,
@@ -45,8 +23,6 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         cliclack::log::info("No secrets stored. Run `esk set <KEY> --env <ENV>` to add one.")?;
         return Ok(());
     }
-
-    cliclack::set_theme(ListTheme);
 
     let envs: Vec<&str> = match env {
         Some(e) => vec![e],
@@ -133,8 +109,6 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
         cliclack::note("Uncategorized (not in esk.yaml)", body)?;
     }
-
-    cliclack::reset_theme();
 
     Ok(())
 }

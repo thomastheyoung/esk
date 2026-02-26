@@ -447,6 +447,21 @@ fn nearest_existing_ancestor(path: &Path) -> Option<&Path> {
 }
 
 impl Config {
+    /// Validate that `env` is a known environment, suggesting corrections if not.
+    pub fn validate_env(&self, env: &str) -> Result<()> {
+        if !self.environments.contains(&env.to_string()) {
+            bail!("{}", crate::suggest::unknown_env(env, &self.environments));
+        }
+        Ok(())
+    }
+
+    /// Find `esk.yaml` from the current directory and load it.
+    pub fn find_and_load() -> Result<Config> {
+        let cwd = std::env::current_dir()?;
+        let config_path = Self::find(&cwd)?;
+        Self::load(&config_path)
+    }
+
     /// Walk up from `start` looking for `esk.yaml`.
     pub fn find(start: &Path) -> Result<PathBuf> {
         let mut dir = start.to_path_buf();

@@ -16,8 +16,7 @@ use anyhow::{Context, Result};
 
 use crate::config::{Config, RailwayTargetConfig, ResolvedTarget};
 use crate::targets::{
-    append_env_flags, check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode,
-    DeployTarget,
+    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
 
 pub struct RailwayTarget<'a> {
@@ -58,17 +57,14 @@ impl<'a> DeployTarget for RailwayTarget<'a> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["variables", "--set", &kv];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("railway", &args, CommandOpts::default())
             .with_context(|| format!("failed to run railway for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("railway variables --set failed for {key}: {stderr}");
-        }
+        output.check("railway variables --set", key)?;
 
         Ok(())
     }
@@ -76,17 +72,14 @@ impl<'a> DeployTarget for RailwayTarget<'a> {
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["variables", "delete", key];
-        append_env_flags(&mut args, &flag_parts);
+        args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
             .run("railway", &args, CommandOpts::default())
             .with_context(|| format!("failed to run railway delete for {key}"))?;
 
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("railway variables delete failed for {key}: {stderr}");
-        }
+        output.check("railway variables delete", key)?;
 
         Ok(())
     }
