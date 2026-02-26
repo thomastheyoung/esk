@@ -180,6 +180,7 @@ pub fn run_with_runner(
             skip_validation: true,
             skip_requirements: true,
             allow_empty: true,
+            prune: false,
         },
         runner,
     )?;

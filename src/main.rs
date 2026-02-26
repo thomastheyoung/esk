@@ -33,6 +33,7 @@ fn run() -> Result<()> {
             skip_validation,
             skip_requirements,
             allow_empty,
+            prune,
         } => {
             let config = Config::find_and_load()?;
             esk::cli::deploy::run(
@@ -45,6 +46,7 @@ fn run() -> Result<()> {
                     skip_validation: *skip_validation,
                     skip_requirements: *skip_requirements,
                     allow_empty: *allow_empty,
+                    prune: *prune,
                 },
             )?;
         }

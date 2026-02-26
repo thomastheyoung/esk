@@ -136,6 +136,11 @@ impl DeployIndex {
         );
     }
 
+    /// Remove a record from the index by tracker key.
+    pub fn remove_record(&mut self, tracker_key: &str) {
+        self.records.remove(tracker_key);
+    }
+
     /// Compute SHA-256 hash of a value.
     pub fn hash_value(value: &str) -> String {
         let mut hasher = Sha256::new();

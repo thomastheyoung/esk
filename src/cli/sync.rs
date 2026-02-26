@@ -400,6 +400,7 @@ pub fn run_with_runner(
                 skip_validation: false,
                 skip_requirements: true,
                 allow_empty: true,
+                prune: false,
             },
             runner,
         )?;

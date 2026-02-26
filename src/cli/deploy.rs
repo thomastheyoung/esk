@@ -19,6 +19,7 @@ pub struct DeployOptions<'a> {
     pub skip_validation: bool,
     pub skip_requirements: bool,
     pub allow_empty: bool,
+    pub prune: bool,
 }
 
 /// A single deploy result entry for display.
@@ -46,6 +47,7 @@ pub fn run_with_runner(
         skip_validation,
         skip_requirements,
         allow_empty,
+        prune,
     } = *opts;
 
     let store = SecretStore::open(&config.root)?;
@@ -275,6 +277,76 @@ pub fn run_with_runner(
     let mut skipped: Vec<DeployEntry> = Vec::new();
     let mut failed: Vec<DeployEntry> = Vec::new();
     let mut unset: Vec<DeployEntry> = Vec::new();
+    let mut pruned: Vec<DeployEntry> = Vec::new();
+
+    // Orphan detection and prune work collection
+    let mut prune_individual: Vec<crate::orphan::TargetOrphan> = Vec::new();
+    let mut batch_prune_keys: BTreeMap<(String, Option<String>, String), Vec<crate::orphan::TargetOrphan>> = BTreeMap::new();
+    let mut unavailable_orphans: Vec<crate::orphan::TargetOrphan> = Vec::new();
+
+    if prune {
+        let orphans = crate::orphan::detect(&index, &resolved, env);
+        if !orphans.is_empty() {
+            const PRUNE_THRESHOLD: usize = 10;
+            if orphans.len() > PRUNE_THRESHOLD && !force {
+                anyhow::bail!(
+                    "{} orphaned secrets detected (threshold: {PRUNE_THRESHOLD}). \
+                     Use --force to override.",
+                    orphans.len()
+                );
+            }
+
+            if !dry_run && std::io::stdin().is_terminal() {
+                let lines: Vec<String> = orphans
+                    .iter()
+                    .map(|o| {
+                        let target_display = match &o.app {
+                            Some(a) => format!("{}:{}", o.service, a),
+                            None => o.service.clone(),
+                        };
+                        format!("  {} → {} ({})", o.key, target_display, o.env)
+                    })
+                    .collect();
+                cliclack::log::warning(format!(
+                    "Orphaned secrets to prune:\n{}",
+                    lines.join("\n")
+                ))?;
+                let proceed = cliclack::confirm("Remove these orphaned secrets from targets?")
+                    .initial_value(true)
+                    .interact()?;
+                if !proceed {
+                    anyhow::bail!("Prune aborted.");
+                }
+            }
+
+            for orphan in orphans {
+                if let Some((_, deploy_mode)) = target_map.get(orphan.service.as_str()) {
+                    match deploy_mode {
+                        DeployMode::Batch => {
+                            batch_dirty.insert((
+                                orphan.service.clone(),
+                                orphan.app.clone(),
+                                orphan.env.clone(),
+                            ));
+                            batch_prune_keys
+                                .entry((
+                                    orphan.service.clone(),
+                                    orphan.app.clone(),
+                                    orphan.env.clone(),
+                                ))
+                                .or_default()
+                                .push(orphan);
+                        }
+                        DeployMode::Individual => {
+                            prune_individual.push(orphan);
+                        }
+                    }
+                } else {
+                    unavailable_orphans.push(orphan);
+                }
+            }
+        }
+    }
 
     for secret in &resolved {
         for target in &secret.targets {
@@ -509,6 +581,35 @@ pub fn run_with_runner(
         }
     }
 
+    // Remove batch orphan tracker keys (batch regeneration excludes orphaned secrets)
+    for ((target_name, app, target_env), orphan_list) in &batch_prune_keys {
+        let target_display = match app {
+            Some(a) => format!("{target_name}:{a}"),
+            None => target_name.clone(),
+        };
+        for orphan in orphan_list {
+            if dry_run {
+                pruned.push(DeployEntry {
+                    key: orphan.key.clone(),
+                    env: target_env.clone(),
+                    target: target_display.clone(),
+                    error: None,
+                });
+            } else {
+                index.remove_record(&orphan.tracker_key);
+                pruned.push(DeployEntry {
+                    key: orphan.key.clone(),
+                    env: target_env.clone(),
+                    target: target_display.clone(),
+                    error: None,
+                });
+            }
+        }
+    }
+    if !batch_prune_keys.is_empty() && !dry_run {
+        index.save()?;
+    }
+
     // Handle individual targets
     for (key, value, target) in &individual_work {
         let target_display = format_target(target);
@@ -664,6 +765,76 @@ pub fn run_with_runner(
         }
     }
 
+    // Process individual orphan deletions (prune)
+    for orphan in &prune_individual {
+        let target = crate::config::ResolvedTarget {
+            service: orphan.service.clone(),
+            app: orphan.app.clone(),
+            environment: orphan.env.clone(),
+        };
+        let target_display = format_target(&target);
+
+        if dry_run {
+            pruned.push(DeployEntry {
+                key: orphan.key.clone(),
+                env: orphan.env.clone(),
+                target: target_display,
+                error: None,
+            });
+            continue;
+        }
+
+        if verbose {
+            cliclack::log::step(format!(
+                "Pruning {}:{} → {}",
+                orphan.key, orphan.env, target
+            ))?;
+        }
+
+        let (target_idx, _) = target_map[orphan.service.as_str()];
+        let deploy_target = &deploy_targets[target_idx];
+
+        match deploy_target.delete_secret(&orphan.key, &target) {
+            Ok(()) => {
+                index.remove_record(&orphan.tracker_key);
+                pruned.push(DeployEntry {
+                    key: orphan.key.clone(),
+                    env: orphan.env.clone(),
+                    target: target_display,
+                    error: None,
+                });
+            }
+            Err(e) => {
+                failed.push(DeployEntry {
+                    key: orphan.key.clone(),
+                    env: orphan.env.clone(),
+                    target: target_display,
+                    error: Some(e.to_string()),
+                });
+            }
+        }
+        index.save()?;
+    }
+
+    // Warn about orphans whose target is no longer configured
+    if !unavailable_orphans.is_empty() {
+        let lines: Vec<String> = unavailable_orphans
+            .iter()
+            .map(|o| {
+                let target_display = match &o.app {
+                    Some(a) => format!("{}:{}", o.service, a),
+                    None => o.service.clone(),
+                };
+                format!("  {} → {} ({})", o.key, target_display, o.env)
+            })
+            .collect();
+        cliclack::log::warning(format!(
+            "Cannot prune — target no longer configured:\n{}\n  \
+             Remove these manually or re-add the target config.",
+            lines.join("\n")
+        ))?;
+    }
+
     // Count skipped batch secrets (those in non-dirty batch target groups)
     for secret in &resolved {
         for target in &secret.targets {
@@ -701,6 +872,7 @@ pub fn run_with_runner(
     let skip_count = skipped.len();
     let fail_count = failed.len();
     let unset_count = unset.len();
+    let prune_count = pruned.len();
 
     // Stop spinner before printing results
     if let Some(s) = spinner {
@@ -710,12 +882,13 @@ pub fn run_with_runner(
     // Output
     let width = 44;
 
-    if deploy_count == 0 && skip_count == 0 && fail_count == 0 && unset_count == 0 {
+    if deploy_count == 0 && skip_count == 0 && fail_count == 0 && unset_count == 0 && prune_count == 0 {
         cliclack::log::info("Nothing to deploy.")?;
     } else {
         // Group everything by environment for framed output
         let mut env_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut env_status: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new(); // (deployed, failed, unset)
+        // (deployed, failed, unset, pruned)
+        let mut env_status: BTreeMap<String, (usize, usize, usize, usize)> = BTreeMap::new();
 
         for entry in &deployed {
             let label = format!("{} {}", style("✔").green(), style(&entry.key).dim());
@@ -723,7 +896,7 @@ pub fn run_with_runner(
                 .entry(entry.env.clone())
                 .or_default()
                 .push(ui::format_dashboard_line(&label, &entry.target, width));
-            env_status.entry(entry.env.clone()).or_insert((0, 0, 0)).0 += 1;
+            env_status.entry(entry.env.clone()).or_insert((0, 0, 0, 0)).0 += 1;
         }
 
         for entry in &failed {
@@ -733,7 +906,7 @@ pub fn run_with_runner(
             if let Some(err) = &entry.error {
                 lines.push(format!("      {}", style(format!("({err})")).red().dim()));
             }
-            env_status.entry(entry.env.clone()).or_insert((0, 0, 0)).1 += 1;
+            env_status.entry(entry.env.clone()).or_insert((0, 0, 0, 0)).1 += 1;
         }
 
         for entry in &unset {
@@ -742,11 +915,20 @@ pub fn run_with_runner(
                 .entry(entry.env.clone())
                 .or_default()
                 .push(ui::format_dashboard_line(&label, &entry.target, width));
-            env_status.entry(entry.env.clone()).or_insert((0, 0, 0)).2 += 1;
+            env_status.entry(entry.env.clone()).or_insert((0, 0, 0, 0)).2 += 1;
+        }
+
+        for entry in &pruned {
+            let label = format!("{} {}", style("✂").yellow(), style(&entry.key).dim());
+            env_map
+                .entry(entry.env.clone())
+                .or_default()
+                .push(ui::format_dashboard_line(&label, &format!("{} (pruned)", entry.target), width));
+            env_status.entry(entry.env.clone()).or_insert((0, 0, 0, 0)).3 += 1;
         }
 
         for (env_name, mut lines) in env_map {
-            let (s_cnt, f_cnt, u_cnt) = env_status.get(&env_name).unwrap();
+            let (s_cnt, f_cnt, u_cnt, p_cnt) = env_status.get(&env_name).unwrap();
             let mut status_parts = Vec::new();
             if *f_cnt > 0 {
                 status_parts.push(format!("{} failed", f_cnt));
@@ -756,6 +938,9 @@ pub fn run_with_runner(
             }
             if *u_cnt > 0 {
                 status_parts.push(format!("{} unset", u_cnt));
+            }
+            if *p_cnt > 0 {
+                status_parts.push(format!("{} pruned", p_cnt));
             }
 
             lines.push(String::new());

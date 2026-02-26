@@ -360,6 +360,7 @@ fn delete_auto_syncs_env_file() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -399,6 +400,7 @@ fn delete_last_secret_regenerates_batch_target() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -529,6 +531,7 @@ secrets:
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &MockCommandRunner::new(),
     )
@@ -650,6 +653,7 @@ fn deploy_env_filter() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -681,6 +685,7 @@ fn deploy_dry_run_no_side_effects() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -711,6 +716,7 @@ fn deploy_force_resyncs_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -733,6 +739,7 @@ fn deploy_force_resyncs_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -783,6 +790,7 @@ secrets:
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -805,6 +813,7 @@ fn deploy_skips_no_value_secrets() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -843,6 +852,7 @@ secrets:
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap_err();
@@ -869,6 +879,7 @@ fn deploy_env_dirty_pair_regens_all() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -887,6 +898,7 @@ fn deploy_env_dirty_pair_regens_all() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -920,6 +932,7 @@ fn status_shows_all_states() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -960,6 +973,7 @@ fn deploy_records_to_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -1104,6 +1118,7 @@ fn deploy_cloudflare_calls_wrangler() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1143,6 +1158,7 @@ fn deploy_cloudflare_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1181,6 +1197,7 @@ fn deploy_cloudflare_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1219,6 +1236,7 @@ fn deploy_cloudflare_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1259,6 +1277,7 @@ fn deploy_cloudflare_multiple_secrets() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1298,6 +1317,7 @@ fn deploy_cloudflare_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1315,6 +1335,7 @@ fn deploy_cloudflare_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1349,6 +1370,7 @@ fn deploy_convex_calls_npx() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1398,6 +1420,7 @@ fn deploy_convex_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1448,6 +1471,7 @@ fn deploy_convex_reads_deployment_source() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1486,6 +1510,7 @@ fn deploy_convex_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1777,6 +1802,7 @@ fn deploy_full_config_cloudflare_and_convex() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1816,6 +1842,7 @@ fn deploy_cloudflare_force_resyncs() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -1837,6 +1864,7 @@ fn deploy_cloudflare_force_resyncs() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2074,6 +2102,7 @@ fn status_dashboard_healthy() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -2140,6 +2169,7 @@ fn status_dashboard_next_steps() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -2212,6 +2242,7 @@ fn deploy_records_tombstone_delete_success() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2236,6 +2267,7 @@ fn deploy_records_tombstone_delete_success() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2275,6 +2307,7 @@ fn deploy_records_tombstone_delete_failure() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2315,6 +2348,7 @@ fn deploy_retries_failed_tombstone_delete() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     );
@@ -2334,6 +2368,7 @@ fn deploy_retries_failed_tombstone_delete() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2375,6 +2410,7 @@ fn deploy_skips_already_deleted_tombstone() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2415,6 +2451,7 @@ fn delete_then_recreate_same_value_syncs() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2436,6 +2473,7 @@ fn delete_then_recreate_same_value_syncs() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2457,6 +2495,7 @@ fn delete_then_recreate_same_value_syncs() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2493,6 +2532,7 @@ fn deploy_fly_calls_cli() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2529,6 +2569,7 @@ fn deploy_fly_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2565,6 +2606,7 @@ fn deploy_fly_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2599,6 +2641,7 @@ fn deploy_fly_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2639,6 +2682,7 @@ fn deploy_fly_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2658,6 +2702,7 @@ fn deploy_fly_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2691,6 +2736,7 @@ fn deploy_netlify_calls_cli() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2727,6 +2773,7 @@ fn deploy_netlify_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2769,6 +2816,7 @@ fn deploy_netlify_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2803,6 +2851,7 @@ fn deploy_netlify_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2842,6 +2891,7 @@ fn deploy_netlify_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2860,6 +2910,7 @@ fn deploy_netlify_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2893,6 +2944,7 @@ fn deploy_vercel_calls_cli() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2930,6 +2982,7 @@ fn deploy_vercel_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -2972,6 +3025,7 @@ fn deploy_vercel_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3006,6 +3060,7 @@ fn deploy_vercel_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3045,6 +3100,7 @@ fn deploy_vercel_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3063,6 +3119,7 @@ fn deploy_vercel_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3096,6 +3153,7 @@ fn deploy_github_calls_cli() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3133,6 +3191,7 @@ fn deploy_github_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3175,6 +3234,7 @@ fn deploy_github_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3209,6 +3269,7 @@ fn deploy_github_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3248,6 +3309,7 @@ fn deploy_github_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3266,6 +3328,7 @@ fn deploy_github_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3299,6 +3362,7 @@ fn deploy_heroku_calls_cli() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3335,6 +3399,7 @@ fn deploy_heroku_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3376,6 +3441,7 @@ fn deploy_heroku_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3410,6 +3476,7 @@ fn deploy_heroku_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3449,6 +3516,7 @@ fn deploy_heroku_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3467,6 +3535,7 @@ fn deploy_heroku_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3500,6 +3569,7 @@ fn deploy_supabase_calls_cli() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3539,6 +3609,7 @@ fn deploy_supabase_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3581,6 +3652,7 @@ fn deploy_supabase_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3615,6 +3687,7 @@ fn deploy_supabase_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3654,6 +3727,7 @@ fn deploy_supabase_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3672,6 +3746,7 @@ fn deploy_supabase_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3705,6 +3780,7 @@ fn deploy_railway_calls_cli() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3741,6 +3817,7 @@ fn deploy_railway_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3781,6 +3858,7 @@ fn deploy_railway_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3815,6 +3893,7 @@ fn deploy_railway_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3854,6 +3933,7 @@ fn deploy_railway_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3872,6 +3952,7 @@ fn deploy_railway_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3905,6 +3986,7 @@ fn deploy_gitlab_calls_cli() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3944,6 +4026,7 @@ fn deploy_gitlab_prod_env_flags() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -3980,6 +4063,7 @@ fn deploy_gitlab_records_tracker() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -4014,6 +4098,7 @@ fn deploy_gitlab_failure_tracked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -4053,6 +4138,7 @@ fn deploy_gitlab_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -4071,6 +4157,7 @@ fn deploy_gitlab_skip_unchanged() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -4278,6 +4365,7 @@ fn deploy_rejects_invalid_values_fail_fast() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap_err();
@@ -4311,6 +4399,7 @@ fn deploy_skip_validation_deploys_despite_errors() {
             skip_validation: true,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4340,6 +4429,7 @@ fn deploy_unchanged_invalid_value_not_blocked() {
             skip_validation: true,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4355,6 +4445,7 @@ fn deploy_unchanged_invalid_value_not_blocked() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4454,6 +4545,7 @@ fn deploy_fails_with_missing_required() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap_err();
@@ -4478,6 +4570,7 @@ fn deploy_force_overrides_required() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4499,6 +4592,7 @@ fn deploy_dry_run_warns_missing_required() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4522,6 +4616,7 @@ fn deploy_succeeds_when_all_required_present() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4545,6 +4640,7 @@ fn deploy_required_env_scoped_fails_in_prod() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap_err();
@@ -4570,6 +4666,7 @@ fn deploy_required_env_scoped_ok_in_dev() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4717,6 +4814,7 @@ fn deploy_non_tty_rejects_empty_values() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap_err();
@@ -4743,6 +4841,7 @@ fn deploy_allow_empty_flag_proceeds() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: true,
+            prune: false,
         },
     )
     .unwrap();
@@ -4767,6 +4866,7 @@ fn deploy_force_bypasses_empty_check() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4792,6 +4892,7 @@ fn deploy_allow_empty_per_secret_suppresses() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4816,6 +4917,7 @@ fn deploy_dry_run_warns_empty_but_succeeds() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
     )
     .unwrap();
@@ -4919,6 +5021,7 @@ fn deploy_blocks_on_cross_field_violation() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     )
@@ -4950,6 +5053,7 @@ fn deploy_passes_cross_field_satisfied() {
             skip_validation: false,
             skip_requirements: false,
             allow_empty: false,
+            prune: false,
         },
         &runner,
     );
@@ -4981,6 +5085,7 @@ fn deploy_skip_validation_bypasses_cross_field() {
             skip_validation: true,
             skip_requirements: true,
             allow_empty: true,
+            prune: false,
         },
         &runner,
     );
@@ -5012,6 +5117,7 @@ fn deploy_dry_run_warns_cross_field() {
             skip_validation: false,
             skip_requirements: true,
             allow_empty: true,
+            prune: false,
         },
         &runner,
     );
@@ -5036,4 +5142,292 @@ fn status_shows_cross_field_violations() {
     // status::run_with_runner doesn't return violations directly,
     // but it should not error
     cli::status::run_with_runner(&config, Some("dev"), false, &runner).unwrap();
+}
+
+// === orphan detection and prune ===
+
+/// Helper: create a deploy index with an orphan record (key not in config).
+fn setup_orphan_project() -> TestProject {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test_123").unwrap();
+    store.set("STRIPE_WEBHOOK", "dev", "whsec_test").unwrap();
+
+    // First, deploy normally to create index
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+    runner.push_success(b"", b""); // deploy STRIPE_KEY
+    runner.push_success(b"", b""); // deploy STRIPE_WEBHOOK
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Now inject an orphan record (a key that doesn't exist in config)
+    let mut index = DeployIndex::load(&project.deploy_index_path());
+    index.record_success(
+        "OLD_SECRET:cloudflare:web:dev".to_string(),
+        "cloudflare:web:dev".to_string(),
+        "oldhash123".to_string(),
+    );
+    index.save().unwrap();
+
+    project
+}
+
+#[test]
+fn deploy_prune_dry_run_shows_orphans() {
+    let project = setup_orphan_project();
+    let config = project.config().unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+    // dry-run: no actual delete calls
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: true,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+            prune: true,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Orphan record should still be present (dry run)
+    let index = DeployIndex::load(&project.deploy_index_path());
+    assert!(index.records.contains_key("OLD_SECRET:cloudflare:web:dev"));
+}
+
+#[test]
+fn deploy_prune_individual_calls_delete_secret() {
+    let project = setup_orphan_project();
+    let config = project.config().unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+    runner.push_success(b"", b""); // delete_secret for OLD_SECRET
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+            prune: true,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Verify delete was called for the orphan
+    let calls = runner.take_calls();
+    let delete_call = calls.iter().find(|c| {
+        c.args.iter().any(|a| a == "OLD_SECRET")
+            || c.args.iter().any(|a| a.contains("delete"))
+    });
+    assert!(
+        delete_call.is_some(),
+        "Expected delete_secret call for orphan. Calls: {calls:?}"
+    );
+
+    // Orphan record should be removed from index
+    let index = DeployIndex::load(&project.deploy_index_path());
+    assert!(
+        !index.records.contains_key("OLD_SECRET:cloudflare:web:dev"),
+        "Orphan record should be removed after prune"
+    );
+}
+
+#[test]
+fn deploy_prune_batch_removes_orphan_from_index() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+    store.set("OTHER_SECRET", "dev", "val2").unwrap();
+
+    // Deploy normally first
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &MockCommandRunner::new(),
+    )
+    .unwrap();
+
+    // Inject an orphan for the batch (env) target
+    let mut index = DeployIndex::load(&project.deploy_index_path());
+    index.record_success(
+        "REMOVED_KEY:env:web:dev".to_string(),
+        "env:web:dev".to_string(),
+        "oldhash".to_string(),
+    );
+    index.save().unwrap();
+
+    // Prune should mark the batch group dirty and regenerate without the orphan
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+            prune: true,
+        },
+        &MockCommandRunner::new(),
+    )
+    .unwrap();
+
+    // Orphan record should be removed
+    let index = DeployIndex::load(&project.deploy_index_path());
+    assert!(
+        !index.records.contains_key("REMOVED_KEY:env:web:dev"),
+        "Batch orphan record should be removed after prune"
+    );
+
+    // Verify env file does NOT contain the orphan key
+    let env_content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
+    assert!(
+        !env_content.contains("REMOVED_KEY"),
+        "Env file should not contain pruned orphan"
+    );
+}
+
+#[test]
+fn deploy_prune_safety_threshold_without_force() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    // Inject more than 10 orphan records
+    let mut index = DeployIndex::load(&project.deploy_index_path());
+    for i in 0..12 {
+        index.record_success(
+            format!("ORPHAN_{i}:cloudflare:web:dev"),
+            "cloudflare:web:dev".to_string(),
+            format!("hash{i}"),
+        );
+    }
+    index.save().unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+
+    let result = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: true,
+            allow_empty: false,
+            prune: true,
+        },
+        &runner,
+    );
+
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("orphaned secrets detected") && err.contains("threshold"),
+        "Expected threshold error, got: {err}"
+    );
+}
+
+#[test]
+fn status_shows_target_orphans() {
+    let project = setup_orphan_project();
+    let config = project.config().unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // target health check
+
+    // status should succeed and show target orphans (no error)
+    cli::status::run_with_runner(&config, Some("dev"), false, &runner).unwrap();
+
+    // Verify orphan is detected via orphan::detect
+    let resolved = config.resolve_secrets().unwrap();
+    let index = DeployIndex::load(&project.deploy_index_path());
+    let orphans = esk::orphan::detect(&index, &resolved, Some("dev"));
+    assert_eq!(orphans.len(), 1);
+    assert_eq!(orphans[0].key, "OLD_SECRET");
+    assert_eq!(orphans[0].service, "cloudflare");
+}
+
+#[test]
+fn deploy_prune_removes_orphan_records_from_index() {
+    let project = setup_orphan_project();
+    let config = project.config().unwrap();
+
+    // Verify orphan exists before prune
+    let index = DeployIndex::load(&project.deploy_index_path());
+    assert!(index.records.contains_key("OLD_SECRET:cloudflare:web:dev"));
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+    runner.push_success(b"", b""); // delete_secret for orphan
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+            prune: true,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Verify orphan record removed after prune
+    let index = DeployIndex::load(&project.deploy_index_path());
+    assert!(
+        !index.records.contains_key("OLD_SECRET:cloudflare:web:dev"),
+        "Orphan record should be removed after successful prune"
+    );
+    // Real secrets should still be tracked
+    assert!(
+        index
+            .records
+            .keys()
+            .any(|k| k.contains("STRIPE_KEY")),
+        "Real secret records should still exist"
+    );
 }

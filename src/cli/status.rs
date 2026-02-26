@@ -99,6 +99,7 @@ struct Dashboard {
     missing_required: Vec<crate::config::MissingRequirement>,
     coverage_gaps: Vec<CoverageGap>,
     orphans: Vec<Orphan>,
+    target_orphans: Vec<crate::orphan::TargetOrphan>,
     remote_states: Vec<RemoteState>,
     next_steps: Vec<NextStep>,
 }
@@ -306,6 +307,9 @@ impl Dashboard {
             }
         }
 
+        // 7b. Target orphans: deployed but no longer in config
+        let target_orphans = crate::orphan::detect(&index, &resolved, env);
+
         // 8. Remote states
         let sync_index_path = config.root.join(".esk/sync-index.json");
         let sync_index = SyncIndex::load(&sync_index_path);
@@ -435,12 +439,30 @@ impl Dashboard {
             }
         }
 
-        // Orphans
+        // Store orphans
         for orphan in &orphans {
             next_steps.push(NextStep {
                 command: format!("esk delete {} --env {}", orphan.key, orphan.env),
-                description: "remove orphaned secret".to_string(),
+                description: "remove orphaned secret from store".to_string(),
             });
+        }
+
+        // Target orphans (dedupe by env)
+        {
+            let mut prune_envs: BTreeSet<&str> = BTreeSet::new();
+            for o in &target_orphans {
+                prune_envs.insert(&o.env);
+            }
+            for env_name in prune_envs {
+                let count = target_orphans.iter().filter(|o| o.env == env_name).count();
+                next_steps.push(NextStep {
+                    command: format!("esk deploy --prune --env {env_name}"),
+                    description: format!(
+                        "prune {count} orphaned deploy{}",
+                        if count == 1 { "" } else { "s" }
+                    ),
+                });
+            }
         }
 
         // Deduplicate next steps by command
@@ -462,6 +484,7 @@ impl Dashboard {
             missing_required,
             coverage_gaps,
             orphans,
+            target_orphans,
             remote_states,
             next_steps,
         })
@@ -502,6 +525,9 @@ impl Dashboard {
             if !self.missing_required.is_empty() {
                 parts.push(format!("{} required missing", self.missing_required.len()));
             }
+            if !self.target_orphans.is_empty() {
+                parts.push(format!("{} target orphans", self.target_orphans.len()));
+            }
 
             let all_deployed = self.failed.is_empty()
                 && self.pending.is_empty()
@@ -509,7 +535,8 @@ impl Dashboard {
                 && self.validation_warnings.is_empty()
                 && self.cross_field_violations.is_empty()
                 && self.empty_values.is_empty()
-                && self.missing_required.is_empty();
+                && self.missing_required.is_empty()
+                && self.target_orphans.is_empty();
 
             if all_deployed {
                 format!(
@@ -762,7 +789,9 @@ impl Dashboard {
         }
 
         // Coverage section
-        let has_coverage = !self.coverage_gaps.is_empty() || !self.orphans.is_empty();
+        let has_coverage = !self.coverage_gaps.is_empty()
+            || !self.orphans.is_empty()
+            || !self.target_orphans.is_empty();
         if has_coverage {
             let mut cov_lines = Vec::new();
 
@@ -795,6 +824,28 @@ impl Dashboard {
                     cov_lines.push(format!(
                         "     {}",
                         style(format!("{}:{}", orphan.key, orphan.env)).dim(),
+                    ));
+                }
+            }
+
+            if !self.target_orphans.is_empty() {
+                cov_lines.push(format!(
+                    "  {} {} deployed but no longer in config",
+                    style("⚠").yellow(),
+                    self.target_orphans.len()
+                ));
+                for orphan in &self.target_orphans {
+                    let target_display = match &orphan.app {
+                        Some(a) => format!("{}:{}", orphan.service, a),
+                        None => orphan.service.clone(),
+                    };
+                    let freshness = relative_time(&orphan.last_deployed_at);
+                    cov_lines.push(format!(
+                        "     {}  {} {}  {}",
+                        style(&orphan.key).dim(),
+                        style("→").dim(),
+                        style(format!("{} ({})", target_display, orphan.env)),
+                        style(freshness).dim(),
                     ));
                 }
             }

@@ -61,6 +61,9 @@ pub enum Commands {
         /// Allow deploying empty/whitespace-only values
         #[arg(long)]
         allow_empty: bool,
+        /// Remove orphaned secrets from targets (deployed but no longer in config)
+        #[arg(long)]
+        prune: bool,
     },
     /// Initialize encrypted store and config
     Init,

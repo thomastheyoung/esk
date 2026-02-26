@@ -1,6 +1,7 @@
 pub mod cli;
 pub mod config;
 pub mod deploy_tracker;
+pub mod orphan;
 pub mod reconcile;
 pub mod remotes;
 pub mod store;
