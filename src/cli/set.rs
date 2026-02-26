@@ -153,7 +153,18 @@ pub fn run_with_runner(
 
     // Auto-deploy affected targets (skip validation — already validated above)
     // skip_requirements: user may be setting secrets incrementally
-    crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, true, true, runner)?;
+    crate::cli::deploy::run_with_runner(
+        config,
+        &crate::cli::deploy::DeployOptions {
+            env: Some(env),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: true,
+            skip_requirements: true,
+        },
+        runner,
+    )?;
 
     if remote_failures > 0 {
         bail!("{remote_failures} remote(s) failed to push. Run `esk sync --env {env}` to retry.");

@@ -160,7 +160,7 @@ fn generate_runtime(metas: &[SecretMeta]) -> String {
         out.push_str("  }\n");
         out.push_str("  const num = parseInt(value, 10);\n");
         out.push_str("  if (isNaN(num)) {\n");
-        out.push_str("    throw new Error(`Expected integer for ${key}, got: ${value}`);\n");
+        out.push_str("    throw new Error(`Expected integer for ${key}`);\n");
         out.push_str("  }\n");
         out.push_str("  return num;\n");
         out.push_str("}\n");
@@ -175,7 +175,7 @@ fn generate_runtime(metas: &[SecretMeta]) -> String {
         out.push_str("  }\n");
         out.push_str("  const num = parseFloat(value);\n");
         out.push_str("  if (isNaN(num)) {\n");
-        out.push_str("    throw new Error(`Expected number for ${key}, got: ${value}`);\n");
+        out.push_str("    throw new Error(`Expected number for ${key}`);\n");
         out.push_str("  }\n");
         out.push_str("  return num;\n");
         out.push_str("}\n");
@@ -202,9 +202,7 @@ fn generate_runtime(metas: &[SecretMeta]) -> String {
         out.push_str("  try {\n");
         out.push_str("    return JSON.parse(value);\n");
         out.push_str("  } catch {\n");
-        out.push_str(
-            "    throw new Error(`Invalid JSON for environment variable ${key}: ${value}`);\n",
-        );
+        out.push_str("    throw new Error(`Invalid JSON for environment variable ${key}`);\n");
         out.push_str("  }\n");
         out.push_str("}\n");
         out.push('\n');

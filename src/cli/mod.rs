@@ -55,6 +55,9 @@ pub enum Commands {
         /// Skip value validation
         #[arg(long)]
         skip_validation: bool,
+        /// Skip required-secret checks
+        #[arg(long)]
+        skip_requirements: bool,
     },
     /// Initialize encrypted store and config
     Init,

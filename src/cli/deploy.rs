@@ -8,6 +8,16 @@ use crate::store::SecretStore;
 use crate::targets::{build_targets, CommandRunner, DeployMode, RealCommandRunner, SecretValue};
 use crate::ui;
 
+/// Options for the deploy command.
+pub struct DeployOptions<'a> {
+    pub env: Option<&'a str>,
+    pub force: bool,
+    pub dry_run: bool,
+    pub verbose: bool,
+    pub skip_validation: bool,
+    pub skip_requirements: bool,
+}
+
 /// A single deploy result entry for display.
 struct DeployEntry {
     key: String,
@@ -16,38 +26,24 @@ struct DeployEntry {
     error: Option<String>,
 }
 
-pub fn run(
+pub fn run(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
+    run_with_runner(config, opts, &RealCommandRunner)
+}
+
+pub fn run_with_runner(
     config: &Config,
-    env: Option<&str>,
-    force: bool,
-    dry_run: bool,
-    verbose: bool,
-    skip_validation: bool,
-    skip_requirements: bool,
+    opts: &DeployOptions<'_>,
+    runner: &dyn CommandRunner,
 ) -> Result<()> {
-    run_with_runner(
-        config,
+    let DeployOptions {
         env,
         force,
         dry_run,
         verbose,
         skip_validation,
         skip_requirements,
-        &RealCommandRunner,
-    )
-}
+    } = *opts;
 
-#[allow(clippy::too_many_arguments)]
-pub fn run_with_runner(
-    config: &Config,
-    env: Option<&str>,
-    force: bool,
-    dry_run: bool,
-    verbose: bool,
-    skip_validation: bool,
-    skip_requirements: bool,
-    runner: &dyn CommandRunner,
-) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
     let index_path = config.root.join(".esk/deploy-index.json");
@@ -70,7 +66,7 @@ pub fn run_with_runner(
     if !skip_validation {
         let mut validation_errors: Vec<String> = Vec::new();
         for secret in &resolved {
-            let Some(ref spec) = secret.validation else {
+            let Some(ref spec) = secret.validate else {
                 continue;
             };
             for target in &secret.targets {
@@ -103,10 +99,16 @@ pub fn run_with_runner(
             }
         }
         if !validation_errors.is_empty() {
-            anyhow::bail!(
-                "Validation failed:\n{}\n  Use --skip-validation to bypass",
-                validation_errors.join("\n")
-            );
+            if dry_run {
+                for e in &validation_errors {
+                    cliclack::log::warning(e)?;
+                }
+            } else {
+                anyhow::bail!(
+                    "Validation failed:\n{}\n  Use --skip-validation to bypass",
+                    validation_errors.join("\n")
+                );
+            }
         }
     }
 
@@ -117,12 +119,17 @@ pub fn run_with_runner(
     if !missing.is_empty() {
         if dry_run {
             for m in &missing {
-                cliclack::log::warning(format!("Missing required: {}:{}", m.key, m.env,))?;
+                cliclack::log::warning(format!(
+                    "Missing required: {}:{} ({})",
+                    m.key,
+                    m.env,
+                    m.targets.join(", ")
+                ))?;
             }
         } else if !force && !skip_requirements {
             let lines: Vec<String> = missing
                 .iter()
-                .map(|m| format!("  {}:{}", m.key, m.env))
+                .map(|m| format!("  {}:{} ({})", m.key, m.env, m.targets.join(", ")))
                 .collect();
             anyhow::bail!(
                 "Required secrets missing:\n{}\n\n  \

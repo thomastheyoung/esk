@@ -196,7 +196,7 @@ impl Dashboard {
         // 3. Validation warnings
         let mut validation_warnings = Vec::new();
         for secret in &resolved {
-            if let Some(ref spec) = secret.validation {
+            if let Some(ref spec) = secret.validate {
                 for &env_name in &envs {
                     let composite = format!("{}:{}", secret.key, env_name);
                     if let Some(value) = all_secrets.get(&composite) {
@@ -648,9 +648,15 @@ impl Dashboard {
                     .bold()
             ));
             for m in &self.missing_required {
+                let target_info = if m.targets.is_empty() {
+                    String::new()
+                } else {
+                    format!("  {}", style(format!("({})", m.targets.join(", "))).dim())
+                };
                 req_lines.push(format!(
-                    "     {}",
+                    "     {}{}",
                     style(format!("{}:{}", m.key, m.env)).dim(),
+                    target_info,
                 ));
             }
             cliclack::log::step(format!("Requirements\n{}", req_lines.join("\n")))?;

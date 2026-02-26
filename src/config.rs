@@ -375,6 +375,12 @@ impl<'de> Deserialize<'de> for Required {
     }
 }
 
+/// Definition of a secret in `esk.yaml`.
+///
+/// `required` and `validate.optional` are orthogonal:
+/// - `required` gates deploy — the secret must have a value in the store.
+/// - `validate.optional` gates validation — empty values pass validation.
+/// - `required: true` + `optional: true` = "must exist, but may be empty".
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretDef {
     #[serde(default)]
@@ -401,7 +407,7 @@ pub struct ResolvedSecret {
     #[allow(dead_code)]
     pub description: Option<String>,
     pub targets: Vec<ResolvedTarget>,
-    pub validation: Option<crate::validate::Validation>,
+    pub validate: Option<crate::validate::Validation>,
     pub required: Required,
 }
 
@@ -410,6 +416,8 @@ pub struct ResolvedSecret {
 pub struct MissingRequirement {
     pub key: String,
     pub env: String,
+    /// Target services that need this secret.
+    pub targets: Vec<String>,
 }
 
 /// Check whether `target` stays within `root` after normalizing `..` components.
@@ -532,6 +540,22 @@ impl Config {
                             bail!(
                                 "secret '{key}': required environment '{req_env}' \
                                  is not in environments list"
+                            );
+                        }
+                    }
+
+                    // Check each required env has at least one target
+                    let target_envs: BTreeSet<&str> = def
+                        .targets
+                        .values()
+                        .flatten()
+                        .map(|s| s.rsplit_once(':').map_or(s.as_str(), |(_, e)| e))
+                        .collect();
+                    for req_env in envs {
+                        if !target_envs.contains(req_env.as_str()) {
+                            bail!(
+                                "secret '{key}': required in '{req_env}' but has \
+                                 no target in that environment"
                             );
                         }
                     }
@@ -672,7 +696,7 @@ impl Config {
                     vendor: vendor.clone(),
                     description: def.description.clone(),
                     targets,
-                    validation: def.validate.clone(),
+                    validate: def.validate.clone(),
                     required: def.required.clone(),
                 });
             }
@@ -703,10 +727,8 @@ impl Config {
         env_filter: Option<&str>,
         target_filter: Option<&[&str]>,
     ) -> Vec<MissingRequirement> {
-        let mut missing = Vec::new();
-        // Deduplicate by (key, env) — a secret missing in an env only needs
-        // to be reported once, even if it targets multiple services.
-        let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+        // First pass: collect target services per (key, env) pair.
+        let mut target_map: BTreeMap<(String, String), BTreeSet<String>> = BTreeMap::new();
         for secret in resolved {
             for target in &secret.targets {
                 if let Some(filter) = env_filter {
@@ -728,17 +750,21 @@ impl Config {
                 }
                 // TODO: when defaults land (esk-9f9), check default here too
                 let pair = (secret.key.clone(), target.environment.clone());
-                if seen.contains(&pair) {
-                    continue;
-                }
-                seen.insert(pair);
-                missing.push(MissingRequirement {
-                    key: secret.key.clone(),
-                    env: target.environment.clone(),
-                });
+                target_map
+                    .entry(pair)
+                    .or_default()
+                    .insert(target.service.clone());
             }
         }
-        missing
+        // Second pass: emit one MissingRequirement per (key, env) with all targets.
+        target_map
+            .into_iter()
+            .map(|((key, env), services)| MissingRequirement {
+                key,
+                env,
+                targets: services.into_iter().collect(),
+            })
+            .collect()
     }
 
     /// Resolve the env file path for an (app, env) pair.
@@ -2024,10 +2050,15 @@ secrets:
         let yaml = r#"
 project: x
 environments: [dev, prod, staging]
+targets:
+  netlify:
+    site: my-site
 secrets:
   General:
     KEY:
       required: [prod, staging]
+      targets:
+        netlify: [dev, prod, staging]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
@@ -2232,5 +2263,96 @@ secrets:
         let missing = config.check_requirements(&resolved, &secrets, None, None);
         // KEY:dev should appear only once, not once per target
         assert_eq!(missing.len(), 1);
+    }
+
+    #[test]
+    fn check_requirements_respects_target_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  netlify:
+    site: my-site
+  railway: {}
+secrets:
+  General:
+    NET_ONLY:
+      targets:
+        netlify: [dev]
+    RAIL_ONLY:
+      targets:
+        railway: [dev]
+    BOTH:
+      targets:
+        netlify: [dev]
+        railway: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let secrets = BTreeMap::new();
+        // Filter to env target only — none of these secrets target "env"
+        let missing = config.check_requirements(&resolved, &secrets, None, Some(&["env"]));
+        assert!(missing.is_empty(), "expected no missing for env target");
+        // Filter to netlify — should see NET_ONLY and BOTH, but not RAIL_ONLY
+        let missing = config.check_requirements(&resolved, &secrets, None, Some(&["netlify"]));
+        assert_eq!(missing.len(), 2);
+        assert!(missing.iter().any(|m| m.key == "NET_ONLY"));
+        assert!(missing.iter().any(|m| m.key == "BOTH"));
+        assert!(!missing.iter().any(|m| m.key == "RAIL_ONLY"));
+    }
+
+    #[test]
+    fn check_requirements_populates_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  netlify:
+    site: my-site
+  railway: {}
+secrets:
+  General:
+    KEY:
+      targets:
+        netlify: [dev]
+        railway: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let secrets = BTreeMap::new();
+        let missing = config.check_requirements(&resolved, &secrets, None, None);
+        assert_eq!(missing.len(), 1);
+        assert!(missing[0].targets.contains(&"netlify".to_string()));
+        assert!(missing[0].targets.contains(&"railway".to_string()));
+    }
+
+    #[test]
+    fn required_env_without_target_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+targets:
+  netlify:
+    site: my-site
+secrets:
+  General:
+    KEY:
+      required: [prod]
+      targets:
+        netlify: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("required in 'prod' but has no target"),
+            "expected target mismatch error, got: {}",
+            err
+        );
     }
 }

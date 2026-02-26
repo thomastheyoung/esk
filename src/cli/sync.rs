@@ -371,7 +371,18 @@ pub fn run_with_runner(
 
     if auto_deploy && result.local_changed {
         cliclack::log::step("Running deploy...")?;
-        crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, false, false, runner)?;
+        crate::cli::deploy::run_with_runner(
+            config,
+            &crate::cli::deploy::DeployOptions {
+                env: Some(env),
+                force: false,
+                dry_run: false,
+                verbose: false,
+                skip_validation: false,
+                skip_requirements: true,
+            },
+            runner,
+        )?;
     }
 
     Ok(())

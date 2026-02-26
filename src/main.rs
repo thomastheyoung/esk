@@ -33,18 +33,21 @@ fn run() -> Result<()> {
             dry_run,
             verbose,
             skip_validation,
+            skip_requirements,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
             esk::cli::deploy::run(
                 &config,
-                env.as_deref(),
-                *force,
-                *dry_run,
-                *verbose,
-                *skip_validation,
-                false,
+                &esk::cli::deploy::DeployOptions {
+                    env: env.as_deref(),
+                    force: *force,
+                    dry_run: *dry_run,
+                    verbose: *verbose,
+                    skip_validation: *skip_validation,
+                    skip_requirements: *skip_requirements,
+                },
             )?;
         }
         Commands::Init => {

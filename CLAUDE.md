@@ -13,6 +13,7 @@ src/
 ├── deploy_tracker.rs    # Deploy tracking (SHA-256 change detection)
 ├── sync_tracker.rs      # Sync tracking (version + status per remote/env)
 ├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
+├── validate.rs          # Value validation (format, enum, pattern, range, length)
 ├── suggest.rs           # Typo suggestions (Levenshtein distance)
 ├── ui.rs                # Custom cliclack theme (EskTheme)
 ├── test_support/
@@ -62,7 +63,7 @@ tests/
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (124)
+└── cli_integration.rs      # CLI command tests (143)
 ```
 
 ## Core design
@@ -144,6 +145,20 @@ Version-counter-based reconciliation between local store and remote sources. Two
 - **Pairwise** (`reconcile()`): compares local store against a single remote source.
 - **Multi-remote** (`reconcile_multi()`): compares local store against N remote sources. Highest version wins as base; unique secrets from lower-version sources are merged in.
 
+### Validation and requirements
+
+Secrets can declare a `validate:` block (`Validation` struct) and a `required:` field (`Required` enum).
+
+- **`validate`**: checks secret values at `set` time and before `deploy`. Supports `format` (string, url, integer, number, boolean, email, json, base64), `enum`, `pattern` (regex), `min_length`/`max_length`, `range`, and `optional`. Use `--skip-validation` to bypass.
+- **`required`**: gates deploy — the secret must have a value in the store. `true` (default) = all targeted envs, `false` = never, `[env1, env2]` = specific envs. Use `--skip-requirements` or `--force` to bypass.
+- These are orthogonal: `required: true` + `optional: true` = "must exist, but may be empty".
+
+`SecretDef` fields: `description`, `targets`, `validate` (`Option<Validation>`), `required` (`Required`).
+
+### DeployOptions
+
+`DeployOptions` struct bundles all deploy parameters: `env`, `force`, `dry_run`, `verbose`, `skip_validation`, `skip_requirements`. Used by `deploy::run()` and `deploy::run_with_runner()`.
+
 ## Key crates
 
 | Crate                               | Purpose                               |
@@ -162,6 +177,7 @@ Version-counter-based reconciliation between local store and remote sources. Two
 | `tempfile`                          | Atomic file writes                    |
 | `anyhow`                            | Error handling                        |
 | `thiserror`                         | Typed errors at API boundaries        |
+| `regex-lite`                        | Lightweight regex for pattern validation |
 | `zeroize`                           | Zeroing secret key bytes on drop      |
 
 ## Rules
@@ -195,6 +211,7 @@ cargo test reconcile::        # Run reconcile unit tests only
 cargo test deploy_tracker::   # Run deploy tracker unit tests only
 cargo test sync_tracker::     # Run sync tracker unit tests only
 cargo test suggest::          # Run suggest unit tests only
+cargo test validate::         # Run validate unit tests only
 cargo test targets::          # Run all target unit tests
 cargo test remotes::          # Run all remote unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
@@ -203,7 +220,7 @@ cargo test --test cli_integration  # Run CLI integration tests only
 ### Test infrastructure
 
 - **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `sync_index_path()`.
-- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `REMOTE_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_REMOTE_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG` — reusable YAML for tests.
+- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `REMOTE_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_REMOTE_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG`, `VALIDATION_CONFIG`, `REQUIRED_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.
