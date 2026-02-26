@@ -119,7 +119,7 @@ pub enum Commands {
     },
     /// Generate code or config files from secret definitions
     Generate {
-        /// Output format (omit to run all configured outputs, or dts if none configured)
+        /// Output format (omit to run all configured outputs)
         #[arg(value_enum)]
         format: Option<GenerateFormat>,
         /// Output file path (requires a format argument)

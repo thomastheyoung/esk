@@ -26,6 +26,14 @@ impl GenerateFormat {
     pub fn should_warn_gitignore(&self) -> bool {
         !matches!(self, Self::EnvExample)
     }
+
+    pub fn cli_name(&self) -> &'static str {
+        match self {
+            Self::Dts => "dts",
+            Self::Ts => "ts",
+            Self::EnvExample => "env-example",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
