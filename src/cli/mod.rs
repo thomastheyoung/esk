@@ -4,6 +4,7 @@ pub mod generate;
 pub mod get;
 pub mod init;
 pub mod list;
+pub mod llm_context;
 pub mod set;
 pub mod status;
 pub mod sync;
@@ -126,6 +127,9 @@ pub enum Commands {
         #[arg(long, short)]
         output: Option<String>,
     },
+    /// Print LLM context reference document
+    #[command(name = "llm-context", hide = true)]
+    LlmContext,
     /// Sync secrets with remotes (pull, reconcile, push)
     Sync {
         /// Environment to sync (omit to sync all)
