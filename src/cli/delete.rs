@@ -57,7 +57,7 @@ pub fn run_with_runner(
     }
 
     // Auto-deploy targets (env files regenerate without deleted key; individual targets delete)
-    crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, runner)?;
+    crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, false, runner)?;
 
     if remote_failures > 0 {
         bail!("{remote_failures} remote(s) failed to push. Run `esk sync --env {env}` to retry.");

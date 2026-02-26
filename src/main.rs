@@ -32,11 +32,19 @@ fn run() -> Result<()> {
             force,
             dry_run,
             verbose,
+            skip_validation,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
             let config = Config::load(&config_path)?;
-            esk::cli::deploy::run(&config, env.as_deref(), *force, *dry_run, *verbose)?;
+            esk::cli::deploy::run(
+                &config,
+                env.as_deref(),
+                *force,
+                *dry_run,
+                *verbose,
+                *skip_validation,
+            )?;
         }
         Commands::Init => {
             let cwd = std::env::current_dir()?;
@@ -49,6 +57,7 @@ fn run() -> Result<()> {
             group,
             no_sync,
             bail,
+            skip_validation,
         } => {
             let cwd = std::env::current_dir()?;
             let config_path = Config::find(&cwd)?;
@@ -61,6 +70,7 @@ fn run() -> Result<()> {
                 group.as_deref(),
                 *no_sync,
                 *bail,
+                *skip_validation,
             )?;
         }
         Commands::Get { key, env } => {

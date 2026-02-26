@@ -418,6 +418,42 @@ secrets:
         gitlab: [dev, prod]
 "#;
 
+/// Config with validation constraints for testing.
+pub const VALIDATION_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+targets:
+  env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix: { dev: "", prod: ".production" }
+secrets:
+  General:
+    DATABASE_URL:
+      validate:
+        format: url
+      targets:
+        env: [web:dev, web:prod]
+    PORT:
+      validate:
+        format: integer
+        range: [1, 65535]
+      targets:
+        env: [web:dev, web:prod]
+    NODE_ENV:
+      validate:
+        enum: [development, staging, production]
+      targets:
+        env: [web:dev, web:prod]
+    ENABLE_CACHE:
+      validate:
+        format: boolean
+      targets:
+        env: [web:dev, web:prod]
+"#;
+
 /// Records calls made to a mock command runner.
 #[derive(Debug, Clone)]
 pub struct RecordedCall {

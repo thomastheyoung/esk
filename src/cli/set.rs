@@ -8,6 +8,7 @@ use crate::suggest;
 use crate::sync_tracker::SyncIndex;
 use crate::targets::{CommandRunner, RealCommandRunner};
 
+#[allow(clippy::too_many_arguments)]
 pub fn run(
     config: &Config,
     key: &str,
@@ -16,6 +17,7 @@ pub fn run(
     group: Option<&str>,
     no_sync: bool,
     bail: bool,
+    skip_validation: bool,
 ) -> Result<()> {
     run_with_runner(
         config,
@@ -25,6 +27,7 @@ pub fn run(
         group,
         no_sync,
         bail,
+        skip_validation,
         &RealCommandRunner,
     )
 }
@@ -38,6 +41,7 @@ pub fn run_with_runner(
     group: Option<&str>,
     no_sync: bool,
     bail: bool,
+    skip_validation: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     if !config.environments.contains(&env.to_string()) {
@@ -106,6 +110,18 @@ pub fn run_with_runner(
         )?;
     }
 
+    if !skip_validation {
+        if let Some((_, def)) = config.find_secret(key) {
+            if let Some(ref spec) = def.validate {
+                crate::validate::validate_value(key, &secret_value, spec).map_err(|e| {
+                    anyhow::anyhow!(
+                        "Validation failed for {key}: {e}\n  Use --skip-validation to bypass"
+                    )
+                })?;
+            }
+        }
+    }
+
     let store = SecretStore::open(&config.root)?;
     let payload = store.set(key, env, &secret_value)?;
 
@@ -135,8 +151,8 @@ pub fn run_with_runner(
         }
     }
 
-    // Auto-deploy affected targets
-    crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, runner)?;
+    // Auto-deploy affected targets (skip validation — already validated above)
+    crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, true, runner)?;
 
     if remote_failures > 0 {
         bail!("{remote_failures} remote(s) failed to push. Run `esk sync --env {env}` to retry.");

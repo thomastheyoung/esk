@@ -311,6 +311,8 @@ pub struct SecretDef {
     pub description: Option<String>,
     #[serde(default)]
     pub targets: BTreeMap<String, Vec<String>>,
+    #[serde(default)]
+    pub validate: Option<crate::validate::Validation>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -327,6 +329,7 @@ pub struct ResolvedSecret {
     #[allow(dead_code)]
     pub description: Option<String>,
     pub targets: Vec<ResolvedTarget>,
+    pub validation: Option<crate::validate::Validation>,
 }
 
 /// Check whether `target` stays within `root` after normalizing `..` components.
@@ -425,6 +428,11 @@ impl Config {
                     bail!("secret '{key}' is defined in multiple vendors: {prev_vendor}, {vendor}");
                 }
                 key_vendors.insert(key, vendor);
+
+                if let Some(ref spec) = def.validate {
+                    crate::validate::validate_spec(key, spec)
+                        .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
+                }
 
                 for (service, targets) in &def.targets {
                     self.validate_service(service)
@@ -570,6 +578,7 @@ impl Config {
                     vendor: vendor.clone(),
                     description: def.description.clone(),
                     targets,
+                    validation: def.validate.clone(),
                 });
             }
         }
@@ -1719,5 +1728,95 @@ targets:
         let content = std::fs::read_to_string(&path).unwrap();
         // Should only appear once
         assert_eq!(content.matches("    SK:").count(), 1);
+    }
+
+    #[test]
+    fn parse_validate_block() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    PORT:
+      validate:
+        format: integer
+        range: [1, 65535]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("PORT").unwrap();
+        let v = def.validate.as_ref().unwrap();
+        assert_eq!(v.format, Some(crate::validate::Format::Integer));
+        assert_eq!(v.range, Some((1.0, 65535.0)));
+    }
+
+    #[test]
+    fn parse_validate_with_enum() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    NODE_ENV:
+      validate:
+        enum: [development, staging, production]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("NODE_ENV").unwrap();
+        let v = def.validate.as_ref().unwrap();
+        assert!(v.enum_values.is_some());
+        assert_eq!(v.enum_values.as_ref().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn validate_rejects_bad_regex_in_spec() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    KEY:
+      validate:
+        pattern: "[invalid"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        assert!(Config::load(&path).is_err());
+    }
+
+    #[test]
+    fn validate_rejects_range_on_string_format() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    KEY:
+      validate:
+        format: string
+        range: [1, 10]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        assert!(Config::load(&path).is_err());
+    }
+
+    #[test]
+    fn no_validate_block_is_none() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    KEY: {}
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("KEY").unwrap();
+        assert!(def.validate.is_none());
     }
 }

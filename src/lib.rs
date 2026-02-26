@@ -10,3 +10,4 @@ pub mod targets;
 #[cfg(test)]
 pub mod test_support;
 pub mod ui;
+pub mod validate;

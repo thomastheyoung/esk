@@ -82,6 +82,12 @@ struct RemoteState {
     status: RemoteStatus,
 }
 
+struct ValidationWarning {
+    key: String,
+    env: String,
+    message: String,
+}
+
 struct NextStep {
     command: String,
     description: String,
@@ -97,6 +103,7 @@ struct Dashboard {
     pending: Vec<DeployEntry>,
     deployed: Vec<DeployEntry>,
     unset: Vec<DeployEntry>,
+    validation_warnings: Vec<ValidationWarning>,
     coverage_gaps: Vec<CoverageGap>,
     orphans: Vec<Orphan>,
     remote_states: Vec<RemoteState>,
@@ -185,7 +192,26 @@ impl Dashboard {
             }
         }
 
-        // 3. Coverage gaps: secrets declared in config but missing values in some envs
+        // 3. Validation warnings
+        let mut validation_warnings = Vec::new();
+        for secret in &resolved {
+            if let Some(ref spec) = secret.validation {
+                for &env_name in &envs {
+                    let composite = format!("{}:{}", secret.key, env_name);
+                    if let Some(value) = all_secrets.get(&composite) {
+                        if let Err(e) = crate::validate::validate_value(&secret.key, value, spec) {
+                            validation_warnings.push(ValidationWarning {
+                                key: secret.key.clone(),
+                                env: env_name.to_string(),
+                                message: e.message,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        // 4. Coverage gaps: secrets declared in config but missing values in some envs
         let mut coverage_gaps = Vec::new();
         for secret in &resolved {
             let secret_envs: BTreeSet<&str> = secret
@@ -218,7 +244,7 @@ impl Dashboard {
             }
         }
 
-        // 4. Orphans: secrets in store but not in config
+        // 5. Orphans: secrets in store but not in config
         let config_keys: BTreeSet<&str> = config
             .secrets
             .values()
@@ -240,7 +266,7 @@ impl Dashboard {
             }
         }
 
-        // 5. Remote states
+        // 6. Remote states
         let sync_index_path = config.root.join(".esk/sync-index.json");
         let sync_index = SyncIndex::load(&sync_index_path);
         let remote_names: Vec<&String> = config.remotes.keys().collect();
@@ -280,7 +306,7 @@ impl Dashboard {
             }
         }
 
-        // 6. Next steps
+        // 7. Next steps
         let mut next_steps = Vec::new();
 
         // Failed deploys
@@ -288,6 +314,14 @@ impl Dashboard {
             next_steps.push(NextStep {
                 command: format!("esk deploy --env {}", entry.env),
                 description: format!("retry failed deploy for {}:{}", entry.key, entry.env),
+            });
+        }
+
+        // Validation warnings
+        for w in &validation_warnings {
+            next_steps.push(NextStep {
+                command: format!("esk set {} --env {}", w.key, w.env),
+                description: format!("fix: {}", w.message),
             });
         }
 
@@ -358,6 +392,7 @@ impl Dashboard {
             pending,
             deployed,
             unset,
+            validation_warnings,
             coverage_gaps,
             orphans,
             remote_states,
@@ -390,9 +425,14 @@ impl Dashboard {
             if !self.unset.is_empty() {
                 parts.push(format!("{} unset", self.unset.len()));
             }
+            if !self.validation_warnings.is_empty() {
+                parts.push(format!("{} invalid", self.validation_warnings.len()));
+            }
 
-            let all_deployed =
-                self.failed.is_empty() && self.pending.is_empty() && self.unset.is_empty();
+            let all_deployed = self.failed.is_empty()
+                && self.pending.is_empty()
+                && self.unset.is_empty()
+                && self.validation_warnings.is_empty();
 
             if all_deployed {
                 format!(
@@ -557,6 +597,26 @@ impl Dashboard {
             if !deploy_lines.is_empty() {
                 cliclack::log::step(format!("Deploy (targets)\n{}", deploy_lines.join("\n")))?;
             }
+        }
+
+        // Validation section
+        if !self.validation_warnings.is_empty() {
+            let mut val_lines = Vec::new();
+            val_lines.push(format!(
+                "  {} {}",
+                style("!").yellow(),
+                style(format!("{} invalid", self.validation_warnings.len()))
+                    .yellow()
+                    .bold()
+            ));
+            for w in &self.validation_warnings {
+                val_lines.push(format!(
+                    "     {}  {}",
+                    style(format!("{}:{}", w.key, w.env)).dim(),
+                    style(&w.message).dim(),
+                ));
+            }
+            cliclack::log::step(format!("Validation\n{}", val_lines.join("\n")))?;
         }
 
         // Coverage section

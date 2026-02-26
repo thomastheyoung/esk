@@ -22,16 +22,27 @@ pub fn run(
     force: bool,
     dry_run: bool,
     verbose: bool,
+    skip_validation: bool,
 ) -> Result<()> {
-    run_with_runner(config, env, force, dry_run, verbose, &RealCommandRunner)
+    run_with_runner(
+        config,
+        env,
+        force,
+        dry_run,
+        verbose,
+        skip_validation,
+        &RealCommandRunner,
+    )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub fn run_with_runner(
     config: &Config,
     env: Option<&str>,
     force: bool,
     dry_run: bool,
     verbose: bool,
+    skip_validation: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
@@ -50,6 +61,50 @@ pub fn run_with_runner(
             "No targets available after preflight checks. Fix the issues above and try again.",
         )?;
         return Ok(());
+    }
+
+    // Validate changed secrets before deploying
+    if !skip_validation {
+        let mut validation_errors: Vec<String> = Vec::new();
+        for secret in &resolved {
+            let Some(ref spec) = secret.validation else {
+                continue;
+            };
+            for target in &secret.targets {
+                if let Some(filter_env) = env {
+                    if target.environment != filter_env {
+                        continue;
+                    }
+                }
+                let composite = format!("{}:{}", secret.key, target.environment);
+                let Some(value) = payload.secrets.get(&composite) else {
+                    continue;
+                };
+
+                // Only validate if this secret needs deploying (changed or never deployed)
+                let value_hash = DeployIndex::hash_value(value);
+                let tracker_key = DeployIndex::tracker_key(
+                    &secret.key,
+                    &target.service,
+                    target.app.as_deref(),
+                    &target.environment,
+                );
+                if !index.should_deploy(&tracker_key, &value_hash, force) {
+                    continue;
+                }
+
+                if let Err(e) = crate::validate::validate_value(&secret.key, value, spec) {
+                    validation_errors
+                        .push(format!("  {}:{} — {}", secret.key, target.environment, e));
+                }
+            }
+        }
+        if !validation_errors.is_empty() {
+            anyhow::bail!(
+                "Validation failed:\n{}\n  Use --skip-validation to bypass",
+                validation_errors.join("\n")
+            );
+        }
     }
 
     // Build a lookup map: target_name -> (index, deploy_mode)

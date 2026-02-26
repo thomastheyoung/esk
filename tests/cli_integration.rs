@@ -110,7 +110,17 @@ fn get_returns_value() {
 fn set_unknown_env_errors() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    let err = cli::set::run(&config, "KEY", "staging", Some("val"), None, true, false).unwrap_err();
+    let err = cli::set::run(
+        &config,
+        "KEY",
+        "staging",
+        Some("val"),
+        None,
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
     assert!(err.to_string().contains("unknown environment"));
 }
 
@@ -125,6 +135,7 @@ fn set_with_value_flag() {
         Some("test_value"),
         None,
         true,
+        false,
         false,
     )
     .unwrap();
@@ -141,7 +152,17 @@ fn set_warns_undeclared_key() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
     // KEY not in config, no --group, non-TTY — should warn but succeed
-    cli::set::run(&config, "UNDECLARED", "dev", Some("val"), None, true, false).unwrap();
+    cli::set::run(
+        &config,
+        "UNDECLARED",
+        "dev",
+        Some("val"),
+        None,
+        true,
+        false,
+        false,
+    )
+    .unwrap();
     let store = project.store().unwrap();
     assert_eq!(
         store.get("UNDECLARED", "dev").unwrap(),
@@ -153,7 +174,7 @@ fn set_warns_undeclared_key() {
 fn set_no_sync_flag() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
-    cli::set::run(&config, "KEY", "dev", Some("val"), None, true, false).unwrap();
+    cli::set::run(&config, "KEY", "dev", Some("val"), None, true, false, false).unwrap();
     // With no_sync=true, no sync should have happened — just verify set worked
     let store = project.store().unwrap();
     assert_eq!(store.get("KEY", "dev").unwrap(), Some("val".to_string()));
@@ -171,6 +192,7 @@ fn set_with_group_flag_adds_to_config() {
         Some("val"),
         Some("Stripe"),
         true,
+        false,
         false,
     )
     .unwrap();
@@ -201,6 +223,7 @@ fn set_with_group_flag_creates_new_group() {
         Some("NewVendor"),
         true,
         false,
+        false,
     )
     .unwrap();
 
@@ -223,6 +246,7 @@ fn set_with_group_flag_existing_key_no_duplicate() {
         Some("val"),
         Some("Stripe"),
         true,
+        false,
         false,
     )
     .unwrap();
@@ -295,7 +319,8 @@ fn delete_auto_syncs_env_file() {
 
     // Deploy first to write both secrets
     let runner = MockCommandRunner::new();
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let env_path = project.root().join("apps/web/.env.local");
     let contents = std::fs::read_to_string(&env_path).unwrap();
@@ -320,7 +345,8 @@ fn delete_last_secret_regenerates_batch_target() {
     store.set("MY_SECRET", "dev", "val1").unwrap();
 
     let runner = MockCommandRunner::new();
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let env_path = project.root().join("apps/web/.env.local");
     let contents = std::fs::read_to_string(&env_path).unwrap();
@@ -390,6 +416,7 @@ secrets:
         None,
         false,
         true,
+        false,
         &runner,
     )
     .unwrap_err();
@@ -436,6 +463,7 @@ secrets:
     cli::deploy::run_with_runner(
         &config,
         Some("dev"),
+        false,
         false,
         false,
         false,
@@ -548,7 +576,7 @@ fn deploy_env_filter() {
     store.set("MY_SECRET", "prod", "pv").unwrap();
 
     // Deploy only dev
-    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
 
     // dev env file should exist
     assert!(project.root().join("apps/web/.env.local").is_file());
@@ -567,7 +595,7 @@ fn deploy_dry_run_no_side_effects() {
     store.set("MY_SECRET", "dev", "dv").unwrap();
     store.set("OTHER_SECRET", "dev", "ov").unwrap();
 
-    cli::deploy::run(&config, None, false, true, false).unwrap();
+    cli::deploy::run(&config, None, false, true, false, false).unwrap();
 
     // No env file should be created
     assert!(!project.root().join("apps/web/.env.local").is_file());
@@ -585,7 +613,7 @@ fn deploy_force_resyncs_unchanged() {
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
     // First deploy
-    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
     let mtime1 = std::fs::metadata(project.root().join("apps/web/.env.local"))
         .unwrap()
         .modified()
@@ -595,7 +623,7 @@ fn deploy_force_resyncs_unchanged() {
     std::thread::sleep(std::time::Duration::from_millis(50));
 
     // Force deploy — should regenerate even though hashes match
-    cli::deploy::run(&config, Some("dev"), true, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), true, false, false, false).unwrap();
     let mtime2 = std::fs::metadata(project.root().join("apps/web/.env.local"))
         .unwrap()
         .modified()
@@ -633,7 +661,7 @@ secrets:
     store.set("MY_SECRET", "dev", "val").unwrap();
 
     // Deploy should succeed — only hitting env target
-    cli::deploy::run(&config, None, false, false, false).unwrap();
+    cli::deploy::run(&config, None, false, false, false, false).unwrap();
     assert!(project.root().join("apps/web/.env.local").is_file());
 }
 
@@ -643,7 +671,7 @@ fn deploy_skips_no_value_secrets() {
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
     // Don't set any values — sync should still work, just skip everything
-    cli::deploy::run(&config, None, false, false, true).unwrap();
+    cli::deploy::run(&config, None, false, false, true, false).unwrap();
 }
 
 #[test]
@@ -669,7 +697,7 @@ secrets:
     let store = project.store().unwrap();
     store.set("KEY", "dev", "val").unwrap();
 
-    let err = cli::deploy::run(&config, None, false, false, false).unwrap_err();
+    let err = cli::deploy::run(&config, None, false, false, false, false).unwrap_err();
     assert!(err.to_string().contains("failed"));
 }
 
@@ -683,13 +711,13 @@ fn deploy_env_dirty_pair_regens_all() {
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
     // First deploy
-    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
 
     // Change only MY_SECRET
     store.set("MY_SECRET", "dev", "val1_changed").unwrap();
 
     // Deploy again — should regenerate entire file including OTHER_SECRET
-    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
     assert!(content.contains("MY_SECRET=val1_changed"));
@@ -710,7 +738,7 @@ fn status_shows_all_states() {
     // Don't set OTHER_SECRET → "no value"
 
     // Deploy to create "deployed" state
-    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
 
     // Change MY_SECRET → "pending" state for dev
     store.set("MY_SECRET", "dev", "changed").unwrap();
@@ -738,7 +766,7 @@ fn deploy_records_to_tracker() {
     store.set("MY_SECRET", "dev", "val").unwrap();
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
-    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(!index.records.is_empty());
@@ -866,7 +894,8 @@ fn deploy_cloudflare_calls_wrangler() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -892,7 +921,8 @@ fn deploy_cloudflare_prod_env_flags() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -915,7 +945,8 @@ fn deploy_cloudflare_records_tracker() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(!index.records.is_empty());
@@ -938,8 +969,9 @@ fn deploy_cloudflare_failure_tracked() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_failure(b"auth error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -966,7 +998,8 @@ fn deploy_cloudflare_multiple_secrets() {
     runner.push_success(b"", b"");
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -990,11 +1023,13 @@ fn deploy_cloudflare_skip_unchanged() {
     runner.push_success(b"", b"");
 
     // First deploy
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
     assert_eq!(runner.take_calls().len(), 3); // preflight (2) + deploy
 
     // Second sync — same value, should skip (only preflight calls)
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
     assert_eq!(runner.take_calls().len(), 2); // preflight only
 }
 
@@ -1015,7 +1050,8 @@ fn deploy_convex_calls_npx() {
     runner.push_success(b"", b""); // preflight: convex env list
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1051,7 +1087,8 @@ fn deploy_convex_prod_env_flags() {
     runner.push_success(b"", b""); // preflight: convex env list
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1088,7 +1125,8 @@ fn deploy_convex_reads_deployment_source() {
     runner.push_success(b"", b""); // preflight: convex env list
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1113,8 +1151,9 @@ fn deploy_convex_failure_tracked() {
     runner.push_success(b"", b""); // preflight: convex env list
     runner.push_failure(b"deploy error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -1384,7 +1423,8 @@ fn deploy_full_config_cloudflare_and_convex() {
     runner.push_success(b"", b""); // cloudflare: STRIPE_KEY
     runner.push_success(b"", b""); // convex: CONVEX_URL
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 6);
@@ -1408,14 +1448,15 @@ fn deploy_cloudflare_force_resyncs() {
     runner.push_success(b"", b"");
 
     // First deploy
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
     assert_eq!(runner.take_calls().len(), 3); // preflight (2) + deploy
 
     // Force sync — should re-run despite unchanged hash
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), true, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), true, false, false, false, &runner).unwrap();
     assert_eq!(runner.take_calls().len(), 3); // preflight (2) + deploy
 }
 
@@ -1637,7 +1678,7 @@ fn status_dashboard_healthy() {
 
     store.set("MY_SECRET", "dev", "val").unwrap();
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
-    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
 
     // All synced — dashboard should render without error
     cli::status::run(&config, Some("dev"), false).unwrap();
@@ -1690,7 +1731,7 @@ fn status_dashboard_next_steps() {
 
     // Set and deploy, then change to create pending state
     store.set("MY_SECRET", "dev", "val").unwrap();
-    cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
     store.set("MY_SECRET", "dev", "changed").unwrap();
 
     // Should render with next steps (pending deploy)
@@ -1715,6 +1756,7 @@ fn set_auto_push_records_sync_index() {
         "dev",
         Some("val"),
         None,
+        false,
         false,
         false,
         &runner,
@@ -1744,7 +1786,8 @@ fn deploy_records_tombstone_delete_success() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // deploy_secret STRIPE_KEY
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     // Delete the key (creates tombstone)
     store.delete("STRIPE_KEY", "dev").unwrap();
@@ -1754,7 +1797,8 @@ fn deploy_records_tombstone_delete_success() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // delete_secret STRIPE_KEY
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
@@ -1779,8 +1823,9 @@ fn deploy_records_tombstone_delete_failure() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_failure(b"delete failed"); // delete_secret fails
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -1807,14 +1852,15 @@ fn deploy_retries_failed_tombstone_delete() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_failure(b"delete failed");
-    let _ = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner);
+    let _ = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner);
 
     // Second sync: delete succeeds — should retry because previous was failed
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // delete_secret succeeds
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
@@ -1839,13 +1885,15 @@ fn deploy_skips_already_deleted_tombstone() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // delete_secret
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     // Second sync: should skip (already successfully deleted)
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     // Verify no additional calls were made beyond preflight
     let calls = runner.take_calls();
@@ -1866,7 +1914,8 @@ fn delete_then_recreate_same_value_syncs() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // deploy_secret
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     // Delete and sync (tombstone processed)
     store.delete("STRIPE_KEY", "dev").unwrap();
@@ -1874,7 +1923,8 @@ fn delete_then_recreate_same_value_syncs() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // delete_secret
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     // Recreate with same value
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
@@ -1882,7 +1932,8 @@ fn delete_then_recreate_same_value_syncs() {
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b""); // deploy_secret — must NOT be skipped
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     // Verify deploy_secret was called (3 calls: preflight x2 + deploy)
     let calls = runner.take_calls();
@@ -1905,7 +1956,8 @@ fn deploy_fly_calls_cli() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_success(b"", b""); // fly secrets set
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -1928,7 +1980,8 @@ fn deploy_fly_prod_env_flags() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_success(b"", b""); // fly secrets import
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -1951,7 +2004,8 @@ fn deploy_fly_records_tracker() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
@@ -1972,8 +2026,9 @@ fn deploy_fly_failure_tracked() {
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_failure(b"deploy error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -2000,13 +2055,15 @@ fn deploy_fly_skip_unchanged() {
     runner.push_success(b"", b""); // fly --version
     runner.push_success(b"", b""); // fly auth whoami
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     // Second sync (unchanged)
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // fly --version
     runner.push_success(b"", b""); // fly auth whoami
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2); // only preflight, no deploy
@@ -2026,7 +2083,8 @@ fn deploy_netlify_calls_cli() {
     runner.push_success(b"", b""); // netlify status
     runner.push_success(b"", b""); // netlify env:set
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2049,7 +2107,8 @@ fn deploy_netlify_prod_env_flags() {
     runner.push_success(b"", b""); // netlify status
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2078,7 +2137,8 @@ fn deploy_netlify_records_tracker() {
     runner.push_success(b"", b""); // netlify status
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
@@ -2099,8 +2159,9 @@ fn deploy_netlify_failure_tracked() {
     runner.push_success(b"", b""); // netlify status
     runner.push_failure(b"auth error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -2126,12 +2187,14 @@ fn deploy_netlify_skip_unchanged() {
     runner.push_success(b"", b""); // netlify --version
     runner.push_success(b"", b""); // netlify status
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // netlify --version
     runner.push_success(b"", b""); // netlify status
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2151,7 +2214,8 @@ fn deploy_vercel_calls_cli() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_success(b"", b""); // vercel env add
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2175,7 +2239,8 @@ fn deploy_vercel_prod_env_flags() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2204,7 +2269,8 @@ fn deploy_vercel_records_tracker() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
@@ -2225,8 +2291,9 @@ fn deploy_vercel_failure_tracked() {
     runner.push_success(b"", b""); // vercel whoami
     runner.push_failure(b"auth error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -2252,12 +2319,14 @@ fn deploy_vercel_skip_unchanged() {
     runner.push_success(b"", b""); // vercel --version
     runner.push_success(b"", b""); // vercel whoami
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // vercel --version
     runner.push_success(b"", b""); // vercel whoami
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2277,7 +2346,8 @@ fn deploy_github_calls_cli() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_success(b"", b""); // gh secret set
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2301,7 +2371,8 @@ fn deploy_github_prod_env_flags() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2330,7 +2401,8 @@ fn deploy_github_records_tracker() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
@@ -2351,8 +2423,9 @@ fn deploy_github_failure_tracked() {
     runner.push_success(b"", b""); // gh auth status
     runner.push_failure(b"auth error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -2378,12 +2451,14 @@ fn deploy_github_skip_unchanged() {
     runner.push_success(b"", b""); // gh --version
     runner.push_success(b"", b""); // gh auth status
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // gh --version
     runner.push_success(b"", b""); // gh auth status
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2403,7 +2478,8 @@ fn deploy_heroku_calls_cli() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_success(b"", b""); // heroku config:set
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2426,7 +2502,8 @@ fn deploy_heroku_prod_env_flags() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2454,7 +2531,8 @@ fn deploy_heroku_records_tracker() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
@@ -2475,8 +2553,9 @@ fn deploy_heroku_failure_tracked() {
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_failure(b"auth error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -2502,12 +2581,14 @@ fn deploy_heroku_skip_unchanged() {
     runner.push_success(b"", b""); // heroku --version
     runner.push_success(b"", b""); // heroku auth:whoami
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // heroku --version
     runner.push_success(b"", b""); // heroku auth:whoami
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2527,7 +2608,8 @@ fn deploy_supabase_calls_cli() {
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b""); // supabase secrets set
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2553,7 +2635,8 @@ fn deploy_supabase_prod_env_flags() {
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2582,7 +2665,8 @@ fn deploy_supabase_records_tracker() {
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
@@ -2603,8 +2687,9 @@ fn deploy_supabase_failure_tracked() {
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_failure(b"api error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -2630,12 +2715,14 @@ fn deploy_supabase_skip_unchanged() {
     runner.push_success(b"", b""); // supabase --version
     runner.push_success(b"", b""); // supabase secrets list (preflight)
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // supabase --version
     runner.push_success(b"", b""); // supabase secrets list (preflight)
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2); // only preflight (version check + secrets list)
@@ -2655,7 +2742,8 @@ fn deploy_railway_calls_cli() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_success(b"", b""); // railway variables --set
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2678,7 +2766,8 @@ fn deploy_railway_prod_env_flags() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2705,7 +2794,8 @@ fn deploy_railway_records_tracker() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
@@ -2726,8 +2816,9 @@ fn deploy_railway_failure_tracked() {
     runner.push_success(b"", b""); // railway whoami
     runner.push_failure(b"api error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -2753,12 +2844,14 @@ fn deploy_railway_skip_unchanged() {
     runner.push_success(b"", b""); // railway --version
     runner.push_success(b"", b""); // railway whoami
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // railway --version
     runner.push_success(b"", b""); // railway whoami
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2778,7 +2871,8 @@ fn deploy_gitlab_calls_cli() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_success(b"", b""); // glab variable set
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
@@ -2804,7 +2898,8 @@ fn deploy_gitlab_prod_env_flags() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("prod"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(
@@ -2827,7 +2922,8 @@ fn deploy_gitlab_records_tracker() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_success(b"", b"");
 
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(index
@@ -2848,8 +2944,9 @@ fn deploy_gitlab_failure_tracked() {
     runner.push_success(b"", b""); // glab auth status
     runner.push_failure(b"api error");
 
-    let err = cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner)
-        .unwrap_err();
+    let err =
+        cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+            .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
     let index = DeployIndex::load(&project.deploy_index_path());
@@ -2875,12 +2972,14 @@ fn deploy_gitlab_skip_unchanged() {
     runner.push_success(b"", b""); // glab --version
     runner.push_success(b"", b""); // glab auth status
     runner.push_success(b"", b"");
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // glab --version
     runner.push_success(b"", b""); // glab auth status
-    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
+    cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, false, &runner)
+        .unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2);
@@ -2969,4 +3068,212 @@ fn generate_runtime_custom_output() {
     assert!(output_path.is_file());
     let content = std::fs::read_to_string(&output_path).unwrap();
     assert!(content.contains("export const env ="));
+}
+
+// === validation: set ===
+
+#[test]
+fn set_rejects_invalid_value_format() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let err = cli::set::run(
+        &config,
+        "DATABASE_URL",
+        "dev",
+        Some("not-a-url"),
+        None,
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("://"));
+}
+
+#[test]
+fn set_rejects_invalid_value_enum() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let err = cli::set::run(
+        &config,
+        "NODE_ENV",
+        "dev",
+        Some("dev"),
+        None,
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("expected one of"));
+}
+
+#[test]
+fn set_rejects_invalid_value_range() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let err = cli::set::run(
+        &config,
+        "PORT",
+        "dev",
+        Some("99999"),
+        None,
+        true,
+        false,
+        false,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("outside range"));
+}
+
+#[test]
+fn set_skip_validation_allows_invalid() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    // Would fail validation, but --skip-validation bypasses
+    cli::set::run(
+        &config,
+        "DATABASE_URL",
+        "dev",
+        Some("not-a-url"),
+        None,
+        true,
+        false,
+        true, // skip_validation
+    )
+    .unwrap();
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("DATABASE_URL", "dev").unwrap(),
+        Some("not-a-url".to_string())
+    );
+}
+
+// === validation: deploy ===
+
+#[test]
+fn deploy_rejects_invalid_values_fail_fast() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("DATABASE_URL", "dev", "not-a-url").unwrap();
+    store.set("PORT", "dev", "99999").unwrap();
+    store.set("NODE_ENV", "dev", "development").unwrap();
+    store.set("ENABLE_CACHE", "dev", "true").unwrap();
+
+    let err = cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap_err();
+    let msg = err.to_string();
+    assert!(msg.contains("Validation failed"));
+    assert!(msg.contains("DATABASE_URL"));
+    assert!(msg.contains("PORT"));
+    // NODE_ENV and ENABLE_CACHE are valid, should not appear
+    assert!(!msg.contains("NODE_ENV"));
+    assert!(!msg.contains("ENABLE_CACHE"));
+}
+
+#[test]
+fn deploy_skip_validation_deploys_despite_errors() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("DATABASE_URL", "dev", "not-a-url").unwrap();
+    store.set("PORT", "dev", "80").unwrap();
+    store.set("NODE_ENV", "dev", "development").unwrap();
+    store.set("ENABLE_CACHE", "dev", "true").unwrap();
+
+    // skip_validation=true should not fail
+    cli::deploy::run(&config, Some("dev"), false, false, false, true).unwrap();
+    // Verify env file was written
+    let env_path = project.root().join("apps/web/.env.local");
+    assert!(env_path.is_file());
+}
+
+#[test]
+fn deploy_unchanged_invalid_value_not_blocked() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("DATABASE_URL", "dev", "not-a-url").unwrap();
+    store.set("PORT", "dev", "80").unwrap();
+    store.set("NODE_ENV", "dev", "development").unwrap();
+    store.set("ENABLE_CACHE", "dev", "true").unwrap();
+
+    // First deploy with skip_validation to establish hashes
+    cli::deploy::run(&config, Some("dev"), false, false, false, true).unwrap();
+
+    // Second deploy without skip — hashes match, so no validation happens
+    cli::deploy::run(&config, Some("dev"), false, false, false, false).unwrap();
+}
+
+// === validation: status ===
+
+#[test]
+fn status_shows_validation_warnings() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("PORT", "dev", "99999").unwrap();
+    store.set("NODE_ENV", "dev", "dev").unwrap();
+    store
+        .set("DATABASE_URL", "dev", "https://db.example.com")
+        .unwrap();
+    store.set("ENABLE_CACHE", "dev", "true").unwrap();
+
+    // Status should build without error (warnings are informational)
+    cli::status::run(&config, Some("dev"), false).unwrap();
+}
+
+#[test]
+fn status_no_warnings_when_valid() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("PORT", "dev", "8080").unwrap();
+    store.set("NODE_ENV", "dev", "development").unwrap();
+    store
+        .set("DATABASE_URL", "dev", "https://db.example.com")
+        .unwrap();
+    store.set("ENABLE_CACHE", "dev", "true").unwrap();
+
+    cli::status::run(&config, Some("dev"), false).unwrap();
+}
+
+// === validation: generate ===
+
+#[test]
+fn generate_dts_with_validation_types() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, false, None).unwrap();
+
+    let output_path = project.root().join("env.d.ts");
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    // NODE_ENV should be a union type from enum
+    assert!(content.contains("NODE_ENV: \"development\" | \"staging\" | \"production\";"));
+    // PORT, DATABASE_URL, ENABLE_CACHE should be plain string (no validation type narrowing in .d.ts)
+    assert!(content.contains("PORT: string;"));
+    assert!(content.contains("DATABASE_URL: string;"));
+    assert!(content.contains("ENABLE_CACHE: string;"));
+}
+
+#[test]
+fn generate_runtime_with_typed_helpers() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, true, None).unwrap();
+
+    let output_path = project.root().join("env.ts");
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    // PORT is integer → envInt
+    assert!(content.contains("PORT: envInt(\"PORT\")"));
+    assert!(content.contains("function envInt("));
+    // ENABLE_CACHE is boolean → envBool
+    assert!(content.contains("ENABLE_CACHE: envBool(\"ENABLE_CACHE\")"));
+    assert!(content.contains("function envBool("));
+    // DATABASE_URL is url → requireEnv
+    assert!(content.contains("DATABASE_URL: requireEnv(\"DATABASE_URL\")"));
+    // NODE_ENV has enum but no special format → requireEnv
+    assert!(content.contains("NODE_ENV: requireEnv(\"NODE_ENV\")"));
 }

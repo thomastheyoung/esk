@@ -52,6 +52,9 @@ pub enum Commands {
         /// Show detailed output
         #[arg(long, short)]
         verbose: bool,
+        /// Skip value validation
+        #[arg(long)]
+        skip_validation: bool,
     },
     /// Initialize encrypted store and config
     Init,
@@ -74,6 +77,9 @@ pub enum Commands {
         /// Fail if any remote push fails (skip target deploy)
         #[arg(long)]
         bail: bool,
+        /// Skip value validation
+        #[arg(long)]
+        skip_validation: bool,
     },
     /// Retrieve a secret value
     Get {
