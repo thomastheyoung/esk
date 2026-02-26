@@ -58,6 +58,9 @@ pub enum Commands {
         /// Skip required-secret checks
         #[arg(long)]
         skip_requirements: bool,
+        /// Allow deploying empty/whitespace-only values
+        #[arg(long)]
+        allow_empty: bool,
     },
     /// Initialize encrypted store and config
     Init,
@@ -83,6 +86,9 @@ pub enum Commands {
         /// Skip value validation
         #[arg(long)]
         skip_validation: bool,
+        /// Bypass interactive confirmations (empty value, etc.)
+        #[arg(long)]
+        force: bool,
     },
     /// Retrieve a secret value
     Get {

@@ -88,6 +88,7 @@ pub fn run_with_runner(
             verbose: false,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: true,
         },
         runner,
     )?;

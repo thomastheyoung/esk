@@ -71,6 +71,12 @@ struct ValidationWarning {
     message: String,
 }
 
+struct EmptyValueWarning {
+    key: String,
+    env: String,
+    kind: &'static str,
+}
+
 struct NextStep {
     command: String,
     description: String,
@@ -87,6 +93,7 @@ struct Dashboard {
     deployed: Vec<DeployEntry>,
     unset: Vec<DeployEntry>,
     validation_warnings: Vec<ValidationWarning>,
+    empty_values: Vec<EmptyValueWarning>,
     missing_required: Vec<crate::config::MissingRequirement>,
     coverage_gaps: Vec<CoverageGap>,
     orphans: Vec<Orphan>,
@@ -195,11 +202,35 @@ impl Dashboard {
             }
         }
 
-        // 4. Required secret checks
+        // 4. Empty value warnings
+        let mut empty_values = Vec::new();
+        for secret in &resolved {
+            if secret.allow_empty {
+                continue;
+            }
+            for &env_name in &envs {
+                let composite = format!("{}:{}", secret.key, env_name);
+                if let Some(value) = all_secrets.get(&composite) {
+                    if crate::validate::is_effectively_empty(value) {
+                        empty_values.push(EmptyValueWarning {
+                            key: secret.key.clone(),
+                            env: env_name.to_string(),
+                            kind: if value.is_empty() {
+                                "empty"
+                            } else {
+                                "whitespace-only"
+                            },
+                        });
+                    }
+                }
+            }
+        }
+
+        // 5. Required secret checks
         let missing_required =
             config.check_requirements(&resolved, all_secrets, env, Some(&target_names));
 
-        // 5. Coverage gaps: secrets declared in config but missing values in some envs
+        // 6. Coverage gaps: secrets declared in config but missing values in some envs
         let mut coverage_gaps = Vec::new();
         for secret in &resolved {
             let secret_envs: BTreeSet<&str> = secret
@@ -232,7 +263,7 @@ impl Dashboard {
             }
         }
 
-        // 6. Orphans: secrets in store but not in config
+        // 7. Orphans: secrets in store but not in config
         let config_keys: BTreeSet<&str> = config
             .secrets
             .values()
@@ -254,7 +285,7 @@ impl Dashboard {
             }
         }
 
-        // 7. Remote states
+        // 8. Remote states
         let sync_index_path = config.root.join(".esk/sync-index.json");
         let sync_index = SyncIndex::load(&sync_index_path);
         let remote_names: Vec<&String> = config.remotes.keys().collect();
@@ -294,7 +325,7 @@ impl Dashboard {
             }
         }
 
-        // 8. Next steps
+        // 9. Next steps
         let mut next_steps = Vec::new();
 
         // Failed deploys
@@ -310,6 +341,14 @@ impl Dashboard {
             next_steps.push(NextStep {
                 command: format!("esk set {} --env {}", w.key, w.env),
                 description: format!("fix: {}", w.message),
+            });
+        }
+
+        // Empty values
+        for w in &empty_values {
+            next_steps.push(NextStep {
+                command: format!("esk set {} --env {}", w.key, w.env),
+                description: format!("{} value (may break defaults)", w.kind),
             });
         }
 
@@ -389,6 +428,7 @@ impl Dashboard {
             deployed,
             unset,
             validation_warnings,
+            empty_values,
             missing_required,
             coverage_gaps,
             orphans,
@@ -423,6 +463,9 @@ impl Dashboard {
             if !self.validation_warnings.is_empty() {
                 parts.push(format!("{} invalid", self.validation_warnings.len()));
             }
+            if !self.empty_values.is_empty() {
+                parts.push(format!("{} empty", self.empty_values.len()));
+            }
             if !self.missing_required.is_empty() {
                 parts.push(format!("{} required missing", self.missing_required.len()));
             }
@@ -431,6 +474,7 @@ impl Dashboard {
                 && self.pending.is_empty()
                 && self.unset.is_empty()
                 && self.validation_warnings.is_empty()
+                && self.empty_values.is_empty()
                 && self.missing_required.is_empty();
 
             if all_deployed {
@@ -616,6 +660,26 @@ impl Dashboard {
                 ));
             }
             cliclack::log::step(format!("Validation\n{}", val_lines.join("\n")))?;
+        }
+
+        // Empty values section
+        if !self.empty_values.is_empty() {
+            let mut empty_lines = Vec::new();
+            empty_lines.push(format!(
+                "  {} {}",
+                style("!").yellow(),
+                style(format!("{} empty", self.empty_values.len()))
+                    .yellow()
+                    .bold()
+            ));
+            for w in &self.empty_values {
+                empty_lines.push(format!(
+                    "     {}  {}",
+                    style(format!("{}:{}", w.key, w.env)).dim(),
+                    style(w.kind).dim(),
+                ));
+            }
+            cliclack::log::step(format!("Empty values\n{}", empty_lines.join("\n")))?;
         }
 
         // Required section

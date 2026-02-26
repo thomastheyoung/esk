@@ -480,6 +480,28 @@ secrets:
         env: [web:dev, web:prod]
 "#;
 
+/// Config with allow_empty for testing empty value detection.
+pub const ALLOW_EMPTY_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+targets:
+  env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix: { dev: "", prod: ".production" }
+secrets:
+  General:
+    NORMAL_KEY:
+      targets:
+        env: [web:dev, web:prod]
+    ALLOWED_EMPTY:
+      allow_empty: true
+      targets:
+        env: [web:dev, web:prod]
+"#;
+
 /// Records calls made to a mock command runner.
 #[derive(Debug, Clone)]
 pub struct RecordedCall {

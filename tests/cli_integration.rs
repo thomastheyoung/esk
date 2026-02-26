@@ -120,6 +120,7 @@ fn set_unknown_env_errors() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap_err();
@@ -140,6 +141,7 @@ fn set_with_value_flag() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap();
@@ -166,6 +168,7 @@ fn set_warns_undeclared_key() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap();
@@ -190,6 +193,7 @@ fn set_no_sync_flag() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap();
@@ -213,6 +217,7 @@ fn set_with_group_flag_adds_to_config() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap();
@@ -245,6 +250,7 @@ fn set_with_group_flag_creates_new_group() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap();
@@ -271,6 +277,7 @@ fn set_with_group_flag_existing_key_no_duplicate() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap();
@@ -352,6 +359,7 @@ fn delete_auto_syncs_env_file() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -390,6 +398,7 @@ fn delete_last_secret_regenerates_batch_target() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -465,6 +474,7 @@ secrets:
             no_sync: false,
             bail: true,
             skip_validation: false,
+            force: false,
         },
         &runner,
     )
@@ -518,6 +528,7 @@ secrets:
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &MockCommandRunner::new(),
     )
@@ -638,6 +649,7 @@ fn deploy_env_filter() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -668,6 +680,7 @@ fn deploy_dry_run_no_side_effects() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -697,6 +710,7 @@ fn deploy_force_resyncs_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -718,6 +732,7 @@ fn deploy_force_resyncs_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -767,6 +782,7 @@ secrets:
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -788,6 +804,7 @@ fn deploy_skips_no_value_secrets() {
             verbose: true,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -825,6 +842,7 @@ secrets:
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap_err();
@@ -850,6 +868,7 @@ fn deploy_env_dirty_pair_regens_all() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -867,6 +886,7 @@ fn deploy_env_dirty_pair_regens_all() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -899,6 +919,7 @@ fn status_shows_all_states() {
             verbose: false,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -938,6 +959,7 @@ fn deploy_records_to_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -1081,6 +1103,7 @@ fn deploy_cloudflare_calls_wrangler() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1119,6 +1142,7 @@ fn deploy_cloudflare_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1156,6 +1180,7 @@ fn deploy_cloudflare_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1193,6 +1218,7 @@ fn deploy_cloudflare_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1232,6 +1258,7 @@ fn deploy_cloudflare_multiple_secrets() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1270,6 +1297,7 @@ fn deploy_cloudflare_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1286,6 +1314,7 @@ fn deploy_cloudflare_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1319,6 +1348,7 @@ fn deploy_convex_calls_npx() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1367,6 +1397,7 @@ fn deploy_convex_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1416,6 +1447,7 @@ fn deploy_convex_reads_deployment_source() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1453,6 +1485,7 @@ fn deploy_convex_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1743,6 +1776,7 @@ fn deploy_full_config_cloudflare_and_convex() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1781,6 +1815,7 @@ fn deploy_cloudflare_force_resyncs() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -1801,6 +1836,7 @@ fn deploy_cloudflare_force_resyncs() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2037,6 +2073,7 @@ fn status_dashboard_healthy() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -2102,6 +2139,7 @@ fn status_dashboard_next_steps() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -2133,6 +2171,7 @@ fn set_auto_push_records_sync_index() {
             no_sync: false,
             bail: false,
             skip_validation: false,
+            force: false,
         },
         &runner,
     )
@@ -2172,6 +2211,7 @@ fn deploy_records_tombstone_delete_success() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2195,6 +2235,7 @@ fn deploy_records_tombstone_delete_success() {
             verbose: false,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2233,6 +2274,7 @@ fn deploy_records_tombstone_delete_failure() {
             verbose: false,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2272,6 +2314,7 @@ fn deploy_retries_failed_tombstone_delete() {
             verbose: false,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: false,
         },
         &runner,
     );
@@ -2290,6 +2333,7 @@ fn deploy_retries_failed_tombstone_delete() {
             verbose: false,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2330,6 +2374,7 @@ fn deploy_skips_already_deleted_tombstone() {
             verbose: false,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2369,6 +2414,7 @@ fn delete_then_recreate_same_value_syncs() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2389,6 +2435,7 @@ fn delete_then_recreate_same_value_syncs() {
             verbose: false,
             skip_validation: false,
             skip_requirements: true,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2409,6 +2456,7 @@ fn delete_then_recreate_same_value_syncs() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2444,6 +2492,7 @@ fn deploy_fly_calls_cli() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2479,6 +2528,7 @@ fn deploy_fly_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2514,6 +2564,7 @@ fn deploy_fly_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2547,6 +2598,7 @@ fn deploy_fly_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2586,6 +2638,7 @@ fn deploy_fly_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2604,6 +2657,7 @@ fn deploy_fly_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2636,6 +2690,7 @@ fn deploy_netlify_calls_cli() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2671,6 +2726,7 @@ fn deploy_netlify_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2712,6 +2768,7 @@ fn deploy_netlify_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2745,6 +2802,7 @@ fn deploy_netlify_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2783,6 +2841,7 @@ fn deploy_netlify_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2800,6 +2859,7 @@ fn deploy_netlify_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2832,6 +2892,7 @@ fn deploy_vercel_calls_cli() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2868,6 +2929,7 @@ fn deploy_vercel_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2909,6 +2971,7 @@ fn deploy_vercel_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2942,6 +3005,7 @@ fn deploy_vercel_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2980,6 +3044,7 @@ fn deploy_vercel_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -2997,6 +3062,7 @@ fn deploy_vercel_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3029,6 +3095,7 @@ fn deploy_github_calls_cli() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3065,6 +3132,7 @@ fn deploy_github_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3106,6 +3174,7 @@ fn deploy_github_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3139,6 +3208,7 @@ fn deploy_github_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3177,6 +3247,7 @@ fn deploy_github_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3194,6 +3265,7 @@ fn deploy_github_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3226,6 +3298,7 @@ fn deploy_heroku_calls_cli() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3261,6 +3334,7 @@ fn deploy_heroku_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3301,6 +3375,7 @@ fn deploy_heroku_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3334,6 +3409,7 @@ fn deploy_heroku_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3372,6 +3448,7 @@ fn deploy_heroku_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3389,6 +3466,7 @@ fn deploy_heroku_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3421,6 +3499,7 @@ fn deploy_supabase_calls_cli() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3459,6 +3538,7 @@ fn deploy_supabase_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3500,6 +3580,7 @@ fn deploy_supabase_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3533,6 +3614,7 @@ fn deploy_supabase_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3571,6 +3653,7 @@ fn deploy_supabase_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3588,6 +3671,7 @@ fn deploy_supabase_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3620,6 +3704,7 @@ fn deploy_railway_calls_cli() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3655,6 +3740,7 @@ fn deploy_railway_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3694,6 +3780,7 @@ fn deploy_railway_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3727,6 +3814,7 @@ fn deploy_railway_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3765,6 +3853,7 @@ fn deploy_railway_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3782,6 +3871,7 @@ fn deploy_railway_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3814,6 +3904,7 @@ fn deploy_gitlab_calls_cli() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3852,6 +3943,7 @@ fn deploy_gitlab_prod_env_flags() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3887,6 +3979,7 @@ fn deploy_gitlab_records_tracker() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3920,6 +4013,7 @@ fn deploy_gitlab_failure_tracked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3958,6 +4052,7 @@ fn deploy_gitlab_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -3975,6 +4070,7 @@ fn deploy_gitlab_skip_unchanged() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
         &runner,
     )
@@ -4085,6 +4181,7 @@ fn set_rejects_invalid_value_format() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap_err();
@@ -4105,6 +4202,7 @@ fn set_rejects_invalid_value_enum() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap_err();
@@ -4125,6 +4223,7 @@ fn set_rejects_invalid_value_range() {
             no_sync: true,
             bail: false,
             skip_validation: false,
+            force: false,
         },
     )
     .unwrap_err();
@@ -4146,6 +4245,7 @@ fn set_skip_validation_allows_invalid() {
             no_sync: true,
             bail: false,
             skip_validation: true,
+            force: false,
         },
     )
     .unwrap();
@@ -4177,6 +4277,7 @@ fn deploy_rejects_invalid_values_fail_fast() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap_err();
@@ -4209,6 +4310,7 @@ fn deploy_skip_validation_deploys_despite_errors() {
             verbose: false,
             skip_validation: true,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -4237,6 +4339,7 @@ fn deploy_unchanged_invalid_value_not_blocked() {
             verbose: false,
             skip_validation: true,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -4251,6 +4354,7 @@ fn deploy_unchanged_invalid_value_not_blocked() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -4349,6 +4453,7 @@ fn deploy_fails_with_missing_required() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap_err();
@@ -4372,6 +4477,7 @@ fn deploy_force_overrides_required() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -4392,6 +4498,7 @@ fn deploy_dry_run_warns_missing_required() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -4414,6 +4521,7 @@ fn deploy_succeeds_when_all_required_present() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -4436,6 +4544,7 @@ fn deploy_required_env_scoped_fails_in_prod() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap_err();
@@ -4460,6 +4569,7 @@ fn deploy_required_env_scoped_ok_in_dev() {
             verbose: false,
             skip_validation: false,
             skip_requirements: false,
+            allow_empty: false,
         },
     )
     .unwrap();
@@ -4482,4 +4592,256 @@ fn existing_config_without_required_loads() {
     for secret in &resolved {
         assert_eq!(secret.required, esk::config::Required::All);
     }
+}
+
+// === empty value detection ===
+
+#[test]
+fn set_empty_value_stores_in_non_tty() {
+    // Non-TTY: warns but succeeds (piping/scripting shouldn't block)
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    cli::set::run(
+        &config,
+        &cli::set::SetOptions {
+            key: "NORMAL_KEY",
+            env: "dev",
+            value: Some(""),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+            force: false,
+        },
+    )
+    .unwrap();
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("NORMAL_KEY", "dev").unwrap(),
+        Some("".to_string())
+    );
+}
+
+#[test]
+fn set_force_bypasses_empty_check() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    cli::set::run(
+        &config,
+        &cli::set::SetOptions {
+            key: "NORMAL_KEY",
+            env: "dev",
+            value: Some(""),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+            force: true,
+        },
+    )
+    .unwrap();
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("NORMAL_KEY", "dev").unwrap(),
+        Some("".to_string())
+    );
+}
+
+#[test]
+fn set_allow_empty_suppresses_warning() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    // ALLOWED_EMPTY has allow_empty: true — no warning, no prompt
+    cli::set::run(
+        &config,
+        &cli::set::SetOptions {
+            key: "ALLOWED_EMPTY",
+            env: "dev",
+            value: Some(""),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+            force: false,
+        },
+    )
+    .unwrap();
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("ALLOWED_EMPTY", "dev").unwrap(),
+        Some("".to_string())
+    );
+}
+
+#[test]
+fn set_whitespace_only_treated_as_empty() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    // Whitespace-only in non-TTY: warns but succeeds
+    cli::set::run(
+        &config,
+        &cli::set::SetOptions {
+            key: "NORMAL_KEY",
+            env: "dev",
+            value: Some("   "),
+            group: None,
+            no_sync: true,
+            bail: false,
+            skip_validation: false,
+            force: false,
+        },
+    )
+    .unwrap();
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("NORMAL_KEY", "dev").unwrap(),
+        Some("   ".to_string())
+    );
+}
+
+#[test]
+fn deploy_non_tty_rejects_empty_values() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("NORMAL_KEY", "dev", "").unwrap();
+    store.set("ALLOWED_EMPTY", "dev", "ok").unwrap();
+
+    let err = cli::deploy::run(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("Empty values would be deployed"));
+    assert!(err.to_string().contains("NORMAL_KEY"));
+}
+
+#[test]
+fn deploy_allow_empty_flag_proceeds() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("NORMAL_KEY", "dev", "").unwrap();
+    store.set("ALLOWED_EMPTY", "dev", "ok").unwrap();
+
+    cli::deploy::run(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: true,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn deploy_force_bypasses_empty_check() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    store.set("NORMAL_KEY", "dev", "").unwrap();
+    store.set("ALLOWED_EMPTY", "dev", "ok").unwrap();
+
+    cli::deploy::run(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: true,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn deploy_allow_empty_per_secret_suppresses() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let store = project.store().unwrap();
+    // Only ALLOWED_EMPTY is empty — it has allow_empty: true, so no error
+    store.set("NORMAL_KEY", "dev", "ok").unwrap();
+    store.set("ALLOWED_EMPTY", "dev", "").unwrap();
+
+    cli::deploy::run(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn deploy_dry_run_warns_empty_but_succeeds() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("NORMAL_KEY", "dev", "").unwrap();
+    store.set("ALLOWED_EMPTY", "dev", "ok").unwrap();
+
+    // dry_run warns but doesn't bail
+    cli::deploy::run(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: true,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn status_shows_empty_values_section() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("NORMAL_KEY", "dev", "").unwrap();
+    store.set("ALLOWED_EMPTY", "dev", "").unwrap();
+
+    // Status should build and render without error
+    cli::status::run(&config, Some("dev"), false).unwrap();
+}
+
+#[test]
+fn status_allow_empty_suppresses_warning() {
+    let project = TestProject::with_store(ALLOW_EMPTY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    // Only ALLOWED_EMPTY is empty — it has allow_empty: true so no warning
+    store.set("NORMAL_KEY", "dev", "ok").unwrap();
+    store.set("ALLOWED_EMPTY", "dev", "").unwrap();
+
+    // Should render without errors and no empty values in dashboard
+    cli::status::run(&config, Some("dev"), false).unwrap();
 }

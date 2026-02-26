@@ -185,6 +185,11 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
     }
 }
 
+/// Returns true if the value is empty or contains only ASCII whitespace.
+pub fn is_effectively_empty(value: &str) -> bool {
+    value.trim().is_empty()
+}
+
 fn validate_format(value: &str, format: Format) -> Result<(), String> {
     match format {
         Format::String => {
@@ -631,6 +636,28 @@ mod tests {
             ..Default::default()
         };
         assert!(validate_spec("K", &spec).is_ok());
+    }
+
+    // --- resolve_enum_values ---
+
+    // --- is_effectively_empty ---
+
+    #[test]
+    fn effectively_empty_true_cases() {
+        assert!(is_effectively_empty(""));
+        assert!(is_effectively_empty("   "));
+        assert!(is_effectively_empty("\t"));
+        assert!(is_effectively_empty("\n"));
+        assert!(is_effectively_empty("  \t\n  "));
+    }
+
+    #[test]
+    fn effectively_empty_false_cases() {
+        assert!(!is_effectively_empty("a"));
+        assert!(!is_effectively_empty(" a "));
+        assert!(!is_effectively_empty("\"\""));
+        assert!(!is_effectively_empty("0"));
+        assert!(!is_effectively_empty("false"));
     }
 
     // --- resolve_enum_values ---

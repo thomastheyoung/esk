@@ -32,6 +32,7 @@ fn run() -> Result<()> {
             verbose,
             skip_validation,
             skip_requirements,
+            allow_empty,
         } => {
             let config = Config::find_and_load()?;
             esk::cli::deploy::run(
@@ -43,6 +44,7 @@ fn run() -> Result<()> {
                     verbose: *verbose,
                     skip_validation: *skip_validation,
                     skip_requirements: *skip_requirements,
+                    allow_empty: *allow_empty,
                 },
             )?;
         }
@@ -58,6 +60,7 @@ fn run() -> Result<()> {
             no_sync,
             bail,
             skip_validation,
+            force,
         } => {
             let config = Config::find_and_load()?;
             esk::cli::set::run(
@@ -70,6 +73,7 @@ fn run() -> Result<()> {
                     no_sync: *no_sync,
                     bail: *bail,
                     skip_validation: *skip_validation,
+                    force: *force,
                 },
             )?;
         }

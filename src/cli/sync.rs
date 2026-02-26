@@ -285,6 +285,30 @@ pub fn run_with_runner(
     }
 
     if result.local_changed {
+        // Detect values that became empty from remote merge
+        let mut empty_from_remote: Vec<String> = Vec::new();
+        for (composite, value) in &result.merged_payload.secrets {
+            if crate::validate::is_effectively_empty(value) {
+                let was_empty_locally = payload
+                    .secrets
+                    .get(composite)
+                    .map(|v| crate::validate::is_effectively_empty(v))
+                    .unwrap_or(false); // didn't exist = not "was empty"
+                if !was_empty_locally {
+                    empty_from_remote.push(composite.clone());
+                }
+            }
+        }
+        if !empty_from_remote.is_empty() {
+            empty_from_remote.sort();
+            cliclack::log::warning(format!(
+                "Remote introduced {} empty value{}: {}",
+                empty_from_remote.len(),
+                if empty_from_remote.len() == 1 { "" } else { "s" },
+                empty_from_remote.join(", ")
+            ))?;
+        }
+
         store.set_payload(&result.merged_payload)?;
         let label = env_version_label(&result.merged_payload, env);
         status_line = format!("{} Merged → {}", style("↻").yellow(), label);
@@ -361,6 +385,7 @@ pub fn run_with_runner(
                 verbose: false,
                 skip_validation: false,
                 skip_requirements: true,
+                allow_empty: false,
             },
             runner,
         )?;

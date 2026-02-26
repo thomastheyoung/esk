@@ -15,6 +15,7 @@ pub struct SetOptions<'a> {
     pub no_sync: bool,
     pub bail: bool,
     pub skip_validation: bool,
+    pub force: bool,
 }
 
 pub fn run(config: &Config, opts: &SetOptions<'_>) -> Result<()> {
@@ -98,6 +99,33 @@ pub fn run_with_runner(
         )?;
     }
 
+    if !opts.force && crate::validate::is_effectively_empty(&secret_value) {
+        let allow = config
+            .find_secret(key)
+            .map(|(_, d)| d.allow_empty)
+            .unwrap_or(false);
+        if !allow {
+            let kind = if secret_value.is_empty() {
+                "empty"
+            } else {
+                "whitespace-only"
+            };
+            if std::io::stdin().is_terminal() {
+                cliclack::log::warning(format!("Value for {key}:{env} is {kind}"))?;
+                let proceed = cliclack::confirm(
+                    "Empty values can break defaults and type coercion. Continue?",
+                )
+                .initial_value(false)
+                .interact()?;
+                if !proceed {
+                    bail!("Aborted. Use --force to bypass.");
+                }
+            } else {
+                cliclack::log::warning(format!("Setting {kind} value for {key}:{env}"))?;
+            }
+        }
+    }
+
     if !skip_validation {
         if let Some((_, def)) = config.find_secret(key) {
             if let Some(ref spec) = def.validate {
@@ -141,6 +169,7 @@ pub fn run_with_runner(
 
     // Auto-deploy affected targets (skip validation — already validated above)
     // skip_requirements: user may be setting secrets incrementally
+    // allow_empty: user already confirmed at set time, don't double-prompt
     crate::cli::deploy::run_with_runner(
         config,
         &crate::cli::deploy::DeployOptions {
@@ -150,6 +179,7 @@ pub fn run_with_runner(
             verbose: false,
             skip_validation: true,
             skip_requirements: true,
+            allow_empty: true,
         },
         runner,
     )?;

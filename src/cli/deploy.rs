@@ -1,6 +1,7 @@
 use anyhow::Result;
 use console::style;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::io::IsTerminal;
 
 use crate::config::Config;
 use crate::deploy_tracker::DeployIndex;
@@ -16,6 +17,7 @@ pub struct DeployOptions<'a> {
     pub verbose: bool,
     pub skip_validation: bool,
     pub skip_requirements: bool,
+    pub allow_empty: bool,
 }
 
 /// A single deploy result entry for display.
@@ -42,6 +44,7 @@ pub fn run_with_runner(
         verbose,
         skip_validation,
         skip_requirements,
+        allow_empty,
     } = *opts;
 
     let store = SecretStore::open(&config.root)?;
@@ -142,6 +145,73 @@ pub fn run_with_runner(
                     .collect::<Vec<_>>()
                     .join("\n"),
             );
+        }
+    }
+
+    // Check for empty/whitespace-only values that would be deployed
+    if !allow_empty && !force {
+        let mut empty_warnings: Vec<String> = Vec::new();
+        for secret in &resolved {
+            if secret.allow_empty {
+                continue;
+            }
+            for target in &secret.targets {
+                if let Some(filter_env) = env {
+                    if target.environment != filter_env {
+                        continue;
+                    }
+                }
+                let composite = format!("{}:{}", secret.key, target.environment);
+                let Some(value) = payload.secrets.get(&composite) else {
+                    continue;
+                };
+
+                // Only check secrets that need deploying (changed or never deployed)
+                let value_hash = DeployIndex::hash_value(value);
+                let tracker_key = DeployIndex::tracker_key(
+                    &secret.key,
+                    &target.service,
+                    target.app.as_deref(),
+                    &target.environment,
+                );
+                if !index.should_deploy(&tracker_key, &value_hash, false) {
+                    continue;
+                }
+
+                if crate::validate::is_effectively_empty(value) {
+                    let kind = if value.is_empty() { "empty" } else { "whitespace-only" };
+                    empty_warnings.push(format!(
+                        "  {}:{} — {}",
+                        secret.key, target.environment, kind
+                    ));
+                }
+            }
+        }
+        if !empty_warnings.is_empty() {
+            let detail = empty_warnings.join("\n");
+            if dry_run {
+                for w in &empty_warnings {
+                    cliclack::log::warning(w)?;
+                }
+            } else if std::io::stdin().is_terminal() {
+                cliclack::log::warning(format!(
+                    "Empty values detected:\n{}",
+                    detail
+                ))?;
+                let proceed = cliclack::confirm(
+                    "Empty values can break defaults and type coercion. Continue?",
+                )
+                .initial_value(false)
+                .interact()?;
+                if !proceed {
+                    anyhow::bail!("Aborted. Use --allow-empty to proceed.");
+                }
+            } else {
+                anyhow::bail!(
+                    "Empty values would be deployed:\n{}\n  Use --allow-empty to proceed",
+                    detail
+                );
+            }
         }
     }
 

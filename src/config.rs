@@ -391,6 +391,8 @@ pub struct SecretDef {
     pub validate: Option<crate::validate::Validation>,
     #[serde(default)]
     pub required: Required,
+    #[serde(default)]
+    pub allow_empty: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -409,6 +411,7 @@ pub struct ResolvedSecret {
     pub targets: Vec<ResolvedTarget>,
     pub validate: Option<crate::validate::Validation>,
     pub required: Required,
+    pub allow_empty: bool,
 }
 
 /// A secret that is required but has no stored value.
@@ -713,6 +716,7 @@ impl Config {
                     targets,
                     validate: def.validate.clone(),
                     required: def.required.clone(),
+                    allow_empty: def.allow_empty,
                 });
             }
         }
@@ -2369,5 +2373,63 @@ secrets:
             "expected target mismatch error, got: {}",
             err
         );
+    }
+
+    #[test]
+    fn allow_empty_defaults_to_false() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: test
+environments: [dev]
+secrets:
+  General:
+    MY_KEY:
+      targets: {}
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("MY_KEY").unwrap();
+        assert!(!def.allow_empty);
+    }
+
+    #[test]
+    fn allow_empty_parses_true() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: test
+environments: [dev]
+secrets:
+  General:
+    MY_KEY:
+      allow_empty: true
+      targets: {}
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("MY_KEY").unwrap();
+        assert!(def.allow_empty);
+    }
+
+    #[test]
+    fn allow_empty_propagates_to_resolved() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: test
+environments: [dev]
+secrets:
+  General:
+    NORMAL:
+      targets: {}
+    ALLOWED:
+      allow_empty: true
+      targets: {}
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let normal = resolved.iter().find(|s| s.key == "NORMAL").unwrap();
+        let allowed = resolved.iter().find(|s| s.key == "ALLOWED").unwrap();
+        assert!(!normal.allow_empty);
+        assert!(allowed.allow_empty);
     }
 }
