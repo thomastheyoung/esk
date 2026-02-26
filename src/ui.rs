@@ -118,9 +118,7 @@ impl cliclack::Theme for EskTheme {
     }
 
     fn format_log(&self, text: &str, symbol: &str) -> String {
-        // Keep compact one-line log rows while preserving cliclack's newline
-        // handling, so sequential logs don't get concatenated.
-        self.format_log_with_spacing(text, symbol, false)
+        self.format_log_with_spacing(text, symbol, true)
     }
 }
 
