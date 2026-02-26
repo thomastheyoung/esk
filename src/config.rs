@@ -52,7 +52,7 @@ pub struct Config {
     #[serde(default)]
     pub targets: TargetsConfig,
     #[serde(default)]
-    pub remotes: BTreeMap<String, serde_yaml::Value>,
+    pub remotes: BTreeMap<String, serde_json::Value>,
     #[serde(default)]
     pub secrets: BTreeMap<String, BTreeMap<String, SecretDef>>,
     #[serde(default)]
@@ -382,15 +382,15 @@ impl Serialize for Required {
 
 impl<'de> Deserialize<'de> for Required {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        let value = serde_yaml::Value::deserialize(deserializer)?;
+        let value = serde_json::Value::deserialize(deserializer)?;
         match value {
-            serde_yaml::Value::Bool(true) => Ok(Required::All),
-            serde_yaml::Value::Bool(false) => Ok(Required::None),
-            serde_yaml::Value::Sequence(seq) => {
-                let mut envs = Vec::with_capacity(seq.len());
-                for item in seq {
+            serde_json::Value::Bool(true) => Ok(Required::All),
+            serde_json::Value::Bool(false) => Ok(Required::None),
+            serde_json::Value::Array(arr) => {
+                let mut envs = Vec::with_capacity(arr.len());
+                for item in arr {
                     match item {
-                        serde_yaml::Value::String(s) => envs.push(s),
+                        serde_json::Value::String(s) => envs.push(s),
                         other => {
                             return Err(serde::de::Error::custom(format!(
                                 "expected string in required list, got {other:?}"
@@ -523,7 +523,7 @@ impl Config {
     pub fn load(path: &Path) -> Result<Self> {
         let contents = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read {}", path.display()))?;
-        let mut config: Config = serde_yaml::from_str(&contents)
+        let mut config: Config = serde_saphyr::from_str(&contents)
             .with_context(|| format!("failed to parse {}", path.display()))?;
         config.root = path
             .parent()
@@ -707,39 +707,39 @@ impl Config {
         for (name, value) in &self.remotes {
             match name.as_str() {
                 "1password" => {
-                    let _: OnePasswordRemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: OnePasswordRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid 1password remote config")?;
                 }
                 "aws_secrets_manager" => {
-                    let _: AwsSecretsManagerRemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: AwsSecretsManagerRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid aws_secrets_manager remote config")?;
                 }
                 "bitwarden" => {
-                    let _: BitwardenRemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: BitwardenRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid bitwarden remote config")?;
                 }
                 "vault" => {
-                    let _: HashicorpVaultRemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: HashicorpVaultRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid vault remote config")?;
                 }
                 "s3" => {
-                    let _: S3RemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: S3RemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid s3 remote config")?;
                 }
                 "gcp" => {
-                    let _: GcpSecretManagerRemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: GcpSecretManagerRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid gcp remote config")?;
                 }
                 "azure" => {
-                    let _: AzureKeyVaultRemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: AzureKeyVaultRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid azure remote config")?;
                 }
                 "doppler" => {
-                    let _: DopplerRemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: DopplerRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid doppler remote config")?;
                 }
                 "sops" => {
-                    let _: SopsRemoteConfig = serde_yaml::from_value(value.clone())
+                    let _: SopsRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid sops remote config")?;
                 }
                 _ => {
@@ -751,7 +751,7 @@ impl Config {
                         match type_str {
                             "cloud_file" => {
                                 let _: CloudFileRemoteConfig =
-                                    serde_yaml::from_value(value.clone()).with_context(|| {
+                                    serde_json::from_value(value.clone()).with_context(|| {
                                         format!("invalid cloud_file remote config for '{name}'")
                                     })?;
                             }
@@ -946,14 +946,14 @@ impl Config {
     pub fn onepassword_remote_config(&self) -> Option<OnePasswordRemoteConfig> {
         self.remotes
             .get("1password")
-            .and_then(|v| serde_yaml::from_value(v.clone()).ok())
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
     /// Get a typed remote config by name.
     pub fn remote_config<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
         self.remotes
             .get(name)
-            .and_then(|v| serde_yaml::from_value(v.clone()).ok())
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
     }
 
     /// Get all cloud_file remote configs: (name, config) pairs.
@@ -968,7 +968,7 @@ impl Config {
                 if type_val != "cloud_file" {
                     return None;
                 }
-                let cfg: CloudFileRemoteConfig = serde_yaml::from_value(value.clone()).ok()?;
+                let cfg: CloudFileRemoteConfig = serde_json::from_value(value.clone()).ok()?;
                 Some((name.clone(), cfg))
             })
             .collect()

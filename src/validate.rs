@@ -36,7 +36,7 @@ pub struct Validation {
     #[serde(default)]
     pub format: Option<Format>,
     #[serde(default, rename = "enum")]
-    pub enum_values: Option<Vec<serde_yaml::Value>>,
+    pub enum_values: Option<Vec<serde_json::Value>>,
     #[serde(default)]
     pub pattern: Option<String>,
     #[serde(default)]
@@ -97,14 +97,14 @@ pub struct CrossFieldViolation {
     pub message: String,
 }
 
-/// Coerce a list of YAML values (bool, int, string) to strings.
-pub fn resolve_enum_values(raw: &[serde_yaml::Value]) -> Result<Vec<String>> {
+/// Coerce a list of values (bool, number, string) to strings.
+pub fn resolve_enum_values(raw: &[serde_json::Value]) -> Result<Vec<String>> {
     let mut result = Vec::with_capacity(raw.len());
     for v in raw {
         match v {
-            serde_yaml::Value::Bool(b) => result.push(b.to_string()),
-            serde_yaml::Value::Number(n) => result.push(n.to_string()),
-            serde_yaml::Value::String(s) => result.push(s.clone()),
+            serde_json::Value::Bool(b) => result.push(b.to_string()),
+            serde_json::Value::Number(n) => result.push(n.to_string()),
+            serde_json::Value::String(s) => result.push(s.clone()),
             other => bail!("unsupported enum value: {other:?}"),
         }
     }
@@ -718,8 +718,8 @@ mod tests {
     fn enum_accepts_matching_value() {
         let spec = Validation {
             enum_values: Some(vec![
-                serde_yaml::Value::String("dev".into()),
-                serde_yaml::Value::String("prod".into()),
+                serde_json::Value::String("dev".into()),
+                serde_json::Value::String("prod".into()),
             ]),
             ..Default::default()
         };
@@ -730,8 +730,8 @@ mod tests {
     fn enum_rejects_non_matching() {
         let spec = Validation {
             enum_values: Some(vec![
-                serde_yaml::Value::String("dev".into()),
-                serde_yaml::Value::String("prod".into()),
+                serde_json::Value::String("dev".into()),
+                serde_json::Value::String("prod".into()),
             ]),
             ..Default::default()
         };
@@ -743,8 +743,8 @@ mod tests {
     fn enum_coerces_booleans() {
         let spec = Validation {
             enum_values: Some(vec![
-                serde_yaml::Value::Bool(true),
-                serde_yaml::Value::Bool(false),
+                serde_json::Value::Bool(true),
+                serde_json::Value::Bool(false),
             ]),
             ..Default::default()
         };
@@ -757,8 +757,8 @@ mod tests {
     fn enum_coerces_numbers() {
         let spec = Validation {
             enum_values: Some(vec![
-                serde_yaml::Value::Number(serde_yaml::Number::from(80)),
-                serde_yaml::Value::Number(serde_yaml::Number::from(443)),
+                serde_json::Value::Number(serde_json::Number::from(80)),
+                serde_json::Value::Number(serde_json::Number::from(443)),
             ]),
             ..Default::default()
         };
@@ -897,7 +897,7 @@ mod tests {
     fn spec_rejects_enum_values_failing_format() {
         let spec = Validation {
             format: Some(Format::Integer),
-            enum_values: Some(vec![serde_yaml::Value::String("not_a_number".into())]),
+            enum_values: Some(vec![serde_json::Value::String("not_a_number".into())]),
             ..Default::default()
         };
         assert!(validate_spec("K", &spec, &known(&["K"])).is_err());
@@ -908,7 +908,7 @@ mod tests {
         let spec = Validation {
             format: Some(Format::Integer),
             range: Some((1.0, 100.0)),
-            enum_values: Some(vec![serde_yaml::Value::Number(serde_yaml::Number::from(
+            enum_values: Some(vec![serde_json::Value::Number(serde_json::Number::from(
                 42,
             ))]),
             ..Default::default()
@@ -943,9 +943,9 @@ mod tests {
     #[test]
     fn resolve_enum_mixed_types() {
         let raw = vec![
-            serde_yaml::Value::String("dev".into()),
-            serde_yaml::Value::Bool(true),
-            serde_yaml::Value::Number(serde_yaml::Number::from(42)),
+            serde_json::Value::String("dev".into()),
+            serde_json::Value::Bool(true),
+            serde_json::Value::Number(serde_json::Number::from(42)),
         ];
         let values = resolve_enum_values(&raw).unwrap();
         assert_eq!(values, vec!["dev", "true", "42"]);
