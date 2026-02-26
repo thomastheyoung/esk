@@ -17,7 +17,8 @@ use crate::reconcile::ConflictPreference;
 #[derive(Parser)]
 #[command(
     name = "esk",
-    about = "Encrypted secrets management with multi-target deploy"
+    about = "Encrypted secrets management with multi-target deploy",
+    version
 )]
 pub struct Cli {
     #[command(subcommand)]
