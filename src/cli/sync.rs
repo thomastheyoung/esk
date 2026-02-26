@@ -285,10 +285,16 @@ pub fn run_with_runner(
     }
 
     if result.local_changed {
-        // Detect values that became empty from remote merge
+        // Detect values that became empty from remote merge (skip allow_empty secrets)
+        let resolved = config.resolve_secrets()?;
         let mut empty_from_remote: Vec<String> = Vec::new();
         for (composite, value) in &result.merged_payload.secrets {
             if crate::validate::is_effectively_empty(value) {
+                let bare_key = composite.rsplit_once(':').map(|(k, _)| k).unwrap_or(composite);
+                let is_allowed = resolved.iter().any(|s| s.key == bare_key && s.allow_empty);
+                if is_allowed {
+                    continue;
+                }
                 let was_empty_locally = payload
                     .secrets
                     .get(composite)
@@ -376,6 +382,7 @@ pub fn run_with_runner(
 
     if auto_deploy && result.local_changed {
         cliclack::log::step("Running deploy...")?;
+        // allow_empty: user already saw the sync warning about empty values
         crate::cli::deploy::run_with_runner(
             config,
             &crate::cli::deploy::DeployOptions {
@@ -385,7 +392,7 @@ pub fn run_with_runner(
                 verbose: false,
                 skip_validation: false,
                 skip_requirements: true,
-                allow_empty: false,
+                allow_empty: true,
             },
             runner,
         )?;

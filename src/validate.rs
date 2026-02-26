@@ -185,7 +185,7 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
     }
 }
 
-/// Returns true if the value is empty or contains only ASCII whitespace.
+/// Returns true if the value is empty or contains only whitespace.
 pub fn is_effectively_empty(value: &str) -> bool {
     value.trim().is_empty()
 }

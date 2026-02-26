@@ -174,6 +174,8 @@ pub fn run_with_runner(
                     target.app.as_deref(),
                     &target.environment,
                 );
+                // force=false here is intentional: the outer guard already skips
+                // this block when --force is set, so the value doesn't matter.
                 if !index.should_deploy(&tracker_key, &value_hash, false) {
                     continue;
                 }

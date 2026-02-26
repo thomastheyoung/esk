@@ -4845,3 +4845,55 @@ fn status_allow_empty_suppresses_warning() {
     // Should render without errors and no empty values in dashboard
     cli::status::run(&config, Some("dev"), false).unwrap();
 }
+
+#[test]
+fn sync_warns_about_newly_empty_values_from_remote() {
+    let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "non_empty").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: op --version
+    runner.push_success(b"", b""); // preflight: op vault get
+    // Remote returns empty value at higher version
+    let item_json = json!({
+        "fields": [
+            {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": ""},
+            {"section": {"label": "_Metadata"}, "label": "version", "value": "5"},
+        ]
+    });
+    runner.push_success(serde_json::to_vec(&item_json).unwrap().as_slice(), b"");
+    // push-back
+    let item_json2 = json!({
+        "fields": [
+            {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": ""},
+            {"section": {"label": "_Metadata"}, "label": "version", "value": "5"},
+        ]
+    });
+    runner.push_success(serde_json::to_vec(&item_json2).unwrap().as_slice(), b"");
+    runner.push_success(b"", b"");
+
+    // Should succeed (sync never blocks for empty values, only warns)
+    cli::sync::run_with_runner(
+        &config,
+        &cli::sync::SyncOptions {
+            env: Some("dev"),
+            only: None,
+            dry_run: false,
+            bail: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Value should be merged (remote wins with higher version)
+    let store = project.store().unwrap();
+    assert_eq!(
+        store.get("STRIPE_KEY", "dev").unwrap(),
+        Some("".to_string())
+    );
+}
