@@ -8,8 +8,10 @@
 //! by omitting the key from the next write. Values containing newlines are
 //! rejected since the dotenv format has no reliable multiline escaping.
 
-use anyhow::{Context, Result};
 use std::collections::BTreeMap;
+use std::fmt::Write;
+
+use anyhow::{Context, Result};
 use tempfile::NamedTempFile;
 
 use crate::config::{Config, ResolvedTarget};
@@ -123,9 +125,9 @@ impl EnvFileTarget<'_> {
         for (vendor, mut entries) in by_vendor {
             entries.sort_by_key(|(k, _)| *k);
             content.push('\n');
-            content.push_str(&format!("# === {vendor} ===\n"));
+            let _ = writeln!(content, "# === {vendor} ===");
             for (key, value) in entries {
-                content.push_str(&format!("{key}={}\n", format_env_value(value)));
+                let _ = writeln!(content, "{key}={}", format_env_value(value));
             }
         }
 

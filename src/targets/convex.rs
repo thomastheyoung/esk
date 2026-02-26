@@ -140,6 +140,8 @@ impl DeployTarget for ConvexTarget<'_> {
 
 #[cfg(test)]
 mod tests {
+    use std::fmt::Write;
+
     use super::*;
     use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
@@ -170,7 +172,7 @@ targets:
 ",
         );
         if let Some(s) = deployment_source {
-            yaml.push_str(&format!("    deployment_source: {s}\n"));
+            let _ = writeln!(yaml, "    deployment_source: {s}");
         }
         yaml.push_str("    env_flags:\n      prod: \"--prod\"\n");
         let path = dir.join("esk.yaml");

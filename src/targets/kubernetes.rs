@@ -13,6 +13,8 @@
 //! (RFC 1123: lowercase alphanumeric and hyphens, max 253 chars). Supports
 //! `--context` for multi-cluster setups.
 
+use std::fmt::Write;
+
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
 
@@ -93,7 +95,7 @@ impl KubernetesTarget<'_> {
         let mut data_entries = String::new();
         for s in secrets {
             let encoded = BASE64.encode(s.value.as_bytes());
-            data_entries.push_str(&format!("  {}: {}\n", s.key, encoded));
+            let _ = writeln!(data_entries, "  {}: {}", s.key, encoded);
         }
 
         Ok(format!(

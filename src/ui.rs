@@ -112,7 +112,6 @@ impl cliclack::Theme for EskTheme {
     fn input_style(&self, state: &cliclack::ThemeState) -> console::Style {
         match state {
             cliclack::ThemeState::Cancel => console::Style::new().dim().strikethrough(),
-            cliclack::ThemeState::Submit => console::Style::new(),
             _ => console::Style::new(),
         }
     }

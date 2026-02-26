@@ -1,6 +1,8 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
+
 use anyhow::Result;
 use console::style;
-use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
@@ -238,13 +240,14 @@ fn render_table(
                 CellStatus::Pending => ui::icon_pending().to_string(),
                 CellStatus::Failed => ui::icon_failure().to_string(),
             };
-            row.push_str(&format!(
+            let _ = write!(
+                row,
                 "{}{}{}{}",
                 " ".repeat(gap),
                 " ".repeat(pad_left),
                 indicator,
                 " ".repeat(pad_right),
-            ));
+            );
         }
         lines.push(row);
     }

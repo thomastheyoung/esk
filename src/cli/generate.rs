@@ -1,6 +1,8 @@
-use anyhow::{bail, Result};
 use std::collections::BTreeSet;
+use std::fmt::Write;
 use std::path::Path;
+
+use anyhow::{bail, Result};
 
 use crate::config::{Config, GenerateFormat, GenerateOutput};
 use crate::validate::Format;
@@ -196,14 +198,14 @@ fn generate_dts(metas: &[SecretMeta]) -> String {
                 .collect::<Vec<_>>()
                 .join(" | ");
             if m.optional {
-                out.push_str(&format!("    {}?: {} | undefined;\n", m.key, union));
+                let _ = writeln!(out, "    {}?: {} | undefined;", m.key, union);
             } else {
-                out.push_str(&format!("    {}: {};\n", m.key, union));
+                let _ = writeln!(out, "    {}: {};", m.key, union);
             }
         } else if m.optional {
-            out.push_str(&format!("    {}?: string | undefined;\n", m.key));
+            let _ = writeln!(out, "    {}?: string | undefined;", m.key);
         } else {
-            out.push_str(&format!("    {}: string;\n", m.key));
+            let _ = writeln!(out, "    {}: string;", m.key);
         }
     }
     out.push_str("  }\n");
@@ -311,23 +313,23 @@ fn generate_runtime(metas: &[SecretMeta]) -> String {
     out.push_str("export const env = {\n");
     for m in metas {
         if m.optional {
-            out.push_str(&format!("  {}: process.env.{},\n", m.key, m.key));
+            let _ = writeln!(out, "  {}: process.env.{},", m.key, m.key);
         } else {
             match m.format {
                 Some(Format::Integer) => {
-                    out.push_str(&format!("  {}: envInt(\"{}\"),\n", m.key, m.key));
+                    let _ = writeln!(out, "  {}: envInt(\"{}\"),", m.key, m.key);
                 }
                 Some(Format::Number) => {
-                    out.push_str(&format!("  {}: envFloat(\"{}\"),\n", m.key, m.key));
+                    let _ = writeln!(out, "  {}: envFloat(\"{}\"),", m.key, m.key);
                 }
                 Some(Format::Boolean) => {
-                    out.push_str(&format!("  {}: envBool(\"{}\"),\n", m.key, m.key));
+                    let _ = writeln!(out, "  {}: envBool(\"{}\"),", m.key, m.key);
                 }
                 Some(Format::Json) => {
-                    out.push_str(&format!("  {}: envJson(\"{}\"),\n", m.key, m.key));
+                    let _ = writeln!(out, "  {}: envJson(\"{}\"),", m.key, m.key);
                 }
                 _ => {
-                    out.push_str(&format!("  {}: requireEnv(\"{}\"),\n", m.key, m.key));
+                    let _ = writeln!(out, "  {}: requireEnv(\"{}\"),", m.key, m.key);
                 }
             }
         }
@@ -345,17 +347,17 @@ fn generate_env_example(metas: &[SecretMeta]) -> String {
         }
         if let Some(ref desc) = m.description {
             for line in desc.lines() {
-                out.push_str(&format!("# {line}\n"));
+                let _ = writeln!(out, "# {line}");
             }
         }
         if let Some(ref values) = m.enum_values {
-            out.push_str(&format!("# Allowed: {}\n", values.join(", ")));
+            let _ = writeln!(out, "# Allowed: {}", values.join(", "));
         }
         if m.optional {
             out.push_str("# Optional\n");
-            out.push_str(&format!("# {}=\n", m.key));
+            let _ = writeln!(out, "# {}=", m.key);
         } else {
-            out.push_str(&format!("{}=\n", m.key));
+            let _ = writeln!(out, "{}=", m.key);
         }
     }
 

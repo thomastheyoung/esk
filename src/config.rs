@@ -1,7 +1,9 @@
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
+use std::path::{Path, PathBuf};
+
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::{BTreeMap, BTreeSet};
-use std::path::{Path, PathBuf};
 
 use crate::store::{validate_app, validate_environment, validate_key, validate_project};
 use crate::suggest;
@@ -1042,105 +1044,100 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
         .iter()
         .position(|line| *line == "secrets:" || line.starts_with("secrets:"));
 
-    let new_content = match secrets_idx {
-        Some(secrets_idx) => {
-            // Find the extent of the secrets section (next top-level key or EOF)
-            let secrets_end = lines
+    let new_content = if let Some(secrets_idx) = secrets_idx {
+        // Find the extent of the secrets section (next top-level key or EOF)
+        let secrets_end = lines
+            .iter()
+            .enumerate()
+            .skip(secrets_idx + 1)
+            .find(|(_, line)| {
+                !line.is_empty()
+                    && !line.starts_with(' ')
+                    && !line.starts_with('#')
+                    && !line.starts_with('\t')
+            })
+            .map_or(lines.len(), |(i, _)| i);
+
+        // Look for the group within the secrets section
+        let group_line = format!("  {group}:");
+        let group_idx = lines
+            .iter()
+            .enumerate()
+            .skip(secrets_idx + 1)
+            .take(secrets_end - secrets_idx - 1)
+            .find(|(_, line)| line.trim_end() == group_line.trim_end())
+            .map(|(i, _)| i);
+
+        if let Some(group_idx) = group_idx {
+            // Check if key already exists in this group
+            let key_line = format!("    {key}:");
+            let group_end = lines
                 .iter()
                 .enumerate()
-                .skip(secrets_idx + 1)
-                .find(|(_, line)| {
-                    !line.is_empty()
-                        && !line.starts_with(' ')
-                        && !line.starts_with('#')
-                        && !line.starts_with('\t')
+                .skip(group_idx + 1)
+                .find(|(i, line)| {
+                    *i >= secrets_end
+                        || (!line.is_empty()
+                            && !line.starts_with("    ")
+                            && !line.starts_with('#'))
                 })
                 .map_or(lines.len(), |(i, _)| i);
 
-            // Look for the group within the secrets section
-            let group_line = format!("  {group}:");
-            let group_idx = lines
+            let key_exists = lines
                 .iter()
-                .enumerate()
-                .skip(secrets_idx + 1)
-                .take(secrets_end - secrets_idx - 1)
-                .find(|(_, line)| line.trim_end() == group_line.trim_end())
-                .map(|(i, _)| i);
+                .skip(group_idx + 1)
+                .take(group_end - group_idx - 1)
+                .any(|line| {
+                    line.starts_with(&key_line)
+                        && (line.len() == key_line.len()
+                            || line.as_bytes().get(key_line.len()) == Some(&b' ')
+                            || line.as_bytes().get(key_line.len()) == Some(&b'\n'))
+                });
 
-            match group_idx {
-                Some(group_idx) => {
-                    // Check if key already exists in this group
-                    let key_line = format!("    {key}:");
-                    let group_end = lines
-                        .iter()
-                        .enumerate()
-                        .skip(group_idx + 1)
-                        .find(|(i, line)| {
-                            *i >= secrets_end
-                                || (!line.is_empty()
-                                    && !line.starts_with("    ")
-                                    && !line.starts_with('#'))
-                        })
-                        .map_or(lines.len(), |(i, _)| i);
-
-                    let key_exists = lines
-                        .iter()
-                        .skip(group_idx + 1)
-                        .take(group_end - group_idx - 1)
-                        .any(|line| {
-                            line.starts_with(&key_line)
-                                && (line.len() == key_line.len()
-                                    || line.as_bytes().get(key_line.len()) == Some(&b' ')
-                                    || line.as_bytes().get(key_line.len()) == Some(&b'\n'))
-                        });
-
-                    if key_exists {
-                        return Ok(()); // Already present, no-op
-                    }
-
-                    // Insert after last line of this group
-                    let mut parts = Vec::new();
-                    for line in &lines[..group_end] {
-                        parts.push((*line).to_string());
-                    }
-                    parts.push(format!("    {key}: {{}}"));
-                    for line in &lines[group_end..] {
-                        parts.push((*line).to_string());
-                    }
-                    let mut out = parts.join("\n");
-                    if content.ends_with('\n') {
-                        out.push('\n');
-                    }
-                    out
-                }
-                None => {
-                    // Group doesn't exist — insert at end of secrets section
-                    let mut parts = Vec::new();
-                    for line in &lines[..secrets_end] {
-                        parts.push((*line).to_string());
-                    }
-                    parts.push(format!("  {group}:"));
-                    parts.push(format!("    {key}: {{}}"));
-                    for line in &lines[secrets_end..] {
-                        parts.push((*line).to_string());
-                    }
-                    let mut out = parts.join("\n");
-                    if content.ends_with('\n') {
-                        out.push('\n');
-                    }
-                    out
-                }
+            if key_exists {
+                return Ok(()); // Already present, no-op
             }
-        }
-        None => {
-            // No secrets section — append at end
-            let mut out = content.clone();
-            if !out.ends_with('\n') {
+
+            // Insert after last line of this group
+            let mut parts = Vec::new();
+            for line in &lines[..group_end] {
+                parts.push((*line).to_string());
+            }
+            parts.push(format!("    {key}: {{}}"));
+            for line in &lines[group_end..] {
+                parts.push((*line).to_string());
+            }
+            let mut out = parts.join("\n");
+            if content.ends_with('\n') {
                 out.push('\n');
             }
-            out.push_str(&format!("secrets:\n  {group}:\n    {key}: {{}}\n"));
+            out
+        } else {
+            // Group doesn't exist — insert at end of secrets section
+            let mut parts = Vec::new();
+            for line in &lines[..secrets_end] {
+                parts.push((*line).to_string());
+            }
+            parts.push(format!("  {group}:"));
+            parts.push(format!("    {key}: {{}}"));
+            for line in &lines[secrets_end..] {
+                parts.push((*line).to_string());
+            }
+            let mut out = parts.join("\n");
+            if content.ends_with('\n') {
+                out.push('\n');
+            }
             out
         }
+    } else {
+        // No secrets section — append at end
+        let mut out = content.clone();
+        if !out.ends_with('\n') {
+            out.push('\n');
+        }
+        let _ = writeln!(out, "secrets:\n  {group}:\n    {key}: {{}}");
+
+        out
     };
 
     // Atomic write: temp file + rename
