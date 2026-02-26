@@ -26,9 +26,8 @@ struct SetReport {
 }
 
 impl SetReport {
-    #[allow(clippy::cast_possible_truncation)]
-    fn remote_failure_count(&self) -> u32 {
-        self.push_results.iter().filter(|r| !r.success).count() as u32
+    fn remote_failure_count(&self) -> usize {
+        self.push_results.iter().filter(|r| !r.success).count()
     }
 
     fn render(&self) -> Result<()> {
@@ -168,7 +167,6 @@ pub fn run_with_runner(
             config,
             env,
             &mut sync_index,
-            false,
         )?;
         sync_index.save()?;
     }

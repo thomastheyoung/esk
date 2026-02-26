@@ -1584,7 +1584,7 @@ fn push_onepassword_creates_item() {
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut sync_index = SyncIndex::load(&project.sync_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index, false).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1628,7 +1628,7 @@ fn push_onepassword_edits_existing() {
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut sync_index = SyncIndex::load(&project.sync_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index, false).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
@@ -1657,7 +1657,7 @@ fn push_onepassword_version_metadata() {
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut sync_index = SyncIndex::load(&project.sync_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index, false).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
     // The create call should include version metadata
@@ -1928,7 +1928,7 @@ fn push_records_sync_index() {
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut sync_index = SyncIndex::load(&project.sync_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index, false).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
     sync_index.save().unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -1962,7 +1962,7 @@ fn push_records_env_scoped_version_when_global_is_higher() {
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut sync_index = SyncIndex::load(&project.sync_index_path());
-    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index, false).unwrap();
+    cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
     sync_index.save().unwrap();
 
     let index = SyncIndex::load(&project.sync_index_path());
@@ -2053,7 +2053,7 @@ remotes:
     let remotes = esk::remotes::build_remotes(&config, &runner);
     let mut sync_index = SyncIndex::load(&project.sync_index_path());
     let results =
-        cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index, false).unwrap();
+        cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
     sync_index.save().unwrap();
     assert!(results.iter().any(|r| !r.success));
 

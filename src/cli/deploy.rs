@@ -43,7 +43,7 @@ struct DeployEntry {
     error: Option<String>,
 }
 
-pub(crate) struct DeployReport {
+struct DeployReport {
     deployed: Vec<DeployEntry>,
     failed: Vec<DeployEntry>,
     skipped: Vec<DeployEntry>,

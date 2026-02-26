@@ -21,12 +21,11 @@ struct GenerateResult {
 
 struct GenerateReport {
     results: Vec<GenerateResult>,
-    empty: bool,
 }
 
 impl GenerateReport {
     fn render(&self) -> Result<()> {
-        if self.empty {
+        if self.results.is_empty() {
             cliclack::log::warning("No secrets defined in config")?;
             return Ok(());
         }
@@ -55,7 +54,6 @@ pub fn run(config: &Config, format: Option<&GenerateFormat>, output: Option<&str
     if metas.is_empty() {
         let report = GenerateReport {
             results: Vec::new(),
-            empty: true,
         };
         return report.render();
     }
@@ -67,10 +65,7 @@ pub fn run(config: &Config, format: Option<&GenerateFormat>, output: Option<&str
         results.push(generate_one(config, &metas, entry)?);
     }
 
-    let report = GenerateReport {
-        results,
-        empty: false,
-    };
+    let report = GenerateReport { results };
     report.render()
 }
 

@@ -164,34 +164,24 @@ impl SyncReport {
 }
 
 /// Push a payload to the given remotes, recording results in the remote index.
-///
-/// When `quiet` is false (used by set/delete), shows spinners per remote.
-/// When `quiet` is true (used by sync report), skips spinners — the caller renders.
+/// Shows a spinner per remote during push.
 pub fn push_to_remotes(
     remotes: &[Box<dyn SyncRemote + '_>],
     payload: &StorePayload,
     config: &Config,
     env: &str,
     sync_index: &mut SyncIndex,
-    quiet: bool,
 ) -> Result<Vec<RemotePushResult>> {
     let mut results = Vec::new();
     let pushed_version = payload.env_version(env);
 
     for rem in remotes {
-        let spinner = if quiet {
-            None
-        } else {
-            let s = cliclack::spinner();
-            s.start(format!("↑ {}...", rem.name()));
-            Some(s)
-        };
+        let spinner = cliclack::spinner();
+        spinner.start(format!("↑ {}...", rem.name()));
 
         match rem.push(payload, config, env) {
             Ok(()) => {
-                if let Some(s) = spinner {
-                    s.stop(format!("↑ {}  {}", rem.name(), style("done").green()));
-                }
+                spinner.stop(format!("↑ {}  {}", rem.name(), style("done").green()));
                 sync_index.record_success(rem.name(), env, pushed_version);
                 results.push(RemotePushResult {
                     remote: rem.name().to_string(),
@@ -200,9 +190,7 @@ pub fn push_to_remotes(
                 });
             }
             Err(e) => {
-                if let Some(s) = spinner {
-                    s.error(format!("↑ {}  {} — {e}", rem.name(), style("failed").red()));
-                }
+                spinner.error(format!("↑ {}  {} — {e}", rem.name(), style("failed").red()));
                 sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                 results.push(RemotePushResult {
                     remote: rem.name().to_string(),
@@ -554,7 +542,7 @@ pub fn run_with_runner(
     }
 
     // Auto-deploy stays after render
-    if auto_deploy && result.local_changed {
+    if !dry_run && auto_deploy && result.local_changed {
         cliclack::log::step("Running deploy...")?;
         crate::cli::deploy::run_with_runner(
             config,

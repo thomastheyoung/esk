@@ -14,12 +14,11 @@ struct ListGroup {
 
 struct ListReport {
     groups: Vec<ListGroup>,
-    empty: bool,
 }
 
 impl ListReport {
     fn render(&self) -> Result<()> {
-        if self.empty {
+        if self.groups.is_empty() {
             cliclack::log::info(
                 "No secrets stored. Run `esk set <KEY> --env <ENV>` to add one.",
             )?;
@@ -48,10 +47,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let all_secrets = store.list()?;
 
     if all_secrets.is_empty() {
-        let report = ListReport {
-            groups: Vec::new(),
-            empty: true,
-        };
+        let report = ListReport { groups: Vec::new() };
         return report.render();
     }
 
@@ -155,10 +151,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         });
     }
 
-    let report = ListReport {
-        groups,
-        empty: false,
-    };
+    let report = ListReport { groups };
     report.render()
 }
 
