@@ -210,12 +210,12 @@ pub struct TargetHealth {
     pub message: String,
 }
 
-struct TargetCandidate<'a> {
-    target: Box<dyn DeployTarget + 'a>,
-    ok_message: &'static str,
+pub(crate) struct TargetCandidate<'a> {
+    pub(crate) target: Box<dyn DeployTarget + 'a>,
+    pub(crate) ok_message: &'static str,
 }
 
-fn target_candidates<'a>(
+pub(crate) fn target_candidates<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
 ) -> Vec<TargetCandidate<'a>> {
