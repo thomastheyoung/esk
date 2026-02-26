@@ -846,8 +846,11 @@ mod tests {
     fn is_esk_generated_false_for_user_file() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("env.d.ts");
-        std::fs::write(&path, "declare namespace NodeJS {\n  interface ProcessEnv {}\n}")
-            .unwrap();
+        std::fs::write(
+            &path,
+            "declare namespace NodeJS {\n  interface ProcessEnv {}\n}",
+        )
+        .unwrap();
         assert!(!is_esk_generated(&path));
     }
 
