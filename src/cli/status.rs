@@ -479,7 +479,7 @@ impl Dashboard {
 
         let env_versions: Vec<(String, u64)> = envs
             .iter()
-            .map(|e| (e.to_string(), payload.env_version(e)))
+            .map(|e| ((*e).to_string(), payload.env_version(e)))
             .collect();
 
         Ok(Dashboard {
@@ -522,7 +522,7 @@ impl Dashboard {
             format!(
                 "{} · {}",
                 style(&self.project).bold(),
-                style(format!("v{}", display_version)).dim(),
+                style(format!("v{display_version}")).dim(),
             )
         } else {
             let parts = ui::format_count_summary(&[
@@ -550,7 +550,7 @@ impl Dashboard {
                 format!(
                     "{} · {} · {}, all deployed",
                     style(&self.project).bold(),
-                    style(format!("v{}", display_version)).dim(),
+                    style(format!("v{display_version}")).dim(),
                     style(format!(
                         "{total} target{}",
                         if total == 1 { "" } else { "s" }
@@ -560,7 +560,7 @@ impl Dashboard {
                 format!(
                     "{} · {} · {} target{} ({})",
                     style(&self.project).bold(),
-                    style(format!("v{}", display_version)).dim(),
+                    style(format!("v{display_version}")).dim(),
                     total,
                     if total == 1 { "" } else { "s" },
                     parts,
@@ -892,15 +892,15 @@ impl Dashboard {
         }
 
         let outro_text = match &self.filtered_env {
-            Some(env) => format!("Store version: {} ({})", display_version, env),
+            Some(env) => format!("Store version: {display_version} ({env})"),
             None if self.env_versions.is_empty() => {
-                format!("Store version: {}", display_version)
+                format!("Store version: {display_version}")
             }
             None => {
                 let parts: Vec<String> = self
                     .env_versions
                     .iter()
-                    .map(|(e, v)| format!("{}: v{}", e, v))
+                    .map(|(e, v)| format!("{e}: v{v}"))
                     .collect();
                 format!("Store version: {} ({})", display_version, parts.join(", "))
             }
