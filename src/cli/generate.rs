@@ -67,7 +67,7 @@ fn collect_secret_metas(config: &Config) -> Vec<SecretMeta> {
                             .enum_values
                             .as_ref()
                             .and_then(|raw| crate::validate::resolve_enum_values(raw).ok());
-                        (v.format, v.optional.unwrap_or(false), enums)
+                        (v.format, v.optional, enums)
                     }
                     None => (None, false, None),
                 };
@@ -199,7 +199,13 @@ fn generate_runtime(metas: &[SecretMeta]) -> String {
         out.push_str("  if (value === undefined || value === \"\") {\n");
         out.push_str("    throw new Error(`Missing required environment variable: ${key}`);\n");
         out.push_str("  }\n");
-        out.push_str("  return JSON.parse(value);\n");
+        out.push_str("  try {\n");
+        out.push_str("    return JSON.parse(value);\n");
+        out.push_str("  } catch {\n");
+        out.push_str(
+            "    throw new Error(`Invalid JSON for environment variable ${key}: ${value}`);\n",
+        );
+        out.push_str("  }\n");
         out.push_str("}\n");
         out.push('\n');
     }

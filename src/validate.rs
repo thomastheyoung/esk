@@ -30,15 +30,6 @@ impl fmt::Display for Format {
     }
 }
 
-/// Deserialization helper: `range: [1, 65535]` → `(1.0, 65535.0)`
-fn deserialize_range<'de, D>(deserializer: D) -> Result<Option<(f64, f64)>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let opt: Option<(f64, f64)> = Option::deserialize(deserializer)?;
-    Ok(opt)
-}
-
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct Validation {
     #[serde(default)]
@@ -51,10 +42,10 @@ pub struct Validation {
     pub min_length: Option<usize>,
     #[serde(default)]
     pub max_length: Option<usize>,
-    #[serde(default, deserialize_with = "deserialize_range")]
+    #[serde(default)]
     pub range: Option<(f64, f64)>,
     #[serde(default)]
-    pub optional: Option<bool>,
+    pub optional: bool,
 }
 
 /// Coerce a list of YAML values (bool, int, string) to strings.
@@ -115,7 +106,7 @@ pub fn validate_spec(key: &str, spec: &Validation) -> Result<()> {
 
 /// Validate a single value against a spec. Returns a human-readable error message.
 pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), ValidationError> {
-    let is_optional = spec.optional.unwrap_or(false);
+    let is_optional = spec.optional;
 
     // Empty value handling
     if value.is_empty() {
@@ -160,15 +151,17 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
         }
     }
 
-    // Length checks
+    // Length checks (character count, not byte count)
     if let Some(min) = spec.min_length {
-        if value.len() < min {
-            errors.push(format!("length {} is below minimum {}", value.len(), min));
+        let len = value.chars().count();
+        if len < min {
+            errors.push(format!("length {} is below minimum {}", len, min));
         }
     }
     if let Some(max) = spec.max_length {
-        if value.len() > max {
-            errors.push(format!("length {} exceeds maximum {}", value.len(), max));
+        let len = value.chars().count();
+        if len > max {
+            errors.push(format!("length {} exceeds maximum {}", len, max));
         }
     }
 
@@ -192,33 +185,34 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
     }
 }
 
-fn validate_format(value: &str, format: Format) -> Result<String, String> {
+fn validate_format(value: &str, format: Format) -> Result<(), String> {
     match format {
         Format::String => {
             // Any non-empty string is valid (emptiness checked earlier)
-            Ok(value.to_string())
+            Ok(())
         }
         Format::Url => {
-            if !value.contains("://") {
+            let scheme = value.split("://").next().unwrap_or("");
+            if scheme.is_empty() || scheme == value {
                 return Err("expected url (must contain '://')".to_string());
             }
             let after_scheme = value.split("://").nth(1).unwrap_or("");
             if after_scheme.is_empty() || after_scheme == "/" {
                 return Err("expected url with host after scheme".to_string());
             }
-            Ok(value.to_string())
+            Ok(())
         }
         Format::Integer => {
             if value.parse::<i64>().is_err() {
                 return Err(format!("expected integer, got {:?}", value));
             }
-            Ok(value.to_string())
+            Ok(())
         }
         Format::Number => {
             if value.parse::<f64>().is_err() {
                 return Err(format!("expected number, got {:?}", value));
             }
-            Ok(value.to_string())
+            Ok(())
         }
         Format::Boolean => {
             let lower = value.to_lowercase();
@@ -228,20 +222,20 @@ fn validate_format(value: &str, format: Format) -> Result<String, String> {
                     value
                 ));
             }
-            Ok(value.to_string())
+            Ok(())
         }
         Format::Email => {
             let parts: Vec<&str> = value.splitn(2, '@').collect();
             if parts.len() != 2 || parts[0].is_empty() || !parts[1].contains('.') {
                 return Err(format!("expected email address, got {:?}", value));
             }
-            Ok(value.to_string())
+            Ok(())
         }
         Format::Json => {
             if serde_json::from_str::<serde_json::Value>(value).is_err() {
                 return Err(format!("expected valid JSON, got {:?}", value));
             }
-            Ok(value.to_string())
+            Ok(())
         }
         Format::Base64 => {
             use base64::Engine;
@@ -251,7 +245,7 @@ fn validate_format(value: &str, format: Format) -> Result<String, String> {
             {
                 return Err(format!("expected valid base64, got {:?}", value));
             }
-            Ok(value.to_string())
+            Ok(())
         }
     }
 }
@@ -299,7 +293,7 @@ mod tests {
     fn empty_allowed_when_optional() {
         let spec = Validation {
             format: Some(Format::String),
-            optional: Some(true),
+            optional: true,
             ..Default::default()
         };
         assert!(validate_value("K", "", &spec).is_ok());
@@ -324,6 +318,12 @@ mod tests {
     fn url_empty_host() {
         let spec = spec_with_format(Format::Url);
         assert!(validate_value("K", "http://", &spec).is_err());
+    }
+
+    #[test]
+    fn url_empty_scheme() {
+        let spec = spec_with_format(Format::Url);
+        assert!(validate_value("K", "://example.com", &spec).is_err());
     }
 
     // --- Format: integer ---
