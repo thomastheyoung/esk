@@ -127,6 +127,9 @@ pub enum Commands {
         /// Output file path (requires a format argument)
         #[arg(long, short)]
         output: Option<String>,
+        /// Print generated output to stdout without writing files
+        #[arg(long)]
+        preview: bool,
     },
     /// Print LLM context reference document
     #[command(name = "llm-context", hide = true)]

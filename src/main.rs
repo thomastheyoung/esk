@@ -91,9 +91,13 @@ fn run() -> Result<()> {
             let config = Config::find_and_load()?;
             esk::cli::get::run(&config, key, env)?;
         }
-        Commands::Generate { format, output } => {
+        Commands::Generate {
+            format,
+            output,
+            preview,
+        } => {
             let config = Config::find_and_load()?;
-            esk::cli::generate::run(&config, format.as_ref(), output.as_deref())?;
+            esk::cli::generate::run(&config, format.as_ref(), output.as_deref(), *preview)?;
         }
         Commands::LlmContext => {
             esk::cli::llm_context::run()?;

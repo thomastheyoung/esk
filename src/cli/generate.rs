@@ -50,10 +50,18 @@ impl GenerateReport {
     }
 }
 
-pub fn run(config: &Config, format: Option<&GenerateFormat>, output: Option<&str>) -> Result<()> {
+pub fn run(
+    config: &Config,
+    format: Option<&GenerateFormat>,
+    output: Option<&str>,
+    preview: bool,
+) -> Result<()> {
     let metas = collect_secret_metas(config);
 
     if metas.is_empty() {
+        if preview {
+            return Ok(());
+        }
         let report = GenerateReport {
             results: Vec::new(),
         };
@@ -61,6 +69,24 @@ pub fn run(config: &Config, format: Option<&GenerateFormat>, output: Option<&str
     }
 
     let outputs = resolve_outputs(format, output, &config.generate)?;
+
+    if preview {
+        for (i, entry) in outputs.iter().enumerate() {
+            if i > 0 {
+                println!();
+            }
+            if outputs.len() > 1 {
+                let name = entry
+                    .output
+                    .as_deref()
+                    .unwrap_or(entry.format.default_output());
+                println!("── {} ──", name);
+            }
+            let content = render_content(&metas, entry.format);
+            print!("{content}");
+        }
+        return Ok(());
+    }
 
     let mut results = Vec::new();
     for entry in &outputs {
@@ -111,6 +137,14 @@ fn is_esk_generated(path: &Path) -> bool {
         .unwrap_or(false)
 }
 
+fn render_content(metas: &[SecretMeta], format: GenerateFormat) -> String {
+    match format {
+        GenerateFormat::Dts => generate_dts(metas),
+        GenerateFormat::Ts => generate_runtime(metas),
+        GenerateFormat::EnvExample => generate_env_example(metas),
+    }
+}
+
 fn generate_one(
     config: &Config,
     metas: &[SecretMeta],
@@ -134,11 +168,7 @@ fn generate_one(
         );
     }
 
-    let content = match entry.format {
-        GenerateFormat::Dts => generate_dts(metas),
-        GenerateFormat::Ts => generate_runtime(metas),
-        GenerateFormat::EnvExample => generate_env_example(metas),
-    };
+    let content = render_content(metas, entry.format);
 
     if let Some(parent) = out_path.parent() {
         std::fs::create_dir_all(parent)?;
