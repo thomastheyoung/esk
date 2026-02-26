@@ -404,23 +404,28 @@ remotes:
     }
 
     #[test]
-    fn build_remotes_filters_cloud_file_missing_dir() {
+    fn build_remotes_creates_cloud_file_missing_dir() {
         let dir = tempfile::tempdir().unwrap();
-        let yaml = r"
+        let cloud_dir = dir.path().join("new-cloud-dir");
+        let yaml = format!(
+            r"
 project: x
 environments: [dev]
 remotes:
   testcloud:
     type: cloud_file
-    path: /nonexistent/path/nowhere
+    path: {}
     format: cleartext
-";
+",
+            cloud_dir.display()
+        );
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
         let config = Config::load(&path).unwrap();
         let runner = DummyRunner;
         let built_remotes = build_remotes(&config, &runner);
-        assert!(built_remotes.is_empty());
+        assert_eq!(built_remotes.len(), 1);
+        assert!(cloud_dir.is_dir());
     }
 
     #[test]

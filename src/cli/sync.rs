@@ -318,6 +318,9 @@ pub fn run_with_runner(
                     remote: rem.name().to_string(),
                     outcome: PullOutcome::Empty,
                 });
+                // Treat empty remote as version 0 — reconciliation will mark it
+                // for push so local data gets seeded on first sync.
+                remote_data.push((rem.name().to_string(), BTreeMap::new(), 0));
             }
             Err(_) => {
                 pulls.push(PullResult {
@@ -338,7 +341,8 @@ pub fn run_with_runner(
     }
 
     if remote_data.is_empty() {
-        cliclack::log::info("No remote data found. Nothing to reconcile.")?;
+        // All remotes failed — nothing to reconcile or push to.
+        // Individual failure details were already logged above.
         return Ok(());
     }
 

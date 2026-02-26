@@ -1731,8 +1731,12 @@ fn remote_sync_onepassword_no_item() {
     runner.push_success(b"", b""); // preflight: op vault get
                                    // pull: op item get → not found
     runner.push_failure(b"isn't an item in vault");
+    // push: get_item check → not found
+    runner.push_failure(b"isn't an item in vault");
+    // push: op item create → success
+    runner.push_success(b"", b"");
 
-    // Should succeed — no remote data, nothing to reconcile
+    // Should succeed — empty remote gets seeded with local data
     cli::sync::run_with_runner(
         &config,
         &cli::sync::SyncOptions {

@@ -113,11 +113,13 @@ impl SyncRemote for CloudFileRemote {
     fn preflight(&self) -> Result<()> {
         let path = self.expand_path()?;
         if !path.is_dir() {
-            anyhow::bail!(
-                "{} sync folder not found at {}. Make sure the cloud sync app is installed and the folder exists.",
-                self.name,
-                path.display()
-            );
+            std::fs::create_dir_all(&path).with_context(|| {
+                format!(
+                    "failed to create {} sync folder at {}",
+                    self.name,
+                    path.display()
+                )
+            })?;
         }
         // Verify write access
         let probe = path.join(".esk-probe");
@@ -296,20 +298,19 @@ mod tests {
     }
 
     #[test]
-    fn cloud_file_preflight_missing_dir() {
+    fn cloud_file_preflight_creates_missing_dir() {
+        let base = tempfile::tempdir().unwrap();
+        let nested = base.path().join("deep/nested/sync");
         let remote = CloudFileRemote::new(
             "dropbox".to_string(),
             "testapp".to_string(),
             CloudFileRemoteConfig {
-                path: "/nonexistent/path/that/does/not/exist".to_string(),
+                path: nested.to_string_lossy().to_string(),
                 format: CloudFileFormat::Cleartext,
             },
         );
-        let err = remote.preflight().unwrap_err();
-        assert!(err.to_string().contains("dropbox sync folder not found"));
-        assert!(err
-            .to_string()
-            .contains("/nonexistent/path/that/does/not/exist"));
+        assert!(remote.preflight().is_ok());
+        assert!(nested.is_dir());
     }
 
     #[test]
