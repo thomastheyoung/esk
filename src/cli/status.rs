@@ -8,6 +8,7 @@ use crate::remotes::{check_remote_health, RemoteHealth};
 use crate::store::SecretStore;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
 use crate::targets::{check_target_health, CommandRunner, RealCommandRunner, TargetHealth};
+use crate::validate;
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -93,6 +94,7 @@ struct Dashboard {
     deployed: Vec<DeployEntry>,
     unset: Vec<DeployEntry>,
     validation_warnings: Vec<ValidationWarning>,
+    cross_field_violations: Vec<validate::CrossFieldViolation>,
     empty_values: Vec<EmptyValueWarning>,
     missing_required: Vec<crate::config::MissingRequirement>,
     coverage_gaps: Vec<CoverageGap>,
@@ -199,6 +201,25 @@ impl Dashboard {
                         }
                     }
                 }
+            }
+        }
+
+        // 3b. Cross-field violations
+        let mut cross_field_violations = Vec::new();
+        let mut cross_field_specs: std::collections::BTreeMap<&str, &validate::Validation> =
+            std::collections::BTreeMap::new();
+        for secret in &resolved {
+            if let Some(ref spec) = secret.validate {
+                if spec.has_cross_field_rules() {
+                    cross_field_specs.insert(secret.key.as_str(), spec);
+                }
+            }
+        }
+        if !cross_field_specs.is_empty() {
+            for &env_name in &envs {
+                let violations =
+                    validate::validate_cross_field(&cross_field_specs, all_secrets, env_name);
+                cross_field_violations.extend(violations);
             }
         }
 
@@ -344,6 +365,14 @@ impl Dashboard {
             });
         }
 
+        // Cross-field violations
+        for v in &cross_field_violations {
+            next_steps.push(NextStep {
+                command: format!("esk set {} --env {}", v.key, v.env),
+                description: v.message.clone(),
+            });
+        }
+
         // Empty values
         for w in &empty_values {
             next_steps.push(NextStep {
@@ -428,6 +457,7 @@ impl Dashboard {
             deployed,
             unset,
             validation_warnings,
+            cross_field_violations,
             empty_values,
             missing_required,
             coverage_gaps,
@@ -463,6 +493,9 @@ impl Dashboard {
             if !self.validation_warnings.is_empty() {
                 parts.push(format!("{} invalid", self.validation_warnings.len()));
             }
+            if !self.cross_field_violations.is_empty() {
+                parts.push(format!("{} cross-field", self.cross_field_violations.len()));
+            }
             if !self.empty_values.is_empty() {
                 parts.push(format!("{} empty", self.empty_values.len()));
             }
@@ -474,6 +507,7 @@ impl Dashboard {
                 && self.pending.is_empty()
                 && self.unset.is_empty()
                 && self.validation_warnings.is_empty()
+                && self.cross_field_violations.is_empty()
                 && self.empty_values.is_empty()
                 && self.missing_required.is_empty();
 
@@ -643,21 +677,41 @@ impl Dashboard {
         }
 
         // Validation section
-        if !self.validation_warnings.is_empty() {
+        let has_validation =
+            !self.validation_warnings.is_empty() || !self.cross_field_violations.is_empty();
+        if has_validation {
             let mut val_lines = Vec::new();
-            val_lines.push(format!(
-                "  {} {}",
-                style("!").yellow(),
-                style(format!("{} invalid", self.validation_warnings.len()))
-                    .yellow()
-                    .bold()
-            ));
-            for w in &self.validation_warnings {
+            if !self.validation_warnings.is_empty() {
                 val_lines.push(format!(
-                    "     {}  {}",
-                    style(format!("{}:{}", w.key, w.env)).dim(),
-                    style(&w.message).dim(),
+                    "  {} {}",
+                    style("!").yellow(),
+                    style(format!("{} invalid", self.validation_warnings.len()))
+                        .yellow()
+                        .bold()
                 ));
+                for w in &self.validation_warnings {
+                    val_lines.push(format!(
+                        "     {}  {}",
+                        style(format!("{}:{}", w.key, w.env)).dim(),
+                        style(&w.message).dim(),
+                    ));
+                }
+            }
+            if !self.cross_field_violations.is_empty() {
+                val_lines.push(format!(
+                    "  {} {}",
+                    style("!").yellow(),
+                    style(format!("{} cross-field", self.cross_field_violations.len()))
+                        .yellow()
+                        .bold()
+                ));
+                for v in &self.cross_field_violations {
+                    val_lines.push(format!(
+                        "     {}  {}",
+                        style(format!("{}:{}", v.key, v.env)).dim(),
+                        style(&v.message).dim(),
+                    ));
+                }
             }
             cliclack::log::step(format!("Validation\n{}", val_lines.join("\n")))?;
         }

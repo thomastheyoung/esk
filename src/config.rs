@@ -523,20 +523,26 @@ impl Config {
             }
         }
         self.validate_remotes()?;
-        // Validate secret targets reference known targets, apps, and environments
-        // Check for duplicate key names across vendors
+
+        // --- Pass 1: collect all secret key names and check duplicates ---
         let mut key_vendors: BTreeMap<&str, &str> = BTreeMap::new();
         for (vendor, secrets) in &self.secrets {
-            for (key, def) in secrets {
+            for key in secrets.keys() {
                 validate_key(key)
                     .with_context(|| format!("secret '{key}' in vendor '{vendor}'"))?;
                 if let Some(prev_vendor) = key_vendors.get(key.as_str()) {
                     bail!("secret '{key}' is defined in multiple vendors: {prev_vendor}, {vendor}");
                 }
                 key_vendors.insert(key, vendor);
+            }
+        }
+        let known_keys: BTreeSet<&str> = key_vendors.keys().copied().collect();
 
+        // --- Pass 2: validate each secret definition ---
+        for (vendor, secrets) in &self.secrets {
+            for (key, def) in secrets {
                 if let Some(ref spec) = def.validate {
-                    crate::validate::validate_spec(key, spec)
+                    crate::validate::validate_spec(key, spec, &known_keys)
                         .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
                 }
 
@@ -580,6 +586,49 @@ impl Config {
                 }
             }
         }
+
+        // --- Pass 3: cross-field cycle detection ---
+        let mut cross_field_specs: BTreeMap<&str, &crate::validate::Validation> = BTreeMap::new();
+        for secrets in self.secrets.values() {
+            for (key, def) in secrets {
+                if let Some(ref spec) = def.validate {
+                    if spec.has_cross_field_rules() {
+                        cross_field_specs.insert(key.as_str(), spec);
+                    }
+                }
+            }
+        }
+        if !cross_field_specs.is_empty() {
+            crate::validate::detect_cross_field_cycles(&cross_field_specs)?;
+
+            // Warn about asymmetric required_with
+            for (&key, spec) in &cross_field_specs {
+                if let Some(ref peers) = spec.required_with {
+                    for peer in peers {
+                        if let Some(peer_spec) = cross_field_specs.get(peer.as_str()) {
+                            let peer_refs_back = peer_spec
+                                .required_with
+                                .as_ref()
+                                .is_some_and(|p| p.iter().any(|k| k == key));
+                            if !peer_refs_back {
+                                let _ = cliclack::log::warning(format!(
+                                    "{key} has required_with: [{peer}] but {peer} \
+                                     does not have required_with: [{key}]"
+                                ));
+                            }
+                        }
+                        // If peer has no cross-field rules at all, it's also asymmetric
+                        else if known_keys.contains(peer.as_str()) {
+                            let _ = cliclack::log::warning(format!(
+                                "{key} has required_with: [{peer}] but {peer} \
+                                 does not have required_with: [{key}]"
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+
         Ok(())
     }
 
@@ -2431,5 +2480,87 @@ secrets:
         let allowed = resolved.iter().find(|s| s.key == "ALLOWED").unwrap();
         assert!(!normal.allow_empty);
         assert!(allowed.allow_empty);
+    }
+
+    // --- Cross-field validation (config parse) ---
+
+    #[test]
+    fn cross_field_config_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    AUTH_ENABLED:
+      targets: {}
+    AUTH_SECRET:
+      validate:
+        required_if:
+          AUTH_ENABLED: "true"
+      targets: {}
+    OAUTH_CLIENT_ID:
+      validate:
+        required_with: [OAUTH_CLIENT_SECRET]
+      targets: {}
+    OAUTH_CLIENT_SECRET:
+      validate:
+        required_with: [OAUTH_CLIENT_ID]
+      targets: {}
+    DB_HOST:
+      validate:
+        required_unless: [DB_URL]
+      targets: {}
+    DB_URL:
+      targets: {}
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        Config::load(&path).unwrap();
+    }
+
+    #[test]
+    fn cross_field_rejects_unknown_key() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    MY_KEY:
+      validate:
+        required_with: [NONEXISTENT]
+      targets: {}
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let chain = format!("{err:?}");
+        assert!(
+            chain.contains("unknown key 'NONEXISTENT'"),
+            "expected unknown key error, got: {chain}"
+        );
+    }
+
+    #[test]
+    fn cross_field_rejects_cycle() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    A:
+      validate:
+        required_if:
+          B: "*"
+      targets: {}
+    B:
+      validate:
+        required_if:
+          A: "*"
+      targets: {}
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("circular cross-field reference"));
     }
 }

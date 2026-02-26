@@ -290,7 +290,10 @@ pub fn run_with_runner(
         let mut empty_from_remote: Vec<String> = Vec::new();
         for (composite, value) in &result.merged_payload.secrets {
             if crate::validate::is_effectively_empty(value) {
-                let bare_key = composite.rsplit_once(':').map(|(k, _)| k).unwrap_or(composite);
+                let bare_key = composite
+                    .rsplit_once(':')
+                    .map(|(k, _)| k)
+                    .unwrap_or(composite);
                 let is_allowed = resolved.iter().any(|s| s.key == bare_key && s.allow_empty);
                 if is_allowed {
                     continue;
@@ -310,7 +313,11 @@ pub fn run_with_runner(
             cliclack::log::warning(format!(
                 "Remote introduced {} empty value{}: {}",
                 empty_from_remote.len(),
-                if empty_from_remote.len() == 1 { "" } else { "s" },
+                if empty_from_remote.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
                 empty_from_remote.join(", ")
             ))?;
         }

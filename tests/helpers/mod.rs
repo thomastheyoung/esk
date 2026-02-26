@@ -502,6 +502,62 @@ secrets:
         env: [web:dev, web:prod]
 "#;
 
+/// Config with cross-field validation rules for testing.
+pub const CROSS_FIELD_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+targets:
+  env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix: { dev: "", prod: ".production" }
+secrets:
+  Auth:
+    AUTH_ENABLED:
+      validate:
+        format: boolean
+      targets:
+        env: [web:dev, web:prod]
+    AUTH_SECRET:
+      validate:
+        required_if:
+          AUTH_ENABLED: "true"
+      targets:
+        env: [web:dev, web:prod]
+  OAuth:
+    OAUTH_CLIENT_ID:
+      validate:
+        required_with: [OAUTH_CLIENT_SECRET]
+      targets:
+        env: [web:dev, web:prod]
+    OAUTH_CLIENT_SECRET:
+      validate:
+        required_with: [OAUTH_CLIENT_ID]
+      targets:
+        env: [web:dev, web:prod]
+  Database:
+    DB_URL:
+      validate:
+        format: url
+      targets:
+        env: [web:dev, web:prod]
+    DB_HOST:
+      validate:
+        required_unless: [DB_URL]
+        required_if:
+          DB_PORT: "*"
+      targets:
+        env: [web:dev, web:prod]
+    DB_PORT:
+      validate:
+        format: integer
+        required_unless: [DB_URL]
+      targets:
+        env: [web:dev, web:prod]
+"#;
+
 /// Records calls made to a mock command runner.
 #[derive(Debug, Clone)]
 pub struct RecordedCall {

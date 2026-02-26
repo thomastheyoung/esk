@@ -4856,7 +4856,7 @@ fn sync_warns_about_newly_empty_values_from_remote() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    // Remote returns empty value at higher version
+                                   // Remote returns empty value at higher version
     let item_json = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": ""},
@@ -4896,4 +4896,144 @@ fn sync_warns_about_newly_empty_values_from_remote() {
         store.get("STRIPE_KEY", "dev").unwrap(),
         Some("".to_string())
     );
+}
+
+// === cross-field validation ===
+
+#[test]
+fn deploy_blocks_on_cross_field_violation() {
+    let project = TestProject::with_store(CROSS_FIELD_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("AUTH_ENABLED", "dev", "true").unwrap();
+    // AUTH_SECRET not set → should fail
+
+    let runner = MockCommandRunner::new();
+    let err = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+        },
+        &runner,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("Cross-field validation failed"));
+    assert!(err.to_string().contains("AUTH_SECRET"));
+}
+
+#[test]
+fn deploy_passes_cross_field_satisfied() {
+    let project = TestProject::with_store(CROSS_FIELD_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("AUTH_ENABLED", "dev", "true").unwrap();
+    store.set("AUTH_SECRET", "dev", "s3cr3t").unwrap();
+    store
+        .set("DB_URL", "dev", "postgres://localhost/db")
+        .unwrap();
+
+    let runner = MockCommandRunner::new();
+    // Should succeed (or at least not fail on cross-field validation)
+    let result = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: true,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: false,
+            allow_empty: false,
+        },
+        &runner,
+    );
+    // If it fails, it should NOT be a cross-field error
+    if let Err(ref e) = result {
+        assert!(
+            !e.to_string().contains("Cross-field validation failed"),
+            "unexpected cross-field error: {e}"
+        );
+    }
+}
+
+#[test]
+fn deploy_skip_validation_bypasses_cross_field() {
+    let project = TestProject::with_store(CROSS_FIELD_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("AUTH_ENABLED", "dev", "true").unwrap();
+    // AUTH_SECRET not set → would fail without --skip-validation
+
+    let runner = MockCommandRunner::new();
+    let result = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: true,
+            verbose: false,
+            skip_validation: true,
+            skip_requirements: true,
+            allow_empty: true,
+        },
+        &runner,
+    );
+    // Should not fail on cross-field validation
+    if let Err(ref e) = result {
+        assert!(
+            !e.to_string().contains("Cross-field validation failed"),
+            "skip-validation should bypass cross-field: {e}"
+        );
+    }
+}
+
+#[test]
+fn deploy_dry_run_warns_cross_field() {
+    let project = TestProject::with_store(CROSS_FIELD_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("AUTH_ENABLED", "dev", "true").unwrap();
+    // AUTH_SECRET not set → dry_run should warn but not bail
+
+    let runner = MockCommandRunner::new();
+    let result = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: true,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: true,
+            allow_empty: true,
+        },
+        &runner,
+    );
+    // Dry run should not fail on cross-field violations
+    if let Err(ref e) = result {
+        assert!(
+            !e.to_string().contains("Cross-field validation failed"),
+            "dry_run should warn, not fail: {e}"
+        );
+    }
+}
+
+#[test]
+fn status_shows_cross_field_violations() {
+    let project = TestProject::with_store(CROSS_FIELD_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("AUTH_ENABLED", "dev", "true").unwrap();
+    // AUTH_SECRET not set → should appear in status
+
+    let runner = MockCommandRunner::new();
+    // status::run_with_runner doesn't return violations directly,
+    // but it should not error
+    cli::status::run_with_runner(&config, Some("dev"), false, &runner).unwrap();
 }

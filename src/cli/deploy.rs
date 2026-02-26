@@ -8,6 +8,7 @@ use crate::deploy_tracker::DeployIndex;
 use crate::store::SecretStore;
 use crate::targets::{build_targets, CommandRunner, DeployMode, RealCommandRunner, SecretValue};
 use crate::ui;
+use crate::validate;
 
 /// Options for the deploy command.
 pub struct DeployOptions<'a> {
@@ -115,6 +116,45 @@ pub fn run_with_runner(
         }
     }
 
+    // Cross-field validation
+    if !skip_validation {
+        let mut cross_field_specs: BTreeMap<&str, &validate::Validation> = BTreeMap::new();
+        for secret in &resolved {
+            if let Some(ref spec) = secret.validate {
+                if spec.has_cross_field_rules() {
+                    cross_field_specs.insert(secret.key.as_str(), spec);
+                }
+            }
+        }
+
+        if !cross_field_specs.is_empty() {
+            let envs: Vec<&str> = match env {
+                Some(e) => vec![e],
+                None => config.environments.iter().map(|s| s.as_str()).collect(),
+            };
+            let mut cross_errors: Vec<String> = Vec::new();
+            for &env_name in &envs {
+                let violations =
+                    validate::validate_cross_field(&cross_field_specs, &payload.secrets, env_name);
+                for v in violations {
+                    cross_errors.push(format!("  {}:{} — {}", v.key, v.env, v.message));
+                }
+            }
+            if !cross_errors.is_empty() {
+                if dry_run {
+                    for e in &cross_errors {
+                        cliclack::log::warning(e)?;
+                    }
+                } else {
+                    anyhow::bail!(
+                        "Cross-field validation failed:\n{}\n  Use --skip-validation to bypass",
+                        cross_errors.join("\n")
+                    );
+                }
+            }
+        }
+    }
+
     // Check required secrets have values (only for available targets)
     let available_targets: Vec<&str> = deploy_targets.iter().map(|t| t.name()).collect();
     let missing =
@@ -181,7 +221,11 @@ pub fn run_with_runner(
                 }
 
                 if crate::validate::is_effectively_empty(value) {
-                    let kind = if value.is_empty() { "empty" } else { "whitespace-only" };
+                    let kind = if value.is_empty() {
+                        "empty"
+                    } else {
+                        "whitespace-only"
+                    };
                     empty_warnings.push(format!(
                         "  {}:{} — {}",
                         secret.key, target.environment, kind
@@ -196,10 +240,7 @@ pub fn run_with_runner(
                     cliclack::log::warning(w)?;
                 }
             } else if std::io::stdin().is_terminal() {
-                cliclack::log::warning(format!(
-                    "Empty values detected:\n{}",
-                    detail
-                ))?;
+                cliclack::log::warning(format!("Empty values detected:\n{}", detail))?;
                 let proceed = cliclack::confirm(
                     "Empty values can break defaults and type coercion. Continue?",
                 )

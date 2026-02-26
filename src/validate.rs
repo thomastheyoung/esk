@@ -1,5 +1,6 @@
 use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -46,6 +47,54 @@ pub struct Validation {
     pub range: Option<(f64, f64)>,
     #[serde(default)]
     pub optional: bool,
+
+    /// Required when all conditions match. Key -> value, `"*"` = any non-empty value.
+    #[serde(default)]
+    pub required_if: Option<BTreeMap<String, String>>,
+
+    /// Required when any listed secret has a value. Declare on both sides for symmetry.
+    #[serde(default)]
+    pub required_with: Option<Vec<String>>,
+
+    /// Not required when any listed secret has a value.
+    #[serde(default)]
+    pub required_unless: Option<Vec<String>>,
+}
+
+impl Validation {
+    /// Returns true if this spec has any cross-field rules.
+    pub fn has_cross_field_rules(&self) -> bool {
+        self.required_if.is_some() || self.required_with.is_some() || self.required_unless.is_some()
+    }
+
+    /// Collects all secret keys referenced by cross-field rules.
+    pub fn referenced_keys(&self) -> BTreeSet<&str> {
+        let mut keys = BTreeSet::new();
+        if let Some(ref map) = self.required_if {
+            for k in map.keys() {
+                keys.insert(k.as_str());
+            }
+        }
+        if let Some(ref list) = self.required_with {
+            for k in list {
+                keys.insert(k.as_str());
+            }
+        }
+        if let Some(ref list) = self.required_unless {
+            for k in list {
+                keys.insert(k.as_str());
+            }
+        }
+        keys
+    }
+}
+
+/// A cross-field validation violation found during deploy or status checks.
+#[derive(Debug, Clone)]
+pub struct CrossFieldViolation {
+    pub key: String,
+    pub env: String,
+    pub message: String,
 }
 
 /// Coerce a list of YAML values (bool, int, string) to strings.
@@ -63,7 +112,7 @@ pub fn resolve_enum_values(raw: &[serde_yaml::Value]) -> Result<Vec<String>> {
 }
 
 /// Validate the spec itself at config parse time.
-pub fn validate_spec(key: &str, spec: &Validation) -> Result<()> {
+pub fn validate_spec(key: &str, spec: &Validation, known_keys: &BTreeSet<&str>) -> Result<()> {
     // range only valid on numeric formats
     if let Some((min, max)) = spec.range {
         match spec.format {
@@ -101,6 +150,51 @@ pub fn validate_spec(key: &str, spec: &Validation) -> Result<()> {
         }
     }
 
+    // Cross-field rule validation
+    if let Some(ref map) = spec.required_if {
+        if map.is_empty() {
+            bail!("secret '{key}': required_if must not be empty");
+        }
+        for ref_key in map.keys() {
+            validate_cross_field_ref(key, "required_if", ref_key, known_keys)?;
+        }
+    }
+    if let Some(ref list) = spec.required_with {
+        if list.is_empty() {
+            bail!("secret '{key}': required_with must not be empty");
+        }
+        for ref_key in list {
+            validate_cross_field_ref(key, "required_with", ref_key, known_keys)?;
+        }
+    }
+    if let Some(ref list) = spec.required_unless {
+        if list.is_empty() {
+            bail!("secret '{key}': required_unless must not be empty");
+        }
+        for ref_key in list {
+            validate_cross_field_ref(key, "required_unless", ref_key, known_keys)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn validate_cross_field_ref(
+    key: &str,
+    rule: &str,
+    ref_key: &str,
+    known_keys: &BTreeSet<&str>,
+) -> Result<()> {
+    if ref_key == key {
+        bail!("secret '{key}': {rule} references itself");
+    }
+    if !known_keys.contains(ref_key) {
+        let candidates: Vec<&str> = known_keys.iter().copied().collect();
+        let hint = crate::suggest::closest(ref_key, &candidates)
+            .map(|s| format!(" (did you mean '{s}'?)"))
+            .unwrap_or_default();
+        bail!("secret '{key}': {rule} references unknown key '{ref_key}'{hint}");
+    }
     Ok(())
 }
 
@@ -188,6 +282,188 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
 /// Returns true if the value is empty or contains only whitespace.
 pub fn is_effectively_empty(value: &str) -> bool {
     value.trim().is_empty()
+}
+
+/// Validate cross-field rules for all secrets in a given environment.
+///
+/// `specs` maps secret key → validation spec (only secrets with cross-field rules).
+/// `secrets` is the full store map (composite keys like `"KEY:env"`).
+pub fn validate_cross_field(
+    specs: &BTreeMap<&str, &Validation>,
+    secrets: &BTreeMap<String, String>,
+    env: &str,
+) -> Vec<CrossFieldViolation> {
+    let mut violations = Vec::new();
+
+    for (&key, spec) in specs {
+        if !spec.has_cross_field_rules() {
+            continue;
+        }
+
+        let composite = format!("{key}:{env}");
+        let value = secrets.get(&composite).map(|s| s.as_str()).unwrap_or("");
+        let has_value = !value.is_empty();
+
+        // required_if: all conditions match (AND) → secret must have a non-empty value
+        if let Some(ref conditions) = spec.required_if {
+            let all_match = conditions.iter().all(|(cond_key, cond_val)| {
+                let cond_composite = format!("{cond_key}:{env}");
+                let actual = secrets
+                    .get(&cond_composite)
+                    .map(|s| s.as_str())
+                    .unwrap_or("");
+                if cond_val == "*" {
+                    !actual.is_empty()
+                } else {
+                    actual == cond_val
+                }
+            });
+
+            if all_match && !has_value {
+                let reasons: Vec<String> = conditions
+                    .iter()
+                    .map(|(k, v)| {
+                        if v == "*" {
+                            format!("{k} is set")
+                        } else {
+                            format!("{k} = \"{v}\"")
+                        }
+                    })
+                    .collect();
+                violations.push(CrossFieldViolation {
+                    key: key.to_string(),
+                    env: env.to_string(),
+                    message: format!("required because {}", reasons.join(" and ")),
+                });
+            }
+        }
+
+        // required_with: any listed peer has a non-empty value → this must too
+        if let Some(ref peers) = spec.required_with {
+            if !has_value {
+                for peer in peers {
+                    let peer_composite = format!("{peer}:{env}");
+                    let peer_val = secrets
+                        .get(&peer_composite)
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+                    if !peer_val.is_empty() {
+                        violations.push(CrossFieldViolation {
+                            key: key.to_string(),
+                            env: env.to_string(),
+                            message: format!("required because {peer} is set"),
+                        });
+                        break;
+                    }
+                }
+            }
+        }
+
+        // required_unless: none of the alternatives has a non-empty value → this must
+        if let Some(ref alternatives) = spec.required_unless {
+            if !has_value {
+                let any_alt_set = alternatives.iter().any(|alt| {
+                    let alt_composite = format!("{alt}:{env}");
+                    let alt_val = secrets
+                        .get(&alt_composite)
+                        .map(|s| s.as_str())
+                        .unwrap_or("");
+                    !alt_val.is_empty()
+                });
+
+                if !any_alt_set {
+                    let names = alternatives.join(", ");
+                    violations.push(CrossFieldViolation {
+                        key: key.to_string(),
+                        env: env.to_string(),
+                        message: format!("required because none of {names} is set"),
+                    });
+                }
+            }
+        }
+    }
+
+    violations
+}
+
+/// DFS-based cycle detection on the cross-field dependency graph.
+///
+/// Only `required_if` and `required_unless` participate in cycle detection.
+/// `required_with` is excluded because mutual declaration is the intended pattern.
+pub fn detect_cross_field_cycles(specs: &BTreeMap<&str, &Validation>) -> Result<()> {
+    // Build adjacency list from required_if and required_unless only
+    let mut graph: BTreeMap<&str, BTreeSet<&str>> = BTreeMap::new();
+    for (&key, spec) in specs {
+        let mut refs = BTreeSet::new();
+        if let Some(ref map) = spec.required_if {
+            for k in map.keys() {
+                refs.insert(k.as_str());
+            }
+        }
+        if let Some(ref list) = spec.required_unless {
+            for k in list {
+                refs.insert(k.as_str());
+            }
+        }
+        if !refs.is_empty() {
+            graph.insert(key, refs);
+        }
+    }
+
+    // Standard three-color DFS
+    const WHITE: u8 = 0;
+    const GRAY: u8 = 1;
+    const BLACK: u8 = 2;
+
+    let mut color: BTreeMap<&str, u8> = BTreeMap::new();
+    let mut parent: BTreeMap<&str, &str> = BTreeMap::new();
+
+    for &start in graph.keys() {
+        if *color.get(start).unwrap_or(&WHITE) != WHITE {
+            continue;
+        }
+
+        let mut stack = vec![(start, false)]; // (node, returning)
+        while let Some((node, returning)) = stack.pop() {
+            if returning {
+                color.insert(node, BLACK);
+                continue;
+            }
+
+            color.insert(node, GRAY);
+            stack.push((node, true)); // push return marker
+
+            if let Some(neighbors) = graph.get(node) {
+                for &neighbor in neighbors {
+                    match *color.get(neighbor).unwrap_or(&WHITE) {
+                        GRAY => {
+                            // Found cycle — reconstruct path
+                            let mut cycle = vec![neighbor, node];
+                            let mut cur = node;
+                            while cur != neighbor {
+                                if let Some(&p) = parent.get(cur) {
+                                    cycle.push(p);
+                                    cur = p;
+                                } else {
+                                    break;
+                                }
+                            }
+                            cycle.reverse();
+                            let path = cycle.join(" -> ");
+                            bail!("circular cross-field reference: {path}");
+                        }
+                        WHITE => {
+                            parent.insert(neighbor, node);
+                            stack.push((neighbor, false));
+                        }
+                        _ => {} // BLACK — already fully explored
+                    }
+                }
+            }
+        }
+    }
+
+    Ok(())
 }
 
 fn validate_format(value: &str, format: Format) -> Result<(), String> {
@@ -576,6 +852,10 @@ mod tests {
 
     // --- validate_spec ---
 
+    fn known<'a>(keys: &'a [&'a str]) -> BTreeSet<&'a str> {
+        keys.iter().copied().collect()
+    }
+
     #[test]
     fn spec_rejects_range_on_non_numeric() {
         let spec = Validation {
@@ -583,7 +863,7 @@ mod tests {
             range: Some((1.0, 10.0)),
             ..Default::default()
         };
-        assert!(validate_spec("K", &spec).is_err());
+        assert!(validate_spec("K", &spec, &known(&["K"])).is_err());
     }
 
     #[test]
@@ -593,7 +873,7 @@ mod tests {
             range: Some((100.0, 1.0)),
             ..Default::default()
         };
-        assert!(validate_spec("K", &spec).is_err());
+        assert!(validate_spec("K", &spec, &known(&["K"])).is_err());
     }
 
     #[test]
@@ -603,7 +883,7 @@ mod tests {
             max_length: Some(3),
             ..Default::default()
         };
-        assert!(validate_spec("K", &spec).is_err());
+        assert!(validate_spec("K", &spec, &known(&["K"])).is_err());
     }
 
     #[test]
@@ -612,7 +892,7 @@ mod tests {
             pattern: Some("[invalid".to_string()),
             ..Default::default()
         };
-        assert!(validate_spec("K", &spec).is_err());
+        assert!(validate_spec("K", &spec, &known(&["K"])).is_err());
     }
 
     #[test]
@@ -622,7 +902,7 @@ mod tests {
             enum_values: Some(vec![serde_yaml::Value::String("not_a_number".into())]),
             ..Default::default()
         };
-        assert!(validate_spec("K", &spec).is_err());
+        assert!(validate_spec("K", &spec, &known(&["K"])).is_err());
     }
 
     #[test]
@@ -635,7 +915,7 @@ mod tests {
             ))]),
             ..Default::default()
         };
-        assert!(validate_spec("K", &spec).is_ok());
+        assert!(validate_spec("K", &spec, &known(&["K"])).is_ok());
     }
 
     // --- resolve_enum_values ---
@@ -671,5 +951,256 @@ mod tests {
         ];
         let values = resolve_enum_values(&raw).unwrap();
         assert_eq!(values, vec!["dev", "true", "42"]);
+    }
+
+    // --- has_cross_field_rules ---
+
+    #[test]
+    fn has_cross_field_rules_empty() {
+        assert!(!Validation::default().has_cross_field_rules());
+    }
+
+    #[test]
+    fn has_cross_field_rules_with_required_if() {
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([("X".into(), "true".into())])),
+            ..Default::default()
+        };
+        assert!(spec.has_cross_field_rules());
+    }
+
+    // --- referenced_keys ---
+
+    #[test]
+    fn referenced_keys_all_types() {
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([("A".into(), "*".into())])),
+            required_with: Some(vec!["B".into()]),
+            required_unless: Some(vec!["C".into()]),
+            ..Default::default()
+        };
+        let keys = spec.referenced_keys();
+        assert_eq!(keys, BTreeSet::from(["A", "B", "C"]));
+    }
+
+    // --- validate_cross_field ---
+
+    fn secrets(pairs: &[(&str, &str)]) -> BTreeMap<String, String> {
+        pairs
+            .iter()
+            .map(|(k, v)| (k.to_string(), v.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn required_if_triggered() {
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([("AUTH_ENABLED".into(), "true".into())])),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("AUTH_SECRET", &spec)]);
+        let store = secrets(&[("AUTH_ENABLED:dev", "true")]);
+        let v = validate_cross_field(&specs, &store, "dev");
+        assert_eq!(v.len(), 1);
+        assert_eq!(v[0].key, "AUTH_SECRET");
+        assert!(v[0].message.contains("AUTH_ENABLED = \"true\""));
+    }
+
+    #[test]
+    fn required_if_not_triggered() {
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([("AUTH_ENABLED".into(), "true".into())])),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("AUTH_SECRET", &spec)]);
+        let store = secrets(&[("AUTH_ENABLED:dev", "false")]);
+        assert!(validate_cross_field(&specs, &store, "dev").is_empty());
+    }
+
+    #[test]
+    fn required_if_wildcard() {
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([("DB_HOST".into(), "*".into())])),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("DB_PORT", &spec)]);
+        let store = secrets(&[("DB_HOST:dev", "localhost")]);
+        let v = validate_cross_field(&specs, &store, "dev");
+        assert_eq!(v.len(), 1);
+        assert!(v[0].message.contains("DB_HOST is set"));
+    }
+
+    #[test]
+    fn required_if_wildcard_empty() {
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([("DB_HOST".into(), "*".into())])),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("DB_PORT", &spec)]);
+        let store = secrets(&[("DB_HOST:dev", "")]);
+        assert!(validate_cross_field(&specs, &store, "dev").is_empty());
+    }
+
+    #[test]
+    fn required_if_multiple_conditions() {
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([
+                ("AUTH_ENABLED".into(), "true".into()),
+                ("AUTH_TYPE".into(), "oauth".into()),
+            ])),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("OAUTH_SECRET", &spec)]);
+
+        // Both conditions match → violation
+        let store = secrets(&[("AUTH_ENABLED:dev", "true"), ("AUTH_TYPE:dev", "oauth")]);
+        assert_eq!(validate_cross_field(&specs, &store, "dev").len(), 1);
+
+        // Only one condition → no violation
+        let store = secrets(&[("AUTH_ENABLED:dev", "true"), ("AUTH_TYPE:dev", "basic")]);
+        assert!(validate_cross_field(&specs, &store, "dev").is_empty());
+    }
+
+    #[test]
+    fn required_if_satisfied() {
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([("AUTH_ENABLED".into(), "true".into())])),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("AUTH_SECRET", &spec)]);
+        let store = secrets(&[("AUTH_ENABLED:dev", "true"), ("AUTH_SECRET:dev", "s3cr3t")]);
+        assert!(validate_cross_field(&specs, &store, "dev").is_empty());
+    }
+
+    #[test]
+    fn required_with_triggered() {
+        let spec = Validation {
+            required_with: Some(vec!["OAUTH_CLIENT_SECRET".into()]),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("OAUTH_CLIENT_ID", &spec)]);
+        let store = secrets(&[("OAUTH_CLIENT_SECRET:dev", "secret123")]);
+        let v = validate_cross_field(&specs, &store, "dev");
+        assert_eq!(v.len(), 1);
+        assert!(v[0].message.contains("OAUTH_CLIENT_SECRET is set"));
+    }
+
+    #[test]
+    fn required_with_neither_set() {
+        let spec = Validation {
+            required_with: Some(vec!["OAUTH_CLIENT_SECRET".into()]),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("OAUTH_CLIENT_ID", &spec)]);
+        let store = secrets(&[]);
+        assert!(validate_cross_field(&specs, &store, "dev").is_empty());
+    }
+
+    #[test]
+    fn required_with_both_set() {
+        let spec = Validation {
+            required_with: Some(vec!["OAUTH_CLIENT_SECRET".into()]),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("OAUTH_CLIENT_ID", &spec)]);
+        let store = secrets(&[
+            ("OAUTH_CLIENT_SECRET:dev", "secret"),
+            ("OAUTH_CLIENT_ID:dev", "id123"),
+        ]);
+        assert!(validate_cross_field(&specs, &store, "dev").is_empty());
+    }
+
+    #[test]
+    fn required_unless_triggered() {
+        let spec = Validation {
+            required_unless: Some(vec!["DB_URL".into()]),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("DB_HOST", &spec)]);
+        let store = secrets(&[]);
+        let v = validate_cross_field(&specs, &store, "dev");
+        assert_eq!(v.len(), 1);
+        assert!(v[0].message.contains("none of DB_URL is set"));
+    }
+
+    #[test]
+    fn required_unless_alternative_set() {
+        let spec = Validation {
+            required_unless: Some(vec!["DB_URL".into()]),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("DB_HOST", &spec)]);
+        let store = secrets(&[("DB_URL:dev", "postgres://localhost/db")]);
+        assert!(validate_cross_field(&specs, &store, "dev").is_empty());
+    }
+
+    // --- validate_spec cross-field checks ---
+
+    #[test]
+    fn spec_rejects_unknown_key() {
+        let spec = Validation {
+            required_with: Some(vec!["NONEXISTENT".into()]),
+            ..Default::default()
+        };
+        let err = validate_spec("MY_KEY", &spec, &known(&["MY_KEY", "OTHER"])).unwrap_err();
+        assert!(err.to_string().contains("unknown key 'NONEXISTENT'"));
+    }
+
+    #[test]
+    fn spec_rejects_self_reference() {
+        let spec = Validation {
+            required_with: Some(vec!["MY_KEY".into()]),
+            ..Default::default()
+        };
+        let err = validate_spec("MY_KEY", &spec, &known(&["MY_KEY"])).unwrap_err();
+        assert!(err.to_string().contains("references itself"));
+    }
+
+    // --- detect_cross_field_cycles ---
+
+    #[test]
+    fn cycle_detection_finds_cycle() {
+        // required_if creates directed dependencies that can form cycles
+        let spec_a = Validation {
+            required_if: Some(BTreeMap::from([("B".into(), "*".into())])),
+            ..Default::default()
+        };
+        let spec_b = Validation {
+            required_if: Some(BTreeMap::from([("A".into(), "*".into())])),
+            ..Default::default()
+        };
+        let specs: BTreeMap<&str, &Validation> = BTreeMap::from([("A", &spec_a), ("B", &spec_b)]);
+        let err = detect_cross_field_cycles(&specs).unwrap_err();
+        assert!(err.to_string().contains("circular cross-field reference"));
+        assert!(err.to_string().contains("A") && err.to_string().contains("B"));
+    }
+
+    #[test]
+    fn cycle_detection_no_cycle() {
+        let spec_a = Validation {
+            required_if: Some(BTreeMap::from([("B".into(), "*".into())])),
+            ..Default::default()
+        };
+        let spec_c = Validation {
+            required_unless: Some(vec!["D".into()]),
+            ..Default::default()
+        };
+        let specs: BTreeMap<&str, &Validation> = BTreeMap::from([("A", &spec_a), ("C", &spec_c)]);
+        assert!(detect_cross_field_cycles(&specs).is_ok());
+    }
+
+    #[test]
+    fn cycle_detection_ignores_required_with() {
+        // Mutual required_with is the intended pattern, should not be flagged
+        let spec_a = Validation {
+            required_with: Some(vec!["B".into()]),
+            ..Default::default()
+        };
+        let spec_b = Validation {
+            required_with: Some(vec!["A".into()]),
+            ..Default::default()
+        };
+        let specs: BTreeMap<&str, &Validation> = BTreeMap::from([("A", &spec_a), ("B", &spec_b)]);
+        assert!(detect_cross_field_cycles(&specs).is_ok());
     }
 }
