@@ -25,6 +25,8 @@ pub struct DeployOptions<'a> {
 /// Maximum number of orphans allowed without `--force`.
 const PRUNE_THRESHOLD: usize = 10;
 
+const DEPLOY_LINE_WIDTH: usize = 44;
+
 #[derive(Default)]
 struct EnvStatus {
     deployed: usize,
@@ -894,7 +896,7 @@ pub fn run_with_runner(
     }
 
     // Output
-    let width = 44;
+    let width = DEPLOY_LINE_WIDTH;
 
     if deploy_count == 0
         && skip_count == 0
@@ -909,7 +911,7 @@ pub fn run_with_runner(
         let mut env_status: BTreeMap<String, EnvStatus> = BTreeMap::new();
 
         for entry in &deployed {
-            let label = format!("{} {}", style("✔").green(), style(&entry.key).dim());
+            let label = format!("{} {}", ui::icon_success(), style(&entry.key).dim());
             env_map
                 .entry(entry.env.clone())
                 .or_default()
@@ -918,7 +920,7 @@ pub fn run_with_runner(
         }
 
         for entry in &failed {
-            let label = format!("{} {}", style("✗").red(), style(&entry.key).dim());
+            let label = format!("{} {}", ui::icon_failure(), style(&entry.key).dim());
             let lines = env_map.entry(entry.env.clone()).or_default();
             lines.push(ui::format_dashboard_line(&label, &entry.target, width));
             if let Some(err) = &entry.error {
@@ -928,7 +930,7 @@ pub fn run_with_runner(
         }
 
         for entry in &unset {
-            let label = format!("{} {}", style("○").dim(), style(&entry.key).dim());
+            let label = format!("{} {}", ui::icon_unset(), style(&entry.key).dim());
             env_map
                 .entry(entry.env.clone())
                 .or_default()
@@ -937,7 +939,7 @@ pub fn run_with_runner(
         }
 
         for entry in &pruned {
-            let label = format!("{} {}", style("✂").yellow(), style(&entry.key).dim());
+            let label = format!("{} {}", ui::icon_pruned(), style(&entry.key).dim());
             env_map
                 .entry(entry.env.clone())
                 .or_default()
@@ -951,30 +953,21 @@ pub fn run_with_runner(
 
         for (env_name, mut lines) in env_map {
             let es = env_status.get(&env_name).unwrap();
-            let mut status_parts = Vec::new();
-            if es.failed > 0 {
-                status_parts.push(format!("{} failed", es.failed));
-            }
-            if es.deployed > 0 {
-                status_parts.push(format!("{} deployed", es.deployed));
-            }
-            if es.unset > 0 {
-                status_parts.push(format!("{} unset", es.unset));
-            }
-            if es.pruned > 0 {
-                status_parts.push(format!("{} pruned", es.pruned));
-            }
+            let status_summary = ui::format_count_summary(&[
+                ("failed", es.failed),
+                ("deployed", es.deployed),
+                ("unset", es.unset),
+                ("pruned", es.pruned),
+            ]);
 
             lines.push(String::new());
             let status_icon = if es.failed > 0 {
-                style("✗").red()
+                ui::icon_failure()
             } else {
-                style("✔").green()
+                ui::icon_success()
             };
             lines.push(format!(
-                "{} Deployment complete ({})",
-                status_icon,
-                status_parts.join(", ")
+                "{status_icon} Deployment complete ({status_summary})"
             ));
 
             cliclack::note(env_name, lines.join("\n"))?;
@@ -985,6 +978,7 @@ pub fn run_with_runner(
                 let mut skip_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
                 for entry in &skipped {
                     let label = format!("{} {}", style("✔").dim(), style(&entry.key).dim());
+                    // Keep dim checkmark for skipped (not icon_success — intentionally subdued)
                     skip_map
                         .entry(entry.env.clone())
                         .or_default()

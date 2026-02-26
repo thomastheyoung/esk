@@ -8,6 +8,7 @@ use crate::remotes::{check_remote_health, RemoteHealth};
 use crate::store::SecretStore;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
 use crate::targets::{check_target_health, CommandRunner, RealCommandRunner, TargetHealth};
+use crate::ui;
 use crate::validate;
 
 // ---------------------------------------------------------------------------
@@ -499,34 +500,17 @@ impl Dashboard {
                 style(format!("v{}", self.version)).dim(),
             )
         } else {
-            let mut parts = Vec::new();
-            if !self.deployed.is_empty() {
-                parts.push(format!("{} deployed", self.deployed.len()));
-            }
-            if !self.pending.is_empty() {
-                parts.push(format!("{} pending", self.pending.len()));
-            }
-            if !self.failed.is_empty() {
-                parts.push(format!("{} failed", self.failed.len()));
-            }
-            if !self.unset.is_empty() {
-                parts.push(format!("{} unset", self.unset.len()));
-            }
-            if !self.validation_warnings.is_empty() {
-                parts.push(format!("{} invalid", self.validation_warnings.len()));
-            }
-            if !self.cross_field_violations.is_empty() {
-                parts.push(format!("{} cross-field", self.cross_field_violations.len()));
-            }
-            if !self.empty_values.is_empty() {
-                parts.push(format!("{} empty", self.empty_values.len()));
-            }
-            if !self.missing_required.is_empty() {
-                parts.push(format!("{} required missing", self.missing_required.len()));
-            }
-            if !self.target_orphans.is_empty() {
-                parts.push(format!("{} target orphans", self.target_orphans.len()));
-            }
+            let parts = ui::format_count_summary(&[
+                ("deployed", self.deployed.len()),
+                ("pending", self.pending.len()),
+                ("failed", self.failed.len()),
+                ("unset", self.unset.len()),
+                ("invalid", self.validation_warnings.len()),
+                ("cross-field", self.cross_field_violations.len()),
+                ("empty", self.empty_values.len()),
+                ("required missing", self.missing_required.len()),
+                ("target orphans", self.target_orphans.len()),
+            ]);
 
             let all_deployed = self.failed.is_empty()
                 && self.pending.is_empty()
@@ -554,7 +538,7 @@ impl Dashboard {
                     style(format!("v{}", self.version)).dim(),
                     total,
                     if total == 1 { "" } else { "s" },
-                    parts.join(", "),
+                    parts,
                 )
             }
         };
@@ -567,21 +551,12 @@ impl Dashboard {
                 .target_health
                 .iter()
                 .map(|h| {
-                    if h.ok {
-                        format!(
-                            "  {} {:<14} {}",
-                            style("✓").green(),
-                            h.name,
-                            style(&h.message).dim()
-                        )
+                    let icon = if h.ok {
+                        ui::icon_success()
                     } else {
-                        format!(
-                            "  {} {:<14} {}",
-                            style("✗").red(),
-                            h.name,
-                            style(&h.message).dim()
-                        )
-                    }
+                        ui::icon_failure()
+                    };
+                    format!("  {} {:<14} {}", icon, h.name, style(&h.message).dim())
                 })
                 .collect();
             cliclack::log::step(format!("Targets\n{}", lines.join("\n")))?;
@@ -595,44 +570,44 @@ impl Dashboard {
             let mut deploy_lines = Vec::new();
 
             if !self.failed.is_empty() {
-                deploy_lines.push(format!(
-                    "  {} {}",
-                    style("✗").red(),
-                    style(format!("{} failed", self.failed.len())).red().bold()
+                deploy_lines.push(ui::section_header(
+                    ui::icon_failure(),
+                    &format!("{} failed", self.failed.len()),
+                    ui::SectionColor::Red,
                 ));
                 for entry in &self.failed {
                     let freshness = entry
                         .last_deployed_at
                         .as_deref()
-                        .map(relative_time)
+                        .map(ui::format_relative_time)
                         .unwrap_or_default();
                     let err_text = entry
                         .error
                         .as_deref()
                         .map(|e| format!(" {}", style(format!("({e})")).dim()))
                         .unwrap_or_default();
-                    deploy_lines.push(format!(
-                        "     {}  → {}  {}{}",
-                        style(format!("{}:{}", entry.key, entry.env)).dim(),
-                        entry.target,
-                        style(freshness).dim(),
-                        err_text,
+                    deploy_lines.push(ui::section_entry(
+                        &format!("{}:{}", entry.key, entry.env),
+                        &format!(
+                            "→ {}  {}{}",
+                            entry.target,
+                            style(freshness).dim(),
+                            err_text,
+                        ),
                     ));
                 }
             }
 
             if !self.pending.is_empty() {
-                deploy_lines.push(format!(
-                    "  {} {}",
-                    style("●").yellow(),
-                    style(format!("{} pending", self.pending.len()))
-                        .yellow()
-                        .bold()
+                deploy_lines.push(ui::section_header(
+                    ui::icon_pending(),
+                    &format!("{} pending", self.pending.len()),
+                    ui::SectionColor::Yellow,
                 ));
                 for entry in &self.pending {
                     let freshness = match &entry.last_deployed_at {
                         Some(t) => {
-                            let ago = relative_time(t);
+                            let ago = ui::format_relative_time(t);
                             if ago.is_empty() {
                                 "never deployed".to_string()
                             } else {
@@ -641,56 +616,49 @@ impl Dashboard {
                         }
                         None => "never deployed".to_string(),
                     };
-                    deploy_lines.push(format!(
-                        "     {}  → {}  {}",
-                        style(format!("{}:{}", entry.key, entry.env)).dim(),
-                        entry.target,
-                        style(freshness).dim(),
+                    deploy_lines.push(ui::section_entry(
+                        &format!("{}:{}", entry.key, entry.env),
+                        &format!("→ {}  {}", entry.target, style(freshness).dim()),
                     ));
                 }
             }
 
             if !self.unset.is_empty() {
-                deploy_lines.push(format!(
-                    "  {} {}",
-                    style("○").dim(),
-                    style(format!("{} unset", self.unset.len())).dim().bold()
+                deploy_lines.push(ui::section_header(
+                    ui::icon_unset(),
+                    &format!("{} unset", self.unset.len()),
+                    ui::SectionColor::Dim,
                 ));
                 for entry in &self.unset {
-                    deploy_lines.push(format!(
-                        "     {}  → {}",
-                        style(format!("{}:{}", entry.key, entry.env)).dim(),
-                        style(&entry.target).dim(),
+                    deploy_lines.push(ui::section_entry(
+                        &format!("{}:{}", entry.key, entry.env),
+                        &format!("→ {}", style(&entry.target).dim()),
                     ));
                 }
             }
 
             if !self.deployed.is_empty() {
                 if all {
-                    deploy_lines.push(format!(
-                        "  {} {}",
-                        style("✓").green(),
-                        style(format!("{} deployed", self.deployed.len()))
-                            .green()
-                            .bold()
+                    deploy_lines.push(ui::section_header(
+                        ui::icon_success(),
+                        &format!("{} deployed", self.deployed.len()),
+                        ui::SectionColor::Green,
                     ));
                     for entry in &self.deployed {
                         let freshness = entry
                             .last_deployed_at
                             .as_deref()
-                            .map(relative_time)
+                            .map(ui::format_relative_time)
                             .unwrap_or_default();
-                        deploy_lines.push(format!(
-                            "     {}  → {}  {}",
-                            style(format!("{}:{}", entry.key, entry.env)).dim(),
-                            entry.target,
-                            style(freshness).dim(),
+                        deploy_lines.push(ui::section_entry(
+                            &format!("{}:{}", entry.key, entry.env),
+                            &format!("→ {}  {}", entry.target, style(freshness).dim()),
                         ));
                     }
                 } else {
                     deploy_lines.push(format!(
                         "  {} {}  {}",
-                        style("✓").green(),
+                        ui::icon_success(),
                         style(format!("{} deployed", self.deployed.len())).green(),
                         style("(--all to show)").dim()
                     ));
@@ -708,34 +676,28 @@ impl Dashboard {
         if has_validation {
             let mut val_lines = Vec::new();
             if !self.validation_warnings.is_empty() {
-                val_lines.push(format!(
-                    "  {} {}",
-                    style("!").yellow(),
-                    style(format!("{} invalid", self.validation_warnings.len()))
-                        .yellow()
-                        .bold()
+                val_lines.push(ui::section_header(
+                    ui::icon_alert_yellow(),
+                    &format!("{} invalid", self.validation_warnings.len()),
+                    ui::SectionColor::Yellow,
                 ));
                 for w in &self.validation_warnings {
-                    val_lines.push(format!(
-                        "     {}  {}",
-                        style(format!("{}:{}", w.key, w.env)).dim(),
-                        style(&w.message).dim(),
+                    val_lines.push(ui::section_entry(
+                        &format!("{}:{}", w.key, w.env),
+                        &style(&w.message).dim().to_string(),
                     ));
                 }
             }
             if !self.cross_field_violations.is_empty() {
-                val_lines.push(format!(
-                    "  {} {}",
-                    style("!").yellow(),
-                    style(format!("{} cross-field", self.cross_field_violations.len()))
-                        .yellow()
-                        .bold()
+                val_lines.push(ui::section_header(
+                    ui::icon_alert_yellow(),
+                    &format!("{} cross-field", self.cross_field_violations.len()),
+                    ui::SectionColor::Yellow,
                 ));
                 for v in &self.cross_field_violations {
-                    val_lines.push(format!(
-                        "     {}  {}",
-                        style(format!("{}:{}", v.key, v.env)).dim(),
-                        style(&v.message).dim(),
+                    val_lines.push(ui::section_entry(
+                        &format!("{}:{}", v.key, v.env),
+                        &style(&v.message).dim().to_string(),
                     ));
                 }
             }
@@ -745,18 +707,15 @@ impl Dashboard {
         // Empty values section
         if !self.empty_values.is_empty() {
             let mut empty_lines = Vec::new();
-            empty_lines.push(format!(
-                "  {} {}",
-                style("!").yellow(),
-                style(format!("{} empty", self.empty_values.len()))
-                    .yellow()
-                    .bold()
+            empty_lines.push(ui::section_header(
+                ui::icon_alert_yellow(),
+                &format!("{} empty", self.empty_values.len()),
+                ui::SectionColor::Yellow,
             ));
             for w in &self.empty_values {
-                empty_lines.push(format!(
-                    "     {}  {}",
-                    style(format!("{}:{}", w.key, w.env)).dim(),
-                    style(w.kind).dim(),
+                empty_lines.push(ui::section_entry(
+                    &format!("{}:{}", w.key, w.env),
+                    &style(w.kind).dim().to_string(),
                 ));
             }
             cliclack::log::step(format!("Empty values\n{}", empty_lines.join("\n")))?;
@@ -765,12 +724,10 @@ impl Dashboard {
         // Required section
         if !self.missing_required.is_empty() {
             let mut req_lines = Vec::new();
-            req_lines.push(format!(
-                "  {} {}",
-                style("!").red(),
-                style(format!("{} required missing", self.missing_required.len()))
-                    .red()
-                    .bold()
+            req_lines.push(ui::section_header(
+                ui::icon_alert_red(),
+                &format!("{} required missing", self.missing_required.len()),
+                ui::SectionColor::Red,
             ));
             for m in &self.missing_required {
                 let target_info = if m.targets.is_empty() {
@@ -778,10 +735,9 @@ impl Dashboard {
                 } else {
                     format!("  {}", style(format!("({})", m.targets.join(", "))).dim())
                 };
-                req_lines.push(format!(
-                    "     {}{}",
-                    style(format!("{}:{}", m.key, m.env)).dim(),
-                    target_info,
+                req_lines.push(ui::section_entry(
+                    &format!("{}:{}", m.key, m.env),
+                    &target_info,
                 ));
             }
             cliclack::log::step(format!("Requirements\n{}", req_lines.join("\n")))?;
@@ -795,53 +751,60 @@ impl Dashboard {
             let mut cov_lines = Vec::new();
 
             if !self.coverage_gaps.is_empty() {
-                cov_lines.push(format!(
-                    "  {} {} declared but never set",
-                    style("○").dim(),
-                    self.coverage_gaps.len()
+                cov_lines.push(ui::section_header(
+                    ui::icon_unset(),
+                    &format!("{} declared but never set", self.coverage_gaps.len()),
+                    ui::SectionColor::Dim,
                 ));
                 for gap in &self.coverage_gaps {
                     let present = gap.present_envs.join(", ");
                     for missing_env in &gap.missing_envs {
-                        cov_lines.push(format!(
-                            "     {}  missing in {} {}",
-                            style(&gap.key).dim(),
-                            style(missing_env).yellow(),
-                            style(format!("(set in {present})")).dim(),
+                        cov_lines.push(ui::section_entry(
+                            &gap.key,
+                            &format!(
+                                "missing in {} {}",
+                                style(missing_env).yellow(),
+                                style(format!("(set in {present})")).dim(),
+                            ),
                         ));
                     }
                 }
             }
 
             if !self.orphans.is_empty() {
-                cov_lines.push(format!(
-                    "  {} {} in store, not in config",
-                    style("⚠").yellow(),
-                    self.orphans.len()
+                cov_lines.push(ui::section_header(
+                    ui::icon_warning(),
+                    &format!("{} in store, not in config", self.orphans.len()),
+                    ui::SectionColor::Yellow,
                 ));
                 for orphan in &self.orphans {
-                    cov_lines.push(format!(
-                        "     {}",
-                        style(format!("{}:{}", orphan.key, orphan.env)).dim(),
+                    cov_lines.push(ui::section_entry(
+                        &format!("{}:{}", orphan.key, orphan.env),
+                        "",
                     ));
                 }
             }
 
             if !self.target_orphans.is_empty() {
-                cov_lines.push(format!(
-                    "  {} {} deployed but no longer in config",
-                    style("⚠").yellow(),
-                    self.target_orphans.len()
+                cov_lines.push(ui::section_header(
+                    ui::icon_warning(),
+                    &format!(
+                        "{} deployed but no longer in config",
+                        self.target_orphans.len()
+                    ),
+                    ui::SectionColor::Yellow,
                 ));
                 for orphan in &self.target_orphans {
                     let target_display = orphan.target_display();
-                    let freshness = relative_time(&orphan.last_deployed_at);
-                    cov_lines.push(format!(
-                        "     {}  {} {}  {}",
-                        style(&orphan.key).dim(),
-                        style("→").dim(),
-                        style(format!("{} ({})", target_display, orphan.env)),
-                        style(freshness).dim(),
+                    let freshness = ui::format_relative_time(&orphan.last_deployed_at);
+                    cov_lines.push(ui::section_entry(
+                        &orphan.key,
+                        &format!(
+                            "{} {}  {}",
+                            style("→").dim(),
+                            style(format!("{} ({})", target_display, orphan.env)),
+                            style(freshness).dim(),
+                        ),
                     ));
                 }
             }
@@ -857,26 +820,26 @@ impl Dashboard {
                 .map(|ps| match &ps.status {
                     RemoteStatus::Current { version } => format!(
                         "  {} {}  {}",
-                        style("✓").green(),
+                        ui::icon_success(),
                         style(format!("{}:{}", ps.name, ps.env)),
                         style(format!("v{version}")).dim()
                     ),
                     RemoteStatus::Stale { pushed, local } => format!(
                         "  {} {}  {}",
-                        style("●").yellow(),
+                        ui::icon_pending(),
                         style(format!("{}:{}", ps.name, ps.env)),
                         style(format!("v{pushed} → local v{local}")).dim()
                     ),
                     RemoteStatus::Failed { version, error } => format!(
                         "  {} {}  {} {}",
-                        style("✗").red(),
+                        ui::icon_failure(),
                         style(format!("{}:{}", ps.name, ps.env)),
                         style(format!("v{version}")).dim(),
                         style(format!("({error})")).dim()
                     ),
                     RemoteStatus::NeverSynced => format!(
                         "  {} {}  {}",
-                        style("○").dim(),
+                        ui::icon_unset(),
                         style(format!("{}:{}", ps.name, ps.env)),
                         style("never synced").dim()
                     ),
@@ -919,14 +882,6 @@ impl Dashboard {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-fn relative_time(timestamp: &str) -> String {
-    crate::ui::format_relative_time(timestamp)
-}
-
-// ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
 
@@ -940,30 +895,30 @@ mod tests {
     #[test]
     fn relative_time_days() {
         let ts = (Utc::now() - chrono::Duration::days(3)).to_rfc3339();
-        assert_eq!(relative_time(&ts), "3d ago");
+        assert_eq!(crate::ui::format_relative_time(&ts), "3d ago");
     }
 
     #[test]
     fn relative_time_hours() {
         let ts = (Utc::now() - chrono::Duration::hours(5)).to_rfc3339();
-        assert_eq!(relative_time(&ts), "5h ago");
+        assert_eq!(crate::ui::format_relative_time(&ts), "5h ago");
     }
 
     #[test]
     fn relative_time_minutes() {
         let ts = (Utc::now() - chrono::Duration::minutes(12)).to_rfc3339();
-        assert_eq!(relative_time(&ts), "12m ago");
+        assert_eq!(crate::ui::format_relative_time(&ts), "12m ago");
     }
 
     #[test]
     fn relative_time_just_now() {
         let ts = Utc::now().to_rfc3339();
-        assert_eq!(relative_time(&ts), "just now");
+        assert_eq!(crate::ui::format_relative_time(&ts), "just now");
     }
 
     #[test]
     fn relative_time_invalid() {
-        assert_eq!(relative_time("not-a-timestamp"), "not-a-timestamp");
+        assert_eq!(crate::ui::format_relative_time("not-a-timestamp"), "not-a-timestamp");
     }
 
     struct OkRunner;

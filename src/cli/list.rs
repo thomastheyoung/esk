@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
+use crate::ui;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 enum CellStatus {
@@ -195,10 +196,10 @@ fn render_table(
             let pad_right = *w - pad_left - 1;
             let indicator = match cell_status(key, e) {
                 CellStatus::NotTargeted => " ".to_string(),
-                CellStatus::Unset => style("○").dim().to_string(),
-                CellStatus::Deployed => style("✔").green().to_string(),
-                CellStatus::Pending => style("●").yellow().to_string(),
-                CellStatus::Failed => style("✗").red().to_string(),
+                CellStatus::Unset => ui::icon_unset().to_string(),
+                CellStatus::Deployed => ui::icon_success().to_string(),
+                CellStatus::Pending => ui::icon_pending().to_string(),
+                CellStatus::Failed => ui::icon_failure().to_string(),
             };
             row.push_str(&format!(
                 "{}{}{}{}",

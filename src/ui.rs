@@ -1,5 +1,107 @@
+use std::fmt;
+
 use chrono::{DateTime, Utc};
-use console::style;
+use console::{style, StyledObject};
+
+// ---------------------------------------------------------------------------
+// Icon vocabulary
+// ---------------------------------------------------------------------------
+
+pub fn icon_success() -> StyledObject<&'static str> {
+    style("✔").green()
+}
+pub fn icon_failure() -> StyledObject<&'static str> {
+    style("✗").red()
+}
+pub fn icon_pending() -> StyledObject<&'static str> {
+    style("●").yellow()
+}
+pub fn icon_unset() -> StyledObject<&'static str> {
+    style("○").dim()
+}
+pub fn icon_pruned() -> StyledObject<&'static str> {
+    style("✂").yellow()
+}
+pub fn icon_warning() -> StyledObject<&'static str> {
+    style("⚠").yellow()
+}
+pub fn icon_alert_yellow() -> StyledObject<&'static str> {
+    style("!").yellow()
+}
+pub fn icon_alert_red() -> StyledObject<&'static str> {
+    style("!").red()
+}
+pub fn icon_merge() -> StyledObject<&'static str> {
+    style("↻").yellow()
+}
+
+// ---------------------------------------------------------------------------
+// Text measurement
+// ---------------------------------------------------------------------------
+
+/// Returns the visible character count of a string, stripping ANSI escapes.
+pub fn visible_width(text: &str) -> usize {
+    console::strip_ansi_codes(text).chars().count()
+}
+
+// ---------------------------------------------------------------------------
+// Formatting helpers
+// ---------------------------------------------------------------------------
+
+/// Formats a store version and optional timestamp into a compact label like `v3 (2m ago)`.
+pub fn format_version_label(version: u64, timestamp: Option<&str>) -> String {
+    match timestamp {
+        Some(ts) => format!("v{} ({})", version, format_relative_time(ts)),
+        None => format!("v{version}"),
+    }
+}
+
+/// Builds a comma-separated count summary, skipping zero-count entries.
+///
+/// ```text
+/// format_count_summary(&[("failed", 2), ("deployed", 5), ("unset", 0)])
+/// // => "2 failed, 5 deployed"
+/// ```
+pub fn format_count_summary(counts: &[(&str, usize)]) -> String {
+    counts
+        .iter()
+        .filter(|(_, n)| *n > 0)
+        .map(|(label, n)| format!("{n} {label}"))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+// ---------------------------------------------------------------------------
+// Section rendering (status dashboard)
+// ---------------------------------------------------------------------------
+
+#[derive(Clone, Copy)]
+pub enum SectionColor {
+    Red,
+    Yellow,
+    Green,
+    Dim,
+}
+
+/// Renders a section header like `"  ✗ 3 failed"`.
+pub fn section_header(icon: impl fmt::Display, label: &str, color: SectionColor) -> String {
+    let styled = match color {
+        SectionColor::Red => style(label).red().bold(),
+        SectionColor::Yellow => style(label).yellow().bold(),
+        SectionColor::Green => style(label).green().bold(),
+        SectionColor::Dim => style(label).dim().bold(),
+    };
+    format!("  {icon} {styled}")
+}
+
+/// Renders a section entry like `"     API_KEY:prod  details here"`.
+pub fn section_entry(left: &str, right: &str) -> String {
+    format!("     {}  {}", style(left).dim(), right)
+}
+
+// ---------------------------------------------------------------------------
+// Theme
+// ---------------------------------------------------------------------------
 
 /// Shared theme for all esk commands to ensure visual consistency.
 pub struct EskTheme;
@@ -44,8 +146,8 @@ pub fn format_relative_time(ts: &str) -> String {
 
 /// Aligns a label and value with dots (...) between them for a dashboard look.
 pub fn format_dashboard_line(label: &str, value: &str, width: usize) -> String {
-    let label_len = console::strip_ansi_codes(label).chars().count();
-    let value_len = console::strip_ansi_codes(value).chars().count();
+    let label_len = visible_width(label);
+    let value_len = visible_width(value);
 
     if label_len + value_len + 2 >= width {
         return format!("{label}  {value}");

@@ -23,22 +23,10 @@ pub struct SyncOptions<'a> {
     pub prefer: ConflictPreference,
 }
 
+const SYNC_LINE_WIDTH: usize = 30;
+
 fn env_version_label(payload: &StorePayload, env: &str) -> String {
-    let version = payload.env_version(env);
-    match payload.env_last_changed_at(env) {
-        Some(ts) => format!("v{} ({})", version, ui::format_relative_time(ts)),
-        None => format!("v{version}"),
-    }
-}
-
-fn visible_width(text: &str) -> usize {
-    console::strip_ansi_codes(text).chars().count()
-}
-
-fn format_sync_line(label: &str, value: &str, value_column: usize) -> String {
-    let label_width = visible_width(label);
-    let dots = ".".repeat(value_column.saturating_sub(label_width).max(3));
-    format!("{} {} {}", label, style(dots).dim(), value)
+    ui::format_version_label(payload.env_version(env), payload.env_last_changed_at(env))
 }
 
 /// Push a payload to the given remotes, recording results in the remote index.
@@ -162,7 +150,6 @@ pub fn run_with_runner(
     };
 
     let mut lines = Vec::new();
-    let value_column = 24;
 
     // Pull from all target remotes
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
@@ -171,25 +158,25 @@ pub fn run_with_runner(
     for rem in &target_remotes {
         match rem.pull(config, env) {
             Ok(Some((secrets, version))) => {
-                lines.push(format_sync_line(
+                lines.push(ui::format_dashboard_line(
                     &format!("↓ {}", rem.name()),
                     &format!("v{}, {} secrets", version, secrets.len()),
-                    value_column,
+                    SYNC_LINE_WIDTH,
                 ));
                 remote_data.push((rem.name().to_string(), secrets, version));
             }
             Ok(None) => {
-                lines.push(format_sync_line(
+                lines.push(ui::format_dashboard_line(
                     &format!("↓ {}", rem.name()),
                     &style("no data").dim().to_string(),
-                    value_column,
+                    SYNC_LINE_WIDTH,
                 ));
             }
             Err(_) => {
-                lines.push(format_sync_line(
+                lines.push(ui::format_dashboard_line(
                     &format!("↓ {}", rem.name()),
                     &style("failed").red().to_string(),
-                    value_column,
+                    SYNC_LINE_WIDTH,
                 ));
                 pull_failures.push(rem.name().to_string());
             }
@@ -254,25 +241,25 @@ pub fn run_with_runner(
     if dry_run {
         if result.local_changed {
             let label = env_version_label(&result.merged_payload, env);
-            status_line = format!("{} Would merge → {}", style("↻").yellow(), label);
+            status_line = format!("{} Would merge → {}", ui::icon_merge(), label);
         } else if result.sources_to_update.is_empty() {
             let label = env_version_label(&payload, env);
-            status_line = format!("{} Up to date → {}", style("✔").green(), label);
+            status_line = format!("{} Up to date → {}", ui::icon_success(), label);
         }
 
         if !result.sources_to_update.is_empty() {
             for name in &result.sources_to_update {
-                lines.push(format_sync_line(
+                lines.push(ui::format_dashboard_line(
                     &format!("↑ {name}"),
                     &style("would push").dim().to_string(),
-                    value_column,
+                    SYNC_LINE_WIDTH,
                 ));
             }
             if result.has_drift {
                 let label = env_version_label(&payload, env);
                 status_line = format!(
                     "{} Current ({}), would repair drift",
-                    style("↻").yellow(),
+                    ui::icon_merge(),
                     label
                 );
             }
@@ -321,13 +308,13 @@ pub fn run_with_runner(
 
         store.set_payload(&result.merged_payload)?;
         let label = env_version_label(&result.merged_payload, env);
-        status_line = format!("{} Merged → {}", style("↻").yellow(), label);
+        status_line = format!("{} Merged → {}", ui::icon_merge(), label);
     } else {
         let label = env_version_label(&payload, env);
         if result.has_drift {
-            status_line = format!("{} Stale remotes (repairing...)", style("↻").yellow());
+            status_line = format!("{} Stale remotes (repairing...)", ui::icon_merge());
         } else {
-            status_line = format!("{} Up to date → {}", style("✔").green(), label);
+            status_line = format!("{} Up to date → {}", ui::icon_success(), label);
         }
     }
 
@@ -351,18 +338,18 @@ pub fn run_with_runner(
         for rem in &stale_remotes {
             match rem.push(updated_payload, config, env) {
                 Ok(()) => {
-                    lines.push(format_sync_line(
+                    lines.push(ui::format_dashboard_line(
                         &format!("↑ {}", rem.name()),
                         &style("synced").green().to_string(),
-                        value_column,
+                        SYNC_LINE_WIDTH,
                     ));
                     sync_index.record_success(rem.name(), env, pushed_version);
                 }
                 Err(e) => {
-                    lines.push(format_sync_line(
+                    lines.push(ui::format_dashboard_line(
                         &format!("↑ {}", rem.name()),
                         &style("failed").red().to_string(),
-                        value_column,
+                        SYNC_LINE_WIDTH,
                     ));
                     sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                     pushback_failures += 1;
