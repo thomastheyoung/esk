@@ -454,6 +454,32 @@ secrets:
         env: [web:dev, web:prod]
 "#;
 
+/// Config with required-variable auditing for testing.
+pub const REQUIRED_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+targets:
+  env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix: { dev: "", prod: ".production" }
+secrets:
+  General:
+    DB_URL:
+      targets:
+        env: [web:dev, web:prod]
+    ANALYTICS:
+      required: false
+      targets:
+        env: [web:dev, web:prod]
+    SENTRY_DSN:
+      required: [prod]
+      targets:
+        env: [web:dev, web:prod]
+"#;
+
 /// Records calls made to a mock command runner.
 #[derive(Debug, Clone)]
 pub struct RecordedCall {

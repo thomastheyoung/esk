@@ -294,6 +294,7 @@ mod tests {
             description: None,
             targets: BTreeMap::new(),
             validate: None,
+            required: Default::default(),
         }
     }
 
@@ -302,6 +303,7 @@ mod tests {
             description: None,
             targets: BTreeMap::new(),
             validate: Some(v),
+            required: Default::default(),
         }
     }
 

@@ -104,6 +104,7 @@ struct Dashboard {
     deployed: Vec<DeployEntry>,
     unset: Vec<DeployEntry>,
     validation_warnings: Vec<ValidationWarning>,
+    missing_required: Vec<crate::config::MissingRequirement>,
     coverage_gaps: Vec<CoverageGap>,
     orphans: Vec<Orphan>,
     remote_states: Vec<RemoteState>,
@@ -211,7 +212,11 @@ impl Dashboard {
             }
         }
 
-        // 4. Coverage gaps: secrets declared in config but missing values in some envs
+        // 4. Required secret checks
+        let missing_required =
+            config.check_requirements(&resolved, all_secrets, env, Some(&target_names));
+
+        // 5. Coverage gaps: secrets declared in config but missing values in some envs
         let mut coverage_gaps = Vec::new();
         for secret in &resolved {
             let secret_envs: BTreeSet<&str> = secret
@@ -244,7 +249,7 @@ impl Dashboard {
             }
         }
 
-        // 5. Orphans: secrets in store but not in config
+        // 6. Orphans: secrets in store but not in config
         let config_keys: BTreeSet<&str> = config
             .secrets
             .values()
@@ -266,7 +271,7 @@ impl Dashboard {
             }
         }
 
-        // 6. Remote states
+        // 7. Remote states
         let sync_index_path = config.root.join(".esk/sync-index.json");
         let sync_index = SyncIndex::load(&sync_index_path);
         let remote_names: Vec<&String> = config.remotes.keys().collect();
@@ -306,7 +311,7 @@ impl Dashboard {
             }
         }
 
-        // 7. Next steps
+        // 8. Next steps
         let mut next_steps = Vec::new();
 
         // Failed deploys
@@ -322,6 +327,14 @@ impl Dashboard {
             next_steps.push(NextStep {
                 command: format!("esk set {} --env {}", w.key, w.env),
                 description: format!("fix: {}", w.message),
+            });
+        }
+
+        // Missing required secrets
+        for m in &missing_required {
+            next_steps.push(NextStep {
+                command: format!("esk set {} --env {}", m.key, m.env),
+                description: "required secret missing".to_string(),
             });
         }
 
@@ -393,6 +406,7 @@ impl Dashboard {
             deployed,
             unset,
             validation_warnings,
+            missing_required,
             coverage_gaps,
             orphans,
             remote_states,
@@ -428,11 +442,15 @@ impl Dashboard {
             if !self.validation_warnings.is_empty() {
                 parts.push(format!("{} invalid", self.validation_warnings.len()));
             }
+            if !self.missing_required.is_empty() {
+                parts.push(format!("{} required missing", self.missing_required.len()));
+            }
 
             let all_deployed = self.failed.is_empty()
                 && self.pending.is_empty()
                 && self.unset.is_empty()
-                && self.validation_warnings.is_empty();
+                && self.validation_warnings.is_empty()
+                && self.missing_required.is_empty();
 
             if all_deployed {
                 format!(
@@ -617,6 +635,25 @@ impl Dashboard {
                 ));
             }
             cliclack::log::step(format!("Validation\n{}", val_lines.join("\n")))?;
+        }
+
+        // Required section
+        if !self.missing_required.is_empty() {
+            let mut req_lines = Vec::new();
+            req_lines.push(format!(
+                "  {} {}",
+                style("!").red(),
+                style(format!("{} required missing", self.missing_required.len()))
+                    .red()
+                    .bold()
+            ));
+            for m in &self.missing_required {
+                req_lines.push(format!(
+                    "     {}",
+                    style(format!("{}:{}", m.key, m.env)).dim(),
+                ));
+            }
+            cliclack::log::step(format!("Requirements\n{}", req_lines.join("\n")))?;
         }
 
         // Coverage section

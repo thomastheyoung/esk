@@ -1,6 +1,6 @@
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use crate::store::{validate_app, validate_environment, validate_key, validate_project};
@@ -305,6 +305,76 @@ pub struct SopsRemoteConfig {
     pub path: String,
 }
 
+/// Whether a secret is required to have a value before deploy.
+///
+/// YAML forms: `required: true`, `required: false`, `required: [prod, staging]`.
+/// Defaults to `All` (required in all targeted environments) when omitted.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub enum Required {
+    /// Required in all targeted environments (`true` or absent).
+    #[default]
+    All,
+    /// Not required in any environment (`false`).
+    None,
+    /// Required only in the listed environments.
+    Environments(Vec<String>),
+}
+
+impl Required {
+    /// Check whether a secret is required in the given environment.
+    pub fn is_required_in(&self, env: &str) -> bool {
+        match self {
+            Required::All => true,
+            Required::None => false,
+            Required::Environments(envs) => envs.iter().any(|e| e == env),
+        }
+    }
+}
+
+impl Serialize for Required {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self {
+            Required::All => serializer.serialize_bool(true),
+            Required::None => serializer.serialize_bool(false),
+            Required::Environments(envs) => envs.serialize(serializer),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Required {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = serde_yaml::Value::deserialize(deserializer)?;
+        match value {
+            serde_yaml::Value::Bool(true) => Ok(Required::All),
+            serde_yaml::Value::Bool(false) => Ok(Required::None),
+            serde_yaml::Value::Sequence(seq) => {
+                let mut envs = Vec::with_capacity(seq.len());
+                for item in seq {
+                    match item {
+                        serde_yaml::Value::String(s) => envs.push(s),
+                        other => {
+                            return Err(serde::de::Error::custom(format!(
+                                "expected string in required list, got {:?}",
+                                other
+                            )));
+                        }
+                    }
+                }
+                if envs.is_empty() {
+                    return Err(serde::de::Error::custom(
+                        "required environment list must not be empty",
+                    ));
+                }
+                Ok(Required::Environments(envs))
+            }
+            other => Err(serde::de::Error::custom(format!(
+                "expected bool or list for 'required', got {:?}",
+                other
+            ))),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SecretDef {
     #[serde(default)]
@@ -313,6 +383,8 @@ pub struct SecretDef {
     pub targets: BTreeMap<String, Vec<String>>,
     #[serde(default)]
     pub validate: Option<crate::validate::Validation>,
+    #[serde(default)]
+    pub required: Required,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -330,6 +402,14 @@ pub struct ResolvedSecret {
     pub description: Option<String>,
     pub targets: Vec<ResolvedTarget>,
     pub validation: Option<crate::validate::Validation>,
+    pub required: Required,
+}
+
+/// A secret that is required but has no stored value.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MissingRequirement {
+    pub key: String,
+    pub env: String,
 }
 
 /// Check whether `target` stays within `root` after normalizing `..` components.
@@ -440,6 +520,20 @@ impl Config {
                     for target_str in targets {
                         self.validate_target_string(service, target_str)
                             .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
+                    }
+                }
+
+                // Validate required environment references
+                if let Required::Environments(ref envs) = def.required {
+                    let env_set: BTreeSet<&str> =
+                        self.environments.iter().map(|s| s.as_str()).collect();
+                    for req_env in envs {
+                        if !env_set.contains(req_env.as_str()) {
+                            bail!(
+                                "secret '{key}': required environment '{req_env}' \
+                                 is not in environments list"
+                            );
+                        }
                     }
                 }
             }
@@ -579,6 +673,7 @@ impl Config {
                     description: def.description.clone(),
                     targets,
                     validation: def.validate.clone(),
+                    required: def.required.clone(),
                 });
             }
         }
@@ -593,6 +688,57 @@ impl Config {
             }
         }
         None
+    }
+
+    /// Check which required secrets are missing values in the store.
+    ///
+    /// Returns a list of `MissingRequirement` entries for secrets that are
+    /// required but have no stored value. When `env_filter` is set, only
+    /// checks the given environment. When `target_filter` is set, only
+    /// checks secrets targeting those services.
+    pub fn check_requirements(
+        &self,
+        resolved: &[ResolvedSecret],
+        secrets: &BTreeMap<String, String>,
+        env_filter: Option<&str>,
+        target_filter: Option<&[&str]>,
+    ) -> Vec<MissingRequirement> {
+        let mut missing = Vec::new();
+        // Deduplicate by (key, env) — a secret missing in an env only needs
+        // to be reported once, even if it targets multiple services.
+        let mut seen: BTreeSet<(String, String)> = BTreeSet::new();
+        for secret in resolved {
+            for target in &secret.targets {
+                if let Some(filter) = env_filter {
+                    if target.environment != filter {
+                        continue;
+                    }
+                }
+                if let Some(targets) = target_filter {
+                    if !targets.contains(&target.service.as_str()) {
+                        continue;
+                    }
+                }
+                if !secret.required.is_required_in(&target.environment) {
+                    continue;
+                }
+                let composite = format!("{}:{}", secret.key, target.environment);
+                if secrets.contains_key(&composite) {
+                    continue;
+                }
+                // TODO: when defaults land (esk-9f9), check default here too
+                let pair = (secret.key.clone(), target.environment.clone());
+                if seen.contains(&pair) {
+                    continue;
+                }
+                seen.insert(pair);
+                missing.push(MissingRequirement {
+                    key: secret.key.clone(),
+                    env: target.environment.clone(),
+                });
+            }
+        }
+        missing
     }
 
     /// Resolve the env file path for an (app, env) pair.
@@ -1818,5 +1964,273 @@ secrets:
         let config = Config::load(&path).unwrap();
         let (_, def) = config.find_secret("KEY").unwrap();
         assert!(def.validate.is_none());
+    }
+
+    // --- Required parsing ---
+
+    #[test]
+    fn required_defaults_to_all() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    KEY: {}
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("KEY").unwrap();
+        assert_eq!(def.required, Required::All);
+    }
+
+    #[test]
+    fn required_true_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    KEY:
+      required: true
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("KEY").unwrap();
+        assert_eq!(def.required, Required::All);
+    }
+
+    #[test]
+    fn required_false_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+secrets:
+  General:
+    KEY:
+      required: false
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("KEY").unwrap();
+        assert_eq!(def.required, Required::None);
+    }
+
+    #[test]
+    fn required_environments_parses() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod, staging]
+secrets:
+  General:
+    KEY:
+      required: [prod, staging]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let (_, def) = config.find_secret("KEY").unwrap();
+        assert_eq!(
+            def.required,
+            Required::Environments(vec!["prod".to_string(), "staging".to_string()])
+        );
+    }
+
+    #[test]
+    fn required_unknown_env_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+secrets:
+  General:
+    KEY:
+      required: [prod, nonexistent]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("nonexistent"),
+            "expected error about nonexistent env, got: {}",
+            err
+        );
+    }
+
+    // --- is_required_in ---
+
+    #[test]
+    fn is_required_in_all() {
+        assert!(Required::All.is_required_in("prod"));
+        assert!(Required::All.is_required_in("dev"));
+    }
+
+    #[test]
+    fn is_required_in_none() {
+        assert!(!Required::None.is_required_in("prod"));
+        assert!(!Required::None.is_required_in("dev"));
+    }
+
+    #[test]
+    fn is_required_in_specific() {
+        let req = Required::Environments(vec!["prod".to_string(), "staging".to_string()]);
+        assert!(req.is_required_in("prod"));
+        assert!(req.is_required_in("staging"));
+        assert!(!req.is_required_in("dev"));
+    }
+
+    // --- check_requirements ---
+
+    #[test]
+    fn check_requirements_finds_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+targets:
+  netlify:
+    site: my-site
+secrets:
+  General:
+    KEY:
+      targets:
+        netlify: [dev, prod]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let secrets = BTreeMap::new(); // empty store
+        let missing = config.check_requirements(&resolved, &secrets, None, None);
+        assert_eq!(missing.len(), 2);
+        assert!(missing.iter().any(|m| m.key == "KEY" && m.env == "dev"));
+        assert!(missing.iter().any(|m| m.key == "KEY" && m.env == "prod"));
+    }
+
+    #[test]
+    fn check_requirements_satisfied() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+targets:
+  netlify:
+    site: my-site
+secrets:
+  General:
+    KEY:
+      targets:
+        netlify: [dev, prod]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let mut secrets = BTreeMap::new();
+        secrets.insert("KEY:dev".to_string(), "val".to_string());
+        secrets.insert("KEY:prod".to_string(), "val".to_string());
+        let missing = config.check_requirements(&resolved, &secrets, None, None);
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn check_requirements_optional_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+targets:
+  netlify:
+    site: my-site
+secrets:
+  General:
+    KEY:
+      required: false
+      targets:
+        netlify: [dev, prod]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let secrets = BTreeMap::new(); // empty store
+        let missing = config.check_requirements(&resolved, &secrets, None, None);
+        assert!(missing.is_empty());
+    }
+
+    #[test]
+    fn check_requirements_env_scoped() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+targets:
+  netlify:
+    site: my-site
+secrets:
+  General:
+    KEY:
+      required: [prod]
+      targets:
+        netlify: [dev, prod]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let secrets = BTreeMap::new(); // empty store
+        let missing = config.check_requirements(&resolved, &secrets, None, None);
+        // Only prod should be reported missing, not dev
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].key, "KEY");
+        assert_eq!(missing[0].env, "prod");
+    }
+
+    #[test]
+    fn check_requirements_respects_env_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev, prod]
+targets:
+  netlify:
+    site: my-site
+secrets:
+  General:
+    KEY:
+      targets:
+        netlify: [dev, prod]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let secrets = BTreeMap::new();
+        // Filter to dev only
+        let missing = config.check_requirements(&resolved, &secrets, Some("dev"), None);
+        assert_eq!(missing.len(), 1);
+        assert_eq!(missing[0].env, "dev");
+    }
+
+    #[test]
+    fn check_requirements_deduplicates_across_targets() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  netlify:
+    site: my-site
+  railway: {}
+secrets:
+  General:
+    KEY:
+      targets:
+        netlify: [dev]
+        railway: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let secrets = BTreeMap::new();
+        let missing = config.check_requirements(&resolved, &secrets, None, None);
+        // KEY:dev should appear only once, not once per target
+        assert_eq!(missing.len(), 1);
     }
 }

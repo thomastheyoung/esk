@@ -1,3 +1,5 @@
+use std::io::IsTerminal;
+
 use anyhow::{bail, Result};
 
 use crate::config::Config;
@@ -25,6 +27,28 @@ pub fn run_with_runner(
 
     if config.find_secret(key).is_none() {
         cliclack::log::warning(format!("Secret '{}' is not defined in esk.yaml", key))?;
+    }
+
+    // Warn if deleting a required secret
+    if let Some((_, def)) = config.find_secret(key) {
+        if def.required.is_required_in(env) && std::io::stdin().is_terminal() {
+            let targets: Vec<String> = def.targets.keys().map(|t| t.to_string()).collect();
+            let target_list = if targets.is_empty() {
+                String::new()
+            } else {
+                format!(" (targets: {})", targets.join(", "))
+            };
+            let confirm = cliclack::confirm(format!(
+                "{}:{} is required{}. Delete anyway?",
+                key, env, target_list,
+            ))
+            .initial_value(false)
+            .interact()?;
+            if !confirm {
+                cliclack::log::info("Cancelled.")?;
+                return Ok(());
+            }
+        }
     }
 
     let store = SecretStore::open(&config.root)?;
@@ -57,7 +81,8 @@ pub fn run_with_runner(
     }
 
     // Auto-deploy targets (env files regenerate without deleted key; individual targets delete)
-    crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, false, runner)?;
+    // skip_requirements: the user intentionally deleted this secret
+    crate::cli::deploy::run_with_runner(config, Some(env), false, false, false, false, true, runner)?;
 
     if remote_failures > 0 {
         bail!("{remote_failures} remote(s) failed to push. Run `esk sync --env {env}` to retry.");

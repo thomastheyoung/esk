@@ -23,6 +23,7 @@ pub fn run(
     dry_run: bool,
     verbose: bool,
     skip_validation: bool,
+    skip_requirements: bool,
 ) -> Result<()> {
     run_with_runner(
         config,
@@ -31,6 +32,7 @@ pub fn run(
         dry_run,
         verbose,
         skip_validation,
+        skip_requirements,
         &RealCommandRunner,
     )
 }
@@ -43,6 +45,7 @@ pub fn run_with_runner(
     dry_run: bool,
     verbose: bool,
     skip_validation: bool,
+    skip_requirements: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
@@ -103,6 +106,34 @@ pub fn run_with_runner(
             anyhow::bail!(
                 "Validation failed:\n{}\n  Use --skip-validation to bypass",
                 validation_errors.join("\n")
+            );
+        }
+    }
+
+    // Check required secrets have values (only for available targets)
+    let available_targets: Vec<&str> = deploy_targets.iter().map(|t| t.name()).collect();
+    let missing =
+        config.check_requirements(&resolved, &payload.secrets, env, Some(&available_targets));
+    if !missing.is_empty() {
+        if dry_run {
+            for m in &missing {
+                cliclack::log::warning(format!("Missing required: {}:{}", m.key, m.env,))?;
+            }
+        } else if !force && !skip_requirements {
+            let lines: Vec<String> = missing
+                .iter()
+                .map(|m| format!("  {}:{}", m.key, m.env))
+                .collect();
+            anyhow::bail!(
+                "Required secrets missing:\n{}\n\n  \
+                 Set them with:\n{}\n\n  \
+                 Use --force to deploy anyway",
+                lines.join("\n"),
+                missing
+                    .iter()
+                    .map(|m| format!("  esk set {} --env {}", m.key, m.env))
+                    .collect::<Vec<_>>()
+                    .join("\n"),
             );
         }
     }

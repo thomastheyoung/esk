@@ -44,6 +44,7 @@ fn run() -> Result<()> {
                 *dry_run,
                 *verbose,
                 *skip_validation,
+                false,
             )?;
         }
         Commands::Init => {
