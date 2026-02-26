@@ -786,17 +786,17 @@ Preflight runs `docker info --format {{.Swarm.LocalNodeState}}` and verifies the
 targets:
   docker:
     name_pattern: "{project}-{environment}-{key}" # optional, this is the default
-    labels:                                         # optional
+    labels: # optional
       managed-by: esk
-    env_flags:                                      # optional
+    env_flags: # optional
       prod: "--context prod-swarm"
 ```
 
-| Field          | Required | Default                             | Description                                                                                           |
-| -------------- | -------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| `name_pattern` | No       | `{project}-{environment}-{key}`     | Name template for Docker secrets. Supports `{project}`, `{environment}`, and `{key}` placeholders.   |
-| `labels`       | No       | —                                   | Static `--label key=value` flags applied to all created secrets. Useful for organizational tagging.   |
-| `env_flags`    | No       | —                                   | Map of environment name to extra CLI flags appended to docker commands.                               |
+| Field          | Required | Default                         | Description                                                                                         |
+| -------------- | -------- | ------------------------------- | --------------------------------------------------------------------------------------------------- |
+| `name_pattern` | No       | `{project}-{environment}-{key}` | Name template for Docker secrets. Supports `{project}`, `{environment}`, and `{key}` placeholders.  |
+| `labels`       | No       | —                               | Static `--label key=value` flags applied to all created secrets. Useful for organizational tagging. |
+| `env_flags`    | No       | —                               | Map of environment name to extra CLI flags appended to docker commands.                             |
 
 ### Name resolution
 
@@ -804,10 +804,10 @@ Docker secrets are global within a swarm. The `name_pattern` prevents collisions
 
 **Examples with `name_pattern: "{project}-{environment}-{key}"`:**
 
-| Project | Environment | Key            | Docker secret name         |
-| ------- | ----------- | -------------- | -------------------------- |
-| `myapp` | `dev`       | `DATABASE_URL` | `myapp-dev-DATABASE_URL`   |
-| `myapp` | `prod`      | `API_KEY`      | `myapp-prod-API_KEY`       |
+| Project | Environment | Key            | Docker secret name       |
+| ------- | ----------- | -------------- | ------------------------ |
+| `myapp` | `dev`       | `DATABASE_URL` | `myapp-dev-DATABASE_URL` |
+| `myapp` | `prod`      | `API_KEY`      | `myapp-prod-API_KEY`     |
 
 ### Command executed
 

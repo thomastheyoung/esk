@@ -77,11 +77,11 @@ esk status --env dev
 
 `esk init` creates:
 
-| File                     | Purpose                                                        | Commit to git |
-| ------------------------ | -------------------------------------------------------------- | ------------- |
-| `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets) | Yes           |
-| `.esk/store.enc`         | Encrypted secret store                                         | Yes           |
-| `.esk/store.key`         | Local encryption key (32-byte hex)                             | No            |
+| File                     | Purpose                                                        | Commit to git   |
+| ------------------------ | -------------------------------------------------------------- | --------------- |
+| `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets) | Yes             |
+| `.esk/store.enc`         | Encrypted secret store                                         | Yes             |
+| `.esk/store.key`         | Local encryption key (32-byte hex)                             | No              |
 | `.esk/deploy-index.json` | Deploy state tracker                                           | No (gitignored) |
 | `.esk/sync-index.json`   | Sync state tracker                                             | No (gitignored) |
 

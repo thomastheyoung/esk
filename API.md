@@ -297,15 +297,15 @@ Sync secrets with configured remotes. Pulls from remotes, reconciles with the lo
 esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--bail] [--force] [--with-deploy] [--prefer <local|remote>]
 ```
 
-| Argument        | Required | Description                                                                 |
-| --------------- | -------- | --------------------------------------------------------------------------- |
-| `--env`         | No       | Environment to sync (omit to sync all configured environments)              |
-| `--only`        | No       | Sync a specific remote only                                                 |
-| `--dry-run`     | No       | Show what would change without modifying anything                           |
-| `--bail`        | No       | Fail on first error (remote pull failure or per-environment failure)         |
-| `--force`       | No       | Bypass version jump protection (use with caution)                           |
-| `--with-deploy` | No       | Auto-run `deploy` after syncing                                             |
-| `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)         |
+| Argument        | Required | Description                                                          |
+| --------------- | -------- | -------------------------------------------------------------------- |
+| `--env`         | No       | Environment to sync (omit to sync all configured environments)       |
+| `--only`        | No       | Sync a specific remote only                                          |
+| `--dry-run`     | No       | Show what would change without modifying anything                    |
+| `--bail`        | No       | Fail on first error (remote pull failure or per-environment failure) |
+| `--force`       | No       | Bypass version jump protection (use with caution)                    |
+| `--with-deploy` | No       | Auto-run `deploy` after syncing                                      |
+| `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)  |
 
 **Requires:** At least one remote configured in `esk.yaml`. Remotes that fail preflight are skipped; if none remain, sync exits with a warning and no changes.
 
@@ -335,11 +335,11 @@ esk sync --env prod --dry-run           # Preview changes
 
 ## Files
 
-| File                     | Description                               | Commit to git? |
-| ------------------------ | ----------------------------------------- | -------------- |
-| `esk.yaml`               | Project configuration                     | Yes            |
-| `.esk/store.enc`         | AES-256-GCM encrypted secret store        | Yes            |
-| `.esk/store.key`         | 32-byte encryption key (hex)              | **No**         |
+| File                     | Description                               | Commit to git?  |
+| ------------------------ | ----------------------------------------- | --------------- |
+| `esk.yaml`               | Project configuration                     | Yes             |
+| `.esk/store.enc`         | AES-256-GCM encrypted secret store        | Yes             |
+| `.esk/store.key`         | 32-byte encryption key (hex)              | **No**          |
 | `.esk/deploy-index.json` | Deploy state (hashes, timestamps, status) | No (gitignored) |
 | `.esk/sync-index.json`   | Sync state (versions, timestamps)         | No (gitignored) |
 
