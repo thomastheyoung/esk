@@ -22,6 +22,17 @@ pub struct DeployOptions<'a> {
     pub prune: bool,
 }
 
+/// Maximum number of orphans allowed without `--force`.
+const PRUNE_THRESHOLD: usize = 10;
+
+#[derive(Default)]
+struct EnvStatus {
+    deployed: usize,
+    failed: usize,
+    unset: usize,
+    pruned: usize,
+}
+
 /// A single deploy result entry for display.
 struct DeployEntry {
     key: String,
@@ -279,6 +290,9 @@ pub fn run_with_runner(
     let mut unset: Vec<DeployEntry> = Vec::new();
     let mut pruned: Vec<DeployEntry> = Vec::new();
 
+    // Batch groups that had at least one failure (skip pruning for these)
+    let mut failed_batch_groups: BTreeSet<(String, Option<String>, String)> = BTreeSet::new();
+
     // Orphan detection and prune work collection
     let mut prune_individual: Vec<crate::orphan::TargetOrphan> = Vec::new();
     let mut batch_prune_keys: BTreeMap<(String, Option<String>, String), Vec<crate::orphan::TargetOrphan>> = BTreeMap::new();
@@ -287,7 +301,6 @@ pub fn run_with_runner(
     if prune {
         let orphans = crate::orphan::detect(&index, &resolved, env);
         if !orphans.is_empty() {
-            const PRUNE_THRESHOLD: usize = 10;
             if orphans.len() > PRUNE_THRESHOLD && !force {
                 anyhow::bail!(
                     "{} orphaned secrets detected (threshold: {PRUNE_THRESHOLD}). \
@@ -300,11 +313,7 @@ pub fn run_with_runner(
                 let lines: Vec<String> = orphans
                     .iter()
                     .map(|o| {
-                        let target_display = match &o.app {
-                            Some(a) => format!("{}:{}", o.service, a),
-                            None => o.service.clone(),
-                        };
-                        format!("  {} → {} ({})", o.key, target_display, o.env)
+                        format!("  {} → {} ({})", o.key, o.target_display(), o.env)
                     })
                     .collect();
                 cliclack::log::warning(format!(
@@ -370,7 +379,7 @@ pub fn run_with_runner(
                     unset.push(DeployEntry {
                         key: secret.key.clone(),
                         env: target.environment.clone(),
-                        target: format_target(target),
+                        target: target.target_display(),
                         error: None,
                     });
                     if verbose {
@@ -408,7 +417,7 @@ pub fn run_with_runner(
                         skipped.push(DeployEntry {
                             key: secret.key.clone(),
                             env: target.environment.clone(),
-                            target: format_target(target),
+                            target: target.target_display(),
                             error: None,
                         });
                     }
@@ -464,7 +473,7 @@ pub fn run_with_runner(
             app: app.clone(),
             environment: target_env.clone(),
         };
-        let target_display = format_target(&target);
+        let target_display = target.target_display();
 
         // Gather all secrets that target this (target, app, env)
         let mut secrets_for_batch: Vec<SecretValue> = Vec::new();
@@ -572,6 +581,11 @@ pub fn run_with_runner(
                     target: target_display.clone(),
                     error: Some(error),
                 });
+                failed_batch_groups.insert((
+                    target_name.clone(),
+                    app.clone(),
+                    target_env.clone(),
+                ));
             }
         }
 
@@ -581,13 +595,23 @@ pub fn run_with_runner(
         }
     }
 
-    // Remove batch orphan tracker keys (batch regeneration excludes orphaned secrets)
+    // Remove batch orphan tracker keys (batch regeneration excludes orphaned secrets).
+    // Skip groups that had deploy failures — the batch output may be incomplete.
     for ((target_name, app, target_env), orphan_list) in &batch_prune_keys {
-        let target_display = match app {
-            Some(a) => format!("{target_name}:{a}"),
-            None => target_name.clone(),
-        };
+        let group_key = (target_name.clone(), app.clone(), target_env.clone());
+        if failed_batch_groups.contains(&group_key) {
+            for orphan in orphan_list {
+                failed.push(DeployEntry {
+                    key: orphan.key.clone(),
+                    env: target_env.clone(),
+                    target: orphan.target_display(),
+                    error: Some("skipped: batch deploy had failures".to_string()),
+                });
+            }
+            continue;
+        }
         for orphan in orphan_list {
+            let target_display = orphan.target_display();
             if dry_run {
                 pruned.push(DeployEntry {
                     key: orphan.key.clone(),
@@ -612,7 +636,7 @@ pub fn run_with_runner(
 
     // Handle individual targets
     for (key, value, target) in &individual_work {
-        let target_display = format_target(target);
+        let target_display = target.target_display();
 
         if dry_run {
             deployed.push(DeployEntry {
@@ -722,7 +746,7 @@ pub fn run_with_runner(
                     deployed.push(DeployEntry {
                         key: bare_key.to_string(),
                         env: tomb_env.to_string(),
-                        target: format_target(target),
+                        target: target.target_display(),
                         error: None,
                     });
                     continue;
@@ -735,27 +759,27 @@ pub fn run_with_runner(
                     Ok(()) => {
                         index.record_success(
                             tracker_key,
-                            format_target(target),
+                            target.target_display(),
                             DeployIndex::TOMBSTONE_HASH.to_string(),
                         );
                         deployed.push(DeployEntry {
                             key: bare_key.to_string(),
                             env: tomb_env.to_string(),
-                            target: format_target(target),
+                            target: target.target_display(),
                             error: None,
                         });
                     }
                     Err(e) => {
                         index.record_failure(
                             tracker_key,
-                            format_target(target),
+                            target.target_display(),
                             DeployIndex::TOMBSTONE_HASH.to_string(),
                             e.to_string(),
                         );
                         failed.push(DeployEntry {
                             key: bare_key.to_string(),
                             env: tomb_env.to_string(),
-                            target: format_target(target),
+                            target: target.target_display(),
                             error: Some(e.to_string()),
                         });
                     }
@@ -767,12 +791,12 @@ pub fn run_with_runner(
 
     // Process individual orphan deletions (prune)
     for orphan in &prune_individual {
+        let target_display = orphan.target_display();
         let target = crate::config::ResolvedTarget {
             service: orphan.service.clone(),
             app: orphan.app.clone(),
             environment: orphan.env.clone(),
         };
-        let target_display = format_target(&target);
 
         if dry_run {
             pruned.push(DeployEntry {
@@ -803,6 +827,7 @@ pub fn run_with_runner(
                     target: target_display,
                     error: None,
                 });
+                index.save()?;
             }
             Err(e) => {
                 failed.push(DeployEntry {
@@ -813,7 +838,6 @@ pub fn run_with_runner(
                 });
             }
         }
-        index.save()?;
     }
 
     // Warn about orphans whose target is no longer configured
@@ -821,11 +845,7 @@ pub fn run_with_runner(
         let lines: Vec<String> = unavailable_orphans
             .iter()
             .map(|o| {
-                let target_display = match &o.app {
-                    Some(a) => format!("{}:{}", o.service, a),
-                    None => o.service.clone(),
-                };
-                format!("  {} → {} ({})", o.key, target_display, o.env)
+                format!("  {} → {} ({})", o.key, o.target_display(), o.env)
             })
             .collect();
         cliclack::log::warning(format!(
@@ -855,7 +875,7 @@ pub fn run_with_runner(
                         skipped.push(DeployEntry {
                             key: secret.key.clone(),
                             env: target.environment.clone(),
-                            target: format_target(target),
+                            target: target.target_display(),
                             error: None,
                         });
                     }
@@ -887,8 +907,7 @@ pub fn run_with_runner(
     } else {
         // Group everything by environment for framed output
         let mut env_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        // (deployed, failed, unset, pruned)
-        let mut env_status: BTreeMap<String, (usize, usize, usize, usize)> = BTreeMap::new();
+        let mut env_status: BTreeMap<String, EnvStatus> = BTreeMap::new();
 
         for entry in &deployed {
             let label = format!("{} {}", style("✔").green(), style(&entry.key).dim());
@@ -896,7 +915,7 @@ pub fn run_with_runner(
                 .entry(entry.env.clone())
                 .or_default()
                 .push(ui::format_dashboard_line(&label, &entry.target, width));
-            env_status.entry(entry.env.clone()).or_insert((0, 0, 0, 0)).0 += 1;
+            env_status.entry(entry.env.clone()).or_default().deployed += 1;
         }
 
         for entry in &failed {
@@ -906,7 +925,7 @@ pub fn run_with_runner(
             if let Some(err) = &entry.error {
                 lines.push(format!("      {}", style(format!("({err})")).red().dim()));
             }
-            env_status.entry(entry.env.clone()).or_insert((0, 0, 0, 0)).1 += 1;
+            env_status.entry(entry.env.clone()).or_default().failed += 1;
         }
 
         for entry in &unset {
@@ -915,7 +934,7 @@ pub fn run_with_runner(
                 .entry(entry.env.clone())
                 .or_default()
                 .push(ui::format_dashboard_line(&label, &entry.target, width));
-            env_status.entry(entry.env.clone()).or_insert((0, 0, 0, 0)).2 += 1;
+            env_status.entry(entry.env.clone()).or_default().unset += 1;
         }
 
         for entry in &pruned {
@@ -924,27 +943,27 @@ pub fn run_with_runner(
                 .entry(entry.env.clone())
                 .or_default()
                 .push(ui::format_dashboard_line(&label, &format!("{} (pruned)", entry.target), width));
-            env_status.entry(entry.env.clone()).or_insert((0, 0, 0, 0)).3 += 1;
+            env_status.entry(entry.env.clone()).or_default().pruned += 1;
         }
 
         for (env_name, mut lines) in env_map {
-            let (s_cnt, f_cnt, u_cnt, p_cnt) = env_status.get(&env_name).unwrap();
+            let es = env_status.get(&env_name).unwrap();
             let mut status_parts = Vec::new();
-            if *f_cnt > 0 {
-                status_parts.push(format!("{} failed", f_cnt));
+            if es.failed > 0 {
+                status_parts.push(format!("{} failed", es.failed));
             }
-            if *s_cnt > 0 {
-                status_parts.push(format!("{} deployed", s_cnt));
+            if es.deployed > 0 {
+                status_parts.push(format!("{} deployed", es.deployed));
             }
-            if *u_cnt > 0 {
-                status_parts.push(format!("{} unset", u_cnt));
+            if es.unset > 0 {
+                status_parts.push(format!("{} unset", es.unset));
             }
-            if *p_cnt > 0 {
-                status_parts.push(format!("{} pruned", p_cnt));
+            if es.pruned > 0 {
+                status_parts.push(format!("{} pruned", es.pruned));
             }
 
             lines.push(String::new());
-            let status_icon = if *f_cnt > 0 {
+            let status_icon = if es.failed > 0 {
                 style("✗").red()
             } else {
                 style("✔").green()
@@ -996,11 +1015,3 @@ pub fn run_with_runner(
     Ok(())
 }
 
-fn format_target(target: &crate::config::ResolvedTarget) -> String {
-    let mut s = target.service.clone();
-    if let Some(app) = &target.app {
-        s.push(':');
-        s.push_str(app);
-    }
-    s
-}

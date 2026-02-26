@@ -967,6 +967,16 @@ impl Config {
     }
 }
 
+impl ResolvedTarget {
+    /// Display as "service" or "service:app" (without environment).
+    pub fn target_display(&self) -> String {
+        match &self.app {
+            Some(a) => format!("{}:{}", self.service, a),
+            None => self.service.clone(),
+        }
+    }
+}
+
 impl std::fmt::Display for ResolvedTarget {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.service)?;

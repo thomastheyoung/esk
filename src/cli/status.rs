@@ -2,7 +2,7 @@ use anyhow::Result;
 use console::style;
 use std::collections::BTreeSet;
 
-use crate::config::{Config, ResolvedTarget};
+use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::remotes::{check_remote_health, RemoteHealth};
 use crate::store::SecretStore;
@@ -153,7 +153,7 @@ impl Dashboard {
                 let entry = DeployEntry {
                     key: secret.key.clone(),
                     env: target.environment.clone(),
-                    target: format_target(target),
+                    target: target.target_display(),
                     error: record.and_then(|r| r.last_error.clone()),
                     last_deployed_at: record.map(|r| r.last_deployed_at.clone()),
                 };
@@ -835,10 +835,7 @@ impl Dashboard {
                     self.target_orphans.len()
                 ));
                 for orphan in &self.target_orphans {
-                    let target_display = match &orphan.app {
-                        Some(a) => format!("{}:{}", orphan.service, a),
-                        None => orphan.service.clone(),
-                    };
+                    let target_display = orphan.target_display();
                     let freshness = relative_time(&orphan.last_deployed_at);
                     cov_lines.push(format!(
                         "     {}  {} {}  {}",
@@ -925,15 +922,6 @@ impl Dashboard {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-fn format_target(target: &ResolvedTarget) -> String {
-    let mut s = target.service.clone();
-    if let Some(app) = &target.app {
-        s.push(':');
-        s.push_str(app);
-    }
-    s
-}
 
 fn relative_time(timestamp: &str) -> String {
     crate::ui::format_relative_time(timestamp)

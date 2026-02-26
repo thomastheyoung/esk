@@ -5431,3 +5431,101 @@ fn deploy_prune_removes_orphan_records_from_index() {
         "Real secret records should still exist"
     );
 }
+
+#[test]
+fn deploy_prune_without_env_prunes_all_environments() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_dev").unwrap();
+    store.set("STRIPE_KEY", "prod", "sk_prod").unwrap();
+
+    // Deploy to both envs
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+    runner.push_success(b"", b""); // deploy STRIPE_KEY dev
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: true,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+    runner.push_success(b"", b""); // deploy STRIPE_KEY prod
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("prod"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: true,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Inject orphans in both envs
+    let mut index = DeployIndex::load(&project.deploy_index_path());
+    index.record_success(
+        "OLD_DEV:cloudflare:web:dev".to_string(),
+        "cloudflare:web:dev".to_string(),
+        "hash_dev".to_string(),
+    );
+    index.record_success(
+        "OLD_PROD:cloudflare:web:prod".to_string(),
+        "cloudflare:web:prod".to_string(),
+        "hash_prod".to_string(),
+    );
+    index.save().unwrap();
+
+    // Prune without --env (env: None) should prune both
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+    runner.push_success(b"", b""); // delete OLD_DEV
+    runner.push_success(b"", b""); // delete OLD_PROD
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: None,
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            skip_requirements: true,
+            allow_empty: false,
+            prune: true,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let index = DeployIndex::load(&project.deploy_index_path());
+    assert!(
+        !index.records.contains_key("OLD_DEV:cloudflare:web:dev"),
+        "Dev orphan should be removed"
+    );
+    assert!(
+        !index.records.contains_key("OLD_PROD:cloudflare:web:prod"),
+        "Prod orphan should be removed"
+    );
+    // Real secrets should still be tracked
+    assert!(
+        index.records.keys().any(|k| k.contains("STRIPE_KEY")),
+        "Real secret records should still exist"
+    );
+}

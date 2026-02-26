@@ -14,6 +14,16 @@ pub struct TargetOrphan {
     pub last_deployed_at: String,
 }
 
+impl TargetOrphan {
+    /// Display the target as "service" or "service:app" (no env).
+    pub fn target_display(&self) -> String {
+        match &self.app {
+            Some(a) => format!("{}:{}", self.service, a),
+            None => self.service.clone(),
+        }
+    }
+}
+
 /// Detect orphaned deploy index records: records whose tracker key doesn't match
 /// any (key, target, app, env) combination in the current resolved secrets.
 ///
@@ -52,25 +62,22 @@ pub fn detect(
         }
 
         // Parse tracker key: KEY:service:env or KEY:service:app:env
-        let parts: Vec<&str> = tracker_key.split(':').collect();
-        let (key, service, app, env) = match parts.len() {
-            3 => (parts[0], parts[1], None, parts[2]),
-            4 => (parts[0], parts[1], Some(parts[2].to_string()), parts[3]),
-            _ => continue,
+        let Some(parts) = DeployIndex::parse_tracker_key(tracker_key) else {
+            continue;
         };
 
         if let Some(filter) = env_filter {
-            if env != filter {
+            if parts.env != filter {
                 continue;
             }
         }
 
         orphans.push(TargetOrphan {
             tracker_key: tracker_key.clone(),
-            key: key.to_string(),
-            service: service.to_string(),
-            app,
-            env: env.to_string(),
+            key: parts.key,
+            service: parts.service,
+            app: parts.app,
+            env: parts.env,
             last_deployed_at: record.last_deployed_at.clone(),
         });
     }

@@ -31,6 +31,14 @@ pub enum DeployStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, PartialEq)]
+pub struct TrackerKeyParts {
+    pub key: String,
+    pub service: String,
+    pub app: Option<String>,
+    pub env: String,
+}
+
 impl DeployIndex {
     /// Sentinel hash for tombstone (deleted key) tracking.
     /// Never collides with real SHA-256 hashes (which are 64-char hex).
@@ -88,6 +96,27 @@ impl DeployIndex {
         match app {
             Some(a) => format!("{secret_key}:{target}:{a}:{env}"),
             None => format!("{secret_key}:{target}:{env}"),
+        }
+    }
+
+    /// Parse a tracker key back into its component parts.
+    /// Returns `None` for malformed keys.
+    pub fn parse_tracker_key(tracker_key: &str) -> Option<TrackerKeyParts> {
+        let parts: Vec<&str> = tracker_key.split(':').collect();
+        match parts.len() {
+            3 => Some(TrackerKeyParts {
+                key: parts[0].to_string(),
+                service: parts[1].to_string(),
+                app: None,
+                env: parts[2].to_string(),
+            }),
+            4 => Some(TrackerKeyParts {
+                key: parts[0].to_string(),
+                service: parts[1].to_string(),
+                app: Some(parts[2].to_string()),
+                env: parts[3].to_string(),
+            }),
+            _ => None,
         }
     }
 
@@ -368,6 +397,74 @@ mod tests {
             DeployIndex::TOMBSTONE_HASH.to_string(),
         );
         assert!(!index.should_deploy("K", DeployIndex::TOMBSTONE_HASH, false));
+    }
+
+    #[test]
+    fn parse_tracker_key_without_app() {
+        let parsed = DeployIndex::parse_tracker_key("SECRET:cloudflare:prod").unwrap();
+        assert_eq!(
+            parsed,
+            TrackerKeyParts {
+                key: "SECRET".to_string(),
+                service: "cloudflare".to_string(),
+                app: None,
+                env: "prod".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_tracker_key_with_app() {
+        let parsed = DeployIndex::parse_tracker_key("SECRET:env:web:dev").unwrap();
+        assert_eq!(
+            parsed,
+            TrackerKeyParts {
+                key: "SECRET".to_string(),
+                service: "env".to_string(),
+                app: Some("web".to_string()),
+                env: "dev".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn parse_tracker_key_roundtrip_without_app() {
+        let key = DeployIndex::tracker_key("API_KEY", "fly", None, "prod");
+        let parsed = DeployIndex::parse_tracker_key(&key).unwrap();
+        assert_eq!(parsed.key, "API_KEY");
+        assert_eq!(parsed.service, "fly");
+        assert_eq!(parsed.app, None);
+        assert_eq!(parsed.env, "prod");
+    }
+
+    #[test]
+    fn parse_tracker_key_roundtrip_with_app() {
+        let key = DeployIndex::tracker_key("DB_URL", "env", Some("web"), "staging");
+        let parsed = DeployIndex::parse_tracker_key(&key).unwrap();
+        assert_eq!(parsed.key, "DB_URL");
+        assert_eq!(parsed.service, "env");
+        assert_eq!(parsed.app, Some("web".to_string()));
+        assert_eq!(parsed.env, "staging");
+    }
+
+    #[test]
+    fn parse_tracker_key_too_few_parts() {
+        assert!(DeployIndex::parse_tracker_key("SECRET:only").is_none());
+    }
+
+    #[test]
+    fn parse_tracker_key_too_many_parts() {
+        assert!(DeployIndex::parse_tracker_key("A:B:C:D:E").is_none());
+    }
+
+    #[test]
+    fn parse_tracker_key_empty() {
+        assert!(DeployIndex::parse_tracker_key("").is_none());
+    }
+
+    #[test]
+    fn parse_tracker_key_single() {
+        assert!(DeployIndex::parse_tracker_key("SECRET").is_none());
     }
 
     #[test]
