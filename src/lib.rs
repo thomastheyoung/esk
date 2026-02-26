@@ -10,6 +10,8 @@
 pub mod cli;
 pub mod config;
 pub mod deploy_tracker;
+#[cfg(feature = "mcp")]
+pub mod mcp;
 pub mod orphan;
 pub mod reconcile;
 pub mod remotes;
@@ -21,5 +23,3 @@ pub mod targets;
 pub mod test_support;
 pub mod ui;
 pub mod validate;
-#[cfg(feature = "mcp")]
-pub mod mcp;

@@ -1077,9 +1077,7 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
                 .skip(group_idx + 1)
                 .find(|(i, line)| {
                     *i >= secrets_end
-                        || (!line.is_empty()
-                            && !line.starts_with("    ")
-                            && !line.starts_with('#'))
+                        || (!line.is_empty() && !line.starts_with("    ") && !line.starts_with('#'))
                 })
                 .map_or(lines.len(), |(i, _)| i);
 

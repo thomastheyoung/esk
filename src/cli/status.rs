@@ -104,7 +104,11 @@ pub(crate) struct Dashboard {
 }
 
 impl Dashboard {
-    pub(crate) fn build(config: &Config, env: Option<&str>, runner: &dyn CommandRunner) -> Result<Self> {
+    pub(crate) fn build(
+        config: &Config,
+        env: Option<&str>,
+        runner: &dyn CommandRunner,
+    ) -> Result<Self> {
         let store = SecretStore::open(&config.root)?;
         let payload = store.payload()?;
         let all_secrets = &payload.secrets;

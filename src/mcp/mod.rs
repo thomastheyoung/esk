@@ -119,10 +119,7 @@ impl EskMcpServer {
         name = "esk_get",
         description = "Retrieve a secret value from the encrypted store"
     )]
-    async fn get(
-        &self,
-        params: Parameters<GetParams>,
-    ) -> Result<CallToolResult, ErrorData> {
+    async fn get(&self, params: Parameters<GetParams>) -> Result<CallToolResult, ErrorData> {
         match do_get(params.0) {
             Ok(resp) => json_result(&resp),
             Err(e) => Ok(error_result(&e)),
@@ -133,10 +130,7 @@ impl EskMcpServer {
         name = "esk_set",
         description = "Set a secret value in the encrypted store. Does NOT auto-deploy or auto-sync — call esk_deploy explicitly after setting secrets."
     )]
-    async fn set(
-        &self,
-        params: Parameters<SetParams>,
-    ) -> Result<CallToolResult, ErrorData> {
+    async fn set(&self, params: Parameters<SetParams>) -> Result<CallToolResult, ErrorData> {
         match do_set(params.0) {
             Ok(resp) => json_result(&resp),
             Err(e) => Ok(error_result(&e)),
@@ -147,10 +141,7 @@ impl EskMcpServer {
         name = "esk_delete",
         description = "Delete a secret value from the encrypted store. Does NOT auto-deploy — call esk_deploy explicitly if needed."
     )]
-    async fn delete(
-        &self,
-        params: Parameters<DeleteParams>,
-    ) -> Result<CallToolResult, ErrorData> {
+    async fn delete(&self, params: Parameters<DeleteParams>) -> Result<CallToolResult, ErrorData> {
         match do_delete(params.0) {
             Ok(resp) => json_result(&resp),
             Err(e) => Ok(error_result(&e)),
@@ -161,10 +152,7 @@ impl EskMcpServer {
         name = "esk_list",
         description = "List all secrets with their status per environment and deploy target. Returns structured JSON with deploy state (deployed/pending/failed/unset/not_targeted) for each secret×environment pair."
     )]
-    async fn list(
-        &self,
-        params: Parameters<ListParams>,
-    ) -> Result<CallToolResult, ErrorData> {
+    async fn list(&self, params: Parameters<ListParams>) -> Result<CallToolResult, ErrorData> {
         match do_list(&params.0) {
             Ok(resp) => json_result(&resp),
             Err(e) => Ok(error_result(&e)),
@@ -175,10 +163,7 @@ impl EskMcpServer {
         name = "esk_status",
         description = "Show project deploy and sync status: pending/failed/deployed counts, validation warnings, missing required secrets, coverage gaps, and recommended next steps."
     )]
-    async fn status(
-        &self,
-        params: Parameters<StatusParams>,
-    ) -> Result<CallToolResult, ErrorData> {
+    async fn status(&self, params: Parameters<StatusParams>) -> Result<CallToolResult, ErrorData> {
         match do_status(&params.0) {
             Ok(resp) => json_result(&resp),
             Err(e) => Ok(error_result(&e)),
@@ -189,10 +174,7 @@ impl EskMcpServer {
         name = "esk_deploy",
         description = "Deploy secrets to configured targets (env files, Cloudflare, Vercel, etc.). Skips secrets that haven't changed unless force=true."
     )]
-    async fn deploy(
-        &self,
-        params: Parameters<DeployParams>,
-    ) -> Result<CallToolResult, ErrorData> {
+    async fn deploy(&self, params: Parameters<DeployParams>) -> Result<CallToolResult, ErrorData> {
         match do_deploy(&params.0) {
             Ok(resp) => json_result(&resp),
             Err(e) => Ok(error_result(&e)),
@@ -306,9 +288,7 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
             let env_targets: Vec<_> = secret
                 .targets
                 .iter()
-                .filter(|t| {
-                    t.environment == env_name && target_names.contains(&t.service.as_str())
-                })
+                .filter(|t| t.environment == env_name && target_names.contains(&t.service.as_str()))
                 .collect();
 
             let status = if env_targets.is_empty() {
@@ -485,9 +465,8 @@ fn do_generate(params: &GenerateParams) -> anyhow::Result<GenerateResponse> {
 // ---------------------------------------------------------------------------
 
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, ErrorData> {
-    let json = serde_json::to_string_pretty(value).map_err(|e| {
-        ErrorData::internal_error(format!("JSON serialization failed: {e}"), None)
-    })?;
+    let json = serde_json::to_string_pretty(value)
+        .map_err(|e| ErrorData::internal_error(format!("JSON serialization failed: {e}"), None))?;
     Ok(CallToolResult::success(vec![Content::text(json)]))
 }
 

@@ -26,10 +26,7 @@ pub struct DopplerRemote<'a> {
 }
 
 impl<'a> DopplerRemote<'a> {
-    pub fn new(
-        remote_config: DopplerRemoteConfig,
-        runner: &'a dyn CommandRunner,
-    ) -> Self {
+    pub fn new(remote_config: DopplerRemoteConfig, runner: &'a dyn CommandRunner) -> Self {
         Self {
             remote_config,
             runner,
