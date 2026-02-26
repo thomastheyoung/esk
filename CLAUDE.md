@@ -57,7 +57,8 @@ src/
 │   ├── deploy.rs        # esk deploy (target-agnostic)
 │   ├── status.rs        # esk status (target-agnostic)
 │   ├── generate.rs      # esk generate (multi-format: dts, ts, env-example)
-│   └── sync.rs          # esk sync (remote-agnostic, bidirectional)
+│   ├── sync.rs          # esk sync (remote-agnostic, bidirectional)
+│   └── llm_context.rs   # esk llm-context
 tests/
 ├── helpers/
 │   └── mod.rs              # TestProject, fixtures, MockCommandRunner
@@ -150,7 +151,7 @@ Version-counter-based reconciliation between local store and remote sources. Two
 
 Secrets can declare a `validate:` block (`Validation` struct) and a `required:` field (`Required` enum).
 
-- **`validate`**: checks secret values at `set` time and before `deploy`. Supports `format` (string, url, integer, number, boolean, email, json, base64), `enum`, `pattern` (regex), `min_length`/`max_length`, `range`, and `optional`. Use `--skip-validation` to bypass.
+- **`validate`**: checks secret values at `set` time and before `deploy`. Supports `format` (string, url, integer, number, boolean, email, json, base64), `enum`, `pattern` (regex), `min_length`/`max_length`, `range`, `optional`, and cross-field rules (`required_if`, `required_with`, `required_unless`). Cross-field cycles are detected at validation time. Use `--skip-validation` to bypass.
 - **`required`**: gates deploy — the secret must have a value in the store. `true` (default) = all targeted envs, `false` = never, `[env1, env2]` = specific envs. Use `--skip-requirements` or `--force` to bypass.
 - These are orthogonal: `required: true` + `optional: true` = "must exist, but may be empty".
 
