@@ -26,6 +26,8 @@ It is built for teams that want:
 - Validates values against format, pattern, enum, and range constraints
 - Audits required secrets before deploy — catches missing values early
 - Detects empty/whitespace-only values that break runtime defaults
+- Generates TypeScript declarations, runtime validators, and `.env.example` templates
+- Prunes orphaned deploys (secrets removed from config but still deployed to targets)
 
 ## Install
 
@@ -82,7 +84,7 @@ esk status --env dev
 
 | File                     | Purpose                                                        | Commit to git   |
 | ------------------------ | -------------------------------------------------------------- | --------------- |
-| `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets) | Yes             |
+| `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets, generate) | Yes             |
 | `.esk/store.enc`         | Encrypted secret store                                         | Yes             |
 | `.esk/store.key`         | Local encryption key (32-byte hex)                             | No              |
 | `.esk/deploy-index.json` | Deploy state tracker                                           | No (gitignored) |
@@ -148,7 +150,7 @@ When you need cloud deploy targets or shared sync, add target/remote blocks. See
 | `esk deploy [--env <ENV>]`     | Deploy to configured targets                   |
 | `esk status [--env <ENV>]`     | Show drift/sync dashboard                      |
 | `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state         |
-| `esk generate [--runtime]`     | Generate TypeScript env declarations/validator |
+| `esk generate [<FORMAT>]`      | Generate code/config from secret definitions   |
 
 Full flags and behavior: [API.md](API.md).
 

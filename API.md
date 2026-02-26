@@ -69,7 +69,7 @@ esk delete API_KEY --env dev --bail              # Fail hard on remote errors
 Deploy secrets to configured targets.
 
 ```bash
-esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose] [--skip-validation] [--skip-requirements] [--allow-empty]
+esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose] [--skip-validation] [--skip-requirements] [--allow-empty] [--prune]
 ```
 
 | Argument              | Required | Description                                          |
@@ -81,6 +81,7 @@ esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose] [--skip-validation] [
 | `--skip-validation`   | No       | Bypass `validate:` checks before deploying           |
 | `--skip-requirements` | No       | Bypass `required:` checks (missing secret errors)    |
 | `--allow-empty`       | No       | Allow deploying empty/whitespace-only values         |
+| `--prune`             | No       | Remove orphaned secrets from targets (deployed but no longer in config) |
 
 **Pre-deploy checks:**
 
@@ -100,6 +101,10 @@ Targets that fail preflight checks are skipped with warnings (or all deploy work
 **Change detection:**
 
 SHA-256 hash of each secret value is tracked per (secret, target, app, environment) tuple in `.esk/deploy-index.json`. Secrets are skipped when the hash matches unless `--force` is used. Failed deploys are always retried.
+
+**Orphan pruning:**
+
+With `--prune`, esk detects secrets that were previously deployed to targets but are no longer in the config (orphans). It calls the target's delete command to remove them. The `status` command also shows orphans in its Coverage section.
 
 **Example output:**
 
@@ -240,9 +245,12 @@ Displays a multi-section dashboard with the following sections:
 - **Summary** — Project name, store version, and target counts with status breakdown.
 - **Targets** — Target health from preflight checks (pass/fail per target).
 - **Deploy (targets)** — Secrets grouped by status: failed, pending, unset, and deployed (deployed hidden unless `--all`). Entries include relative deploy freshness (for example, "3h ago") and error details for failures.
-- **Coverage** — Gaps where a secret is set in some environments but not others, and orphaned secrets (in store but not in config).
+- **Validation** — Secrets failing `validate:` constraints and cross-field rule violations.
+- **Empty values** — Secrets with empty or whitespace-only values (unless `allow_empty: true`).
+- **Requirements** — Required secrets that have no stored value.
+- **Coverage** — Gaps where a secret is set in some environments but not others, orphaned secrets (in store but not in config), and orphaned deploys (deployed to targets but no longer in config).
 - **Sync (remotes)** — Push state per (remote, environment): current, stale (version behind), failed, or never synced.
-- **Next steps** — Actionable commands to fix issues (retry failed deploys, deploy pending changes, fill coverage gaps, sync stale remotes, remove orphans).
+- **Next steps** — Actionable commands to fix issues (retry failed deploys, deploy pending changes, fill coverage gaps, sync stale remotes, prune orphaned deploys).
 
 The dashboard closes with the current store version.
 
@@ -275,31 +283,66 @@ The dashboard closes with the current store version.
 
 ## `esk generate`
 
-Generate TypeScript declarations (or a runtime validator) for configured secret keys.
+Generate code or config files from secret definitions. Supports multiple output formats, including config-driven multi-output.
 
 ```bash
-esk generate [--runtime] [--output <PATH>]
+esk generate [<FORMAT>] [--output <PATH>]
 ```
 
-| Argument          | Required | Description                                                         |
-| ----------------- | -------- | ------------------------------------------------------------------- |
-| `--runtime`       | No       | Generate `env.ts` runtime validator instead of `.d.ts` declarations |
-| `--output` / `-o` | No       | Output path (defaults to `env.d.ts` or `env.ts`)                    |
+| Argument          | Required | Description                                                                                     |
+| ----------------- | -------- | ----------------------------------------------------------------------------------------------- |
+| `FORMAT`          | No       | Output format: `dts`, `ts`, or `env-example`. Omit to run all configured outputs (see below).   |
+| `--output` / `-o` | No       | Output file path. Requires a format argument. Overrides the default path for the chosen format. |
+
+**Formats:**
+
+| Format        | Default output    | Description                                                                     |
+| ------------- | ----------------- | ------------------------------------------------------------------------------- |
+| `dts`         | `env.d.ts`        | TypeScript type declarations (`NodeJS.ProcessEnv` interface)                    |
+| `ts`          | `env.ts`          | Runtime TypeScript module with typed helpers (`requireEnv`, `envInt`, etc.)      |
+| `env-example` | `.env.example`    | Template file with key names, descriptions, allowed values, and optional markers |
 
 **Behavior:**
 
 1. Collects unique secret keys from the `secrets` section in `esk.yaml`.
-2. Writes `env.d.ts` by default with `NodeJS.ProcessEnv` declarations.
-3. With `--runtime`, writes `env.ts` containing a `requireEnv` helper and typed `env` object.
-4. Creates parent directories for the output path if needed.
-5. Warns when no secrets are defined, and suggests adding the output path to `.gitignore` if it isn't already listed.
+2. If a format is given, generates that single output.
+3. If no format is given and the config has a `generate:` section, generates all configured outputs.
+4. If no format and no `generate:` config, defaults to `dts`.
+5. Creates parent directories for the output path if needed.
+6. Warns when no secrets are defined. Suggests adding the output to `.gitignore` for `dts` and `ts` formats (not `env-example`).
+
+**Config-driven multi-output:**
+
+```yaml
+generate:
+  - format: dts
+  - format: env-example
+    output: config/.env.example
+```
+
+Running `esk generate` with this config produces both `env.d.ts` and `config/.env.example` in one invocation.
+
+**Runtime `ts` format details:**
+
+The `ts` format generates typed accessor helpers based on the secret's `validate.format`:
+
+- `format: integer` → `envInt()` (returns `number`, validates integer)
+- `format: number` → `envFloat()` (returns `number`, validates float)
+- `format: boolean` → `envBool()` (returns `boolean`)
+- `format: json` → `envJson()` (returns `unknown`, validates JSON)
+- All others → `requireEnv()` (returns `string`)
+- `optional: true` → `process.env.KEY` (no helper, may be `undefined`)
+
+Only helpers that are actually used are emitted in the output.
 
 **Examples:**
 
 ```bash
-esk generate
-esk generate --runtime
-esk generate --runtime --output src/env.ts
+esk generate                                    # All configured outputs, or dts by default
+esk generate dts                                # TypeScript declarations
+esk generate ts                                 # Runtime validator module
+esk generate env-example                        # .env.example template
+esk generate ts --output src/env.ts             # Custom output path
 ```
 
 ---

@@ -15,7 +15,8 @@ src/
 ├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
 ├── validate.rs          # Value validation (format, enum, pattern, range, length)
 ├── suggest.rs           # Typo suggestions (Levenshtein distance)
-├── ui.rs                # Custom cliclack theme (EskTheme)
+├── orphan.rs            # Orphaned deploy detection and pruning
+├── ui.rs                # Custom cliclack theme (EskTheme) + shared rendering helpers
 ├── test_support/
 │   └── mod.rs           # Unit test helpers (MockCommandRunner, ErrorCommandRunner, ConfigFixture)
 ├── targets/
@@ -55,7 +56,7 @@ src/
 │   ├── list.rs          # esk list
 │   ├── deploy.rs        # esk deploy (target-agnostic)
 │   ├── status.rs        # esk status (target-agnostic)
-│   ├── generate.rs      # esk generate (TypeScript type declarations)
+│   ├── generate.rs      # esk generate (multi-format: dts, ts, env-example)
 │   └── sync.rs          # esk sync (remote-agnostic, bidirectional)
 tests/
 ├── helpers/
@@ -63,7 +64,7 @@ tests/
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── env_file_integration.rs # Env file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (143)
+└── cli_integration.rs      # CLI command tests (174)
 ```
 
 ## Core design
@@ -77,7 +78,7 @@ esk distinguishes between two extension types:
 
 ### Config (`esk.yaml`)
 
-Project-level config defines everything: environments, apps, target settings, remote settings, and secrets. No hardcoded paths or project-specific assumptions in the binary.
+Project-level config defines everything: environments, apps, target settings, remote settings, secrets, and generate outputs. No hardcoded paths or project-specific assumptions in the binary.
 
 ### Encrypted store (`.esk/store.enc`)
 
@@ -153,11 +154,11 @@ Secrets can declare a `validate:` block (`Validation` struct) and a `required:` 
 - **`required`**: gates deploy — the secret must have a value in the store. `true` (default) = all targeted envs, `false` = never, `[env1, env2]` = specific envs. Use `--skip-requirements` or `--force` to bypass.
 - These are orthogonal: `required: true` + `optional: true` = "must exist, but may be empty".
 
-`SecretDef` fields: `description`, `targets`, `validate` (`Option<Validation>`), `required` (`Required`).
+`SecretDef` fields: `description`, `targets`, `validate` (`Option<Validation>`), `required` (`Required`), `allow_empty` (`bool`).
 
 ### DeployOptions
 
-`DeployOptions` struct bundles all deploy parameters: `env`, `force`, `dry_run`, `verbose`, `skip_validation`, `skip_requirements`. Used by `deploy::run()` and `deploy::run_with_runner()`.
+`DeployOptions` struct bundles all deploy parameters: `env`, `force`, `dry_run`, `verbose`, `skip_validation`, `skip_requirements`, `allow_empty`, `prune`. Used by `deploy::run()` and `deploy::run_with_runner()`.
 
 ## Key crates
 
@@ -220,7 +221,7 @@ cargo test --test cli_integration  # Run CLI integration tests only
 ### Test infrastructure
 
 - **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `sync_index_path()`.
-- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `REMOTE_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_REMOTE_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG`, `VALIDATION_CONFIG`, `REQUIRED_CONFIG` — reusable YAML for tests.
+- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `REMOTE_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_REMOTE_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG`, `VALIDATION_CONFIG`, `REQUIRED_CONFIG`, `ALLOW_EMPTY_CONFIG`, `CROSS_FIELD_CONFIG`, `GENERATE_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.
