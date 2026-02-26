@@ -220,17 +220,17 @@ pub fn find_secret(&self, key: &str) -> Option<(&str, &SecretDef)>
 
 Before writing a helper, check if Rust already has it:
 
-| Instead of | Use |
-|-----------|-----|
-| Custom `append_env_flags` fn wrapping a for loop | `args.extend(flag_parts.iter().map(String::as_str))` |
-| 8-line `center()` with manual padding | `format!("{s:^width$}")` |
-| `vec!["a".to_string(), format!(...)]` in flat_map | `["a".into(), format!(...)]` — array literal, stack-allocated |
-| Manual `Default` with all `BTreeMap::new()` | `#[derive(Default)]` |
-| Manual `Display` + `impl Error` | `#[derive(thiserror::Error)]` |
-| `match opt { Some(v) => v, None => return Ok(()) }` | `let Some(v) = opt else { return Ok(()); };` |
-| Manual loop + push on fallible operations | `.map(\|v\| ...).collect::<Result<Vec<_>>>()` |
-| `if x.is_some() { x.unwrap() }` | `if let Some(v) = x { ... }` |
-| Manual `HashMap` entry check + insert | `map.entry(key).or_insert_with(|| ...)` |
+| Instead of                                          | Use                                                           |
+| --------------------------------------------------- | ------------------------------------------------------------- | --- | ----- |
+| Custom `append_env_flags` fn wrapping a for loop    | `args.extend(flag_parts.iter().map(String::as_str))`          |
+| 8-line `center()` with manual padding               | `format!("{s:^width$}")`                                      |
+| `vec!["a".to_string(), format!(...)]` in flat_map   | `["a".into(), format!(...)]` — array literal, stack-allocated |
+| Manual `Default` with all `BTreeMap::new()`         | `#[derive(Default)]`                                          |
+| Manual `Display` + `impl Error`                     | `#[derive(thiserror::Error)]`                                 |
+| `match opt { Some(v) => v, None => return Ok(()) }` | `let Some(v) = opt else { return Ok(()); };`                  |
+| Manual loop + push on fallible operations           | `.map(\|v\| ...).collect::<Result<Vec<_>>>()`                 |
+| `if x.is_some() { x.unwrap() }`                     | `if let Some(v) = x { ... }`                                  |
+| Manual `HashMap` entry check + insert               | `map.entry(key).or_insert_with(                               |     | ...)` |
 
 ## Avoid redundant code
 
@@ -322,22 +322,22 @@ impl TryFrom<&str> for SecretKey {
 
 ### Naming conventions for conversions
 
-| Prefix | Cost | Ownership | Example |
-|--------|------|-----------|---------|
-| `as_` | Free | Borrowed &rarr; borrowed | `str::as_bytes()` |
-| `to_` | Allocates | Borrowed &rarr; owned | `str::to_lowercase()` |
-| `into_` | Variable | Owned &rarr; owned | `String::into_bytes()` |
-| `from_` | Variable | Constructor | `String::from_utf8()` |
+| Prefix  | Cost      | Ownership                | Example                |
+| ------- | --------- | ------------------------ | ---------------------- |
+| `as_`   | Free      | Borrowed &rarr; borrowed | `str::as_bytes()`      |
+| `to_`   | Allocates | Borrowed &rarr; owned    | `str::to_lowercase()`  |
+| `into_` | Variable  | Owned &rarr; owned       | `String::into_bytes()` |
+| `from_` | Variable  | Constructor              | `String::from_utf8()`  |
 
 ## Error handling
 
 Three patterns, each with a specific purpose:
 
-| Pattern | When to use |
-|---------|-------------|
-| `bail!("message")` | The code itself generates the error — validation failures, user aborts. Include remediation: `"Use --skip-validation to bypass"` |
-| `.context("message")?` | Wrapping a library/IO error with static context |
-| `.with_context(\|\| format!("message {var}"))?` | Wrapping a library/IO error with dynamic context |
+| Pattern                                         | When to use                                                                                                                      |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `bail!("message")`                              | The code itself generates the error — validation failures, user aborts. Include remediation: `"Use --skip-validation to bypass"` |
+| `.context("message")?`                          | Wrapping a library/IO error with static context                                                                                  |
+| `.with_context(\|\| format!("message {var}"))?` | Wrapping a library/IO error with dynamic context                                                                                 |
 
 For typed errors that callers need to `downcast_ref` and inspect, use `thiserror`. Everywhere else, use `anyhow`.
 
@@ -473,12 +473,14 @@ Resist the urge to DRY when:
 Each target and remote file is a self-contained unit. It imports from its parent `mod.rs` (traits, `CommandRunner`, `check_command`, `resolve_env_flags`) but never from sibling adapters.
 
 **Allowed shared infrastructure** (in `targets/mod.rs` or `remotes/mod.rs`):
+
 - Trait definitions (`DeployTarget`, `SyncRemote`)
 - `CommandRunner`, `CommandOutput`, `CommandOpts`
 - `check_command`, `resolve_env_flags`, `extract_env_secrets`
 - Builder functions (`build_targets`, `build_remotes`)
 
 **Not allowed:**
+
 - Shared helpers only 2-3 adapters use — inline them
 - Cross-adapter imports (`use super::fly::resolve_app`)
 - Macros that generate adapter boilerplate — hides what's happening
@@ -503,6 +505,7 @@ Enable pedantic lints selectively. In `lib.rs`:
 ```
 
 Key pedantic lints to keep enabled:
+
 - `redundant_closure_for_method_calls` — simplifies closures
 - `manual_let_else` — encourages `let ... else` syntax
 - `needless_pass_by_value` — catches unnecessary moves
@@ -520,18 +523,18 @@ Key pedantic lints to keep enabled:
 
 ## Naming
 
-| Kind | Convention | Example |
-|------|-----------|---------|
-| Functions | `snake_case`, descriptive verbs | `resolve_app`, `check_command`, `deploy_secret` |
-| Structs | `PascalCase`, domain noun | `DeployOptions`, `CloudflareTarget`, `StorePayload` |
-| Enums | `PascalCase` with `PascalCase` variants | `DeployMode::Individual`, `Required::Envs(vec)` |
-| Constants | `UPPER_SNAKE_CASE` | `ESK_VERSION_KEY`, `MAX_VERSION_JUMP` |
-| Modules/files | `snake_case`, matching domain | `aws_ssm.rs`, `cloud_file.rs` |
-| Config structs | `{Service}TargetConfig` / `{Service}RemoteConfig` | `FlyTargetConfig`, `DopplerRemoteConfig` |
-| Test functions | `{module}_{scenario}` | `fly_deploy_uses_stdin` |
-| Getters | No `get_` prefix | `fn name(&self) -> &str`, not `fn get_name` |
-| Predicates | `is_` or `has_` prefix, returns `bool` | `is_empty()`, `has_key()` |
-| Acronyms | One word in PascalCase | `Uuid`, not `UUID`; `HttpClient`, not `HTTPClient` |
+| Kind           | Convention                                        | Example                                             |
+| -------------- | ------------------------------------------------- | --------------------------------------------------- |
+| Functions      | `snake_case`, descriptive verbs                   | `resolve_app`, `check_command`, `deploy_secret`     |
+| Structs        | `PascalCase`, domain noun                         | `DeployOptions`, `CloudflareTarget`, `StorePayload` |
+| Enums          | `PascalCase` with `PascalCase` variants           | `DeployMode::Individual`, `Required::Envs(vec)`     |
+| Constants      | `UPPER_SNAKE_CASE`                                | `ESK_VERSION_KEY`, `MAX_VERSION_JUMP`               |
+| Modules/files  | `snake_case`, matching domain                     | `aws_ssm.rs`, `cloud_file.rs`                       |
+| Config structs | `{Service}TargetConfig` / `{Service}RemoteConfig` | `FlyTargetConfig`, `DopplerRemoteConfig`            |
+| Test functions | `{module}_{scenario}`                             | `fly_deploy_uses_stdin`                             |
+| Getters        | No `get_` prefix                                  | `fn name(&self) -> &str`, not `fn get_name`         |
+| Predicates     | `is_` or `has_` prefix, returns `bool`            | `is_empty()`, `has_key()`                           |
+| Acronyms       | One word in PascalCase                            | `Uuid`, not `UUID`; `HttpClient`, not `HTTPClient`  |
 
 No module stuttering: items within a module should not repeat the module name. `targets::EnvFile`, not `targets::EnvFileTarget` (unless `Target` is meaningful disambiguation).
 
