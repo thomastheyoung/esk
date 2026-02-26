@@ -5194,7 +5194,7 @@ fn deploy_prune_dry_run_shows_orphans() {
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight
-    // dry-run: no actual delete calls
+                                   // dry-run: no actual delete calls
     cli::deploy::run_with_runner(
         &config,
         &cli::deploy::DeployOptions {
@@ -5243,8 +5243,7 @@ fn deploy_prune_individual_calls_delete_secret() {
     // Verify delete was called for the orphan
     let calls = runner.take_calls();
     let delete_call = calls.iter().find(|c| {
-        c.args.iter().any(|a| a == "OLD_SECRET")
-            || c.args.iter().any(|a| a.contains("delete"))
+        c.args.iter().any(|a| a == "OLD_SECRET") || c.args.iter().any(|a| a.contains("delete"))
     });
     assert!(
         delete_call.is_some(),
@@ -5424,10 +5423,7 @@ fn deploy_prune_removes_orphan_records_from_index() {
     );
     // Real secrets should still be tracked
     assert!(
-        index
-            .records
-            .keys()
-            .any(|k| k.contains("STRIPE_KEY")),
+        index.records.keys().any(|k| k.contains("STRIPE_KEY")),
         "Real secret records should still exist"
     );
 }

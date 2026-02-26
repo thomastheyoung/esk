@@ -295,7 +295,10 @@ pub fn run_with_runner(
 
     // Orphan detection and prune work collection
     let mut prune_individual: Vec<crate::orphan::TargetOrphan> = Vec::new();
-    let mut batch_prune_keys: BTreeMap<(String, Option<String>, String), Vec<crate::orphan::TargetOrphan>> = BTreeMap::new();
+    let mut batch_prune_keys: BTreeMap<
+        (String, Option<String>, String),
+        Vec<crate::orphan::TargetOrphan>,
+    > = BTreeMap::new();
     let mut unavailable_orphans: Vec<crate::orphan::TargetOrphan> = Vec::new();
 
     if prune {
@@ -312,9 +315,7 @@ pub fn run_with_runner(
             if !dry_run && std::io::stdin().is_terminal() {
                 let lines: Vec<String> = orphans
                     .iter()
-                    .map(|o| {
-                        format!("  {} → {} ({})", o.key, o.target_display(), o.env)
-                    })
+                    .map(|o| format!("  {} → {} ({})", o.key, o.target_display(), o.env))
                     .collect();
                 cliclack::log::warning(format!(
                     "Orphaned secrets to prune:\n{}",
@@ -581,11 +582,7 @@ pub fn run_with_runner(
                     target: target_display.clone(),
                     error: Some(error),
                 });
-                failed_batch_groups.insert((
-                    target_name.clone(),
-                    app.clone(),
-                    target_env.clone(),
-                ));
+                failed_batch_groups.insert((target_name.clone(), app.clone(), target_env.clone()));
             }
         }
 
@@ -844,9 +841,7 @@ pub fn run_with_runner(
     if !unavailable_orphans.is_empty() {
         let lines: Vec<String> = unavailable_orphans
             .iter()
-            .map(|o| {
-                format!("  {} → {} ({})", o.key, o.target_display(), o.env)
-            })
+            .map(|o| format!("  {} → {} ({})", o.key, o.target_display(), o.env))
             .collect();
         cliclack::log::warning(format!(
             "Cannot prune — target no longer configured:\n{}\n  \
@@ -902,7 +897,12 @@ pub fn run_with_runner(
     // Output
     let width = 44;
 
-    if deploy_count == 0 && skip_count == 0 && fail_count == 0 && unset_count == 0 && prune_count == 0 {
+    if deploy_count == 0
+        && skip_count == 0
+        && fail_count == 0
+        && unset_count == 0
+        && prune_count == 0
+    {
         cliclack::log::info("Nothing to deploy.")?;
     } else {
         // Group everything by environment for framed output
@@ -942,7 +942,11 @@ pub fn run_with_runner(
             env_map
                 .entry(entry.env.clone())
                 .or_default()
-                .push(ui::format_dashboard_line(&label, &format!("{} (pruned)", entry.target), width));
+                .push(ui::format_dashboard_line(
+                    &label,
+                    &format!("{} (pruned)", entry.target),
+                    width,
+                ));
             env_status.entry(entry.env.clone()).or_default().pruned += 1;
         }
 
@@ -1014,4 +1018,3 @@ pub fn run_with_runner(
 
     Ok(())
 }
-
