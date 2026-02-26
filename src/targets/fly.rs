@@ -45,7 +45,7 @@ impl<'a> DeployTarget for FlyTarget<'a> {
         "fly"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -65,7 +65,7 @@ impl<'a> DeployTarget for FlyTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         validate_stdin_kv_value(key, value, "fly")?;
         let fly_app = self.resolve_app(target)?;
         let stdin_data = format!("{key}={value}\n");
@@ -219,7 +219,7 @@ targets:
     }
 
     #[test]
-    fn fly_sync_uses_stdin() {
+    fn fly_deploy_uses_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.fly.as_ref().unwrap();
@@ -234,7 +234,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(calls[0].program, "fly");
@@ -248,7 +248,7 @@ targets:
     }
 
     #[test]
-    fn fly_sync_with_env_flags() {
+    fn fly_deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.fly.as_ref().unwrap();
@@ -263,7 +263,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target(Some("web"), "prod"))
+            .deploy_secret("KEY", "val", &make_target(Some("web"), "prod"))
             .unwrap();
         let calls = runner.take_calls();
         assert_eq!(
@@ -285,7 +285,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(None, "dev"))
+            .deploy_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("requires an app"));
     }
@@ -302,7 +302,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(Some("api"), "dev"))
+            .deploy_secret("KEY", "val", &make_target(Some("api"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("no fly app_names mapping"));
     }
@@ -365,7 +365,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "line1\nline2", &make_target(Some("web"), "dev"))
+            .deploy_secret("KEY", "line1\nline2", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("contains newlines"));
     }
@@ -382,7 +382,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "line1\r\nline2", &make_target(Some("web"), "dev"))
+            .deploy_secret("KEY", "line1\r\nline2", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("contains newlines"));
     }
@@ -403,7 +403,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
+            .deploy_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("deploy error"));
     }

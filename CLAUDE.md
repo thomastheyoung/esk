@@ -91,9 +91,9 @@ pub trait DeployTarget {
     fn name(&self) -> &str;
     fn deploy_mode(&self) -> DeployMode;  // Batch or Individual
     fn preflight(&self) -> Result<()>;  // Validate external deps (default: Ok)
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()>;  // Default: no-op
-    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;
+    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;
 }
 ```
 

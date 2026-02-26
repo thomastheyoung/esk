@@ -30,7 +30,7 @@ impl<'a> DeployTarget for NetlifyTarget<'a> {
         "netlify"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -53,7 +53,7 @@ impl<'a> DeployTarget for NetlifyTarget<'a> {
     // SECURITY: netlify CLI has no stdin/file support for `env:set`. It has `env:import` but with
     // different semantics (replaces all vars). Secret values are exposed in process arguments
     // (visible via `ps aux`). No workaround available.
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["env:set", key, value];
         if let Some(site) = &self.target_config.site {
@@ -217,7 +217,7 @@ targets:
     }
 
     #[test]
-    fn netlify_sync_correct_args() {
+    fn netlify_deploy_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), false);
         let target_config = config.targets.netlify.as_ref().unwrap();
@@ -232,7 +232,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "netlify");
@@ -240,7 +240,7 @@ targets:
     }
 
     #[test]
-    fn netlify_sync_with_site() {
+    fn netlify_deploy_with_site() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), true);
         let target_config = config.targets.netlify.as_ref().unwrap();
@@ -255,7 +255,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
@@ -265,7 +265,7 @@ targets:
     }
 
     #[test]
-    fn netlify_sync_with_env_flags() {
+    fn netlify_deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path(), false);
         let target_config = config.targets.netlify.as_ref().unwrap();
@@ -280,7 +280,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("prod"))
+            .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
@@ -349,7 +349,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
     }

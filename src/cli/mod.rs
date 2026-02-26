@@ -15,7 +15,7 @@ use crate::reconcile::ConflictPreference;
 #[derive(Parser)]
 #[command(
     name = "esk",
-    about = "Encrypted secrets management with multi-target sync"
+    about = "Encrypted secrets management with multi-target deploy"
 )]
 pub struct Cli {
     #[command(subcommand)]
@@ -89,12 +89,12 @@ pub enum Commands {
         #[arg(long)]
         env: Option<String>,
     },
-    /// Show sync status and drift
+    /// Show deploy and sync status
     Status {
         /// Filter by environment
         #[arg(long)]
         env: Option<String>,
-        /// Show all targets including synced ones
+        /// Show all targets including deployed ones
         #[arg(long)]
         all: bool,
     },

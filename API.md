@@ -56,7 +56,7 @@ esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 
 ```bash
 esk delete API_KEY --env dev                     # Delete + auto-deploy
-esk delete API_KEY --env dev --no-sync           # Delete only, don't deploy
+esk delete API_KEY --env dev --no-sync           # Store only, skip sync and deploy
 esk delete API_KEY --env dev --strict            # Fail hard on remote errors
 ```
 
@@ -91,11 +91,11 @@ SHA-256 hash of each secret value is tracked per (secret, target, app, environme
 **Example output:**
 
 ```
-  ✔ 2 synced
+  ✔ 2 deployed
     STRIPE_SECRET_KEY:prod  → cloudflare:web
     STRIPE_WEBHOOK_SECRET:dev  → env:web
 
-  3 up to date  (use --verbose to show)
+  3 targets up to date  (use --verbose to show)
 ```
 
 ---
@@ -136,7 +136,7 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--str
 esk set API_KEY --env dev                        # Interactive prompt for value
 esk set API_KEY --env dev --value sk_test_123    # Inline value
 esk set API_KEY --env dev --group Stripe          # Register under Stripe group
-esk set API_KEY --env dev --no-sync              # Store only, don't deploy
+esk set API_KEY --env dev --no-sync              # Store only, skip sync and deploy
 esk set API_KEY --env dev --strict               # Fail hard on remote errors
 ```
 
@@ -183,7 +183,7 @@ esk list [--env <ENV>]
 - Secrets grouped by vendor (as defined in `esk.yaml`), displayed as tables.
 - Column headers show each environment.
 - Per-cell status indicators reflect deploy state across configured targets for that key/environment:
-  - `✔` (green) — synced: all targets up to date.
+  - `✔` (green) — deployed: all targets up to date.
   - `●` (yellow) — pending: value changed since last deploy.
   - `✗` (red) — failed: last deploy attempt failed.
   - `○` (dim) — unset: key is targeted for this environment but has no stored value.

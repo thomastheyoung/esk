@@ -49,12 +49,12 @@ pub fn run_with_runner(
 // Dashboard data model
 // ---------------------------------------------------------------------------
 
-struct SyncEntry {
+struct DeployEntry {
     key: String,
     env: String,
     target: String,
     error: Option<String>,
-    last_synced_at: Option<String>,
+    last_deployed_at: Option<String>,
 }
 
 struct CoverageGap {
@@ -93,10 +93,10 @@ struct Dashboard {
     target_health: Vec<TargetHealth>,
     #[allow(dead_code)]
     remote_health: Vec<RemoteHealth>,
-    failed: Vec<SyncEntry>,
-    pending: Vec<SyncEntry>,
-    synced: Vec<SyncEntry>,
-    unset: Vec<SyncEntry>,
+    failed: Vec<DeployEntry>,
+    pending: Vec<DeployEntry>,
+    deployed: Vec<DeployEntry>,
+    unset: Vec<DeployEntry>,
     coverage_gaps: Vec<CoverageGap>,
     orphans: Vec<Orphan>,
     remote_states: Vec<RemoteState>,
@@ -123,10 +123,10 @@ impl Dashboard {
         let target_health = check_target_health(config, runner);
         let remote_health = check_remote_health(config, runner);
 
-        // 2. Sync entries
+        // 2. Deploy entries
         let mut failed = Vec::new();
         let mut pending = Vec::new();
-        let mut synced = Vec::new();
+        let mut deployed = Vec::new();
         let mut unset = Vec::new();
 
         for secret in &resolved {
@@ -149,12 +149,12 @@ impl Dashboard {
 
                 let record = index.records.get(&tracker_key);
 
-                let entry = SyncEntry {
+                let entry = DeployEntry {
                     key: secret.key.clone(),
                     env: target.environment.clone(),
                     target: format_target(target),
                     error: record.and_then(|r| r.last_error.clone()),
-                    last_synced_at: record.map(|r| r.last_synced_at.clone()),
+                    last_deployed_at: record.map(|r| r.last_deployed_at.clone()),
                 };
 
                 match (value, record) {
@@ -162,8 +162,8 @@ impl Dashboard {
                     (Some(_), None) => pending.push(entry),
                     (Some(v), Some(rec)) => {
                         let current_hash = DeployIndex::hash_value(v);
-                        if rec.last_sync_status == DeployStatus::Failed {
-                            failed.push(SyncEntry {
+                        if rec.last_deploy_status == DeployStatus::Failed {
+                            failed.push(DeployEntry {
                                 error: Some(
                                     rec.last_error
                                         .as_deref()
@@ -173,12 +173,12 @@ impl Dashboard {
                                 ..entry
                             });
                         } else if current_hash != rec.value_hash {
-                            pending.push(SyncEntry {
-                                last_synced_at: Some(rec.last_synced_at.clone()),
+                            pending.push(DeployEntry {
+                                last_deployed_at: Some(rec.last_deployed_at.clone()),
                                 ..entry
                             });
                         } else {
-                            synced.push(entry);
+                            deployed.push(entry);
                         }
                     }
                 }
@@ -283,7 +283,7 @@ impl Dashboard {
         // 6. Next steps
         let mut next_steps = Vec::new();
 
-        // Failed syncs
+        // Failed deploys
         for entry in &failed {
             next_steps.push(NextStep {
                 command: format!("esk deploy --env {}", entry.env),
@@ -291,7 +291,7 @@ impl Dashboard {
             });
         }
 
-        // Pending syncs (dedupe by env)
+        // Pending deploys (dedupe by env)
         let mut pending_envs: BTreeSet<&str> = BTreeSet::new();
         for entry in &pending {
             pending_envs.insert(&entry.env);
@@ -356,7 +356,7 @@ impl Dashboard {
             remote_health,
             failed,
             pending,
-            synced,
+            deployed,
             unset,
             coverage_gaps,
             orphans,
@@ -369,7 +369,7 @@ impl Dashboard {
         cliclack::set_theme(StatusTheme);
 
         // Summary line
-        let total = self.failed.len() + self.pending.len() + self.synced.len() + self.unset.len();
+        let total = self.failed.len() + self.pending.len() + self.deployed.len() + self.unset.len();
         let summary = if total == 0 {
             format!(
                 "{} · {}",
@@ -378,8 +378,8 @@ impl Dashboard {
             )
         } else {
             let mut parts = Vec::new();
-            if !self.synced.is_empty() {
-                parts.push(format!("{} deployed", self.synced.len()));
+            if !self.deployed.is_empty() {
+                parts.push(format!("{} deployed", self.deployed.len()));
             }
             if !self.pending.is_empty() {
                 parts.push(format!("{} pending", self.pending.len()));
@@ -391,10 +391,10 @@ impl Dashboard {
                 parts.push(format!("{} unset", self.unset.len()));
             }
 
-            let all_synced =
+            let all_deployed =
                 self.failed.is_empty() && self.pending.is_empty() && self.unset.is_empty();
 
-            if all_synced {
+            if all_deployed {
                 format!(
                     "{} · {} · {}, all deployed",
                     style(&self.project).bold(),
@@ -448,18 +448,18 @@ impl Dashboard {
         let has_problems =
             !self.failed.is_empty() || !self.pending.is_empty() || !self.unset.is_empty();
 
-        if has_problems || (all && !self.synced.is_empty()) {
-            let mut sync_lines = Vec::new();
+        if has_problems || (all && !self.deployed.is_empty()) {
+            let mut deploy_lines = Vec::new();
 
             if !self.failed.is_empty() {
-                sync_lines.push(format!(
+                deploy_lines.push(format!(
                     "  {} {}",
                     style("✗").red(),
                     style(format!("{} failed", self.failed.len())).red().bold()
                 ));
                 for entry in &self.failed {
                     let freshness = entry
-                        .last_synced_at
+                        .last_deployed_at
                         .as_deref()
                         .map(relative_time)
                         .unwrap_or_default();
@@ -468,7 +468,7 @@ impl Dashboard {
                         .as_deref()
                         .map(|e| format!(" {}", style(format!("({e})")).dim()))
                         .unwrap_or_default();
-                    sync_lines.push(format!(
+                    deploy_lines.push(format!(
                         "     {}  → {}  {}{}",
                         style(format!("{}:{}", entry.key, entry.env)).dim(),
                         entry.target,
@@ -479,7 +479,7 @@ impl Dashboard {
             }
 
             if !self.pending.is_empty() {
-                sync_lines.push(format!(
+                deploy_lines.push(format!(
                     "  {} {}",
                     style("●").yellow(),
                     style(format!("{} pending", self.pending.len()))
@@ -487,7 +487,7 @@ impl Dashboard {
                         .bold()
                 ));
                 for entry in &self.pending {
-                    let freshness = match &entry.last_synced_at {
+                    let freshness = match &entry.last_deployed_at {
                         Some(t) => {
                             let ago = relative_time(t);
                             if ago.is_empty() {
@@ -498,7 +498,7 @@ impl Dashboard {
                         }
                         None => "never deployed".to_string(),
                     };
-                    sync_lines.push(format!(
+                    deploy_lines.push(format!(
                         "     {}  → {}  {}",
                         style(format!("{}:{}", entry.key, entry.env)).dim(),
                         entry.target,
@@ -508,13 +508,13 @@ impl Dashboard {
             }
 
             if !self.unset.is_empty() {
-                sync_lines.push(format!(
+                deploy_lines.push(format!(
                     "  {} {}",
                     style("○").dim(),
                     style(format!("{} unset", self.unset.len())).dim().bold()
                 ));
                 for entry in &self.unset {
-                    sync_lines.push(format!(
+                    deploy_lines.push(format!(
                         "     {}  → {}",
                         style(format!("{}:{}", entry.key, entry.env)).dim(),
                         style(&entry.target).dim(),
@@ -522,22 +522,22 @@ impl Dashboard {
                 }
             }
 
-            if !self.synced.is_empty() {
+            if !self.deployed.is_empty() {
                 if all {
-                    sync_lines.push(format!(
+                    deploy_lines.push(format!(
                         "  {} {}",
                         style("✓").green(),
-                        style(format!("{} deployed", self.synced.len()))
+                        style(format!("{} deployed", self.deployed.len()))
                             .green()
                             .bold()
                     ));
-                    for entry in &self.synced {
+                    for entry in &self.deployed {
                         let freshness = entry
-                            .last_synced_at
+                            .last_deployed_at
                             .as_deref()
                             .map(relative_time)
                             .unwrap_or_default();
-                        sync_lines.push(format!(
+                        deploy_lines.push(format!(
                             "     {}  → {}  {}",
                             style(format!("{}:{}", entry.key, entry.env)).dim(),
                             entry.target,
@@ -545,17 +545,17 @@ impl Dashboard {
                         ));
                     }
                 } else {
-                    sync_lines.push(format!(
+                    deploy_lines.push(format!(
                         "  {} {}  {}",
                         style("✓").green(),
-                        style(format!("{} deployed", self.synced.len())).green(),
+                        style(format!("{} deployed", self.deployed.len())).green(),
                         style("(--all to show)").dim()
                     ));
                 }
             }
 
-            if !sync_lines.is_empty() {
-                cliclack::log::step(format!("Deploy (targets)\n{}", sync_lines.join("\n")))?;
+            if !deploy_lines.is_empty() {
+                cliclack::log::step(format!("Deploy (targets)\n{}", deploy_lines.join("\n")))?;
             }
         }
 

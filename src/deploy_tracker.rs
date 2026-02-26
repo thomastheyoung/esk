@@ -16,8 +16,10 @@ pub struct DeployIndex {
 pub struct DeployRecord {
     pub target: String,
     pub value_hash: String,
-    pub last_synced_at: String,
-    pub last_sync_status: DeployStatus,
+    #[serde(alias = "last_synced_at")]
+    pub last_deployed_at: String,
+    #[serde(alias = "last_sync_status")]
+    pub last_deploy_status: DeployStatus,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub last_error: Option<String>,
 }
@@ -89,15 +91,15 @@ impl DeployIndex {
         }
     }
 
-    /// Determine if a sync is needed.
-    pub fn should_sync(&self, tracker_key: &str, value_hash: &str, force: bool) -> bool {
+    /// Determine if a deploy is needed.
+    pub fn should_deploy(&self, tracker_key: &str, value_hash: &str, force: bool) -> bool {
         if force {
             return true;
         }
         match self.records.get(tracker_key) {
             None => true,
             Some(record) => {
-                record.last_sync_status == DeployStatus::Failed || record.value_hash != value_hash
+                record.last_deploy_status == DeployStatus::Failed || record.value_hash != value_hash
             }
         }
     }
@@ -108,8 +110,8 @@ impl DeployIndex {
             DeployRecord {
                 target,
                 value_hash,
-                last_synced_at: chrono::Utc::now().to_rfc3339(),
-                last_sync_status: DeployStatus::Success,
+                last_deployed_at: chrono::Utc::now().to_rfc3339(),
+                last_deploy_status: DeployStatus::Success,
                 last_error: None,
             },
         );
@@ -127,8 +129,8 @@ impl DeployIndex {
             DeployRecord {
                 target,
                 value_hash,
-                last_synced_at: chrono::Utc::now().to_rfc3339(),
-                last_sync_status: DeployStatus::Failed,
+                last_deployed_at: chrono::Utc::now().to_rfc3339(),
+                last_deploy_status: DeployStatus::Failed,
                 last_error: Some(error),
             },
         );
@@ -205,11 +207,11 @@ mod tests {
         let loaded = DeployIndex::load(&path);
         assert_eq!(loaded.records.len(), 2);
         assert_eq!(
-            loaded.records["A:env:web:dev"].last_sync_status,
+            loaded.records["A:env:web:dev"].last_deploy_status,
             DeployStatus::Success
         );
         assert_eq!(
-            loaded.records["B:cf:prod"].last_sync_status,
+            loaded.records["B:cf:prod"].last_deploy_status,
             DeployStatus::Failed
         );
     }
@@ -236,34 +238,34 @@ mod tests {
     }
 
     #[test]
-    fn should_sync_force_true() {
+    fn should_deploy_force_true() {
         let mut index = DeployIndex::new(Path::new("/tmp/test.json"));
         index.record_success("K".to_string(), "t".to_string(), "hash".to_string());
-        assert!(index.should_sync("K", "hash", true));
+        assert!(index.should_deploy("K", "hash", true));
     }
 
     #[test]
-    fn should_sync_no_record() {
+    fn should_deploy_no_record() {
         let index = DeployIndex::new(Path::new("/tmp/test.json"));
-        assert!(index.should_sync("K", "hash", false));
+        assert!(index.should_deploy("K", "hash", false));
     }
 
     #[test]
-    fn should_sync_hash_match_success() {
+    fn should_deploy_hash_match_success() {
         let mut index = DeployIndex::new(Path::new("/tmp/test.json"));
         index.record_success("K".to_string(), "t".to_string(), "hash".to_string());
-        assert!(!index.should_sync("K", "hash", false));
+        assert!(!index.should_deploy("K", "hash", false));
     }
 
     #[test]
-    fn should_sync_hash_mismatch() {
+    fn should_deploy_hash_mismatch() {
         let mut index = DeployIndex::new(Path::new("/tmp/test.json"));
         index.record_success("K".to_string(), "t".to_string(), "old_hash".to_string());
-        assert!(index.should_sync("K", "new_hash", false));
+        assert!(index.should_deploy("K", "new_hash", false));
     }
 
     #[test]
-    fn should_sync_previous_failure() {
+    fn should_deploy_previous_failure() {
         let mut index = DeployIndex::new(Path::new("/tmp/test.json"));
         index.record_failure(
             "K".to_string(),
@@ -271,7 +273,7 @@ mod tests {
             "hash".to_string(),
             "err".to_string(),
         );
-        assert!(index.should_sync("K", "hash", false));
+        assert!(index.should_deploy("K", "hash", false));
     }
 
     #[test]
@@ -285,7 +287,7 @@ mod tests {
         let record = &index.records["K"];
         assert_eq!(record.target, "env:web:dev");
         assert_eq!(record.value_hash, "abc");
-        assert_eq!(record.last_sync_status, DeployStatus::Success);
+        assert_eq!(record.last_deploy_status, DeployStatus::Success);
         assert!(record.last_error.is_none());
     }
 
@@ -301,7 +303,7 @@ mod tests {
         let record = &index.records["K"];
         assert_eq!(record.target, "cf:prod");
         assert_eq!(record.value_hash, "abc");
-        assert_eq!(record.last_sync_status, DeployStatus::Failed);
+        assert_eq!(record.last_deploy_status, DeployStatus::Failed);
         assert_eq!(record.last_error.as_deref(), Some("timeout"));
     }
 
@@ -316,7 +318,7 @@ mod tests {
         );
         index.record_success("K".to_string(), "t".to_string(), "h2".to_string());
         let record = &index.records["K"];
-        assert_eq!(record.last_sync_status, DeployStatus::Success);
+        assert_eq!(record.last_deploy_status, DeployStatus::Success);
         assert_eq!(record.value_hash, "h2");
     }
 
@@ -353,18 +355,18 @@ mod tests {
     }
 
     #[test]
-    fn should_sync_tombstone_success_skips() {
+    fn should_deploy_tombstone_success_skips() {
         let mut index = DeployIndex::new(Path::new("/tmp/test.json"));
         index.record_success(
             "K".to_string(),
             "t".to_string(),
             DeployIndex::TOMBSTONE_HASH.to_string(),
         );
-        assert!(!index.should_sync("K", DeployIndex::TOMBSTONE_HASH, false));
+        assert!(!index.should_deploy("K", DeployIndex::TOMBSTONE_HASH, false));
     }
 
     #[test]
-    fn should_sync_tombstone_failure_retries() {
+    fn should_deploy_tombstone_failure_retries() {
         let mut index = DeployIndex::new(Path::new("/tmp/test.json"));
         index.record_failure(
             "K".to_string(),
@@ -372,6 +374,6 @@ mod tests {
             DeployIndex::TOMBSTONE_HASH.to_string(),
             "err".to_string(),
         );
-        assert!(index.should_sync("K", DeployIndex::TOMBSTONE_HASH, false));
+        assert!(index.should_deploy("K", DeployIndex::TOMBSTONE_HASH, false));
     }
 }

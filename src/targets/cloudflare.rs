@@ -25,7 +25,7 @@ pub struct CloudflareTarget<'a> {
 }
 
 impl<'a> CloudflareTarget<'a> {
-    fn sync_pages_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_pages_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let project = self
             .target_config
             .pages_project
@@ -94,7 +94,7 @@ impl<'a> DeployTarget for CloudflareTarget<'a> {
         "cloudflare"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -114,9 +114,9 @@ impl<'a> DeployTarget for CloudflareTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         if self.target_config.mode == "pages" {
-            return self.sync_pages_secret(key, value, target);
+            return self.deploy_pages_secret(key, value, target);
         }
 
         let app = target
@@ -327,7 +327,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(None, "dev"))
+            .deploy_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("requires an app"));
     }
@@ -344,7 +344,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(Some("nope"), "dev"))
+            .deploy_secret("KEY", "val", &make_target(Some("nope"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("unknown app 'nope'"));
     }
@@ -366,7 +366,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "prod"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target(Some("web"), "prod"))
             .unwrap();
 
         let calls = take_calls(&runner);
@@ -396,7 +396,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "my_secret", &make_target(Some("web"), "dev"))
+            .deploy_secret("KEY", "my_secret", &make_target(Some("web"), "dev"))
             .unwrap();
 
         let calls = take_calls(&runner);
@@ -420,7 +420,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
+            .deploy_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap();
 
         let calls = take_calls(&runner);
@@ -520,7 +520,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
+            .deploy_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
     }
@@ -544,7 +544,7 @@ targets:
     }
 
     #[test]
-    fn pages_sync_correct_args() {
+    fn pages_deploy_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_pages_config(dir.path());
         let target_config = config.targets.cloudflare.as_ref().unwrap();
@@ -559,7 +559,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target(None, "dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target(None, "dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "wrangler");
@@ -578,7 +578,7 @@ targets:
     }
 
     #[test]
-    fn pages_sync_with_env_flags() {
+    fn pages_deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_pages_config(dir.path());
         let target_config = config.targets.cloudflare.as_ref().unwrap();
@@ -593,7 +593,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target(None, "prod"))
+            .deploy_secret("KEY", "val", &make_target(None, "prod"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
@@ -665,7 +665,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(None, "dev"))
+            .deploy_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("pages_project is required"));
     }

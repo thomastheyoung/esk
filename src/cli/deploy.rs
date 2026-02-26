@@ -8,8 +8,8 @@ use crate::store::SecretStore;
 use crate::targets::{build_targets, CommandRunner, DeployMode, RealCommandRunner, SecretValue};
 use crate::ui;
 
-/// A single sync result entry for display.
-struct SyncEntry {
+/// A single deploy result entry for display.
+struct DeployEntry {
     key: String,
     env: String,
     target: String,
@@ -52,11 +52,11 @@ pub fn run_with_runner(
         return Ok(());
     }
 
-    // Build a lookup map: target_name -> (index, sync_mode)
+    // Build a lookup map: target_name -> (index, deploy_mode)
     let target_map: HashMap<&str, (usize, DeployMode)> = deploy_targets
         .iter()
         .enumerate()
-        .map(|(i, a)| (a.name(), (i, a.sync_mode())))
+        .map(|(i, a)| (a.name(), (i, a.deploy_mode())))
         .collect();
 
     // Track batch-mode dirty target groups: (target_name, app, env)
@@ -65,10 +65,10 @@ pub fn run_with_runner(
     let mut individual_work: Vec<(String, String, crate::config::ResolvedTarget)> = Vec::new();
 
     // Collect structured results
-    let mut synced: Vec<SyncEntry> = Vec::new();
-    let mut skipped: Vec<SyncEntry> = Vec::new();
-    let mut failed: Vec<SyncEntry> = Vec::new();
-    let mut unset: Vec<SyncEntry> = Vec::new();
+    let mut deployed: Vec<DeployEntry> = Vec::new();
+    let mut skipped: Vec<DeployEntry> = Vec::new();
+    let mut failed: Vec<DeployEntry> = Vec::new();
+    let mut unset: Vec<DeployEntry> = Vec::new();
 
     for secret in &resolved {
         for target in &secret.targets {
@@ -80,7 +80,7 @@ pub fn run_with_runner(
             }
 
             // Skip targets whose target isn't in the deploy target map (e.g. remotes)
-            let (_, sync_mode) = match target_map.get(target.service.as_str()) {
+            let (_, deploy_mode) = match target_map.get(target.service.as_str()) {
                 Some(entry) => *entry,
                 None => continue,
             };
@@ -89,7 +89,7 @@ pub fn run_with_runner(
             let value = match payload.secrets.get(&composite) {
                 Some(v) => v,
                 None => {
-                    unset.push(SyncEntry {
+                    unset.push(DeployEntry {
                         key: secret.key.clone(),
                         env: target.environment.clone(),
                         target: format_target(target),
@@ -113,9 +113,9 @@ pub fn run_with_runner(
                 &target.environment,
             );
 
-            match sync_mode {
+            match deploy_mode {
                 DeployMode::Batch => {
-                    if index.should_sync(&tracker_key, &value_hash, force) {
+                    if index.should_deploy(&tracker_key, &value_hash, force) {
                         batch_dirty.insert((
                             target.service.clone(),
                             target.app.clone(),
@@ -124,10 +124,10 @@ pub fn run_with_runner(
                     }
                 }
                 DeployMode::Individual => {
-                    if index.should_sync(&tracker_key, &value_hash, force) {
+                    if index.should_deploy(&tracker_key, &value_hash, force) {
                         individual_work.push((secret.key.clone(), value.clone(), target.clone()));
                     } else {
-                        skipped.push(SyncEntry {
+                        skipped.push(DeployEntry {
                             key: secret.key.clone(),
                             env: target.environment.clone(),
                             target: format_target(target),
@@ -171,13 +171,13 @@ pub fn run_with_runner(
     // Normal mode: single spinner for the entire operation
     let spinner = if !verbose && !dry_run {
         let s = cliclack::spinner();
-        s.start("Syncing secrets...");
+        s.start("Deploying secrets...");
         Some(s)
     } else {
         None
     };
 
-    // Handle batch targets: for each dirty target group, gather ALL secrets and sync
+    // Handle batch targets: for each dirty target group, gather ALL secrets and deploy
     for (target_name, app, target_env) in &batch_dirty {
         let (target_idx, _) = target_map[target_name.as_str()];
         let deploy_target = &deploy_targets[target_idx];
@@ -215,7 +215,7 @@ pub fn run_with_runner(
         if dry_run {
             if secrets_for_batch.is_empty() {
                 for key in &tombstoned_keys {
-                    synced.push(SyncEntry {
+                    deployed.push(DeployEntry {
                         key: key.clone(),
                         env: target_env.clone(),
                         target: target_display.clone(),
@@ -225,7 +225,7 @@ pub fn run_with_runner(
                 continue;
             }
             for s in &secrets_for_batch {
-                synced.push(SyncEntry {
+                deployed.push(DeployEntry {
                     key: s.key.clone(),
                     env: target_env.clone(),
                     target: target_display.clone(),
@@ -237,14 +237,14 @@ pub fn run_with_runner(
 
         if verbose {
             cliclack::log::step(format!(
-                "Syncing {} ({} secrets) → {}",
+                "Deploying {} ({} secrets) → {}",
                 style(target_name).bold(),
                 secrets_for_batch.len(),
                 target
             ))?;
         }
 
-        let results = deploy_target.sync_batch(&secrets_for_batch, &target);
+        let results = deploy_target.deploy_batch(&secrets_for_batch, &target);
         if results.is_empty() {
             for key in &tombstoned_keys {
                 let tracker_key =
@@ -254,7 +254,7 @@ pub fn run_with_runner(
                     target.to_string(),
                     DeployIndex::TOMBSTONE_HASH.to_string(),
                 );
-                synced.push(SyncEntry {
+                deployed.push(DeployEntry {
                     key: key.clone(),
                     env: target_env.clone(),
                     target: target_display.clone(),
@@ -279,7 +279,7 @@ pub fn run_with_runner(
 
             if result.success {
                 index.record_success(tracker_key, target.to_string(), value_hash);
-                synced.push(SyncEntry {
+                deployed.push(DeployEntry {
                     key: result.key.clone(),
                     env: target_env.clone(),
                     target: target_display.clone(),
@@ -288,7 +288,7 @@ pub fn run_with_runner(
             } else {
                 let error = result.error.clone().unwrap_or_default();
                 index.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
-                failed.push(SyncEntry {
+                failed.push(DeployEntry {
                     key: result.key.clone(),
                     env: target_env.clone(),
                     target: target_display.clone(),
@@ -308,7 +308,7 @@ pub fn run_with_runner(
         let target_display = format_target(target);
 
         if dry_run {
-            synced.push(SyncEntry {
+            deployed.push(DeployEntry {
                 key: key.clone(),
                 env: target.environment.clone(),
                 target: target_display,
@@ -319,14 +319,14 @@ pub fn run_with_runner(
 
         if verbose {
             cliclack::log::step(format!(
-                "Syncing {}:{} → {}",
+                "Deploying {}:{} → {}",
                 key, target.environment, target
             ))?;
         }
 
         let (target_idx, _) = target_map[target.service.as_str()];
         let deploy_target = &deploy_targets[target_idx];
-        let result = deploy_target.sync_secret(key, value, target);
+        let result = deploy_target.deploy_secret(key, value, target);
 
         let tracker_key = DeployIndex::tracker_key(
             key,
@@ -339,7 +339,7 @@ pub fn run_with_runner(
         match result {
             Ok(()) => {
                 index.record_success(tracker_key, target.to_string(), value_hash);
-                synced.push(SyncEntry {
+                deployed.push(DeployEntry {
                     key: key.clone(),
                     env: target.environment.clone(),
                     target: target_display,
@@ -347,14 +347,14 @@ pub fn run_with_runner(
                 });
                 if verbose {
                     cliclack::log::success(format!(
-                        "Synced {}:{} → {}",
+                        "Deployed {}:{} → {}",
                         key, target.environment, target
                     ))?;
                 }
             }
             Err(e) => {
                 index.record_failure(tracker_key, target.to_string(), value_hash, e.to_string());
-                failed.push(SyncEntry {
+                failed.push(DeployEntry {
                     key: key.clone(),
                     env: target.environment.clone(),
                     target: target_display,
@@ -406,12 +406,13 @@ pub fn run_with_runner(
                 );
 
                 // Skip if already successfully deleted (unless forced)
-                if !force && !index.should_sync(&tracker_key, DeployIndex::TOMBSTONE_HASH, false) {
+                if !force && !index.should_deploy(&tracker_key, DeployIndex::TOMBSTONE_HASH, false)
+                {
                     continue;
                 }
 
                 if dry_run {
-                    synced.push(SyncEntry {
+                    deployed.push(DeployEntry {
                         key: bare_key.to_string(),
                         env: tomb_env.to_string(),
                         target: format_target(target),
@@ -430,7 +431,7 @@ pub fn run_with_runner(
                             format_target(target),
                             DeployIndex::TOMBSTONE_HASH.to_string(),
                         );
-                        synced.push(SyncEntry {
+                        deployed.push(DeployEntry {
                             key: bare_key.to_string(),
                             env: tomb_env.to_string(),
                             target: format_target(target),
@@ -444,7 +445,7 @@ pub fn run_with_runner(
                             DeployIndex::TOMBSTONE_HASH.to_string(),
                             e.to_string(),
                         );
-                        failed.push(SyncEntry {
+                        failed.push(DeployEntry {
                             key: bare_key.to_string(),
                             env: tomb_env.to_string(),
                             target: format_target(target),
@@ -474,7 +475,7 @@ pub fn run_with_runner(
                 if !batch_dirty.contains(&group) {
                     let composite = format!("{}:{}", secret.key, target.environment);
                     if payload.secrets.contains_key(&composite) {
-                        skipped.push(SyncEntry {
+                        skipped.push(DeployEntry {
                             key: secret.key.clone(),
                             env: target.environment.clone(),
                             target: format_target(target),
@@ -490,27 +491,27 @@ pub fn run_with_runner(
         index.save()?;
     }
 
-    let sync_count = synced.len();
+    let deploy_count = deployed.len();
     let skip_count = skipped.len();
     let fail_count = failed.len();
     let unset_count = unset.len();
 
     // Stop spinner before printing results
     if let Some(s) = spinner {
-        s.stop("Syncing secrets...");
+        s.stop("Deploying secrets...");
     }
 
     // Output
     let width = 44;
 
-    if sync_count == 0 && skip_count == 0 && fail_count == 0 && unset_count == 0 {
-        cliclack::log::info("Nothing to sync.")?;
+    if deploy_count == 0 && skip_count == 0 && fail_count == 0 && unset_count == 0 {
+        cliclack::log::info("Nothing to deploy.")?;
     } else {
         // Group everything by environment for framed output
         let mut env_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
-        let mut env_status: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new(); // (synced, failed, unset)
+        let mut env_status: BTreeMap<String, (usize, usize, usize)> = BTreeMap::new(); // (deployed, failed, unset)
 
-        for entry in &synced {
+        for entry in &deployed {
             let label = format!("{} {}", style("✔").green(), style(&entry.key).dim());
             env_map
                 .entry(entry.env.clone())
@@ -545,7 +546,7 @@ pub fn run_with_runner(
                 status_parts.push(format!("{} failed", f_cnt));
             }
             if *s_cnt > 0 {
-                status_parts.push(format!("{} synced", s_cnt));
+                status_parts.push(format!("{} deployed", s_cnt));
             }
             if *u_cnt > 0 {
                 status_parts.push(format!("{} unset", u_cnt));
@@ -598,7 +599,7 @@ pub fn run_with_runner(
     }
 
     if fail_count > 0 {
-        anyhow::bail!("{fail_count} sync(s) failed");
+        anyhow::bail!("{fail_count} deploy(s) failed");
     }
 
     Ok(())

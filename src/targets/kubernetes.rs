@@ -107,7 +107,7 @@ impl<'a> DeployTarget for KubernetesTarget<'a> {
         "kubernetes"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Batch
     }
 
@@ -131,12 +131,12 @@ impl<'a> DeployTarget for KubernetesTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
-        // Batch target — sync_batch is the primary method
+    fn deploy_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
+        // Batch target — deploy_batch is the primary method
         Ok(())
     }
 
-    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
+    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         let manifest = match self.generate_manifest(secrets, target) {
             Ok(m) => m,
             Err(e) => {
@@ -330,7 +330,7 @@ targets:
     }
 
     #[test]
-    fn sync_batch_generates_manifest() {
+    fn deploy_batch_generates_manifest() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.kubernetes.as_ref().unwrap();
@@ -349,7 +349,7 @@ targets:
             make_secret("DB_HOST", "localhost"),
             make_secret("DB_PASS", "s3cret"),
         ];
-        let results = target.sync_batch(&secrets, &make_target("dev"));
+        let results = target.deploy_batch(&secrets, &make_target("dev"));
         assert!(results.iter().all(|r| r.success));
 
         let calls = take_calls(&runner);
@@ -367,7 +367,7 @@ targets:
     }
 
     #[test]
-    fn sync_batch_with_context_and_flags() {
+    fn deploy_batch_with_context_and_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.kubernetes.as_ref().unwrap();
@@ -383,7 +383,7 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        target.sync_batch(&secrets, &make_target("prod"));
+        target.deploy_batch(&secrets, &make_target("prod"));
 
         let calls = take_calls(&runner);
         assert!(calls[0].1.contains(&"--context".to_string()));
@@ -392,7 +392,7 @@ targets:
     }
 
     #[test]
-    fn sync_batch_failure() {
+    fn deploy_batch_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.kubernetes.as_ref().unwrap();
@@ -408,13 +408,13 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        let results = target.sync_batch(&secrets, &make_target("dev"));
+        let results = target.deploy_batch(&secrets, &make_target("dev"));
         assert!(!results[0].success);
         assert!(results[0].error.as_ref().unwrap().contains("forbidden"));
     }
 
     #[test]
-    fn sync_batch_unknown_namespace() {
+    fn deploy_batch_unknown_namespace() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.kubernetes.as_ref().unwrap();
@@ -426,7 +426,7 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        let results = target.sync_batch(&secrets, &make_target("staging"));
+        let results = target.deploy_batch(&secrets, &make_target("staging"));
         assert!(!results[0].success);
         assert!(results[0]
             .error
@@ -512,7 +512,7 @@ targets:
     }
 
     #[test]
-    fn sync_batch_empty() {
+    fn deploy_batch_empty() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.kubernetes.as_ref().unwrap();
@@ -526,7 +526,7 @@ targets:
             target_config,
             runner: &runner,
         };
-        let results = target.sync_batch(&[], &make_target("dev"));
+        let results = target.deploy_batch(&[], &make_target("dev"));
         assert!(results.is_empty());
     }
 }

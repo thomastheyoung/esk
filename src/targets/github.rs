@@ -30,7 +30,7 @@ impl<'a> DeployTarget for GithubTarget<'a> {
         "github"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -50,7 +50,7 @@ impl<'a> DeployTarget for GithubTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["secret", "set", key];
         if let Some(repo) = &self.target_config.repo {
@@ -219,7 +219,7 @@ targets:
     }
 
     #[test]
-    fn github_sync_correct_args_with_repo() {
+    fn github_deploy_correct_args_with_repo() {
         let fixture = make_config(true);
         let config = fixture.config();
         let target_config = config.targets.github.as_ref().unwrap();
@@ -234,7 +234,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "gh");
@@ -260,14 +260,14 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "my_secret", &make_target("dev"))
+            .deploy_secret("KEY", "my_secret", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].2.as_ref().unwrap(), b"my_secret");
     }
 
     #[test]
-    fn github_sync_without_repo() {
+    fn github_deploy_without_repo() {
         let fixture = make_config(false);
         let config = fixture.config();
         let target_config = config.targets.github.as_ref().unwrap();
@@ -282,14 +282,14 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].1, vec!["secret", "set", "KEY"]);
     }
 
     #[test]
-    fn github_sync_with_env_flags() {
+    fn github_deploy_with_env_flags() {
         let fixture = make_config(true);
         let config = fixture.config();
         let target_config = config.targets.github.as_ref().unwrap();
@@ -304,7 +304,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("prod"))
+            .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
@@ -381,7 +381,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
     }

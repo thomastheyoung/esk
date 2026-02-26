@@ -61,7 +61,7 @@ esk init
 esk set API_KEY --env dev --group General
 ```
 
-3. Add more secrets without deploying on each write, then deploy once.
+3. Add more secrets without syncing or deploying on each write, then deploy once.
 
 ```bash
 esk set DATABASE_URL --env dev --group General --no-sync
@@ -151,35 +151,35 @@ Full flags and behavior: [API.md](API.md).
 
 ## Supported deploy targets
 
-- `env`
+- `.env* files`
+- `aws_ssm`
 - `cloudflare`
 - `convex`
-- `fly`
-- `netlify`
-- `vercel`
-- `github`
-- `heroku`
-- `supabase`
-- `railway`
-- `gitlab`
-- `aws_ssm`
-- `kubernetes`
 - `docker`
+- `fly`
+- `github`
+- `gitlab`
+- `heroku`
+- `kubernetes`
+- `netlify`
+- `railway`
+- `supabase`
+- `vercel`
 
 Target config details: [TARGETS.md](TARGETS.md).
 
 ## Supported sync remotes
 
 - `1password`
-- Cloud file (`dropbox`, `gdrive`, `onedrive`, etc.)
 - `aws_secrets_manager`
-- `vault`
-- `bitwarden`
-- `s3`
-- `gcp`
 - `azure`
+- `bitwarden`
+- Cloud storage (`dropbox`, `gdrive`, `onedrive`, etc.)
 - `doppler`
+- `gcp`
+- `s3`
 - `sops`
+- `vault`
 
 Remote config details: [REMOTES.md](REMOTES.md).
 

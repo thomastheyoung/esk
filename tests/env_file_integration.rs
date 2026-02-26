@@ -37,7 +37,7 @@ fn env_file_end_to_end() {
             vendor: "General".into(),
         },
     ];
-    let results = target.sync_batch(&secrets, &make_target("web", "dev"));
+    let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
     assert!(results.iter().all(|r| r.success));
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
@@ -70,7 +70,7 @@ fn env_file_multiple_vendors() {
             vendor: "Resend".into(),
         },
     ];
-    let results = target.sync_batch(&secrets, &make_target("web", "dev"));
+    let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
     assert!(results.iter().all(|r| r.success));
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
@@ -94,7 +94,7 @@ fn env_file_regeneration_replaces() {
         value: "old".into(),
         vendor: "G".into(),
     }];
-    env_target.sync_batch(&secrets1, &resolved);
+    env_target.deploy_batch(&secrets1, &resolved);
 
     // Second write with different secrets
     let secrets2 = vec![SecretValue {
@@ -102,7 +102,7 @@ fn env_file_regeneration_replaces() {
         value: "new".into(),
         vendor: "G".into(),
     }];
-    env_target.sync_batch(&secrets2, &resolved);
+    env_target.deploy_batch(&secrets2, &resolved);
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
     assert!(content.contains("NEW_KEY=new"));

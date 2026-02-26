@@ -293,7 +293,7 @@ fn delete_auto_syncs_env_file() {
     store.set("MY_SECRET", "dev", "val1").unwrap();
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
-    // Sync first to write both secrets
+    // Deploy first to write both secrets
     let runner = MockCommandRunner::new();
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
@@ -432,7 +432,7 @@ secrets:
     store.set("MY_SECRET", "dev", "val").unwrap();
     store.set("OTHER", "dev", "other_val").unwrap();
 
-    // First sync to write the env file
+    // First deploy to write the env file
     cli::deploy::run_with_runner(
         &config,
         Some("dev"),
@@ -539,7 +539,7 @@ fn remote_sync_no_remotes() {
 // === sync ===
 
 #[test]
-fn sync_env_filter() {
+fn deploy_env_filter() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -547,7 +547,7 @@ fn sync_env_filter() {
     store.set("MY_SECRET", "dev", "dv").unwrap();
     store.set("MY_SECRET", "prod", "pv").unwrap();
 
-    // Sync only dev
+    // Deploy only dev
     cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     // dev env file should exist
@@ -560,7 +560,7 @@ fn sync_env_filter() {
 }
 
 #[test]
-fn sync_dry_run_no_side_effects() {
+fn deploy_dry_run_no_side_effects() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -576,7 +576,7 @@ fn sync_dry_run_no_side_effects() {
 }
 
 #[test]
-fn sync_force_resyncs_unchanged() {
+fn deploy_force_resyncs_unchanged() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -584,7 +584,7 @@ fn sync_force_resyncs_unchanged() {
     store.set("MY_SECRET", "dev", "val").unwrap();
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
-    // First sync
+    // First deploy
     cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
     let mtime1 = std::fs::metadata(project.root().join("apps/web/.env.local"))
         .unwrap()
@@ -594,7 +594,7 @@ fn sync_force_resyncs_unchanged() {
     // Small sleep to ensure mtime differs
     std::thread::sleep(std::time::Duration::from_millis(50));
 
-    // Force sync — should regenerate even though hashes match
+    // Force deploy — should regenerate even though hashes match
     cli::deploy::run(&config, Some("dev"), true, false, false).unwrap();
     let mtime2 = std::fs::metadata(project.root().join("apps/web/.env.local"))
         .unwrap()
@@ -605,7 +605,7 @@ fn sync_force_resyncs_unchanged() {
 }
 
 #[test]
-fn sync_skips_remote_targets() {
+fn deploy_skips_remote_targets() {
     // Secrets with targets that reference a non-target name should be skipped
     // Since onepassword is now a remote, not a target, we just verify sync works
     // with a config that has both target and remote entries
@@ -632,13 +632,13 @@ secrets:
     let store = project.store().unwrap();
     store.set("MY_SECRET", "dev", "val").unwrap();
 
-    // Sync should succeed — only hitting env target
+    // Deploy should succeed — only hitting env target
     cli::deploy::run(&config, None, false, false, false).unwrap();
     assert!(project.root().join("apps/web/.env.local").is_file());
 }
 
 #[test]
-fn sync_skips_no_value_secrets() {
+fn deploy_skips_no_value_secrets() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -647,7 +647,7 @@ fn sync_skips_no_value_secrets() {
 }
 
 #[test]
-fn sync_failure_count_causes_error() {
+fn deploy_failure_count_causes_error() {
     // This tests uses env target with an app that can't write
     let yaml = r#"
 project: x
@@ -674,7 +674,7 @@ secrets:
 }
 
 #[test]
-fn sync_env_dirty_pair_regens_all() {
+fn deploy_env_dirty_pair_regens_all() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -682,13 +682,13 @@ fn sync_env_dirty_pair_regens_all() {
     store.set("MY_SECRET", "dev", "val1").unwrap();
     store.set("OTHER_SECRET", "dev", "val2").unwrap();
 
-    // First sync
+    // First deploy
     cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     // Change only MY_SECRET
     store.set("MY_SECRET", "dev", "val1_changed").unwrap();
 
-    // Sync again — should regenerate entire file including OTHER_SECRET
+    // Deploy again — should regenerate entire file including OTHER_SECRET
     cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
@@ -709,7 +709,7 @@ fn status_shows_all_states() {
     store.set("MY_SECRET", "dev", "val").unwrap();
     // Don't set OTHER_SECRET → "no value"
 
-    // Sync to create "synced" state
+    // Deploy to create "deployed" state
     cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
 
     // Change MY_SECRET → "pending" state for dev
@@ -730,7 +730,7 @@ fn status_env_filter() {
 }
 
 #[test]
-fn sync_records_to_tracker() {
+fn deploy_records_to_tracker() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -854,7 +854,7 @@ remotes:
 // === cloudflare target integration ===
 
 #[test]
-fn sync_cloudflare_calls_wrangler() {
+fn deploy_cloudflare_calls_wrangler() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -880,7 +880,7 @@ fn sync_cloudflare_calls_wrangler() {
 }
 
 #[test]
-fn sync_cloudflare_prod_env_flags() {
+fn deploy_cloudflare_prod_env_flags() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -903,7 +903,7 @@ fn sync_cloudflare_prod_env_flags() {
 }
 
 #[test]
-fn sync_cloudflare_records_tracker() {
+fn deploy_cloudflare_records_tracker() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -926,7 +926,7 @@ fn sync_cloudflare_records_tracker() {
 }
 
 #[test]
-fn sync_cloudflare_failure_tracked() {
+fn deploy_cloudflare_failure_tracked() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -952,7 +952,7 @@ fn sync_cloudflare_failure_tracked() {
 }
 
 #[test]
-fn sync_cloudflare_multiple_secrets() {
+fn deploy_cloudflare_multiple_secrets() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -970,14 +970,14 @@ fn sync_cloudflare_multiple_secrets() {
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 4);
-    // Skip preflight calls (index 0-1), check sync calls
+    // Skip preflight calls (index 0-1), check deploy calls
     let keys: Vec<&str> = calls[2..].iter().map(|c| c.args[2].as_str()).collect();
     assert!(keys.contains(&"STRIPE_KEY"));
     assert!(keys.contains(&"STRIPE_WEBHOOK"));
 }
 
 #[test]
-fn sync_cloudflare_skip_unchanged() {
+fn deploy_cloudflare_skip_unchanged() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -989,9 +989,9 @@ fn sync_cloudflare_skip_unchanged() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
 
-    // First sync
+    // First deploy
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
-    assert_eq!(runner.take_calls().len(), 3); // preflight (2) + sync
+    assert_eq!(runner.take_calls().len(), 3); // preflight (2) + deploy
 
     // Second sync — same value, should skip (only preflight calls)
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
@@ -1001,7 +1001,7 @@ fn sync_cloudflare_skip_unchanged() {
 // === convex target integration ===
 
 #[test]
-fn sync_convex_calls_npx() {
+fn deploy_convex_calls_npx() {
     let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
@@ -1037,7 +1037,7 @@ fn sync_convex_calls_npx() {
 }
 
 #[test]
-fn sync_convex_prod_env_flags() {
+fn deploy_convex_prod_env_flags() {
     let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
@@ -1069,7 +1069,7 @@ fn sync_convex_prod_env_flags() {
 }
 
 #[test]
-fn sync_convex_reads_deployment_source() {
+fn deploy_convex_reads_deployment_source() {
     let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
@@ -1099,7 +1099,7 @@ fn sync_convex_reads_deployment_source() {
 }
 
 #[test]
-fn sync_convex_failure_tracked() {
+fn deploy_convex_failure_tracked() {
     let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
@@ -1363,7 +1363,7 @@ fn remote_sync_dry_run_no_mutation() {
 // === mixed target integration ===
 
 #[test]
-fn sync_full_config_cloudflare_and_convex() {
+fn deploy_full_config_cloudflare_and_convex() {
     let project = TestProject::with_store(FULL_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -1395,7 +1395,7 @@ fn sync_full_config_cloudflare_and_convex() {
 }
 
 #[test]
-fn sync_cloudflare_force_resyncs() {
+fn deploy_cloudflare_force_resyncs() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -1407,16 +1407,16 @@ fn sync_cloudflare_force_resyncs() {
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
 
-    // First sync
+    // First deploy
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
-    assert_eq!(runner.take_calls().len(), 3); // preflight (2) + sync
+    assert_eq!(runner.take_calls().len(), 3); // preflight (2) + deploy
 
     // Force sync — should re-run despite unchanged hash
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
     runner.push_success(b"", b"");
     cli::deploy::run_with_runner(&config, Some("dev"), true, false, false, &runner).unwrap();
-    assert_eq!(runner.take_calls().len(), 3); // preflight (2) + sync
+    assert_eq!(runner.take_calls().len(), 3); // preflight (2) + deploy
 }
 
 // === remote tracker integration ===
@@ -1480,7 +1480,7 @@ fn push_records_env_scoped_version_when_global_is_higher() {
 }
 
 #[test]
-fn sync_repairs_equal_version_remote_drift() {
+fn deploy_repairs_equal_version_remote_drift() {
     let cloud_sync = tempfile::tempdir().unwrap();
     let yaml = format!(
         r#"
@@ -1688,12 +1688,12 @@ fn status_dashboard_next_steps() {
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
     let store = project.store().unwrap();
 
-    // Set and sync, then change to create pending state
+    // Set and deploy, then change to create pending state
     store.set("MY_SECRET", "dev", "val").unwrap();
     cli::deploy::run(&config, Some("dev"), false, false, false).unwrap();
     store.set("MY_SECRET", "dev", "changed").unwrap();
 
-    // Should render with next steps (pending sync)
+    // Should render with next steps (pending deploy)
     cli::status::run(&config, None, false).unwrap();
 }
 
@@ -1733,23 +1733,23 @@ fn set_auto_push_records_sync_index() {
 // === tombstone delete tracking ===
 
 #[test]
-fn sync_records_tombstone_delete_success() {
+fn deploy_records_tombstone_delete_success() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
 
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
-    // Sync to establish initial state
+    // Deploy to establish initial state
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
-    runner.push_success(b"", b""); // sync_secret STRIPE_KEY
+    runner.push_success(b"", b""); // deploy_secret STRIPE_KEY
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Delete the key (creates tombstone)
     store.delete("STRIPE_KEY", "dev").unwrap();
 
-    // Sync again — should call delete_secret and record tombstone
+    // Deploy again — should call delete_secret and record tombstone
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
@@ -1761,13 +1761,13 @@ fn sync_records_tombstone_delete_success() {
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Success
     );
 }
 
 #[test]
-fn sync_records_tombstone_delete_failure() {
+fn deploy_records_tombstone_delete_failure() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1788,13 +1788,13 @@ fn sync_records_tombstone_delete_failure() {
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_retries_failed_tombstone_delete() {
+fn deploy_retries_failed_tombstone_delete() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1802,7 +1802,7 @@ fn sync_retries_failed_tombstone_delete() {
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
     store.delete("STRIPE_KEY", "dev").unwrap();
 
-    // First sync: delete fails
+    // First deploy: delete fails
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
@@ -1820,13 +1820,13 @@ fn sync_retries_failed_tombstone_delete() {
     let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Success
     );
 }
 
 #[test]
-fn sync_skips_already_deleted_tombstone() {
+fn deploy_skips_already_deleted_tombstone() {
     let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1834,7 +1834,7 @@ fn sync_skips_already_deleted_tombstone() {
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
     store.delete("STRIPE_KEY", "dev").unwrap();
 
-    // First sync: delete succeeds
+    // First deploy: delete succeeds
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
@@ -1860,12 +1860,12 @@ fn delete_then_recreate_same_value_syncs() {
     let config = project.config().unwrap();
     let store = project.store().unwrap();
 
-    // Set and sync
+    // Set and deploy
     store.set("STRIPE_KEY", "dev", "sk_test").unwrap();
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
-    runner.push_success(b"", b""); // sync_secret
+    runner.push_success(b"", b""); // deploy_secret
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     // Delete and sync (tombstone processed)
@@ -1881,10 +1881,10 @@ fn delete_then_recreate_same_value_syncs() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: wrangler --version
     runner.push_success(b"", b""); // preflight: wrangler whoami
-    runner.push_success(b"", b""); // sync_secret — must NOT be skipped
+    runner.push_success(b"", b""); // deploy_secret — must NOT be skipped
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
-    // Verify sync_secret was called (3 calls: preflight x2 + sync)
+    // Verify deploy_secret was called (3 calls: preflight x2 + deploy)
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     // Third call should be wrangler secret put
@@ -1894,7 +1894,7 @@ fn delete_then_recreate_same_value_syncs() {
 // === fly target integration tests ===
 
 #[test]
-fn sync_fly_calls_cli() {
+fn deploy_fly_calls_cli() {
     let project = TestProject::with_store(FLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1917,7 +1917,7 @@ fn sync_fly_calls_cli() {
 }
 
 #[test]
-fn sync_fly_prod_env_flags() {
+fn deploy_fly_prod_env_flags() {
     let project = TestProject::with_store(FLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1940,7 +1940,7 @@ fn sync_fly_prod_env_flags() {
 }
 
 #[test]
-fn sync_fly_records_tracker() {
+fn deploy_fly_records_tracker() {
     let project = TestProject::with_store(FLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1961,7 +1961,7 @@ fn sync_fly_records_tracker() {
 }
 
 #[test]
-fn sync_fly_failure_tracked() {
+fn deploy_fly_failure_tracked() {
     let project = TestProject::with_store(FLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -1983,19 +1983,19 @@ fn sync_fly_failure_tracked() {
         .find(|r| r.target.contains("fly"))
         .unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_fly_skip_unchanged() {
+fn deploy_fly_skip_unchanged() {
     let project = TestProject::with_store(FLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
     store.set("API_KEY", "dev", "secret").unwrap();
 
-    // First sync
+    // First deploy
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // fly --version
     runner.push_success(b"", b""); // fly auth whoami
@@ -2009,13 +2009,13 @@ fn sync_fly_skip_unchanged() {
     cli::deploy::run_with_runner(&config, Some("dev"), false, false, false, &runner).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 2); // only preflight, no sync
+    assert_eq!(calls.len(), 2); // only preflight, no deploy
 }
 
 // === netlify target integration tests ===
 
 #[test]
-fn sync_netlify_calls_cli() {
+fn deploy_netlify_calls_cli() {
     let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2038,7 +2038,7 @@ fn sync_netlify_calls_cli() {
 }
 
 #[test]
-fn sync_netlify_prod_env_flags() {
+fn deploy_netlify_prod_env_flags() {
     let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2067,7 +2067,7 @@ fn sync_netlify_prod_env_flags() {
 }
 
 #[test]
-fn sync_netlify_records_tracker() {
+fn deploy_netlify_records_tracker() {
     let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2088,7 +2088,7 @@ fn sync_netlify_records_tracker() {
 }
 
 #[test]
-fn sync_netlify_failure_tracked() {
+fn deploy_netlify_failure_tracked() {
     let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2110,13 +2110,13 @@ fn sync_netlify_failure_tracked() {
         .find(|r| r.target.contains("netlify"))
         .unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_netlify_skip_unchanged() {
+fn deploy_netlify_skip_unchanged() {
     let project = TestProject::with_store(NETLIFY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2140,7 +2140,7 @@ fn sync_netlify_skip_unchanged() {
 // === vercel target integration tests ===
 
 #[test]
-fn sync_vercel_calls_cli() {
+fn deploy_vercel_calls_cli() {
     let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2164,7 +2164,7 @@ fn sync_vercel_calls_cli() {
 }
 
 #[test]
-fn sync_vercel_prod_env_flags() {
+fn deploy_vercel_prod_env_flags() {
     let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2193,7 +2193,7 @@ fn sync_vercel_prod_env_flags() {
 }
 
 #[test]
-fn sync_vercel_records_tracker() {
+fn deploy_vercel_records_tracker() {
     let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2214,7 +2214,7 @@ fn sync_vercel_records_tracker() {
 }
 
 #[test]
-fn sync_vercel_failure_tracked() {
+fn deploy_vercel_failure_tracked() {
     let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2236,13 +2236,13 @@ fn sync_vercel_failure_tracked() {
         .find(|r| r.target.contains("vercel"))
         .unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_vercel_skip_unchanged() {
+fn deploy_vercel_skip_unchanged() {
     let project = TestProject::with_store(VERCEL_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2266,7 +2266,7 @@ fn sync_vercel_skip_unchanged() {
 // === github target integration tests ===
 
 #[test]
-fn sync_github_calls_cli() {
+fn deploy_github_calls_cli() {
     let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2290,7 +2290,7 @@ fn sync_github_calls_cli() {
 }
 
 #[test]
-fn sync_github_prod_env_flags() {
+fn deploy_github_prod_env_flags() {
     let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2319,7 +2319,7 @@ fn sync_github_prod_env_flags() {
 }
 
 #[test]
-fn sync_github_records_tracker() {
+fn deploy_github_records_tracker() {
     let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2340,7 +2340,7 @@ fn sync_github_records_tracker() {
 }
 
 #[test]
-fn sync_github_failure_tracked() {
+fn deploy_github_failure_tracked() {
     let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2362,13 +2362,13 @@ fn sync_github_failure_tracked() {
         .find(|r| r.target.contains("github"))
         .unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_github_skip_unchanged() {
+fn deploy_github_skip_unchanged() {
     let project = TestProject::with_store(GITHUB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2392,7 +2392,7 @@ fn sync_github_skip_unchanged() {
 // === heroku target integration tests ===
 
 #[test]
-fn sync_heroku_calls_cli() {
+fn deploy_heroku_calls_cli() {
     let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2415,7 +2415,7 @@ fn sync_heroku_calls_cli() {
 }
 
 #[test]
-fn sync_heroku_prod_env_flags() {
+fn deploy_heroku_prod_env_flags() {
     let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2443,7 +2443,7 @@ fn sync_heroku_prod_env_flags() {
 }
 
 #[test]
-fn sync_heroku_records_tracker() {
+fn deploy_heroku_records_tracker() {
     let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2464,7 +2464,7 @@ fn sync_heroku_records_tracker() {
 }
 
 #[test]
-fn sync_heroku_failure_tracked() {
+fn deploy_heroku_failure_tracked() {
     let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2486,13 +2486,13 @@ fn sync_heroku_failure_tracked() {
         .find(|r| r.target.contains("heroku"))
         .unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_heroku_skip_unchanged() {
+fn deploy_heroku_skip_unchanged() {
     let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2516,7 +2516,7 @@ fn sync_heroku_skip_unchanged() {
 // === supabase target integration tests ===
 
 #[test]
-fn sync_supabase_calls_cli() {
+fn deploy_supabase_calls_cli() {
     let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2542,7 +2542,7 @@ fn sync_supabase_calls_cli() {
 }
 
 #[test]
-fn sync_supabase_prod_env_flags() {
+fn deploy_supabase_prod_env_flags() {
     let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2571,7 +2571,7 @@ fn sync_supabase_prod_env_flags() {
 }
 
 #[test]
-fn sync_supabase_records_tracker() {
+fn deploy_supabase_records_tracker() {
     let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2592,7 +2592,7 @@ fn sync_supabase_records_tracker() {
 }
 
 #[test]
-fn sync_supabase_failure_tracked() {
+fn deploy_supabase_failure_tracked() {
     let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2614,13 +2614,13 @@ fn sync_supabase_failure_tracked() {
         .find(|r| r.target.contains("supabase"))
         .unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_supabase_skip_unchanged() {
+fn deploy_supabase_skip_unchanged() {
     let project = TestProject::with_store(SUPABASE_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2644,7 +2644,7 @@ fn sync_supabase_skip_unchanged() {
 // === railway target integration tests ===
 
 #[test]
-fn sync_railway_calls_cli() {
+fn deploy_railway_calls_cli() {
     let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2667,7 +2667,7 @@ fn sync_railway_calls_cli() {
 }
 
 #[test]
-fn sync_railway_prod_env_flags() {
+fn deploy_railway_prod_env_flags() {
     let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2694,7 +2694,7 @@ fn sync_railway_prod_env_flags() {
 }
 
 #[test]
-fn sync_railway_records_tracker() {
+fn deploy_railway_records_tracker() {
     let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2715,7 +2715,7 @@ fn sync_railway_records_tracker() {
 }
 
 #[test]
-fn sync_railway_failure_tracked() {
+fn deploy_railway_failure_tracked() {
     let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2737,13 +2737,13 @@ fn sync_railway_failure_tracked() {
         .find(|r| r.target.contains("railway"))
         .unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_railway_skip_unchanged() {
+fn deploy_railway_skip_unchanged() {
     let project = TestProject::with_store(RAILWAY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2767,7 +2767,7 @@ fn sync_railway_skip_unchanged() {
 // === gitlab target integration tests ===
 
 #[test]
-fn sync_gitlab_calls_cli() {
+fn deploy_gitlab_calls_cli() {
     let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2793,7 +2793,7 @@ fn sync_gitlab_calls_cli() {
 }
 
 #[test]
-fn sync_gitlab_prod_env_flags() {
+fn deploy_gitlab_prod_env_flags() {
     let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2816,7 +2816,7 @@ fn sync_gitlab_prod_env_flags() {
 }
 
 #[test]
-fn sync_gitlab_records_tracker() {
+fn deploy_gitlab_records_tracker() {
     let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2837,7 +2837,7 @@ fn sync_gitlab_records_tracker() {
 }
 
 #[test]
-fn sync_gitlab_failure_tracked() {
+fn deploy_gitlab_failure_tracked() {
     let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
@@ -2859,13 +2859,13 @@ fn sync_gitlab_failure_tracked() {
         .find(|r| r.target.contains("gitlab"))
         .unwrap();
     assert_eq!(
-        record.last_sync_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
 }
 
 #[test]
-fn sync_gitlab_skip_unchanged() {
+fn deploy_gitlab_skip_unchanged() {
     let project = TestProject::with_store(GITLAB_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();

@@ -56,7 +56,7 @@ impl<'a> DeployTarget for AwsSsmTarget<'a> {
         "aws_ssm"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -81,7 +81,7 @@ impl<'a> DeployTarget for AwsSsmTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let param_path = self.resolve_path(key, target);
         let param_type = &self.target_config.parameter_type;
         let base = self.base_args();
@@ -264,7 +264,7 @@ targets:
     }
 
     #[test]
-    fn sync_correct_args() {
+    fn deploy_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
@@ -279,7 +279,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "aws");
@@ -304,7 +304,7 @@ targets:
     }
 
     #[test]
-    fn sync_with_env_flags() {
+    fn deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
@@ -319,7 +319,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("prod"))
+            .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
         assert!(calls[0].1.contains(&"--no-paginate".to_string()));
@@ -377,7 +377,7 @@ targets:
     }
 
     #[test]
-    fn sync_failure() {
+    fn deploy_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
@@ -392,7 +392,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("access denied"));
     }

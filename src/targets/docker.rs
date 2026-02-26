@@ -50,7 +50,7 @@ impl<'a> DeployTarget for DockerTarget<'a> {
         "docker"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -85,7 +85,7 @@ impl<'a> DeployTarget for DockerTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let resolved_name = self.resolve_name(key, target);
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
 
@@ -298,7 +298,7 @@ targets:
     }
 
     #[test]
-    fn sync_creates_via_stdin() {
+    fn deploy_creates_via_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.docker.as_ref().unwrap();
@@ -322,7 +322,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("API_KEY", "s3cret", &make_target("dev"))
+            .deploy_secret("API_KEY", "s3cret", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -338,7 +338,7 @@ targets:
     }
 
     #[test]
-    fn sync_replaces_existing() {
+    fn deploy_replaces_existing() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.docker.as_ref().unwrap();
@@ -362,7 +362,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("API_KEY", "new_val", &make_target("dev"))
+            .deploy_secret("API_KEY", "new_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -371,7 +371,7 @@ targets:
     }
 
     #[test]
-    fn sync_rm_fails_service_in_use() {
+    fn deploy_rm_fails_service_in_use() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.docker.as_ref().unwrap();
@@ -389,7 +389,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("API_KEY", "val", &make_target("dev"))
+            .deploy_secret("API_KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("secret rm failed"));
         // Should not have attempted create
@@ -398,7 +398,7 @@ targets:
     }
 
     #[test]
-    fn sync_create_failure() {
+    fn deploy_create_failure() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.docker.as_ref().unwrap();
@@ -422,13 +422,13 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("API_KEY", "val", &make_target("dev"))
+            .deploy_secret("API_KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("secret create failed"));
     }
 
     #[test]
-    fn sync_with_env_flags() {
+    fn deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.docker.as_ref().unwrap();
@@ -452,7 +452,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("prod"))
+            .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
         // rm call should have env_flags
@@ -464,7 +464,7 @@ targets:
     }
 
     #[test]
-    fn sync_with_labels() {
+    fn deploy_with_labels() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.docker.as_ref().unwrap();
@@ -488,7 +488,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         // create call should have --label
@@ -497,7 +497,7 @@ targets:
     }
 
     #[test]
-    fn sync_value_not_in_args() {
+    fn deploy_value_not_in_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.docker.as_ref().unwrap();
@@ -519,7 +519,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "super_secret_value", &make_target("dev"))
+            .deploy_secret("KEY", "super_secret_value", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         // Value must never appear in args of any call

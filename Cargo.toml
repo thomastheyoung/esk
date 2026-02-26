@@ -3,9 +3,9 @@ members = [".", "xtask"]
 
 [package]
 name = "esk"
-version = "0.2.1"
+version = "0.2.2"
 edition = "2021"
-description = "Encrypted Secrets Keeper with multi-target sync"
+description = "Encrypted Secrets Keeper with multi-target deploy"
 authors = ["Thomas LE JEUNE"]
 license = "MIT"
 repository = "https://github.com/thomastheyoung/esk"

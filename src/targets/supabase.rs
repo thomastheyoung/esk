@@ -32,7 +32,7 @@ impl<'a> DeployTarget for SupabaseTarget<'a> {
         "supabase"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -62,7 +62,7 @@ impl<'a> DeployTarget for SupabaseTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         validate_stdin_kv_value(key, value, "supabase")?;
         let project_ref = &self.target_config.project_ref;
         let stdin_data = format!("{key}={value}\n");
@@ -225,7 +225,7 @@ targets:
     }
 
     #[test]
-    fn supabase_sync_uses_stdin() {
+    fn supabase_deploy_uses_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.supabase.as_ref().unwrap();
@@ -240,7 +240,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "supabase");
@@ -257,7 +257,7 @@ targets:
     }
 
     #[test]
-    fn supabase_sync_with_env_flags() {
+    fn supabase_deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.supabase.as_ref().unwrap();
@@ -272,7 +272,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("prod"))
+            .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
@@ -350,7 +350,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "line1\nline2", &make_target("dev"))
+            .deploy_secret("KEY", "line1\nline2", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("contains newlines"));
     }
@@ -367,7 +367,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "line1\r\nline2", &make_target("dev"))
+            .deploy_secret("KEY", "line1\r\nline2", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("contains newlines"));
     }
@@ -388,7 +388,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("api error"));
     }

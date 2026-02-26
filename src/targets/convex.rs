@@ -58,7 +58,7 @@ impl<'a> DeployTarget for ConvexTarget<'a> {
         "convex"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -88,7 +88,7 @@ impl<'a> DeployTarget for ConvexTarget<'a> {
 
     // SECURITY: `npx convex env set` has no stdin support. Secret values are exposed in process
     // arguments (visible via `ps aux`). Known limitation with the Convex CLI.
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let (cwd, env_vars) = self.resolve_deployment_context()?;
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
@@ -285,7 +285,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "my_value", &make_target("dev"))
+            .deploy_secret("MY_KEY", "my_value", &make_target("dev"))
             .unwrap();
 
         let calls = take_calls(&runner);
@@ -316,7 +316,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
         let calls = take_calls(&runner);
@@ -343,7 +343,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
         let calls = take_calls(&runner);
@@ -369,7 +369,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
         let calls = take_calls(&runner);
@@ -395,7 +395,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
         let calls = take_calls(&runner);
@@ -472,7 +472,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("deploy error"));
     }

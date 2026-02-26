@@ -40,7 +40,7 @@ impl<'a> DeployTarget for VercelTarget<'a> {
         "vercel"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -60,7 +60,7 @@ impl<'a> DeployTarget for VercelTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let vercel_env = self.resolve_env_name(&target.environment)?;
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
@@ -216,7 +216,7 @@ targets:
     }
 
     #[test]
-    fn vercel_sync_correct_args() {
+    fn vercel_deploy_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.vercel.as_ref().unwrap();
@@ -231,7 +231,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "vercel");
@@ -257,14 +257,14 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "my_secret", &make_target("dev"))
+            .deploy_secret("KEY", "my_secret", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].2.as_ref().unwrap(), b"my_secret");
     }
 
     #[test]
-    fn vercel_sync_with_env_flags() {
+    fn vercel_deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.vercel.as_ref().unwrap();
@@ -279,7 +279,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("prod"))
+            .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
@@ -308,7 +308,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target("staging"))
+            .deploy_secret("KEY", "val", &make_target("staging"))
             .unwrap_err();
         assert!(err.to_string().contains("no vercel env_names mapping"));
     }
@@ -383,7 +383,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
     }

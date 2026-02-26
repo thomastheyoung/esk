@@ -29,7 +29,7 @@ impl<'a> DeployTarget for GitlabTarget<'a> {
         "gitlab"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -49,7 +49,7 @@ impl<'a> DeployTarget for GitlabTarget<'a> {
         Ok(())
     }
 
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["variable", "set", key, "--scope", &target.environment];
         append_env_flags(&mut args, &flag_parts);
@@ -200,7 +200,7 @@ targets:
     }
 
     #[test]
-    fn gitlab_sync_uses_stdin() {
+    fn gitlab_deploy_uses_stdin() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.gitlab.as_ref().unwrap();
@@ -215,7 +215,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target("dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "glab");
@@ -229,7 +229,7 @@ targets:
     }
 
     #[test]
-    fn gitlab_sync_with_env_flags() {
+    fn gitlab_deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.gitlab.as_ref().unwrap();
@@ -244,7 +244,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target("prod"))
+            .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
@@ -337,7 +337,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target("dev"))
+            .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("api error"));
     }

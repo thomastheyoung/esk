@@ -44,7 +44,7 @@ impl<'a> DeployTarget for HerokuTarget<'a> {
         "heroku"
     }
 
-    fn sync_mode(&self) -> DeployMode {
+    fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }
 
@@ -67,7 +67,7 @@ impl<'a> DeployTarget for HerokuTarget<'a> {
     // SECURITY: heroku CLI has no stdin/file support for config:set. Secret values are exposed
     // in process arguments (visible via `ps aux`). Feature requested upstream since 2016, never
     // implemented. No workaround available.
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let heroku_app = self.resolve_app(target)?;
         let kv = format!("{key}={value}");
 
@@ -221,7 +221,7 @@ targets:
     }
 
     #[test]
-    fn heroku_sync_correct_args() {
+    fn heroku_deploy_correct_args() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.heroku.as_ref().unwrap();
@@ -236,7 +236,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
+            .deploy_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "heroku");
@@ -247,7 +247,7 @@ targets:
     }
 
     #[test]
-    fn heroku_sync_with_env_flags() {
+    fn heroku_deploy_with_env_flags() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.heroku.as_ref().unwrap();
@@ -262,7 +262,7 @@ targets:
             runner: &runner,
         };
         target
-            .sync_secret("KEY", "val", &make_target(Some("web"), "prod"))
+            .deploy_secret("KEY", "val", &make_target(Some("web"), "prod"))
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(
@@ -290,7 +290,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(None, "dev"))
+            .deploy_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("requires an app"));
     }
@@ -307,7 +307,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(Some("api"), "dev"))
+            .deploy_secret("KEY", "val", &make_target(Some("api"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("no heroku app_names mapping"));
     }
@@ -374,7 +374,7 @@ targets:
             runner: &runner,
         };
         let err = target
-            .sync_secret("KEY", "val", &make_target(Some("web"), "dev"))
+            .deploy_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
     }

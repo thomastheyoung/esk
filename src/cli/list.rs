@@ -32,7 +32,7 @@ impl cliclack::Theme for ListTheme {
 enum CellStatus {
     NotTargeted,
     Unset,
-    Synced,
+    Deployed,
     Pending,
     Failed,
 }
@@ -53,7 +53,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         None => config.environments.iter().map(|s| s.as_str()).collect(),
     };
 
-    // Build sync status map: (key, env) → worst status across all targets
+    // Build deploy status map: (key, env) → worst status across all targets
     let cell_statuses = build_cell_statuses(config, &all_secrets)?;
 
     // Build set of (key, env) pairs that have at least one configured target
@@ -111,7 +111,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
                 cell_statuses
                     .get(&(key.to_string(), e.to_string()))
                     .copied()
-                    .unwrap_or(CellStatus::Synced)
+                    .unwrap_or(CellStatus::Deployed)
             }
         });
 
@@ -127,7 +127,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
                 CellStatus::NotTargeted
             } else {
                 // Uncategorized keys have no configured targets
-                CellStatus::Synced
+                CellStatus::Deployed
             }
         });
 
@@ -139,7 +139,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     Ok(())
 }
 
-/// Compute the worst sync status for each (key, env) pair across all its targets.
+/// Compute the worst deploy status for each (key, env) pair across all its targets.
 fn build_cell_statuses(
     config: &Config,
     all_secrets: &BTreeMap<String, String>,
@@ -171,19 +171,19 @@ fn build_cell_statuses(
                 (Some(_), None) => CellStatus::Pending,
                 (Some(v), Some(record)) => {
                     let current_hash = DeployIndex::hash_value(v);
-                    if record.last_sync_status == DeployStatus::Failed {
+                    if record.last_deploy_status == DeployStatus::Failed {
                         CellStatus::Failed
                     } else if current_hash != record.value_hash {
                         CellStatus::Pending
                     } else {
-                        CellStatus::Synced
+                        CellStatus::Deployed
                     }
                 }
             };
 
             let cell_key = (secret.key.clone(), target.environment.clone());
-            let current = statuses.entry(cell_key).or_insert(CellStatus::Synced);
-            // Worst status wins (Failed > Pending > Synced)
+            let current = statuses.entry(cell_key).or_insert(CellStatus::Deployed);
+            // Worst status wins (Failed > Pending > Deployed)
             if target_status > *current {
                 *current = target_status;
             }
@@ -222,7 +222,7 @@ fn render_table(
             let indicator = match cell_status(key, e) {
                 CellStatus::NotTargeted => " ".to_string(),
                 CellStatus::Unset => style("○").dim().to_string(),
-                CellStatus::Synced => style("✔").green().to_string(),
+                CellStatus::Deployed => style("✔").green().to_string(),
                 CellStatus::Pending => style("●").yellow().to_string(),
                 CellStatus::Failed => style("✗").red().to_string(),
             };

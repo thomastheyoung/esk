@@ -27,7 +27,7 @@ pub struct DeployResult {
     pub error: Option<String>,
 }
 
-/// Secret with its key and value, ready for syncing.
+/// Secret with its key and value, ready for deploying.
 #[derive(Clone)]
 pub struct SecretValue {
     pub key: String,
@@ -35,10 +35,10 @@ pub struct SecretValue {
     pub vendor: String,
 }
 
-/// Whether a target syncs secrets individually or as a batch per target group.
+/// Whether a target deploys secrets individually or as a batch per target group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeployMode {
-    /// Sync each secret individually (e.g. cloudflare, convex).
+    /// Deploy each secret individually (e.g. cloudflare, convex).
     Individual,
     /// Regenerate the entire target in one batch (e.g. env files).
     Batch,
@@ -107,16 +107,16 @@ impl CommandRunner for RealCommandRunner {
 pub trait DeployTarget {
     fn name(&self) -> &str;
 
-    /// Whether this target syncs individually or in batches.
-    fn sync_mode(&self) -> DeployMode;
+    /// Whether this target deploys individually or in batches.
+    fn deploy_mode(&self) -> DeployMode;
 
-    /// Validate that external dependencies are available before syncing.
+    /// Validate that external dependencies are available before deploying.
     fn preflight(&self) -> Result<()> {
         Ok(())
     }
 
-    /// Sync a single secret to a target.
-    fn sync_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
+    /// Deploy a single secret to a target.
+    fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
 
     /// Delete a single secret from a target. Default: no-op (batch targets handle deletion
     /// by regenerating the full output without the deleted key).
@@ -124,11 +124,11 @@ pub trait DeployTarget {
         Ok(())
     }
 
-    /// Sync a batch of secrets. Default implementation loops sync_secret.
-    fn sync_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
+    /// Deploy a batch of secrets. Default implementation loops deploy_secret.
+    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         secrets
             .iter()
-            .map(|s| match self.sync_secret(&s.key, &s.value, target) {
+            .map(|s| match self.deploy_secret(&s.key, &s.value, target) {
                 Ok(()) => DeployResult {
                     key: s.key.clone(),
                     target: target.clone(),
@@ -427,13 +427,13 @@ mod tests {
             "test"
         }
 
-        fn sync_mode(&self) -> DeployMode {
+        fn deploy_mode(&self) -> DeployMode {
             DeployMode::Individual
         }
 
-        fn sync_secret(&self, key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
+        fn deploy_secret(&self, key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
             if self.fail_keys.contains(&key.to_string()) {
-                anyhow::bail!("sync failed for {key}");
+                anyhow::bail!("deploy failed for {key}");
             }
             Ok(())
         }
@@ -456,21 +456,21 @@ mod tests {
     }
 
     #[test]
-    fn default_sync_batch_all_success() {
+    fn default_deploy_batch_all_success() {
         let target = TestTarget { fail_keys: vec![] };
         let secrets = vec![make_secret("A"), make_secret("B")];
-        let results = target.sync_batch(&secrets, &make_target());
+        let results = target.deploy_batch(&secrets, &make_target());
         assert!(results.iter().all(|r| r.success));
         assert_eq!(results.len(), 2);
     }
 
     #[test]
-    fn default_sync_batch_partial_failure() {
+    fn default_deploy_batch_partial_failure() {
         let target = TestTarget {
             fail_keys: vec!["B".to_string()],
         };
         let secrets = vec![make_secret("A"), make_secret("B"), make_secret("C")];
-        let results = target.sync_batch(&secrets, &make_target());
+        let results = target.deploy_batch(&secrets, &make_target());
         assert!(results[0].success);
         assert!(!results[1].success);
         assert!(results[1].error.is_some());
@@ -478,9 +478,9 @@ mod tests {
     }
 
     #[test]
-    fn default_sync_batch_empty_input() {
+    fn default_deploy_batch_empty_input() {
         let target = TestTarget { fail_keys: vec![] };
-        let results = target.sync_batch(&[], &make_target());
+        let results = target.deploy_batch(&[], &make_target());
         assert!(results.is_empty());
     }
 
