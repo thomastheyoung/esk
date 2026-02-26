@@ -86,6 +86,8 @@ struct NextStep {
 struct Dashboard {
     project: String,
     version: u64,
+    filtered_env: Option<String>,
+    env_versions: Vec<(String, u64)>,
     target_health: Vec<TargetHealth>,
     #[allow(dead_code)]
     remote_health: Vec<RemoteHealth>,
@@ -114,6 +116,8 @@ impl Dashboard {
         let index = DeployIndex::load(&index_path);
         let resolved = config.resolve_secrets()?;
         let target_names: Vec<&str> = config.target_names();
+
+        let filtered_env = env.map(String::from);
 
         let envs: Vec<&str> = match env {
             Some(e) => vec![e],
@@ -473,9 +477,16 @@ impl Dashboard {
         let mut seen = BTreeSet::new();
         next_steps.retain(|s| seen.insert(s.command.clone()));
 
+        let env_versions: Vec<(String, u64)> = envs
+            .iter()
+            .map(|e| (e.to_string(), payload.env_version(e)))
+            .collect();
+
         Ok(Dashboard {
             project: config.project.clone(),
             version: payload.version,
+            filtered_env,
+            env_versions,
             target_health,
             remote_health,
             failed,
@@ -495,13 +506,23 @@ impl Dashboard {
     }
 
     fn render(&self, all: bool) -> Result<()> {
+        // When filtering a single env, show that env's version; otherwise global
+        let display_version = match &self.filtered_env {
+            Some(env) => self
+                .env_versions
+                .iter()
+                .find(|(e, _)| e == env)
+                .map_or(self.version, |(_, v)| *v),
+            None => self.version,
+        };
+
         // Summary line
         let total = self.failed.len() + self.pending.len() + self.deployed.len() + self.unset.len();
         let summary = if total == 0 {
             format!(
                 "{} · {}",
                 style(&self.project).bold(),
-                style(format!("v{}", self.version)).dim(),
+                style(format!("v{}", display_version)).dim(),
             )
         } else {
             let parts = ui::format_count_summary(&[
@@ -529,7 +550,7 @@ impl Dashboard {
                 format!(
                     "{} · {} · {}, all deployed",
                     style(&self.project).bold(),
-                    style(format!("v{}", self.version)).dim(),
+                    style(format!("v{}", display_version)).dim(),
                     style(format!(
                         "{total} target{}",
                         if total == 1 { "" } else { "s" }
@@ -539,7 +560,7 @@ impl Dashboard {
                 format!(
                     "{} · {} · {} target{} ({})",
                     style(&self.project).bold(),
-                    style(format!("v{}", self.version)).dim(),
+                    style(format!("v{}", display_version)).dim(),
                     total,
                     if total == 1 { "" } else { "s" },
                     parts,
@@ -870,11 +891,21 @@ impl Dashboard {
             cliclack::log::step(format!("Next steps\n{}", lines.join("\n")))?;
         }
 
-        cliclack::outro(
-            style(format!("Store version: {}", self.version))
-                .dim()
-                .to_string(),
-        )?;
+        let outro_text = match &self.filtered_env {
+            Some(env) => format!("Store version: {} ({})", display_version, env),
+            None if self.env_versions.is_empty() => {
+                format!("Store version: {}", display_version)
+            }
+            None => {
+                let parts: Vec<String> = self
+                    .env_versions
+                    .iter()
+                    .map(|(e, v)| format!("{}: v{}", e, v))
+                    .collect();
+                format!("Store version: {} ({})", display_version, parts.join(", "))
+            }
+        };
+        cliclack::outro(style(outro_text).dim().to_string())?;
 
         Ok(())
     }
