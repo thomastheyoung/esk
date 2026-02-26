@@ -21,6 +21,7 @@ For sync remotes (1Password, cloud files), see [REMOTES.md](REMOTES.md).
 | [GitLab CI](#gitlab-ci)                   | `gitlab`     | `glab`       | Individual  | No                        |
 | [AWS SSM](#aws-ssm)                       | `aws_ssm`    | `aws`        | Individual  | No                        |
 | [Kubernetes](#kubernetes)                 | `kubernetes` | `kubectl`    | Batch       | No                        |
+| [Docker Swarm](#docker-swarm)             | `docker`     | `docker`     | Individual  | No                        |
 
 **Deploy modes:**
 
@@ -756,4 +757,79 @@ secrets:
     DB_HOST:
       targets:
         kubernetes: [dev, prod]
+```
+
+---
+
+## Docker Swarm
+
+Deploys secrets to Docker Swarm using `docker secret create`. Docker Swarm secrets are encrypted at rest in the Raft log and mounted as tmpfs files at `/run/secrets/<name>` inside containers — never exposed as environment variables or CLI arguments.
+
+### How it works
+
+1. Docker secrets are **immutable** — you cannot update a secret in place.
+2. On sync, esk removes the existing secret (`docker secret rm`) then recreates it (`docker secret create`). The remove step tolerates "no such secret" errors for first-time creates.
+3. Values are piped via stdin (`docker secret create <name> -`) to avoid exposing them in process listings.
+4. Services must be restarted to pick up new secret values regardless of the update method.
+5. If a secret is currently in use by a service, the remove will fail — this is a Docker constraint the user must resolve (e.g., by updating the service to remove the secret reference first).
+
+### Prerequisites
+
+- [Docker](https://docs.docker.com/get-docker/) installed with the daemon running.
+- Swarm mode active (`docker swarm init`).
+
+Preflight runs `docker info --format {{.Swarm.LocalNodeState}}` and verifies the output is `active`.
+
+### Configuration
+
+```yaml
+targets:
+  docker:
+    name_pattern: "{project}-{environment}-{key}" # optional, this is the default
+    labels:                                         # optional
+      managed-by: esk
+    env_flags:                                      # optional
+      prod: "--context prod-swarm"
+```
+
+| Field          | Required | Default                             | Description                                                                                           |
+| -------------- | -------- | ----------------------------------- | ----------------------------------------------------------------------------------------------------- |
+| `name_pattern` | No       | `{project}-{environment}-{key}`     | Name template for Docker secrets. Supports `{project}`, `{environment}`, and `{key}` placeholders.   |
+| `labels`       | No       | —                                   | Static `--label key=value` flags applied to all created secrets. Useful for organizational tagging.   |
+| `env_flags`    | No       | —                                   | Map of environment name to extra CLI flags appended to docker commands.                               |
+
+### Name resolution
+
+Docker secrets are global within a swarm. The `name_pattern` prevents collisions across environments and projects.
+
+**Examples with `name_pattern: "{project}-{environment}-{key}"`:**
+
+| Project | Environment | Key            | Docker secret name         |
+| ------- | ----------- | -------------- | -------------------------- |
+| `myapp` | `dev`       | `DATABASE_URL` | `myapp-dev-DATABASE_URL`   |
+| `myapp` | `prod`      | `API_KEY`      | `myapp-prod-API_KEY`       |
+
+### Command executed
+
+```bash
+# Remove existing (tolerates "no such secret"):
+docker secret rm <name> [env_flags...]
+
+# Create via stdin:
+docker secret create [--label key=value ...] <name> - [env_flags...]
+
+# Delete:
+docker secret rm <name> [env_flags...]
+```
+
+### Target format
+
+Targets are environment-only (Docker secrets are swarm-global, not scoped to an app):
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        docker: [dev, prod]
 ```

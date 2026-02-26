@@ -21,7 +21,7 @@ It is built for teams that want:
 
 - Stores secrets in `.esk/store.enc` (AES-256-GCM encrypted)
 - Keeps the decryption key in `.esk/store.key` (local only)
-- Deploys to targets like `.env` files, Cloudflare, Convex, Vercel, GitHub Actions, Kubernetes, and more
+- Deploys to targets like `.env` files, Cloudflare, Convex, Vercel, GitHub Actions, Kubernetes, Docker Swarm, and more
 - Syncs with remotes like 1Password, cloud folders, AWS Secrets Manager, Vault, Bitwarden, S3, GCP, Azure, Doppler, and SOPS
 
 ## Install
@@ -164,6 +164,7 @@ Full flags and behavior: [API.md](API.md).
 - `gitlab`
 - `aws_ssm`
 - `kubernetes`
+- `docker`
 
 Target config details: [TARGETS.md](TARGETS.md).
 

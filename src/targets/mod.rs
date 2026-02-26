@@ -1,6 +1,7 @@
 pub mod aws_ssm;
 pub mod cloudflare;
 pub mod convex;
+pub mod docker;
 pub mod env_file;
 pub mod fly;
 pub mod github;
@@ -340,6 +341,17 @@ fn target_candidates<'a>(
                 runner,
             }),
             ok_message: "kubectl available",
+        });
+    }
+
+    if let Some(target_config) = &config.targets.docker {
+        candidates.push(TargetCandidate {
+            target: Box::new(docker::DockerTarget {
+                config,
+                target_config,
+                runner,
+            }),
+            ok_message: "swarm active",
         });
     }
 

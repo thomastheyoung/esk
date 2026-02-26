@@ -58,6 +58,8 @@ pub struct TargetsConfig {
     // Phase 4: Full cloud coverage
     #[serde(default)]
     pub kubernetes: Option<KubernetesTargetConfig>,
+    #[serde(default)]
+    pub docker: Option<DockerTargetConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +187,22 @@ pub struct KubernetesTargetConfig {
     pub context: BTreeMap<String, String>,
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DockerTargetConfig {
+    /// Name pattern for Docker secrets with `{project}`, `{environment}`, `{key}` placeholders.
+    #[serde(default = "default_docker_name_pattern")]
+    pub name_pattern: String,
+    /// Static labels applied to all created secrets.
+    #[serde(default)]
+    pub labels: BTreeMap<String, String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+fn default_docker_name_pattern() -> String {
+    "{project}-{environment}-{key}".to_string()
 }
 
 // --- Remote config types ---
@@ -692,6 +710,9 @@ impl Config {
         }
         if self.targets.kubernetes.is_some() {
             names.push("kubernetes");
+        }
+        if self.targets.docker.is_some() {
+            names.push("docker");
         }
         names
     }

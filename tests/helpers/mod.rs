@@ -381,6 +381,26 @@ secrets:
         kubernetes: [dev, prod]
 "#;
 
+/// Docker Swarm target config for integration testing.
+pub const DOCKER_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+targets:
+  docker:
+    name_pattern: "{project}-{environment}-{key}"
+    labels:
+      managed-by: esk
+    env_flags:
+      prod: "--context prod-swarm"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        docker: [dev, prod]
+"#;
+
 /// GitLab target config for integration testing.
 pub const GITLAB_CONFIG: &str = r#"
 project: testapp

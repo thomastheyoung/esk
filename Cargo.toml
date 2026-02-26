@@ -3,7 +3,7 @@ members = [".", "xtask"]
 
 [package]
 name = "esk"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 description = "Encrypted Secrets Keeper with multi-target sync"
 authors = ["Thomas LE JEUNE"]

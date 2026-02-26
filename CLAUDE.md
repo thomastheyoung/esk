@@ -19,6 +19,7 @@ src/
 │   ├── env_file.rs      # .env file generation (batch deploy)
 │   ├── cloudflare.rs    # wrangler secret put/delete (individual deploy)
 │   ├── convex.rs        # convex env set/unset (individual deploy)
+│   ├── docker.rs        # docker secret create/rm (individual deploy, stdin)
 │   ├── fly.rs           # fly secrets import/unset (individual deploy, stdin)
 │   ├── netlify.rs       # netlify env:set/unset (individual deploy)
 │   ├── vercel.rs        # vercel env add/rm (individual deploy, stdin)
@@ -199,7 +200,7 @@ cargo test --test cli_integration  # Run CLI integration tests only
 ### Test infrastructure
 
 - **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `sync_index_path()`.
-- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG` — reusable YAML for tests.
+- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `PLUGIN_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_PLUGIN_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.
