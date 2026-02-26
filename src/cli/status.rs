@@ -351,7 +351,7 @@ impl Dashboard {
                     None => RemoteStatus::NeverSynced,
                 };
                 remote_states.push(RemoteState {
-                    name: (*remote_name).to_string(),
+                    name: (*remote_name).clone(),
                     env: env_name.to_string(),
                     status,
                 });
