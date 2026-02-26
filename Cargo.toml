@@ -33,6 +33,23 @@ tempfile = "3"
 thiserror = "2"
 zeroize = { version = "1", features = ["derive"] }
 
+# Optional MCP server dependencies
+rmcp = { version = "0.16", features = ["server", "transport-io", "macros", "schemars"], optional = true }
+tokio = { version = "1", features = ["rt", "macros", "io-std"], optional = true }
+schemars = { version = "1", optional = true }
+
+[features]
+mcp = ["dep:rmcp", "dep:tokio", "dep:schemars"]
+
+[[bin]]
+name = "esk"
+path = "src/main.rs"
+
+[[bin]]
+name = "esk-mcp"
+path = "src/bin/esk-mcp.rs"
+required-features = ["mcp"]
+
 [package.metadata.binstall]
 pkg-url = "{ repo }/releases/download/v{ version }/esk-{ target }.tar.gz"
 pkg-fmt = "tgz"

@@ -24,3 +24,5 @@ pub mod targets;
 pub mod test_support;
 pub mod ui;
 pub mod validate;
+#[cfg(feature = "mcp")]
+pub mod mcp;

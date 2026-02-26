@@ -33,81 +33,81 @@ pub fn run_with_runner(
 // Dashboard data model
 // ---------------------------------------------------------------------------
 
-struct DeployEntry {
-    key: String,
-    env: String,
-    target: String,
-    error: Option<String>,
-    last_deployed_at: Option<String>,
+pub(crate) struct DeployEntry {
+    pub(crate) key: String,
+    pub(crate) env: String,
+    pub(crate) target: String,
+    pub(crate) error: Option<String>,
+    pub(crate) last_deployed_at: Option<String>,
 }
 
-struct CoverageGap {
-    key: String,
-    missing_envs: Vec<String>,
-    present_envs: Vec<String>,
+pub(crate) struct CoverageGap {
+    pub(crate) key: String,
+    pub(crate) missing_envs: Vec<String>,
+    pub(crate) present_envs: Vec<String>,
 }
 
-struct Orphan {
-    key: String,
-    env: String,
+pub(crate) struct Orphan {
+    pub(crate) key: String,
+    pub(crate) env: String,
 }
 
 #[derive(Clone)]
-enum RemoteStatus {
+pub(crate) enum RemoteStatus {
     Current { version: u64 },
     Stale { pushed: u64, local: u64 },
     Failed { version: u64, error: String },
     NeverSynced,
 }
 
-struct RemoteState {
-    name: String,
-    env: String,
-    status: RemoteStatus,
+pub(crate) struct RemoteState {
+    pub(crate) name: String,
+    pub(crate) env: String,
+    pub(crate) status: RemoteStatus,
 }
 
-struct ValidationWarning {
-    key: String,
-    env: String,
-    message: String,
+pub(crate) struct ValidationWarning {
+    pub(crate) key: String,
+    pub(crate) env: String,
+    pub(crate) message: String,
 }
 
-struct EmptyValueWarning {
-    key: String,
-    env: String,
-    kind: &'static str,
+pub(crate) struct EmptyValueWarning {
+    pub(crate) key: String,
+    pub(crate) env: String,
+    pub(crate) kind: &'static str,
 }
 
-struct NextStep {
-    command: String,
-    description: String,
+pub(crate) struct NextStep {
+    pub(crate) command: String,
+    pub(crate) description: String,
 }
 
-struct Dashboard {
-    project: String,
-    version: u64,
-    filtered_env: Option<String>,
-    env_versions: Vec<(String, u64)>,
-    target_health: Vec<TargetHealth>,
+pub(crate) struct Dashboard {
+    pub(crate) project: String,
+    pub(crate) version: u64,
+    pub(crate) filtered_env: Option<String>,
+    pub(crate) env_versions: Vec<(String, u64)>,
+    pub(crate) target_health: Vec<TargetHealth>,
     #[allow(dead_code)]
-    remote_health: Vec<RemoteHealth>,
-    failed: Vec<DeployEntry>,
-    pending: Vec<DeployEntry>,
-    deployed: Vec<DeployEntry>,
-    unset: Vec<DeployEntry>,
-    validation_warnings: Vec<ValidationWarning>,
-    cross_field_violations: Vec<validate::CrossFieldViolation>,
-    empty_values: Vec<EmptyValueWarning>,
-    missing_required: Vec<crate::config::MissingRequirement>,
-    coverage_gaps: Vec<CoverageGap>,
-    orphans: Vec<Orphan>,
-    target_orphans: Vec<crate::orphan::TargetOrphan>,
-    remote_states: Vec<RemoteState>,
-    next_steps: Vec<NextStep>,
+    pub(crate) remote_health: Vec<RemoteHealth>,
+    pub(crate) failed: Vec<DeployEntry>,
+    pub(crate) pending: Vec<DeployEntry>,
+    pub(crate) deployed: Vec<DeployEntry>,
+    pub(crate) unset: Vec<DeployEntry>,
+    pub(crate) validation_warnings: Vec<ValidationWarning>,
+    pub(crate) cross_field_violations: Vec<validate::CrossFieldViolation>,
+    pub(crate) empty_values: Vec<EmptyValueWarning>,
+    pub(crate) missing_required: Vec<crate::config::MissingRequirement>,
+    pub(crate) coverage_gaps: Vec<CoverageGap>,
+    pub(crate) orphans: Vec<Orphan>,
+    pub(crate) target_orphans: Vec<crate::orphan::TargetOrphan>,
+    pub(crate) remote_states: Vec<RemoteState>,
+    pub(crate) next_steps: Vec<NextStep>,
 }
 
 impl Dashboard {
-    fn build(config: &Config, env: Option<&str>, runner: &dyn CommandRunner) -> Result<Self> {
+    pub(crate) fn build(config: &Config, env: Option<&str>, runner: &dyn CommandRunner) -> Result<Self> {
         let store = SecretStore::open(&config.root)?;
         let payload = store.payload()?;
         let all_secrets = &payload.secrets;
