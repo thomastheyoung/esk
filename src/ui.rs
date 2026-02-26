@@ -99,6 +99,12 @@ pub fn section_entry(left: &str, right: &str) -> String {
     format!("     {}  {}", style(left).dim(), right)
 }
 
+/// Like [`section_entry`] but pads `left` to `width` visible characters for column alignment.
+pub fn section_entry_aligned(left: &str, right: &str, width: usize) -> String {
+    let pad = width.saturating_sub(left.len());
+    format!("     {}{}  {}", style(left).dim(), " ".repeat(pad), right)
+}
+
 // ---------------------------------------------------------------------------
 // Theme
 // ---------------------------------------------------------------------------
@@ -140,6 +146,30 @@ pub fn format_relative_time(ts: &str) -> String {
         dt.format("%Y-%m-%d %H:%M").to_string()
     }
 }
+
+// ---------------------------------------------------------------------------
+// Truncation
+// ---------------------------------------------------------------------------
+
+/// Default number of grouped entries to show before truncating.
+pub const TRUNCATE_LIMIT: usize = 5;
+
+/// Returns a footer like `"     ...and 12 more (--all to show)"` when `total > shown`,
+/// or `None` when everything fits.
+pub fn truncation_footer(total: usize, shown: usize) -> Option<String> {
+    if total <= shown {
+        return None;
+    }
+    let remaining = total - shown;
+    Some(format!(
+        "     {}",
+        style(format!("...and {remaining} more (--all to show)")).dim()
+    ))
+}
+
+// ---------------------------------------------------------------------------
+// Dashboard alignment
+// ---------------------------------------------------------------------------
 
 /// Aligns a label and value with dots (...) between them for a dashboard look.
 pub fn format_dashboard_line(label: &str, value: &str, width: usize) -> String {

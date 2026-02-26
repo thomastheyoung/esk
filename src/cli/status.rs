@@ -1,6 +1,6 @@
 use anyhow::Result;
 use console::style;
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
@@ -101,6 +101,75 @@ pub(crate) struct Dashboard {
     pub(crate) target_orphans: Vec<crate::orphan::TargetOrphan>,
     pub(crate) remote_states: Vec<RemoteState>,
     pub(crate) next_steps: Vec<NextStep>,
+}
+
+// ---------------------------------------------------------------------------
+// Grouping helpers (collapse per-target lines into one line per key:env)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, PartialEq)]
+enum GroupedFreshness {
+    NeverDeployed,
+    Timestamp(String),
+}
+
+#[derive(Debug)]
+struct GroupedEntry {
+    key: String,
+    env: String,
+    targets: Vec<String>,
+    freshness: GroupedFreshness,
+}
+
+/// Groups deploy entries by (key, env), merging their target names.
+///
+/// Freshness rule: if *any* entry in the group has no `last_deployed_at`,
+/// the group is `NeverDeployed`. Otherwise keep the oldest (for pending) or
+/// newest (for deployed) timestamp — the caller decides via `pick_newest`.
+fn group_entries(entries: &[DeployEntry], pick_newest: bool) -> Vec<GroupedEntry> {
+    let mut groups: Vec<GroupedEntry> = Vec::new();
+    let mut index: HashMap<(&str, &str), usize> = HashMap::new();
+
+    for entry in entries {
+        let map_key = (entry.key.as_str(), entry.env.as_str());
+        if let Some(&pos) = index.get(&map_key) {
+            let group = &mut groups[pos];
+            group.targets.push(entry.target.clone());
+            // Update freshness
+            if group.freshness != GroupedFreshness::NeverDeployed {
+                match &entry.last_deployed_at {
+                    None => group.freshness = GroupedFreshness::NeverDeployed,
+                    Some(ts) => {
+                        if let GroupedFreshness::Timestamp(ref existing) = group.freshness {
+                            let replace = if pick_newest {
+                                ts > existing
+                            } else {
+                                ts < existing
+                            };
+                            if replace {
+                                group.freshness = GroupedFreshness::Timestamp(ts.clone());
+                            }
+                        }
+                    }
+                }
+            }
+        } else {
+            let freshness = match &entry.last_deployed_at {
+                None => GroupedFreshness::NeverDeployed,
+                Some(ts) => GroupedFreshness::Timestamp(ts.clone()),
+            };
+            let pos = groups.len();
+            groups.push(GroupedEntry {
+                key: entry.key.clone(),
+                env: entry.env.clone(),
+                targets: vec![entry.target.clone()],
+                freshness,
+            });
+            index.insert(map_key, pos);
+        }
+    }
+
+    groups
 }
 
 impl Dashboard {
@@ -614,6 +683,19 @@ impl Dashboard {
         if has_problems || (all && !self.deployed.is_empty()) {
             let mut deploy_lines = Vec::new();
 
+            // Compute max key:env width across all deploy sub-sections for alignment
+            let empty = Vec::new();
+            let deployed_ref = if all { &self.deployed } else { &empty };
+            let deploy_label_width = self
+                .failed
+                .iter()
+                .chain(self.pending.iter())
+                .chain(self.unset.iter())
+                .chain(deployed_ref.iter())
+                .map(|e| e.key.len() + 1 + e.env.len()) // "key:env"
+                .max()
+                .unwrap_or(0);
+
             if !self.failed.is_empty() {
                 deploy_lines.push(ui::section_header(
                     ui::icon_failure(),
@@ -631,9 +713,10 @@ impl Dashboard {
                         .as_deref()
                         .map(|e| format!(" {}", style(format!("({e})")).dim()))
                         .unwrap_or_default();
-                    deploy_lines.push(ui::section_entry(
+                    deploy_lines.push(ui::section_entry_aligned(
                         &format!("{}:{}", entry.key, entry.env),
                         &format!("→ {}  {}{}", entry.target, style(freshness).dim(), err_text,),
+                        deploy_label_width,
                     ));
                 }
             }
@@ -644,22 +727,29 @@ impl Dashboard {
                     &format!("{} pending", self.pending.len()),
                     ui::SectionColor::Yellow,
                 ));
-                for entry in &self.pending {
-                    let freshness = match &entry.last_deployed_at {
-                        Some(t) => {
-                            let ago = ui::format_relative_time(t);
-                            if ago.is_empty() {
-                                "never deployed".to_string()
-                            } else {
-                                format!("last deployed {ago}")
-                            }
+                let groups = group_entries(&self.pending, false);
+                let shown = if all {
+                    groups.len()
+                } else {
+                    groups.len().min(ui::TRUNCATE_LIMIT)
+                };
+                for group in groups.iter().take(shown) {
+                    let targets = group.targets.join(", ");
+                    let freshness = match &group.freshness {
+                        GroupedFreshness::NeverDeployed => "never deployed".to_string(),
+                        GroupedFreshness::Timestamp(ts) => {
+                            let ago = ui::format_relative_time(ts);
+                            format!("last deployed {ago}")
                         }
-                        None => "never deployed".to_string(),
                     };
-                    deploy_lines.push(ui::section_entry(
-                        &format!("{}:{}", entry.key, entry.env),
-                        &format!("→ {}  {}", entry.target, style(freshness).dim()),
+                    deploy_lines.push(ui::section_entry_aligned(
+                        &format!("{}:{}", group.key, group.env),
+                        &format!("→ {}  {}", targets, style(freshness).dim()),
+                        deploy_label_width,
                     ));
+                }
+                if let Some(footer) = ui::truncation_footer(groups.len(), shown) {
+                    deploy_lines.push(footer);
                 }
             }
 
@@ -669,11 +759,22 @@ impl Dashboard {
                     &format!("{} unset", self.unset.len()),
                     ui::SectionColor::Dim,
                 ));
-                for entry in &self.unset {
-                    deploy_lines.push(ui::section_entry(
-                        &format!("{}:{}", entry.key, entry.env),
-                        &format!("→ {}", style(&entry.target).dim()),
+                let groups = group_entries(&self.unset, false);
+                let shown = if all {
+                    groups.len()
+                } else {
+                    groups.len().min(ui::TRUNCATE_LIMIT)
+                };
+                for group in groups.iter().take(shown) {
+                    let targets = group.targets.join(", ");
+                    deploy_lines.push(ui::section_entry_aligned(
+                        &format!("{}:{}", group.key, group.env),
+                        &format!("→ {}", style(targets).dim()),
+                        deploy_label_width,
                     ));
+                }
+                if let Some(footer) = ui::truncation_footer(groups.len(), shown) {
+                    deploy_lines.push(footer);
                 }
             }
 
@@ -684,15 +785,17 @@ impl Dashboard {
                         &format!("{} deployed", self.deployed.len()),
                         ui::SectionColor::Green,
                     ));
-                    for entry in &self.deployed {
-                        let freshness = entry
-                            .last_deployed_at
-                            .as_deref()
-                            .map(ui::format_relative_time)
-                            .unwrap_or_default();
-                        deploy_lines.push(ui::section_entry(
-                            &format!("{}:{}", entry.key, entry.env),
-                            &format!("→ {}  {}", entry.target, style(freshness).dim()),
+                    let groups = group_entries(&self.deployed, true);
+                    for group in &groups {
+                        let targets = group.targets.join(", ");
+                        let freshness = match &group.freshness {
+                            GroupedFreshness::NeverDeployed => String::new(),
+                            GroupedFreshness::Timestamp(ts) => ui::format_relative_time(ts),
+                        };
+                        deploy_lines.push(ui::section_entry_aligned(
+                            &format!("{}:{}", group.key, group.env),
+                            &format!("→ {}  {}", targets, style(freshness).dim()),
+                            deploy_label_width,
                         ));
                     }
                 } else {
@@ -769,7 +872,12 @@ impl Dashboard {
                 &format!("{} required missing", self.missing_required.len()),
                 ui::SectionColor::Red,
             ));
-            for m in &self.missing_required {
+            let shown = if all {
+                self.missing_required.len()
+            } else {
+                self.missing_required.len().min(ui::TRUNCATE_LIMIT)
+            };
+            for m in self.missing_required.iter().take(shown) {
                 let target_info = if m.targets.is_empty() {
                     String::new()
                 } else {
@@ -780,34 +888,65 @@ impl Dashboard {
                     &target_info,
                 ));
             }
+            if let Some(footer) = ui::truncation_footer(self.missing_required.len(), shown) {
+                req_lines.push(footer);
+            }
             cliclack::log::step(format!("Requirements\n{}", req_lines.join("\n")))?;
         }
 
-        // Coverage section
-        let has_coverage = !self.coverage_gaps.is_empty()
+        // Coverage section — deduplicate gaps already shown in Requirements
+        let required_set: BTreeSet<(&str, &str)> = self
+            .missing_required
+            .iter()
+            .map(|m| (m.key.as_str(), m.env.as_str()))
+            .collect();
+
+        // Build filtered coverage gap lines
+        let mut coverage_gap_lines: Vec<String> = Vec::new();
+        let mut coverage_gap_count = 0usize;
+        for gap in &self.coverage_gaps {
+            let filtered_envs: Vec<&String> = gap
+                .missing_envs
+                .iter()
+                .filter(|e| !required_set.contains(&(gap.key.as_str(), e.as_str())))
+                .collect();
+            if filtered_envs.is_empty() {
+                continue;
+            }
+            coverage_gap_count += 1;
+            let present = gap.present_envs.join(", ");
+            for missing_env in &filtered_envs {
+                coverage_gap_lines.push(ui::section_entry(
+                    &gap.key,
+                    &format!(
+                        "missing in {} {}",
+                        style(missing_env).yellow(),
+                        style(format!("(set in {present})")).dim(),
+                    ),
+                ));
+            }
+        }
+
+        let has_coverage = !coverage_gap_lines.is_empty()
             || !self.orphans.is_empty()
             || !self.target_orphans.is_empty();
         if has_coverage {
             let mut cov_lines = Vec::new();
 
-            if !self.coverage_gaps.is_empty() {
+            if !coverage_gap_lines.is_empty() {
                 cov_lines.push(ui::section_header(
                     ui::icon_unset(),
-                    &format!("{} declared but never set", self.coverage_gaps.len()),
+                    &format!("{coverage_gap_count} declared but never set"),
                     ui::SectionColor::Dim,
                 ));
-                for gap in &self.coverage_gaps {
-                    let present = gap.present_envs.join(", ");
-                    for missing_env in &gap.missing_envs {
-                        cov_lines.push(ui::section_entry(
-                            &gap.key,
-                            &format!(
-                                "missing in {} {}",
-                                style(missing_env).yellow(),
-                                style(format!("(set in {present})")).dim(),
-                            ),
-                        ));
-                    }
+                let shown = if all {
+                    coverage_gap_lines.len()
+                } else {
+                    coverage_gap_lines.len().min(ui::TRUNCATE_LIMIT)
+                };
+                cov_lines.extend(coverage_gap_lines.iter().take(shown).cloned());
+                if let Some(footer) = ui::truncation_footer(coverage_gap_lines.len(), shown) {
+                    cov_lines.push(footer);
                 }
             }
 
@@ -854,35 +993,50 @@ impl Dashboard {
 
         // Sync section (remotes)
         if !self.remote_states.is_empty() {
+            let sync_label_width = self
+                .remote_states
+                .iter()
+                .map(|ps| ps.name.len() + 1 + ps.env.len())
+                .max()
+                .unwrap_or(0);
+
             let lines: Vec<String> = self
                 .remote_states
                 .iter()
-                .map(|ps| match &ps.status {
-                    RemoteStatus::Current { version } => format!(
-                        "  {} {}  {}",
-                        ui::icon_success(),
-                        style(format!("{}:{}", ps.name, ps.env)),
-                        style(format!("v{version}")).dim()
-                    ),
-                    RemoteStatus::Stale { pushed, local } => format!(
-                        "  {} {}  {}",
-                        ui::icon_pending(),
-                        style(format!("{}:{}", ps.name, ps.env)),
-                        style(format!("v{pushed} → local v{local}")).dim()
-                    ),
-                    RemoteStatus::Failed { version, error } => format!(
-                        "  {} {}  {} {}",
-                        ui::icon_failure(),
-                        style(format!("{}:{}", ps.name, ps.env)),
-                        style(format!("v{version}")).dim(),
-                        style(format!("({error})")).dim()
-                    ),
-                    RemoteStatus::NeverSynced => format!(
-                        "  {} {}  {}",
-                        ui::icon_unset(),
-                        style(format!("{}:{}", ps.name, ps.env)),
-                        style("never synced").dim()
-                    ),
+                .map(|ps| {
+                    let label = format!("{}:{}", ps.name, ps.env);
+                    let pad = sync_label_width.saturating_sub(label.len());
+                    match &ps.status {
+                        RemoteStatus::Current { version } => format!(
+                            "  {} {}{}  {}",
+                            ui::icon_success(),
+                            style(&label),
+                            " ".repeat(pad),
+                            style(format!("v{version}")).dim()
+                        ),
+                        RemoteStatus::Stale { pushed, local } => format!(
+                            "  {} {}{}  {}",
+                            ui::icon_pending(),
+                            style(&label),
+                            " ".repeat(pad),
+                            style(format!("v{pushed} → local v{local}")).dim()
+                        ),
+                        RemoteStatus::Failed { version, error } => format!(
+                            "  {} {}{}  {} {}",
+                            ui::icon_failure(),
+                            style(&label),
+                            " ".repeat(pad),
+                            style(format!("v{version}")).dim(),
+                            style(format!("({error})")).dim()
+                        ),
+                        RemoteStatus::NeverSynced => format!(
+                            "  {} {}{}  {}",
+                            ui::icon_unset(),
+                            style(&label),
+                            " ".repeat(pad),
+                            style("never synced").dim()
+                        ),
+                    }
                 })
                 .collect();
             cliclack::log::step(format!("Sync (remotes)\n{}", lines.join("\n")))?;
@@ -1021,6 +1175,150 @@ remotes:
                 local: 1
             }
         ));
+    }
+
+    #[test]
+    fn group_entries_combines_targets() {
+        let entries = vec![
+            DeployEntry {
+                key: "API_KEY".into(),
+                env: "dev".into(),
+                target: "cloudflare:web".into(),
+                error: None,
+                last_deployed_at: None,
+            },
+            DeployEntry {
+                key: "API_KEY".into(),
+                env: "dev".into(),
+                target: "convex".into(),
+                error: None,
+                last_deployed_at: None,
+            },
+            DeployEntry {
+                key: "API_KEY".into(),
+                env: "dev".into(),
+                target: "env:web".into(),
+                error: None,
+                last_deployed_at: None,
+            },
+        ];
+        let groups = group_entries(&entries, false);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(
+            groups[0].targets,
+            vec!["cloudflare:web", "convex", "env:web"]
+        );
+        assert_eq!(groups[0].freshness, GroupedFreshness::NeverDeployed);
+    }
+
+    #[test]
+    fn group_entries_picks_oldest_for_pending() {
+        let entries = vec![
+            DeployEntry {
+                key: "K".into(),
+                env: "dev".into(),
+                target: "a".into(),
+                error: None,
+                last_deployed_at: Some("2025-01-03T00:00:00Z".into()),
+            },
+            DeployEntry {
+                key: "K".into(),
+                env: "dev".into(),
+                target: "b".into(),
+                error: None,
+                last_deployed_at: Some("2025-01-01T00:00:00Z".into()),
+            },
+        ];
+        let groups = group_entries(&entries, false);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(
+            groups[0].freshness,
+            GroupedFreshness::Timestamp("2025-01-01T00:00:00Z".into())
+        );
+    }
+
+    #[test]
+    fn group_entries_picks_newest_for_deployed() {
+        let entries = vec![
+            DeployEntry {
+                key: "K".into(),
+                env: "dev".into(),
+                target: "a".into(),
+                error: None,
+                last_deployed_at: Some("2025-01-01T00:00:00Z".into()),
+            },
+            DeployEntry {
+                key: "K".into(),
+                env: "dev".into(),
+                target: "b".into(),
+                error: None,
+                last_deployed_at: Some("2025-01-03T00:00:00Z".into()),
+            },
+        ];
+        let groups = group_entries(&entries, true);
+        assert_eq!(groups.len(), 1);
+        assert_eq!(
+            groups[0].freshness,
+            GroupedFreshness::Timestamp("2025-01-03T00:00:00Z".into())
+        );
+    }
+
+    #[test]
+    fn group_entries_never_deployed_wins() {
+        let entries = vec![
+            DeployEntry {
+                key: "K".into(),
+                env: "dev".into(),
+                target: "a".into(),
+                error: None,
+                last_deployed_at: Some("2025-01-01T00:00:00Z".into()),
+            },
+            DeployEntry {
+                key: "K".into(),
+                env: "dev".into(),
+                target: "b".into(),
+                error: None,
+                last_deployed_at: None,
+            },
+        ];
+        let groups = group_entries(&entries, false);
+        assert_eq!(groups[0].freshness, GroupedFreshness::NeverDeployed);
+    }
+
+    #[test]
+    fn group_entries_separate_envs() {
+        let entries = vec![
+            DeployEntry {
+                key: "K".into(),
+                env: "dev".into(),
+                target: "a".into(),
+                error: None,
+                last_deployed_at: None,
+            },
+            DeployEntry {
+                key: "K".into(),
+                env: "prod".into(),
+                target: "a".into(),
+                error: None,
+                last_deployed_at: None,
+            },
+        ];
+        let groups = group_entries(&entries, false);
+        assert_eq!(groups.len(), 2);
+    }
+
+    #[test]
+    fn truncation_footer_none_within_limit() {
+        assert!(ui::truncation_footer(5, 5).is_none());
+        assert!(ui::truncation_footer(3, 5).is_none());
+    }
+
+    #[test]
+    fn truncation_footer_some_over_limit() {
+        let footer = ui::truncation_footer(12, 5).unwrap();
+        let plain = console::strip_ansi_codes(&footer);
+        assert!(plain.contains("7 more"));
+        assert!(plain.contains("--all to show"));
     }
 
     #[test]
