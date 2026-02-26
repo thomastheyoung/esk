@@ -69,15 +69,26 @@ esk delete API_KEY --env dev --bail              # Fail hard on remote errors
 Deploy secrets to configured targets.
 
 ```bash
-esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose]
+esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose] [--skip-validation] [--skip-requirements] [--allow-empty]
 ```
 
-| Argument           | Required | Description                                          |
-| ------------------ | -------- | ---------------------------------------------------- |
-| `--env`            | No       | Filter to a single environment                       |
-| `--force`          | No       | Deploy all secrets, ignoring change detection hashes |
-| `--dry-run`        | No       | Show what would be deployed without making changes   |
-| `--verbose` / `-v` | No       | Show detailed output including skipped secrets       |
+| Argument              | Required | Description                                          |
+| --------------------- | -------- | ---------------------------------------------------- |
+| `--env`               | No       | Filter to a single environment                       |
+| `--force`             | No       | Deploy all secrets, ignoring change detection hashes |
+| `--dry-run`           | No       | Show what would be deployed without making changes   |
+| `--verbose` / `-v`    | No       | Show detailed output including skipped secrets       |
+| `--skip-validation`   | No       | Bypass `validate:` checks before deploying           |
+| `--skip-requirements` | No       | Bypass `required:` checks (missing secret errors)    |
+| `--allow-empty`       | No       | Allow deploying empty/whitespace-only values         |
+
+**Pre-deploy checks:**
+
+Before deploying, esk runs three checks on the secrets in scope (unless bypassed):
+
+1. **Validation** — secrets with a `validate:` block are checked against their constraints. Failures abort deploy. Bypass with `--skip-validation`.
+2. **Requirements** — secrets with `required: true` (or a matching env list) must have a stored value. Missing secrets abort deploy. Bypass with `--skip-requirements` or `--force`.
+3. **Empty values** — secrets with empty or whitespace-only values are flagged. In non-interactive/CI contexts, empty values abort deploy. Bypass with `--allow-empty`. Secrets with `allow_empty: true` in config are always exempt.
 
 **Target behavior:**
 
@@ -107,17 +118,19 @@ SHA-256 hash of each secret value is tracked per (secret, target, app, environme
 Set a secret value for an environment.
 
 ```bash
-esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--bail]
+esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--bail] [--skip-validation] [--force]
 ```
 
-| Argument    | Required | Description                                                          |
-| ----------- | -------- | -------------------------------------------------------------------- |
-| `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                          |
-| `--env`     | Yes      | Target environment                                                   |
-| `--value`   | No       | Secret value. If omitted, prompts interactively (hidden input)       |
-| `--group`   | No       | Config group to register the secret under (skips interactive prompt) |
-| `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy               |
-| `--bail`    | No       | Fail if any remote push fails and skip deploy                        |
+| Argument            | Required | Description                                                          |
+| ------------------- | -------- | -------------------------------------------------------------------- |
+| `KEY`               | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)                          |
+| `--env`             | Yes      | Target environment                                                   |
+| `--value`           | No       | Secret value. If omitted, prompts interactively (hidden input)       |
+| `--group`           | No       | Config group to register the secret under (skips interactive prompt) |
+| `--no-sync`         | No       | Store only — skip auto-push to remotes and auto-deploy               |
+| `--bail`            | No       | Fail if any remote push fails and skip deploy                        |
+| `--skip-validation` | No       | Bypass `validate:` checks on the value                               |
+| `--force`           | No       | Skip empty-value confirmation prompt                                 |
 
 **Behavior:**
 
@@ -126,11 +139,13 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--bai
    - With `--group`: adds the secret to that group in `esk.yaml` non-interactively.
    - Interactive mode (TTY, no `--group`): prompts "Add it?" with a group selector (existing groups or new).
    - Non-interactive mode (piped stdin, no `--group`): warns but proceeds.
-3. Stores the value in the encrypted store, incrementing the version counter.
-4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
-5. Unless `--no-sync`: runs `deploy` for the affected environment.
-6. With `--bail`: if any remote push fails, exits with an error and skips deploy entirely.
-7. Without `--bail`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
+3. If the secret has a `validate:` block, checks the value against constraints. Fails unless `--skip-validation` is passed.
+4. If the value is empty or whitespace-only (and the secret doesn't have `allow_empty: true`): in TTY mode, prompts for confirmation; in non-TTY mode, warns. Use `--force` to skip the prompt.
+5. Stores the value in the encrypted store, incrementing the version counter.
+6. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
+7. Unless `--no-sync`: runs `deploy` for the affected environment.
+8. With `--bail`: if any remote push fails, exits with an error and skips deploy entirely.
+9. Without `--bail`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
 
 **Examples:**
 
@@ -330,6 +345,66 @@ esk sync --env prod --with-deploy       # Sync + auto-deploy
 esk sync --env prod --prefer remote     # At equal versions, prefer remote content
 esk sync --env prod --dry-run           # Preview changes
 ```
+
+---
+
+## Secret definitions
+
+Each secret in `esk.yaml` supports the following fields:
+
+```yaml
+secrets:
+  Payments:
+    STRIPE_KEY:
+      description: Stripe API key
+      targets:
+        cloudflare: [web:prod]
+        env: [web:dev]
+      validate:
+        format: string
+        min_length: 7
+        pattern: "^sk_(test|live)_"
+      required: true
+      allow_empty: false
+```
+
+### `validate:`
+
+Optional block that checks values at `esk set` and before `esk deploy`. Bypass with `--skip-validation`.
+
+| Field        | Type            | Description                                                     |
+| ------------ | --------------- | --------------------------------------------------------------- |
+| `format`     | string          | Value format: `string`, `url`, `integer`, `number`, `boolean`, `email`, `json`, `base64` |
+| `enum`       | list            | Allowed values (exact match)                                    |
+| `pattern`    | string          | Regex the value must match                                      |
+| `min_length` | integer         | Minimum character length                                        |
+| `max_length` | integer         | Maximum character length                                        |
+| `range`      | [min, max]      | Numeric range (requires `format: integer` or `number`)          |
+| `optional`   | boolean         | If `true`, empty values skip all other checks (default `false`) |
+
+Cross-field constraints (evaluated at deploy with the full store context):
+
+| Field             | Type          | Description                                                    |
+| ----------------- | ------------- | -------------------------------------------------------------- |
+| `required_if`     | map           | Required when all listed keys match their values (`"*"` = any) |
+| `required_with`   | list          | Required when any listed key has a value                       |
+| `required_unless` | list          | Not required when any listed key has a value                   |
+
+### `required:`
+
+Controls whether deploy fails when the secret has no stored value. Default: `true`.
+
+| Value              | Meaning                                         |
+| ------------------ | ----------------------------------------------- |
+| `true`             | Required in all targeted environments (default) |
+| `false`            | Never required                                  |
+| `[dev, prod]`      | Required only in listed environments            |
+
+Bypass with `--skip-requirements` or `--force` on deploy. `esk delete` warns interactively when removing a required secret.
+
+### `allow_empty:`
+
+Boolean, default `false`. When `true`, the secret is exempt from empty-value warnings and blocks in `set`, `deploy`, `status`, and `sync`. Useful for secrets that legitimately have empty values (feature flags, optional overrides).
 
 ---
 

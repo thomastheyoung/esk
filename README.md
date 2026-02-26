@@ -23,6 +23,9 @@ It is built for teams that want:
 - Keeps the decryption key in `.esk/store.key` (local only)
 - Deploys to targets like `.env` files, Cloudflare, Convex, Vercel, GitHub Actions, Kubernetes, Docker Swarm, and more
 - Syncs with remotes like 1Password, cloud folders, AWS Secrets Manager, Vault, Bitwarden, S3, GCP, Azure, Doppler, and SOPS
+- Validates values against format, pattern, enum, and range constraints
+- Audits required secrets before deploy — catches missing values early
+- Detects empty/whitespace-only values that break runtime defaults
 
 ## Install
 
