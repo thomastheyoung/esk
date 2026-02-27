@@ -72,7 +72,7 @@ pub fn parse_pulled_secrets(
 ///
 /// Unlike deploy targets, remotes
 /// store or backup the entire secret list as a source of truth.
-pub trait SyncRemote {
+pub trait SyncRemote: Send + Sync {
     fn name(&self) -> &str;
 
     /// Validate that external dependencies are available before push/pull.

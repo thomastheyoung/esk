@@ -35,132 +35,57 @@ fn env_version_label(payload: &StorePayload, env: &str) -> String {
     ui::format_version_label(payload.env_version(env), payload.env_last_changed_at(env))
 }
 
-struct PullResult {
-    remote: String,
-    outcome: PullOutcome,
+/// Format a pull result line for progressive rendering.
+fn format_pull_line(name: &str, outcome: &PullOutcome) -> String {
+    match outcome {
+        PullOutcome::Fetched {
+            version,
+            secret_count,
+        } => ui::format_dashboard_line(
+            &format!("\u{2193} {name}"),
+            &format!("v{version}, {secret_count} secrets"),
+            SYNC_LINE_WIDTH,
+        ),
+        PullOutcome::Empty => ui::format_dashboard_line(
+            &format!("\u{2193} {name}"),
+            &style("no data").dim().to_string(),
+            SYNC_LINE_WIDTH,
+        ),
+        PullOutcome::Failed => ui::format_dashboard_line(
+            &format!("\u{2193} {name}"),
+            &style("failed").red().to_string(),
+            SYNC_LINE_WIDTH,
+        ),
+    }
+}
+
+/// Format a push result line for progressive rendering.
+fn format_push_line(name: &str, success: bool, dry_run: bool) -> String {
+    if dry_run {
+        ui::format_dashboard_line(
+            &format!("\u{2191} {name}"),
+            &style("would push").dim().to_string(),
+            SYNC_LINE_WIDTH,
+        )
+    } else if success {
+        ui::format_dashboard_line(
+            &format!("\u{2191} {name}"),
+            &style("synced").green().to_string(),
+            SYNC_LINE_WIDTH,
+        )
+    } else {
+        ui::format_dashboard_line(
+            &format!("\u{2191} {name}"),
+            &style("failed").red().to_string(),
+            SYNC_LINE_WIDTH,
+        )
+    }
 }
 
 enum PullOutcome {
     Fetched { version: u64, secret_count: usize },
     Empty,
     Failed,
-}
-
-enum ReconcileOutcome {
-    Merged { version_label: String },
-    UpToDate { version_label: String },
-    DriftRepair { version_label: String },
-}
-
-struct SyncReport {
-    env: String,
-    pulls: Vec<PullResult>,
-    reconcile: ReconcileOutcome,
-    pushes: Vec<RemotePushResult>,
-    dry_run: bool,
-}
-
-impl SyncReport {
-    fn has_push_failures(&self) -> bool {
-        self.pushes.iter().any(|r| !r.success)
-    }
-
-    fn push_failure_count(&self) -> usize {
-        self.pushes.iter().filter(|r| !r.success).count()
-    }
-
-    fn render(&self) -> Result<()> {
-        let mut lines = Vec::new();
-
-        // Pull lines
-        for pull in &self.pulls {
-            let line = match &pull.outcome {
-                PullOutcome::Fetched {
-                    version,
-                    secret_count,
-                } => ui::format_dashboard_line(
-                    &format!("↓ {}", pull.remote),
-                    &format!("v{version}, {secret_count} secrets"),
-                    SYNC_LINE_WIDTH,
-                ),
-                PullOutcome::Empty => ui::format_dashboard_line(
-                    &format!("↓ {}", pull.remote),
-                    &style("no data").dim().to_string(),
-                    SYNC_LINE_WIDTH,
-                ),
-                PullOutcome::Failed => ui::format_dashboard_line(
-                    &format!("↓ {}", pull.remote),
-                    &style("failed").red().to_string(),
-                    SYNC_LINE_WIDTH,
-                ),
-            };
-            lines.push(line);
-        }
-
-        // Push lines
-        if self.dry_run {
-            for push in &self.pushes {
-                lines.push(ui::format_dashboard_line(
-                    &format!("↑ {}", push.remote),
-                    &style("would push").dim().to_string(),
-                    SYNC_LINE_WIDTH,
-                ));
-            }
-        } else {
-            for push in &self.pushes {
-                if push.success {
-                    lines.push(ui::format_dashboard_line(
-                        &format!("↑ {}", push.remote),
-                        &style("synced").green().to_string(),
-                        SYNC_LINE_WIDTH,
-                    ));
-                } else {
-                    lines.push(ui::format_dashboard_line(
-                        &format!("↑ {}", push.remote),
-                        &style("failed").red().to_string(),
-                        SYNC_LINE_WIDTH,
-                    ));
-                }
-            }
-        }
-
-        // Status line
-        let status_line = if self.dry_run {
-            match &self.reconcile {
-                ReconcileOutcome::Merged { version_label } => {
-                    format!("{} Would merge → {}", ui::icon_merge(), version_label)
-                }
-                ReconcileOutcome::UpToDate { version_label } => {
-                    format!("{} Up to date → {}", ui::icon_success(), version_label)
-                }
-                ReconcileOutcome::DriftRepair { version_label } => {
-                    format!(
-                        "{} Current ({}), would repair drift",
-                        ui::icon_merge(),
-                        version_label
-                    )
-                }
-            }
-        } else {
-            match &self.reconcile {
-                ReconcileOutcome::Merged { version_label } => {
-                    format!("{} Merged → {}", ui::icon_merge(), version_label)
-                }
-                ReconcileOutcome::UpToDate { version_label } => {
-                    format!("{} Up to date → {}", ui::icon_success(), version_label)
-                }
-                ReconcileOutcome::DriftRepair { .. } => {
-                    format!("{} Stale remotes (repairing...)", ui::icon_merge())
-                }
-            }
-        };
-
-        lines.push(String::new());
-        lines.push(status_line);
-        cliclack::note(&self.env, lines.join("\n"))?;
-
-        Ok(())
-    }
 }
 
 /// Push a payload to the given remotes, recording results in the remote index.
@@ -177,11 +102,15 @@ pub fn push_to_remotes(
 
     for rem in remotes {
         let spinner = cliclack::spinner();
-        spinner.start(format!("↑ {}...", rem.name()));
+        spinner.start(format!("\u{2191} {}...", rem.name()));
 
         match rem.push(payload, config, env) {
             Ok(()) => {
-                spinner.stop(format!("↑ {}  {}", rem.name(), style("done").green()));
+                spinner.stop(format!(
+                    "\u{2191} {}  {}",
+                    rem.name(),
+                    style("done").green()
+                ));
                 sync_index.record_success(rem.name(), env, pushed_version);
                 results.push(RemotePushResult {
                     remote: rem.name().to_string(),
@@ -190,7 +119,11 @@ pub fn push_to_remotes(
                 });
             }
             Err(e) => {
-                spinner.error(format!("↑ {}  {} — {e}", rem.name(), style("failed").red()));
+                spinner.error(format!(
+                    "\u{2191} {}  {} \u{2014} {e}",
+                    rem.name(),
+                    style("failed").red()
+                ));
                 sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                 results.push(RemotePushResult {
                     remote: rem.name().to_string(),
@@ -296,41 +229,59 @@ pub fn run_with_runner(
         all_remotes
     };
 
-    // Phase 1: Pull from all target remotes
-    let mut pulls: Vec<PullResult> = Vec::new();
+    // Phase 1: Parallel pull from all target remotes
+    let remote_count = target_remotes.len();
+    let spinner = cliclack::spinner();
+    spinner.start(format!(
+        "Pulling {} remote{}...",
+        remote_count,
+        if remote_count == 1 { "" } else { "s" }
+    ));
+
+    let pull_results: Vec<(String, Result<Option<(BTreeMap<String, String>, u64)>>)> =
+        std::thread::scope(|s| {
+            let handles: Vec<_> = target_remotes
+                .iter()
+                .map(|rem| {
+                    let name = rem.name().to_string();
+                    s.spawn(move || (name, rem.pull(config, env)))
+                })
+                .collect();
+            handles.into_iter().map(|h| h.join().unwrap()).collect()
+        });
+
+    // Process pull results
+    let mut pull_lines: Vec<String> = Vec::new();
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
     let mut pull_failures: Vec<String> = Vec::new();
 
-    for rem in &target_remotes {
-        match rem.pull(config, env) {
+    for (name, result) in &pull_results {
+        match result {
             Ok(Some((secrets, version))) => {
-                pulls.push(PullResult {
-                    remote: rem.name().to_string(),
-                    outcome: PullOutcome::Fetched {
-                        version,
-                        secret_count: secrets.len(),
-                    },
-                });
-                remote_data.push((rem.name().to_string(), secrets, version));
+                let outcome = PullOutcome::Fetched {
+                    version: *version,
+                    secret_count: secrets.len(),
+                };
+                pull_lines.push(format_pull_line(name, &outcome));
+                remote_data.push((name.clone(), secrets.clone(), *version));
             }
             Ok(None) => {
-                pulls.push(PullResult {
-                    remote: rem.name().to_string(),
-                    outcome: PullOutcome::Empty,
-                });
-                // Treat empty remote as version 0 — reconciliation will mark it
-                // for push so local data gets seeded on first sync.
-                remote_data.push((rem.name().to_string(), BTreeMap::new(), 0));
+                pull_lines.push(format_pull_line(name, &PullOutcome::Empty));
+                remote_data.push((name.clone(), BTreeMap::new(), 0));
             }
             Err(_) => {
-                pulls.push(PullResult {
-                    remote: rem.name().to_string(),
-                    outcome: PullOutcome::Failed,
-                });
-                pull_failures.push(rem.name().to_string());
+                pull_lines.push(format_pull_line(name, &PullOutcome::Failed));
+                pull_failures.push(name.clone());
             }
         }
     }
+
+    spinner.stop(format!(
+        "Pulled {} remote{}",
+        remote_count,
+        if remote_count == 1 { "" } else { "s" }
+    ));
+    cliclack::log::step(pull_lines.join("\n"))?;
 
     if !pull_failures.is_empty() && bail_on_err {
         bail!(
@@ -341,12 +292,10 @@ pub fn run_with_runner(
     }
 
     if remote_data.is_empty() {
-        // All remotes failed — nothing to reconcile or push to.
-        // Individual failure details were already logged above.
         return Ok(());
     }
 
-    // Phase 2: Multi-source reconciliation (interactive prompts stay here)
+    // Phase 2: Reconcile (single-threaded, may prompt interactively)
     let remotes_ref: Vec<(&str, &BTreeMap<String, String>, u64)> = remote_data
         .iter()
         .map(|(name, secrets, version)| (name.as_str(), secrets, *version))
@@ -385,51 +334,49 @@ pub fn run_with_runner(
         Err(e) => return Err(e),
     };
 
-    // Phase 3: Compute reconcile outcome + execute merge/push
-    let reconcile_outcome;
-    let mut pushes: Vec<RemotePushResult> = Vec::new();
+    // Phase 3: Apply merge + parallel push
+    let reconcile_status;
+    let mut push_failure_count = 0usize;
 
     if dry_run {
-        // Dry-run: compute outcome, fake pushes for sources_to_update
+        // Render reconcile status
         if result.local_changed {
             let label = env_version_label(&result.merged_payload, env);
-            if result.has_drift {
-                reconcile_outcome = ReconcileOutcome::DriftRepair {
-                    version_label: label,
-                };
+            reconcile_status = if result.has_drift {
+                format!("{} Current ({}), would repair drift", ui::icon_merge(), label)
             } else {
-                reconcile_outcome = ReconcileOutcome::Merged {
-                    version_label: label,
-                };
-            }
-        } else if !result.sources_to_update.is_empty() {
-            let label = env_version_label(&payload, env);
-            if result.has_drift {
-                reconcile_outcome = ReconcileOutcome::DriftRepair {
-                    version_label: label,
-                };
-            } else {
-                reconcile_outcome = ReconcileOutcome::UpToDate {
-                    version_label: label,
-                };
-            }
+                format!("{} Would merge \u{2192} {}", ui::icon_merge(), label)
+            };
         } else {
             let label = env_version_label(&payload, env);
-            reconcile_outcome = ReconcileOutcome::UpToDate {
-                version_label: label,
+            reconcile_status = if result.has_drift {
+                format!("{} Current ({}), would repair drift", ui::icon_merge(), label)
+            } else {
+                format!("{} Up to date \u{2192} {}", ui::icon_success(), label)
             };
         }
+        cliclack::log::info(reconcile_status)?;
 
-        // In dry-run, represent sources_to_update as push entries (rendered as "would push")
-        for name in &result.sources_to_update {
-            pushes.push(RemotePushResult {
-                remote: name.clone(),
-                success: true,
-                error: None,
-            });
+        // Dry-run push lines
+        if !result.sources_to_update.is_empty() {
+            let push_lines: Vec<String> = result
+                .sources_to_update
+                .iter()
+                .map(|name| format_push_line(name, true, true))
+                .collect();
+            cliclack::log::step(format!(
+                "Would push {} remote{}\n{}",
+                result.sources_to_update.len(),
+                if result.sources_to_update.len() == 1 {
+                    ""
+                } else {
+                    "s"
+                },
+                push_lines.join("\n")
+            ))?;
         }
     } else {
-        // Live mode: merge + push
+        // Live: apply merge
         if result.local_changed {
             // Detect values that became empty from remote merge (skip allow_empty secrets)
             let resolved = config.resolve_secrets()?;
@@ -468,79 +415,87 @@ pub fn run_with_runner(
 
             store.set_payload(&result.merged_payload)?;
             let label = env_version_label(&result.merged_payload, env);
-            reconcile_outcome = ReconcileOutcome::Merged {
-                version_label: label,
-            };
+            reconcile_status = format!("{} Merged \u{2192} {}", ui::icon_merge(), label);
         } else {
             let label = env_version_label(&payload, env);
-            if result.has_drift {
-                reconcile_outcome = ReconcileOutcome::DriftRepair {
-                    version_label: label,
-                };
+            reconcile_status = if result.has_drift {
+                format!("{} Stale remotes (repairing...)", ui::icon_merge())
             } else {
-                reconcile_outcome = ReconcileOutcome::UpToDate {
-                    version_label: label,
-                };
-            }
+                format!("{} Up to date \u{2192} {}", ui::icon_success(), label)
+            };
         }
+        cliclack::log::info(reconcile_status)?;
 
-        // Push merged/current result back to stale remotes
+        // Parallel push to stale remotes
         if !result.sources_to_update.is_empty() {
             let updated_payload = if result.local_changed {
                 &result.merged_payload
             } else {
                 &payload
             };
+
+            let stale_remotes: Vec<&Box<dyn SyncRemote + '_>> = target_remotes
+                .iter()
+                .filter(|rem| result.sources_to_update.iter().any(|s| s == rem.name()))
+                .collect();
+
+            let push_count = stale_remotes.len();
+            let push_spinner = cliclack::spinner();
+            push_spinner.start(format!(
+                "Pushing {} remote{}...",
+                push_count,
+                if push_count == 1 { "" } else { "s" }
+            ));
+
+            let push_results: Vec<(String, Result<()>)> = std::thread::scope(|s| {
+                let handles: Vec<_> = stale_remotes
+                    .iter()
+                    .map(|rem| {
+                        let name = rem.name().to_string();
+                        s.spawn(move || (name, rem.push(updated_payload, config, env)))
+                    })
+                    .collect();
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+
+            push_spinner.stop(format!(
+                "Pushed {} remote{}",
+                push_count,
+                if push_count == 1 { "" } else { "s" }
+            ));
+
+            // Update sync index sequentially on main thread
             let sync_index_path = config.root.join(".esk/sync-index.json");
             let mut sync_index = SyncIndex::load(&sync_index_path);
             let pushed_version = updated_payload.env_version(env);
 
-            for rem in &target_remotes {
-                if !result.sources_to_update.iter().any(|s| s == rem.name()) {
-                    continue;
-                }
-                match rem.push(updated_payload, config, env) {
+            let mut push_lines: Vec<String> = Vec::new();
+            for (name, res) in &push_results {
+                match res {
                     Ok(()) => {
-                        sync_index.record_success(rem.name(), env, pushed_version);
-                        pushes.push(RemotePushResult {
-                            remote: rem.name().to_string(),
-                            success: true,
-                            error: None,
-                        });
+                        sync_index.record_success(name, env, pushed_version);
+                        push_lines.push(format_push_line(name, true, false));
                     }
                     Err(e) => {
-                        sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
-                        pushes.push(RemotePushResult {
-                            remote: rem.name().to_string(),
-                            success: false,
-                            error: Some(e.to_string()),
-                        });
+                        sync_index
+                            .record_failure(name, env, pushed_version, e.to_string());
+                        push_lines.push(format_push_line(name, false, false));
+                        push_failure_count += 1;
                     }
                 }
             }
             sync_index.save()?;
+            cliclack::log::step(push_lines.join("\n"))?;
         }
     }
 
-    // Phase 4: Render report
-    let report = SyncReport {
-        env: env.to_string(),
-        pulls,
-        reconcile: reconcile_outcome,
-        pushes,
-        dry_run,
-    };
-
-    report.render()?;
-
-    if report.has_push_failures() {
-        let fail_count = report.push_failure_count();
+    if push_failure_count > 0 {
         bail!(
-            "{fail_count} remote(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
+            "{push_failure_count} remote(s) failed to receive merged data. Run `esk sync --env {env}` to retry."
         );
     }
 
-    // Auto-deploy stays after render
+    // Auto-deploy after sync
     if !dry_run && auto_deploy && result.local_changed {
         cliclack::log::step("Running deploy...")?;
         crate::cli::deploy::run_with_runner(
