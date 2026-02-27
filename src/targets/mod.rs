@@ -15,7 +15,11 @@ pub mod vercel;
 
 use anyhow::Result;
 use std::collections::BTreeMap;
+use std::io::IsTerminal;
 use std::path::PathBuf;
+use std::sync::{Arc, Mutex};
+
+use console::style;
 
 use crate::config::{Config, ResolvedTarget};
 
@@ -413,7 +417,7 @@ pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<T
 
 /// Build all configured deploy targets from the config.
 /// Runs preflight checks in parallel and filters out targets that fail.
-/// Renders a section-style summary with per-target checkmarks.
+/// Renders animated per-target spinners that resolve to checkmarks/X marks.
 pub fn build_targets<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
@@ -423,70 +427,141 @@ pub fn build_targets<'a>(
         return Vec::new();
     }
 
-    // Run all preflights in parallel, collecting (index, pass/fail, message)
-    let results: Vec<(usize, bool, String)> = std::thread::scope(|s| {
-        let handles: Vec<_> = candidates
-            .iter()
-            .enumerate()
-            .map(|(i, c)| {
-                let ok_message = c.ok_message;
-                s.spawn(move || match c.target.preflight() {
-                    Ok(()) => (i, true, ok_message.to_string()),
-                    Err(e) => (i, false, e.to_string()),
-                })
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    });
-
-    // Render section with per-target status
     let name_width = candidates
         .iter()
         .map(|c| c.target.name().len())
         .max()
         .unwrap_or(0);
+    let n = candidates.len();
+    let is_tty = std::io::stderr().is_terminal();
 
-    let lines: Vec<String> = results
-        .iter()
-        .map(|(i, ok, msg)| {
-            let name = candidates[*i].target.name();
-            let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
-            format!("  {mark} {name:<name_width$}  {msg}")
-        })
-        .collect();
-    let _ = cliclack::log::step(format!("Preflight\n{}", lines.join("\n")));
+    // Shared preflight results: None = in progress
+    #[allow(clippy::type_complexity)]
+    let results: Arc<Mutex<Vec<Option<(bool, String)>>>> =
+        Arc::new(Mutex::new(vec![None; n]));
+
+    std::thread::scope(|s| {
+        // Spawn preflight workers
+        for (i, c) in candidates.iter().enumerate() {
+            let results = Arc::clone(&results);
+            let ok_message = c.ok_message;
+            s.spawn(move || {
+                let result = match c.target.preflight() {
+                    Ok(()) => (true, ok_message.to_string()),
+                    Err(e) => (false, e.to_string()),
+                };
+                results.lock().unwrap()[i] = Some(result);
+            });
+        }
+
+        // Animated render loop (TTY only)
+        if is_tty {
+            let term = console::Term::stderr();
+            let frames = ['\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}', '\u{2807}', '\u{280F}'];
+            let bar = style("\u{2502}").dim();
+
+            // Print header + initial spinner lines
+            let _ = term.write_line(&format!("{}  Preflight", style("\u{25C7}").dim()));
+            for c in &candidates {
+                let _ = term.write_line(&format!(
+                    "{bar}    {} {:<name_width$}",
+                    style(frames[0]).magenta(),
+                    c.target.name(),
+                ));
+            }
+
+            let mut frame = 0usize;
+            loop {
+                std::thread::sleep(std::time::Duration::from_millis(80));
+                frame = (frame + 1) % frames.len();
+
+                let state = results.lock().unwrap();
+                let all_done = state.iter().all(Option::is_some);
+
+                let _ = term.move_cursor_up(n);
+                for (i, c) in candidates.iter().enumerate() {
+                    let _ = term.clear_line();
+                    let name = c.target.name();
+                    match &state[i] {
+                        Some((true, msg)) => {
+                            let _ = term.write_line(&format!(
+                                "{bar}    {} {:<name_width$}  {msg}",
+                                style("\u{2714}").green(),
+                                name,
+                            ));
+                        }
+                        Some((false, msg)) => {
+                            let _ = term.write_line(&format!(
+                                "{bar}    {} {:<name_width$}  {msg}",
+                                style("\u{2718}").red(),
+                                name,
+                            ));
+                        }
+                        None => {
+                            let _ = term.write_line(&format!(
+                                "{bar}    {} {:<name_width$}",
+                                style(frames[frame]).magenta(),
+                                name,
+                            ));
+                        }
+                    }
+                }
+
+                drop(state);
+                if all_done {
+                    break;
+                }
+            }
+        }
+    });
+
+    // Non-TTY fallback: static rendering via cliclack
+    if !is_tty {
+        let state = results.lock().unwrap();
+        let lines: Vec<String> = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let name = c.target.name();
+                let (ok, msg) = state[i].as_ref().unwrap();
+                let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
+                format!("  {mark} {name:<name_width$}  {msg}")
+            })
+            .collect();
+        let _ = cliclack::log::step(format!("Preflight\n{}", lines.join("\n")));
+    }
 
     // Emit security warnings after the section
+    let state = results.lock().unwrap();
     let mut security_warnings: Vec<String> = Vec::new();
-    for (i, ok, _) in &results {
-        if *ok && needs_cli_secret_arg_warning(candidates[*i].target.name()) {
-            security_warnings.push(format!(
-                "{}: secret values are passed as CLI args and may be visible in local process listings",
-                candidates[*i].target.name()
-            ));
-        }
-    }
+    let passing: Vec<bool> = state
+        .iter()
+        .enumerate()
+        .map(|(i, r)| {
+            if let Some((true, _)) = r {
+                if needs_cli_secret_arg_warning(candidates[i].target.name()) {
+                    security_warnings.push(format!(
+                        "{}: secret values are passed as CLI args and may be visible in local process listings",
+                        candidates[i].target.name()
+                    ));
+                }
+                true
+            } else {
+                false
+            }
+        })
+        .collect();
+    drop(state);
+
     for warning in &security_warnings {
         let _ = cliclack::log::warning(warning);
     }
 
     // Filter to passing targets
-    let passing_indices: Vec<usize> = results
-        .iter()
-        .filter(|(_, ok, _)| *ok)
-        .map(|(i, _, _)| *i)
-        .collect();
-
     candidates
         .into_iter()
         .enumerate()
-        .filter_map(|(i, c)| {
-            if passing_indices.contains(&i) {
-                Some(c.target)
-            } else {
-                None
-            }
-        })
+        .filter_map(|(i, c)| if passing[i] { Some(c.target) } else { None })
         .collect()
 }
 
