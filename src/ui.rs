@@ -172,6 +172,7 @@ pub fn truncation_footer(total: usize, shown: usize) -> Option<String> {
 // ---------------------------------------------------------------------------
 
 /// Aligns a label and value with dots (...) between them for a dashboard look.
+/// The `width` parameter is the total line width (label + dots + value).
 pub fn format_dashboard_line(label: &str, value: &str, width: usize) -> String {
     let label_len = visible_width(label);
     let value_len = visible_width(value);
@@ -181,5 +182,19 @@ pub fn format_dashboard_line(label: &str, value: &str, width: usize) -> String {
     }
 
     let dots = ".".repeat(width - label_len - value_len - 2);
+    format!("{} {} {}", label, style(dots).dim(), value)
+}
+
+/// Aligns a label and value with dots, where `label_col` is the fixed column
+/// where values start. All values align to the same X position regardless of
+/// their length.
+pub fn format_aligned_line(label: &str, value: &str, label_col: usize) -> String {
+    let label_len = visible_width(label);
+
+    if label_len + 2 >= label_col {
+        return format!("{label}  {value}");
+    }
+
+    let dots = ".".repeat(label_col - label_len - 2);
     format!("{} {} {}", label, style(dots).dim(), value)
 }

@@ -25,7 +25,7 @@ pub struct DeployOptions<'a> {
 /// Maximum number of orphans allowed without `--force`.
 const PRUNE_THRESHOLD: usize = 10;
 
-const DEPLOY_LINE_WIDTH: usize = 44;
+const DEPLOY_LINE_WIDTH: usize = 20;
 
 #[derive(Default)]
 struct EnvStatus {
@@ -66,55 +66,88 @@ impl DeployReport {
         !self.failed.is_empty()
     }
 
-    fn render(&self) -> Result<()> {
-        let width = DEPLOY_LINE_WIDTH;
+    fn all_entries(&self) -> impl Iterator<Item = &DeployEntry> {
+        self.deployed
+            .iter()
+            .chain(&self.failed)
+            .chain(&self.skipped)
+            .chain(&self.unset)
+            .chain(&self.pruned)
+    }
 
+    fn render(&self) -> Result<()> {
         if self.is_empty() {
             cliclack::log::info("Nothing to deploy.")?;
         } else {
-            // Group everything by environment for framed output
+            // Compute label column: max(MIN_WIDTH, longest_key + icon_prefix + 3 dots)
+            let max_key_len = self.all_entries().map(|e| e.key.len()).max().unwrap_or(0);
+            let label_col = DEPLOY_LINE_WIDTH.max(max_key_len + 7); // +2 icon, +2 spaces, +3 min dots
+
             let mut env_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
             let mut env_status: BTreeMap<String, EnvStatus> = BTreeMap::new();
 
+            // Count statuses from original entries (one per target)
             for entry in &self.deployed {
-                let label = format!("{} {}", ui::icon_success(), style(&entry.key).dim());
-                env_map
-                    .entry(entry.env.clone())
-                    .or_default()
-                    .push(ui::format_dashboard_line(&label, &entry.target, width));
                 env_status.entry(entry.env.clone()).or_default().deployed += 1;
             }
-
             for entry in &self.failed {
-                let label = format!("{} {}", ui::icon_failure(), style(&entry.key).dim());
-                let lines = env_map.entry(entry.env.clone()).or_default();
-                lines.push(ui::format_dashboard_line(&label, &entry.target, width));
-                if let Some(err) = &entry.error {
-                    lines.push(format!("      {}", style(format!("({err})")).red().dim()));
-                }
                 env_status.entry(entry.env.clone()).or_default().failed += 1;
             }
-
             for entry in &self.unset {
-                let label = format!("{} {}", ui::icon_unset(), style(&entry.key).dim());
-                env_map
-                    .entry(entry.env.clone())
-                    .or_default()
-                    .push(ui::format_dashboard_line(&label, &entry.target, width));
                 env_status.entry(entry.env.clone()).or_default().unset += 1;
             }
-
             for entry in &self.pruned {
-                let label = format!("{} {}", ui::icon_pruned(), style(&entry.key).dim());
-                env_map
-                    .entry(entry.env.clone())
-                    .or_default()
-                    .push(ui::format_dashboard_line(
-                        &label,
-                        &format!("{} (pruned)", entry.target),
-                        width,
-                    ));
                 env_status.entry(entry.env.clone()).or_default().pruned += 1;
+            }
+
+            // Render deployed entries (grouped by key, targets on one line)
+            for ((env, key), (targets, _)) in group_entries(&self.deployed) {
+                let label = format!("{} {}", ui::icon_success(), style(&key).dim());
+                env_map
+                    .entry(env)
+                    .or_default()
+                    .push(ui::format_aligned_line(&label, &targets.join(", "), label_col));
+            }
+
+            // Render failed entries (grouped by key, with errors)
+            for ((env, key), (targets, errors)) in group_entries(&self.failed) {
+                let label = format!("{} {}", ui::icon_failure(), style(&key).dim());
+                let lines = env_map.entry(env).or_default();
+                lines.push(ui::format_aligned_line(&label, &targets.join(", "), label_col));
+                if !errors.is_empty() {
+                    let unique_errors: BTreeSet<&str> =
+                        errors.iter().map(|(_, e)| e.as_str()).collect();
+                    if unique_errors.len() == 1 {
+                        let err = unique_errors.into_iter().next().unwrap();
+                        lines.push(format!("      {}", style(format!("({err})")).red().dim()));
+                    } else {
+                        for (target, err) in &errors {
+                            lines.push(format!(
+                                "      {}",
+                                style(format!("{target}: ({err})")).red().dim()
+                            ));
+                        }
+                    }
+                }
+            }
+
+            // Render unset entries (grouped by key)
+            for ((env, key), (targets, _)) in group_entries(&self.unset) {
+                let label = format!("{} {}", ui::icon_unset(), style(&key).dim());
+                env_map
+                    .entry(env)
+                    .or_default()
+                    .push(ui::format_aligned_line(&label, &targets.join(", "), label_col));
+            }
+
+            // Render pruned entries (grouped by key)
+            for ((env, key), (targets, _)) in group_entries(&self.pruned) {
+                let label = format!("{} {}", ui::icon_pruned(), style(&key).dim());
+                env_map.entry(env).or_default().push(ui::format_aligned_line(
+                    &label,
+                    &format!("{} (pruned)", targets.join(", ")),
+                    label_col,
+                ));
             }
 
             for (env_name, mut lines) in env_map {
@@ -142,10 +175,10 @@ impl DeployReport {
             if !self.skipped.is_empty() {
                 if self.verbose {
                     let mut skip_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
-                    for entry in &self.skipped {
-                        let label = format!("{} {}", style("✔").dim(), style(&entry.key).dim());
-                        skip_map.entry(entry.env.clone()).or_default().push(
-                            ui::format_dashboard_line(&label, &entry.target, width),
+                    for ((env, key), (targets, _)) in group_entries(&self.skipped) {
+                        let label = format!("{} {}", style("✔").dim(), style(&key).dim());
+                        skip_map.entry(env).or_default().push(
+                            ui::format_aligned_line(&label, &targets.join(", "), label_col),
                         );
                     }
                     for (env_name, lines) in skip_map {
@@ -168,6 +201,23 @@ impl DeployReport {
 
         Ok(())
     }
+}
+
+/// Group deploy entries by (env, key), combining targets into lists.
+fn group_entries(
+    entries: &[DeployEntry],
+) -> BTreeMap<(String, String), (Vec<String>, Vec<(String, String)>)> {
+    let mut map: BTreeMap<(String, String), (Vec<String>, Vec<(String, String)>)> = BTreeMap::new();
+    for entry in entries {
+        let group = map
+            .entry((entry.env.clone(), entry.key.clone()))
+            .or_default();
+        group.0.push(entry.target.clone());
+        if let Some(ref err) = entry.error {
+            group.1.push((entry.target.clone(), err.clone()));
+        }
+    }
+    map
 }
 
 pub fn run(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
