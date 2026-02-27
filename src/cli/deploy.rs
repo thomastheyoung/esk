@@ -144,13 +144,8 @@ impl DeployReport {
                     let mut skip_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
                     for entry in &self.skipped {
                         let label = format!("{} {}", style("✔").dim(), style(&entry.key).dim());
-                        // Keep dim checkmark for skipped (not icon_success — intentionally subdued)
                         skip_map.entry(entry.env.clone()).or_default().push(
-                            ui::format_dashboard_line(
-                                &label,
-                                &format!("{} (up to date)", entry.target),
-                                width,
-                            ),
+                            ui::format_dashboard_line(&label, &entry.target, width),
                         );
                     }
                     for (env_name, lines) in skip_map {
