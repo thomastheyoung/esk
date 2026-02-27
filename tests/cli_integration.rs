@@ -4216,7 +4216,7 @@ fn generate_dts_default() {
     let project = TestProject::with_store(FULL_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::Dts), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::Dts), None, false).unwrap();
 
     let output_path = project.root().join("env.d.ts");
     assert!(output_path.is_file());
@@ -4234,7 +4234,7 @@ fn generate_runtime() {
     let project = TestProject::with_store(FULL_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::Ts), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::Ts), None, false).unwrap();
 
     let output_path = project.root().join("env.ts");
     assert!(output_path.is_file());
@@ -4250,7 +4250,13 @@ fn generate_custom_output_path() {
     let project = TestProject::with_store(FULL_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::Dts), Some("types/env.d.ts")).unwrap();
+    cli::generate::run(
+        &config,
+        Some(&GenerateFormat::Dts),
+        Some("types/env.d.ts"),
+        false,
+    )
+    .unwrap();
 
     let output_path = project.root().join("types/env.d.ts");
     assert!(output_path.is_file());
@@ -4263,7 +4269,7 @@ fn generate_no_secrets_warns() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::Dts), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::Dts), None, false).unwrap();
 
     // No file should be written
     assert!(!project.root().join("env.d.ts").is_file());
@@ -4274,7 +4280,7 @@ fn generate_keys_deduplicated() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::Dts), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::Dts), None, false).unwrap();
 
     let content = std::fs::read_to_string(project.root().join("env.d.ts")).unwrap();
     assert_eq!(content.matches("MY_SECRET: string;").count(), 1);
@@ -4286,7 +4292,13 @@ fn generate_runtime_custom_output() {
     let project = TestProject::with_store(FULL_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::Ts), Some("src/env.ts")).unwrap();
+    cli::generate::run(
+        &config,
+        Some(&GenerateFormat::Ts),
+        Some("src/env.ts"),
+        false,
+    )
+    .unwrap();
 
     let output_path = project.root().join("src/env.ts");
     assert!(output_path.is_file());
@@ -4299,7 +4311,7 @@ fn generate_env_example_default() {
     let project = TestProject::with_store(FULL_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::EnvExample), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::EnvExample), None, false).unwrap();
 
     let output_path = project.root().join(".env.example");
     assert!(output_path.is_file());
@@ -4320,6 +4332,7 @@ fn generate_env_example_custom_output() {
         &config,
         Some(&GenerateFormat::EnvExample),
         Some("config/.env.example"),
+        false,
     )
     .unwrap();
 
@@ -4335,7 +4348,7 @@ fn generate_config_runs_all() {
     let config = project.config().unwrap();
 
     // No format arg → runs all config entries (dts + env-example)
-    cli::generate::run(&config, None, None).unwrap();
+    cli::generate::run(&config, None, None, false).unwrap();
 
     let dts_path = project.root().join("env.d.ts");
     assert!(dts_path.is_file());
@@ -4358,7 +4371,7 @@ fn generate_explicit_format_ignores_config() {
     let config = project.config().unwrap();
 
     // Explicit format overrides config entries
-    cli::generate::run(&config, Some(&GenerateFormat::Ts), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::Ts), None, false).unwrap();
 
     // Only env.ts should exist, not the config-driven outputs
     assert!(project.root().join("env.ts").is_file());
@@ -4371,7 +4384,7 @@ fn generate_output_without_format_errors() {
     let project = TestProject::with_store(FULL_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    let err = cli::generate::run(&config, None, Some("out.ts")).unwrap_err();
+    let err = cli::generate::run(&config, None, Some("out.ts"), false).unwrap_err();
     assert!(err.to_string().contains("--output requires a format"));
 }
 
@@ -4384,7 +4397,7 @@ fn generate_env_example_no_gitignore_warning() {
 
     // No .gitignore at all — dts would warn, but env-example should not
     assert!(!project.root().join(".gitignore").is_file());
-    cli::generate::run(&config, Some(&GenerateFormat::EnvExample), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::EnvExample), None, false).unwrap();
 
     let output_path = project.root().join(".env.example");
     assert!(output_path.is_file());
@@ -4405,7 +4418,7 @@ secrets:
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::EnvExample), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::EnvExample), None, false).unwrap();
 
     let content = std::fs::read_to_string(project.root().join(".env.example")).unwrap();
     assert!(content.contains("# Connection string\n# for the database\n"));
@@ -4651,7 +4664,7 @@ fn generate_dts_with_validation_types() {
     let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::Dts), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::Dts), None, false).unwrap();
 
     let output_path = project.root().join("env.d.ts");
     let content = std::fs::read_to_string(&output_path).unwrap();
@@ -4668,7 +4681,7 @@ fn generate_runtime_with_typed_helpers() {
     let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
     let config = project.config().unwrap();
 
-    cli::generate::run(&config, Some(&GenerateFormat::Ts), None).unwrap();
+    cli::generate::run(&config, Some(&GenerateFormat::Ts), None, false).unwrap();
 
     let output_path = project.root().join("env.ts");
     let content = std::fs::read_to_string(&output_path).unwrap();
