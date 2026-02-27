@@ -1,15 +1,17 @@
 # Build
-CLAUDE.md
 /target/
-
-# Claude Code
-.claude/settings.local.json
 /dist/
-.temp/
 .cargo/
 .cargo-home/
 .cargo-tools/
 .beads/
+
+# Temp
+.temp/
+
+# Claude Code
+CLAUDE.md
+.claude/settings.local.json
 
 # IDE
 .idea/
