@@ -7,10 +7,11 @@
 //! CLI: `npx convex` (runs via npx, no global install needed).
 //! Commands: `convex env set` / `convex env unset`.
 //!
-//! The Convex CLI does **not** support stdin for secret values, so they are
-//! passed as command-line arguments (visible in `ps` output). The
-//! `CONVEX_DEPLOYMENT` environment variable is read from the project's Convex
-//! config file and injected into the command environment.
+//! Secrets are set via **stdin** — when `convex env set NAME` receives piped
+//! input (non-TTY stdin), it reads the value from stdin. This avoids exposing
+//! secret values in process arguments. The `CONVEX_DEPLOYMENT` environment
+//! variable is read from the project's Convex config file and injected into
+//! the command environment.
 
 use std::path::PathBuf;
 
@@ -85,13 +86,11 @@ impl DeployTarget for ConvexTarget<'_> {
         Ok(())
     }
 
-    // SECURITY: `npx convex env set` has no stdin support. Secret values are exposed in process
-    // arguments (visible via `ps aux`). Known limitation with the Convex CLI.
     fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let (cwd, env_vars) = self.resolve_deployment_context()?;
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["convex", "env", "set", key, value];
+        let mut args: Vec<&str> = vec!["convex", "env", "set", key];
         args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
@@ -102,6 +101,7 @@ impl DeployTarget for ConvexTarget<'_> {
                 CommandOpts {
                     cwd: Some(cwd),
                     env: env_vars,
+                    stdin: Some(value.as_bytes().to_vec()),
                     ..Default::default()
                 },
             )
@@ -150,6 +150,7 @@ mod tests {
         String,
         Vec<String>,
         Option<std::path::PathBuf>,
+        Option<Vec<u8>>,
         Vec<(String, String)>,
     );
 
@@ -157,7 +158,7 @@ mod tests {
         runner
             .take_calls()
             .into_iter()
-            .map(|call| (call.program, call.args, call.cwd, call.env))
+            .map(|call| (call.program, call.args, call.cwd, call.stdin, call.env))
             .collect()
     }
 
@@ -285,11 +286,11 @@ targets:
 
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "npx");
-        assert_eq!(
-            calls[0].1,
-            vec!["convex", "env", "set", "MY_KEY", "my_value"]
-        );
+        assert_eq!(calls[0].1, vec!["convex", "env", "set", "MY_KEY"]);
         assert_eq!(calls[0].2.as_ref().unwrap(), &dir.path().join("apps/api"));
+        // Value is passed via stdin, not in args
+        assert_eq!(calls[0].3.as_deref(), Some(b"my_value".as_slice()));
+        assert!(!calls[0].1.iter().any(|a| a.contains("my_value")));
     }
 
     #[test]
@@ -315,7 +316,7 @@ targets:
             .unwrap();
 
         let calls = take_calls(&runner);
-        assert!(calls[0].3.contains(&(
+        assert!(calls[0].4.contains(&(
             "CONVEX_DEPLOYMENT".to_string(),
             "dev:my-deploy-123".to_string()
         )));
@@ -342,7 +343,7 @@ targets:
             .unwrap();
 
         let calls = take_calls(&runner);
-        assert!(calls[0].3.is_empty()); // no env vars set
+        assert!(calls[0].4.is_empty()); // no env vars set
     }
 
     #[test]
@@ -368,7 +369,7 @@ targets:
             .unwrap();
 
         let calls = take_calls(&runner);
-        assert!(calls[0].3.is_empty());
+        assert!(calls[0].4.is_empty());
     }
 
     #[test]
@@ -395,7 +396,7 @@ targets:
 
         let calls = take_calls(&runner);
         assert!(calls[0]
-            .3
+            .4
             .contains(&("CONVEX_DEPLOYMENT".to_string(), "my-deploy".to_string())));
     }
 

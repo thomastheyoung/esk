@@ -379,7 +379,7 @@ pub(crate) fn target_candidates<'a>(
 }
 
 fn needs_cli_secret_arg_warning(name: &str) -> bool {
-    matches!(name, "convex" | "netlify" | "heroku" | "railway")
+    matches!(name, "netlify" | "heroku" | "railway")
 }
 
 /// Check the health of all configured targets without filtering.
