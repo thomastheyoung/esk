@@ -1,6 +1,9 @@
 # Build
 CLAUDE.md
 /target/
+
+# Claude Code
+.claude/settings.local.json
 /dist/
 .temp/
 .cargo/

@@ -96,6 +96,7 @@ Generate code or config files from secret definitions. Runs all configured outpu
 |------|-------------|
 | `FORMAT` | `dts` (TypeScript declarations), `ts` (runtime module), or `env-example` |
 | `--output`, `-o` | Output file path (requires a format argument) |
+| `--preview` | Print generated output to stdout without writing files |
 
 ## Config reference (`esk.yaml`)
 
