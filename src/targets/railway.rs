@@ -5,12 +5,11 @@
 //! at runtime.
 //!
 //! CLI: `railway` (Railway's official CLI).
-//! Commands: `railway variables --set KEY=value` / `railway variables delete KEY`.
+//! Commands: `railway variables set KEY --stdin` / `railway variables delete KEY`.
 //!
-//! The Railway CLI does **not** support stdin for secret values, so they are
-//! passed as command-line arguments (visible in `ps` output). The CLI
-//! determines the target project/service from the linked context (no explicit
-//! app flag needed).
+//! Secrets are set via **stdin** using the `--stdin` flag on `railway variables set`.
+//! This avoids exposing secret values in process arguments. The CLI determines
+//! the target project/service from the linked context (no explicit app flag needed).
 
 use anyhow::{Context, Result};
 
@@ -50,21 +49,24 @@ impl DeployTarget for RailwayTarget<'_> {
         Ok(())
     }
 
-    // SECURITY: railway CLI has no stdin/file support for `variables --set`. Secret values are
-    // exposed in process arguments (visible via `ps aux`). No workaround available.
     fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
-        let kv = format!("{key}={value}");
-
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["variables", "--set", &kv];
+        let mut args: Vec<&str> = vec!["variables", "set", key, "--stdin"];
         args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
             .runner
-            .run("railway", &args, CommandOpts::default())
+            .run(
+                "railway",
+                &args,
+                CommandOpts {
+                    stdin: Some(value.as_bytes().to_vec()),
+                    ..Default::default()
+                },
+            )
             .with_context(|| format!("failed to run railway for {key}"))?;
 
-        output.check("railway variables --set", key)?;
+        output.check("railway variables set", key)?;
 
         Ok(())
     }
@@ -91,13 +93,13 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>);
+    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
     fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
         runner
             .take_calls()
             .into_iter()
-            .map(|call| (call.program, call.args))
+            .map(|call| (call.program, call.args, call.stdin))
             .collect()
     }
 
@@ -148,6 +150,7 @@ targets:
         assert!(target.preflight().is_ok());
         let calls = take_calls(&runner);
         assert_eq!(calls[1].1, vec!["whoami"]);
+        assert!(calls[1].2.is_none());
     }
 
     #[test]
@@ -211,7 +214,10 @@ targets:
             .unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].0, "railway");
-        assert_eq!(calls[0].1, vec!["variables", "--set", "MY_KEY=secret_val"]);
+        assert_eq!(calls[0].1, vec!["variables", "set", "MY_KEY", "--stdin"]);
+        // Value is passed via stdin, not in args
+        assert_eq!(calls[0].2.as_deref(), Some(b"secret_val".as_slice()));
+        assert!(!calls[0].1.iter().any(|a| a.contains("secret_val")));
     }
 
     #[test]
@@ -237,12 +243,14 @@ targets:
             calls[0].1,
             vec![
                 "variables",
-                "--set",
-                "KEY=val",
+                "set",
+                "KEY",
+                "--stdin",
                 "--environment",
                 "production"
             ]
         );
+        assert_eq!(calls[0].2.as_deref(), Some(b"val".as_slice()));
     }
 
     #[test]
@@ -263,6 +271,7 @@ targets:
         target.delete_secret("MY_KEY", &make_target("dev")).unwrap();
         let calls = take_calls(&runner);
         assert_eq!(calls[0].1, vec!["variables", "delete", "MY_KEY"]);
+        assert!(calls[0].2.is_none());
     }
 
     #[test]
