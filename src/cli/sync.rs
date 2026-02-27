@@ -237,6 +237,7 @@ pub fn run_with_runner(
         if remote_count == 1 { "" } else { "s" }
     ));
 
+    #[allow(clippy::type_complexity)]
     let pull_results: Vec<(String, Result<Option<(BTreeMap<String, String>, u64)>>)> =
         std::thread::scope(|s| {
             let handles: Vec<_> = target_remotes

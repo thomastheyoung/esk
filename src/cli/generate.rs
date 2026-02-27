@@ -80,7 +80,7 @@ pub fn run(
                     .output
                     .as_deref()
                     .unwrap_or(entry.format.default_output());
-                println!("── {} ──", name);
+                println!("── {name} ──");
             }
             let content = render_content(&metas, entry.format);
             print!("{content}");
