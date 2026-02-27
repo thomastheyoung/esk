@@ -47,6 +47,11 @@ src/
 │   ├── azure_key_vault.rs      # Azure Key Vault
 │   ├── doppler.rs       # Doppler secrets management
 │   └── sops.rs          # Mozilla SOPS encrypted files
+├── bin/
+│   └── esk-mcp.rs       # MCP server binary (requires "mcp" feature)
+├── mcp/
+│   ├── mod.rs           # MCP server implementation (tools + routing)
+│   └── types.rs         # MCP request/response types
 ├── cli/
 │   ├── mod.rs           # Command routing
 │   ├── init.rs          # esk init
@@ -166,7 +171,7 @@ Secrets can declare a `validate:` block (`Validation` struct) and a `required:` 
 | Crate                               | Purpose                               |
 | ----------------------------------- | ------------------------------------- |
 | `clap`                              | CLI argument parsing with derive      |
-| `serde`, `serde_yaml`, `serde_json` | Config and store serialization        |
+| `serde`, `serde-saphyr`, `serde_json` | Config and store serialization       |
 | `aes-gcm`                           | Authenticated encryption              |
 | `sha2`                              | Change detection hashing              |
 | `hex`                               | Hex encoding for keys, nonces, hashes |
@@ -181,6 +186,9 @@ Secrets can declare a `validate:` block (`Validation` struct) and a `required:` 
 | `thiserror`                         | Typed errors at API boundaries        |
 | `regex-lite`                        | Lightweight regex for pattern validation |
 | `zeroize`                           | Zeroing secret key bytes on drop      |
+| `rmcp`                              | MCP server framework (optional, `mcp` feature) |
+| `tokio`                             | Async runtime for MCP server (optional) |
+| `schemars`                          | JSON schema generation for MCP (optional) |
 
 ## Rules
 
