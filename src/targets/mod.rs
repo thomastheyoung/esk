@@ -402,14 +402,28 @@ pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<T
 
 /// Build all configured deploy targets from the config.
 /// Runs preflight checks and filters out targets that fail, printing warnings.
+/// Shows a spinner with per-target progress during preflight checks.
 pub fn build_targets<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
 ) -> Vec<Box<dyn DeployTarget + 'a>> {
+    let candidates = target_candidates(config, runner);
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let spinner = cliclack::spinner();
+    let total = candidates.len();
     let mut targets: Vec<Box<dyn DeployTarget + 'a>> = Vec::new();
 
-    for candidate in target_candidates(config, runner) {
+    for (i, candidate) in candidates.into_iter().enumerate() {
         let target = candidate.target;
+        spinner.start(format!(
+            "{}/{} Checking {} target...",
+            i + 1,
+            total,
+            target.name()
+        ));
         match target.preflight() {
             Ok(()) => {
                 if needs_cli_secret_arg_warning(target.name()) {
@@ -425,6 +439,21 @@ pub fn build_targets<'a>(
             }
         }
     }
+
+    let ready = targets.len();
+    let skipped = total - ready;
+    let summary = if skipped > 0 {
+        format!(
+            "{ready} target{} ready, {skipped} skipped",
+            if ready == 1 { "" } else { "s" }
+        )
+    } else {
+        format!(
+            "{ready} target{} ready",
+            if ready == 1 { "" } else { "s" }
+        )
+    };
+    spinner.stop(summary);
 
     targets
 }

@@ -310,6 +310,10 @@ pub fn run_with_runner(
     let available_targets: Vec<&str> = deploy_targets.iter().map(|t| t.name()).collect();
     let missing =
         config.check_requirements(&resolved, &payload.secrets, env, Some(&available_targets));
+    let warned_missing: BTreeSet<(String, String)> = missing
+        .iter()
+        .map(|m| (m.key.clone(), m.env.clone()))
+        .collect();
     if !missing.is_empty() {
         if dry_run || !bail {
             for m in &missing {
@@ -513,17 +517,14 @@ pub fn run_with_runner(
 
             let composite = format!("{}:{}", secret.key, target.environment);
             let Some(value) = payload.secrets.get(&composite) else {
-                unset.push(DeployEntry {
-                    key: secret.key.clone(),
-                    env: target.environment.clone(),
-                    target: target.target_display(),
-                    error: None,
-                });
-                if verbose {
-                    cliclack::log::remark(format!(
-                        "{}:{} — no value set",
-                        secret.key, target.environment
-                    ))?;
+                // Skip unset entries already warned as missing required
+                if !warned_missing.contains(&(secret.key.clone(), target.environment.clone())) {
+                    unset.push(DeployEntry {
+                        key: secret.key.clone(),
+                        env: target.environment.clone(),
+                        target: target.target_display(),
+                        error: None,
+                    });
                 }
                 continue;
             };
@@ -591,14 +592,18 @@ pub fn run_with_runner(
         }
     }
 
+    // Count total work items for progress display
+    let total_work = individual_work.len() + batch_dirty.len() + prune_individual.len();
+
     // Normal mode: single spinner for the entire operation
-    let spinner = if !verbose && !dry_run {
+    let spinner = if !verbose && !dry_run && total_work > 0 {
         let s = cliclack::spinner();
         s.start("Deploying secrets...");
         Some(s)
     } else {
         None
     };
+    let mut work_done: usize = 0;
 
     // Handle batch targets: for each dirty target group, gather ALL secrets and deploy
     for (target_name, app, target_env) in &batch_dirty {
@@ -665,6 +670,18 @@ pub fn run_with_runner(
                 secrets_for_batch.len(),
                 target
             ))?;
+        }
+
+        work_done += 1;
+        if let Some(ref s) = spinner {
+            s.start(format!(
+                "{}/{} Deploying batch: {} ({} secrets) → {}",
+                work_done,
+                total_work,
+                target_name,
+                secrets_for_batch.len(),
+                target_env,
+            ));
         }
 
         let results = deploy_target.deploy_batch(&secrets_for_batch, &target);
@@ -783,6 +800,17 @@ pub fn run_with_runner(
             continue;
         }
 
+        work_done += 1;
+        if let Some(ref s) = spinner {
+            s.start(format!(
+                "{}/{} {} → {}",
+                work_done,
+                total_work,
+                key,
+                target.target_display(),
+            ));
+        }
+
         if verbose {
             cliclack::log::step(format!(
                 "Deploying {}:{} → {}",
@@ -887,6 +915,14 @@ pub fn run_with_runner(
                     continue;
                 }
 
+                if let Some(ref s) = spinner {
+                    s.start(format!(
+                        "Deleting {} → {}",
+                        bare_key,
+                        target.target_display(),
+                    ));
+                }
+
                 let (target_idx, _) = target_map[target.service.as_str()];
                 let deploy_target = &deploy_targets[target_idx];
 
@@ -941,6 +977,14 @@ pub fn run_with_runner(
                 error: None,
             });
             continue;
+        }
+
+        work_done += 1;
+        if let Some(ref s) = spinner {
+            s.start(format!(
+                "{}/{} Pruning {} → {}",
+                work_done, total_work, orphan.key, target_display,
+            ));
         }
 
         if verbose {
@@ -1033,7 +1077,7 @@ pub fn run_with_runner(
 
     // Stop spinner before printing results
     if let Some(s) = spinner {
-        s.stop("Deploying secrets...");
+        s.stop(format!("Deployed {total_work} target{}", if total_work == 1 { "" } else { "s" }));
     }
 
     report.render()?;
