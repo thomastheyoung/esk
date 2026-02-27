@@ -131,7 +131,7 @@ impl CommandRunner for RealCommandRunner {
     }
 }
 
-pub trait DeployTarget {
+pub trait DeployTarget: Send + Sync {
     fn name(&self) -> &str;
 
     /// Whether this target deploys individually or in batches.
@@ -380,29 +380,40 @@ fn needs_cli_secret_arg_warning(name: &str) -> bool {
 
 /// Check the health of all configured targets without filtering.
 /// Returns one entry per configured target with preflight pass/fail.
+/// Runs all preflight checks in parallel.
 pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<TargetHealth> {
-    let mut health = Vec::new();
-    for candidate in target_candidates(config, runner) {
-        let name = candidate.target.name().to_string();
-        match candidate.target.preflight() {
-            Ok(()) => health.push(TargetHealth {
-                name,
-                ok: true,
-                message: candidate.ok_message.to_string(),
-            }),
-            Err(e) => health.push(TargetHealth {
-                name,
-                ok: false,
-                message: e.to_string(),
-            }),
-        }
+    let candidates = target_candidates(config, runner);
+    if candidates.is_empty() {
+        return Vec::new();
     }
-    health
+
+    std::thread::scope(|s| {
+        let handles: Vec<_> = candidates
+            .iter()
+            .map(|c| {
+                let name = c.target.name().to_string();
+                let ok_message = c.ok_message;
+                s.spawn(move || match c.target.preflight() {
+                    Ok(()) => TargetHealth {
+                        name,
+                        ok: true,
+                        message: ok_message.to_string(),
+                    },
+                    Err(e) => TargetHealth {
+                        name,
+                        ok: false,
+                        message: e.to_string(),
+                    },
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    })
 }
 
 /// Build all configured deploy targets from the config.
-/// Runs preflight checks and filters out targets that fail, printing warnings.
-/// Shows a spinner with per-target progress during preflight checks.
+/// Runs preflight checks in parallel and filters out targets that fail.
+/// Renders a section-style summary with per-target checkmarks.
 pub fn build_targets<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
@@ -412,47 +423,71 @@ pub fn build_targets<'a>(
         return Vec::new();
     }
 
-    let spinner = cliclack::spinner();
-    let total = candidates.len();
-    let mut targets: Vec<Box<dyn DeployTarget + 'a>> = Vec::new();
+    // Run all preflights in parallel, collecting (index, pass/fail, message)
+    let results: Vec<(usize, bool, String)> = std::thread::scope(|s| {
+        let handles: Vec<_> = candidates
+            .iter()
+            .enumerate()
+            .map(|(i, c)| {
+                let ok_message = c.ok_message;
+                s.spawn(move || match c.target.preflight() {
+                    Ok(()) => (i, true, ok_message.to_string()),
+                    Err(e) => (i, false, e.to_string()),
+                })
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
 
-    for (i, candidate) in candidates.into_iter().enumerate() {
-        let target = candidate.target;
-        spinner.start(format!(
-            "{}/{} Checking {} target...",
-            i + 1,
-            total,
-            target.name()
-        ));
-        match target.preflight() {
-            Ok(()) => {
-                if needs_cli_secret_arg_warning(target.name()) {
-                    let _ = cliclack::log::warning(format!(
-                        "{}: security note: secret values are passed as CLI args and may be visible in local process listings",
-                        target.name()
-                    ));
-                }
-                targets.push(target);
-            }
-            Err(e) => {
-                let _ = cliclack::log::warning(format!("Skipping {} target: {}", target.name(), e));
-            }
+    // Render section with per-target status
+    let name_width = candidates
+        .iter()
+        .map(|c| c.target.name().len())
+        .max()
+        .unwrap_or(0);
+
+    let lines: Vec<String> = results
+        .iter()
+        .map(|(i, ok, msg)| {
+            let name = candidates[*i].target.name();
+            let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
+            format!("  {mark} {name:<name_width$}  {msg}")
+        })
+        .collect();
+    let _ = cliclack::log::step(format!("Preflight\n{}", lines.join("\n")));
+
+    // Emit security warnings after the section
+    let mut security_warnings: Vec<String> = Vec::new();
+    for (i, ok, _) in &results {
+        if *ok && needs_cli_secret_arg_warning(candidates[*i].target.name()) {
+            security_warnings.push(format!(
+                "{}: secret values are passed as CLI args and may be visible in local process listings",
+                candidates[*i].target.name()
+            ));
         }
     }
+    for warning in &security_warnings {
+        let _ = cliclack::log::warning(warning);
+    }
 
-    let ready = targets.len();
-    let skipped = total - ready;
-    let summary = if skipped > 0 {
-        format!(
-            "{ready} target{} ready, {skipped} skipped",
-            if ready == 1 { "" } else { "s" }
-        )
-    } else {
-        format!("{ready} target{} ready", if ready == 1 { "" } else { "s" })
-    };
-    spinner.stop(summary);
+    // Filter to passing targets
+    let passing_indices: Vec<usize> = results
+        .iter()
+        .filter(|(_, ok, _)| *ok)
+        .map(|(i, _, _)| *i)
+        .collect();
 
-    targets
+    candidates
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, c)| {
+            if passing_indices.contains(&i) {
+                Some(c.target)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]

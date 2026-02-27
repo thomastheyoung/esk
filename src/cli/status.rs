@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
-use crate::targets::{target_candidates, CommandRunner, RealCommandRunner, TargetHealth};
+use crate::targets::{check_target_health, CommandRunner, RealCommandRunner, TargetHealth};
 use crate::ui;
 use crate::validate;
 
@@ -198,26 +198,10 @@ impl Dashboard {
                 .collect(),
         };
 
-        // 1. Health checks
+        // 1. Health checks (parallel)
         let spinner = cliclack::spinner();
         spinner.start("Checking targets...");
-        let mut target_health = Vec::new();
-        for candidate in target_candidates(config, runner) {
-            let name = candidate.target.name().to_string();
-            spinner.set_message(format!("Checking target: {name}..."));
-            match candidate.target.preflight() {
-                Ok(()) => target_health.push(TargetHealth {
-                    name,
-                    ok: true,
-                    message: candidate.ok_message.to_string(),
-                }),
-                Err(e) => target_health.push(TargetHealth {
-                    name,
-                    ok: false,
-                    message: e.to_string(),
-                }),
-            }
-        }
+        let target_health = check_target_health(config, runner);
         spinner.set_message("Checking status...");
 
         // 2. Deploy entries
