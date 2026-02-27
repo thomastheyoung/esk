@@ -51,16 +51,19 @@ fn format_pull_line(name: &str, outcome: &PullOutcome) -> String {
             &style("no data").dim().to_string(),
             SYNC_LINE_WIDTH,
         ),
-        PullOutcome::Failed => ui::format_dashboard_line(
-            &format!("\u{2193} {name}"),
-            &style("failed").red().to_string(),
-            SYNC_LINE_WIDTH,
-        ),
+        PullOutcome::Failed(reason) => {
+            let status = format!(
+                "{} \u{2014} {}",
+                style("failed").red(),
+                style(reason).dim()
+            );
+            ui::format_dashboard_line(&format!("\u{2193} {name}"), &status, SYNC_LINE_WIDTH)
+        }
     }
 }
 
 /// Format a push result line for progressive rendering.
-fn format_push_line(name: &str, success: bool, dry_run: bool) -> String {
+fn format_push_line(name: &str, success: bool, dry_run: bool, error: Option<&str>) -> String {
     if dry_run {
         ui::format_dashboard_line(
             &format!("\u{2191} {name}"),
@@ -74,18 +77,22 @@ fn format_push_line(name: &str, success: bool, dry_run: bool) -> String {
             SYNC_LINE_WIDTH,
         )
     } else {
-        ui::format_dashboard_line(
-            &format!("\u{2191} {name}"),
-            &style("failed").red().to_string(),
-            SYNC_LINE_WIDTH,
-        )
+        let status = match error {
+            Some(reason) => format!(
+                "{} \u{2014} {}",
+                style("failed").red(),
+                style(reason).dim()
+            ),
+            None => style("failed").red().to_string(),
+        };
+        ui::format_dashboard_line(&format!("\u{2191} {name}"), &status, SYNC_LINE_WIDTH)
     }
 }
 
 enum PullOutcome {
     Fetched { version: u64, secret_count: usize },
     Empty,
-    Failed,
+    Failed(String),
 }
 
 /// Push a payload to the given remotes, recording results in the remote index.
@@ -269,8 +276,8 @@ pub fn run_with_runner(
                 pull_lines.push(format_pull_line(name, &PullOutcome::Empty));
                 remote_data.push((name.clone(), BTreeMap::new(), 0));
             }
-            Err(_) => {
-                pull_lines.push(format_pull_line(name, &PullOutcome::Failed));
+            Err(e) => {
+                pull_lines.push(format_pull_line(name, &PullOutcome::Failed(e.to_string())));
                 pull_failures.push(name.clone());
             }
         }
@@ -362,7 +369,7 @@ pub fn run_with_runner(
             let push_lines: Vec<String> = result
                 .sources_to_update
                 .iter()
-                .map(|name| format_push_line(name, true, true))
+                .map(|name| format_push_line(name, true, true, None))
                 .collect();
             cliclack::log::step(format!(
                 "Would push {} remote{}\n{}",
@@ -474,12 +481,12 @@ pub fn run_with_runner(
                 match res {
                     Ok(()) => {
                         sync_index.record_success(name, env, pushed_version);
-                        push_lines.push(format_push_line(name, true, false));
+                        push_lines.push(format_push_line(name, true, false, None));
                     }
                     Err(e) => {
                         sync_index
                             .record_failure(name, env, pushed_version, e.to_string());
-                        push_lines.push(format_push_line(name, false, false));
+                        push_lines.push(format_push_line(name, false, false, Some(&e.to_string())));
                         push_failure_count += 1;
                     }
                 }
