@@ -106,14 +106,22 @@ impl DeployReport {
                 env_map
                     .entry(env)
                     .or_default()
-                    .push(ui::format_aligned_line(&label, &targets.join(", "), label_col));
+                    .push(ui::format_aligned_line(
+                        &label,
+                        &targets.join(", "),
+                        label_col,
+                    ));
             }
 
             // Render failed entries (grouped by key, with errors)
             for ((env, key), (targets, errors)) in group_entries(&self.failed) {
                 let label = format!("{} {}", ui::icon_failure(), style(&key).dim());
                 let lines = env_map.entry(env).or_default();
-                lines.push(ui::format_aligned_line(&label, &targets.join(", "), label_col));
+                lines.push(ui::format_aligned_line(
+                    &label,
+                    &targets.join(", "),
+                    label_col,
+                ));
                 if !errors.is_empty() {
                     let unique_errors: BTreeSet<&str> =
                         errors.iter().map(|(_, e)| e.as_str()).collect();
@@ -137,17 +145,24 @@ impl DeployReport {
                 env_map
                     .entry(env)
                     .or_default()
-                    .push(ui::format_aligned_line(&label, &targets.join(", "), label_col));
+                    .push(ui::format_aligned_line(
+                        &label,
+                        &targets.join(", "),
+                        label_col,
+                    ));
             }
 
             // Render pruned entries (grouped by key)
             for ((env, key), (targets, _)) in group_entries(&self.pruned) {
                 let label = format!("{} {}", ui::icon_pruned(), style(&key).dim());
-                env_map.entry(env).or_default().push(ui::format_aligned_line(
-                    &label,
-                    &format!("{} (pruned)", targets.join(", ")),
-                    label_col,
-                ));
+                env_map
+                    .entry(env)
+                    .or_default()
+                    .push(ui::format_aligned_line(
+                        &label,
+                        &format!("{} (pruned)", targets.join(", ")),
+                        label_col,
+                    ));
             }
 
             for (env_name, mut lines) in env_map {
@@ -177,9 +192,14 @@ impl DeployReport {
                     let mut skip_map: BTreeMap<String, Vec<String>> = BTreeMap::new();
                     for ((env, key), (targets, _)) in group_entries(&self.skipped) {
                         let label = format!("{} {}", style("✔").dim(), style(&key).dim());
-                        skip_map.entry(env).or_default().push(
-                            ui::format_aligned_line(&label, &targets.join(", "), label_col),
-                        );
+                        skip_map
+                            .entry(env)
+                            .or_default()
+                            .push(ui::format_aligned_line(
+                                &label,
+                                &targets.join(", "),
+                                label_col,
+                            ));
                     }
                     for (env_name, lines) in skip_map {
                         cliclack::note(format!("{env_name} (up to date)"), lines.join("\n"))?;
@@ -203,11 +223,12 @@ impl DeployReport {
     }
 }
 
+/// Targets list and per-target errors for a grouped deploy key.
+type GroupedTargets = (Vec<String>, Vec<(String, String)>);
+
 /// Group deploy entries by (env, key), combining targets into lists.
-fn group_entries(
-    entries: &[DeployEntry],
-) -> BTreeMap<(String, String), (Vec<String>, Vec<(String, String)>)> {
-    let mut map: BTreeMap<(String, String), (Vec<String>, Vec<(String, String)>)> = BTreeMap::new();
+fn group_entries(entries: &[DeployEntry]) -> BTreeMap<(String, String), GroupedTargets> {
+    let mut map: BTreeMap<(String, String), GroupedTargets> = BTreeMap::new();
     for entry in entries {
         let group = map
             .entry((entry.env.clone(), entry.key.clone()))
@@ -362,10 +383,7 @@ pub fn run_with_runner(
     if !missing.is_empty() {
         if dry_run || !bail {
             for m in &missing {
-                cliclack::log::warning(format!(
-                    "Missing required: {}:{}",
-                    m.key, m.env,
-                ))?;
+                cliclack::log::warning(format!("Missing required: {}:{}", m.key, m.env,))?;
             }
         }
         if bail && !dry_run && !force {
@@ -1120,7 +1138,10 @@ pub fn run_with_runner(
 
     // Stop spinner before printing results
     if let Some(s) = spinner {
-        s.stop(format!("Deployed {total_work} target{}", if total_work == 1 { "" } else { "s" }));
+        s.stop(format!(
+            "Deployed {total_work} target{}",
+            if total_work == 1 { "" } else { "s" }
+        ));
     }
 
     report.render()?;

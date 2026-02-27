@@ -448,10 +448,7 @@ pub fn build_targets<'a>(
             if ready == 1 { "" } else { "s" }
         )
     } else {
-        format!(
-            "{ready} target{} ready",
-            if ready == 1 { "" } else { "s" }
-        )
+        format!("{ready} target{} ready", if ready == 1 { "" } else { "s" })
     };
     spinner.stop(summary);
 
