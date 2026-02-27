@@ -133,6 +133,22 @@ targets:
       team: platform
     env_flags: {}
 
+  # Custom targets — define your own deploy commands
+  custom:
+    internal-api:
+      deploy:
+        program: curl
+        args: ["-X", "PUT", "https://config.internal/secrets/{{key}}?env={{env}}"]
+        stdin: "{{value}}"               # prefer stdin over args for secret values
+      delete:
+        program: curl
+        args: ["-X", "DELETE", "https://config.internal/secrets/{{key}}?env={{env}}"]
+      preflight:
+        program: curl
+        args: ["--fail", "-s", "https://config.internal/health"]
+      env_flags:
+        prod: "--header X-Env:production"
+
 # ---------------------------------------------------------------------------
 # Sync remotes — bidirectional sync for team sharing and backup
 # ---------------------------------------------------------------------------
@@ -328,6 +344,7 @@ secrets:
       targets:
         env: [api:prod]
         aws_ssm: [prod]
+        internal-api: [prod]                    # deployed via custom target
       required: [prod]                          # only required in prod
 
     ANALYTICS_TOKEN:

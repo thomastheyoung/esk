@@ -582,6 +582,37 @@ secrets:
       targets: {}
 "#;
 
+/// Custom target config for integration testing.
+pub const CUSTOM_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST", "https://api.example.com/secrets/{{key}}?env={{env}}"]
+        stdin: "{{value}}"
+      delete:
+        program: curl
+        args: ["-X", "DELETE", "https://api.example.com/secrets/{{key}}?env={{env}}"]
+      preflight:
+        program: curl
+        args: ["--fail", "-s", "https://api.example.com/health"]
+      env_flags:
+        prod: "--header X-Env:production"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        my-api: [dev, prod]
+    DB_URL:
+      targets:
+        my-api: [dev]
+"#;
+
 /// Records calls made to a mock command runner.
 #[derive(Debug, Clone)]
 pub struct RecordedCall {

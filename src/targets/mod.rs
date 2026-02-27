@@ -1,6 +1,7 @@
 pub mod aws_ssm;
 pub mod cloudflare;
 pub mod convex;
+pub mod custom;
 pub mod docker;
 pub mod env_file;
 pub mod fly;
@@ -375,6 +376,17 @@ pub(crate) fn target_candidates<'a>(
         });
     }
 
+    for (name, target_config) in &config.targets.custom {
+        candidates.push(TargetCandidate {
+            target: Box::new(custom::CustomTarget {
+                target_name: name.clone(),
+                target_config,
+                runner,
+            }),
+            ok_message: "ready",
+        });
+    }
+
     candidates
 }
 
@@ -539,11 +551,20 @@ pub fn build_targets<'a>(
         .enumerate()
         .map(|(i, r)| {
             if let Some((true, _)) = r {
-                if needs_cli_secret_arg_warning(candidates[i].target.name()) {
+                let name = candidates[i].target.name();
+                if needs_cli_secret_arg_warning(name) {
                     security_warnings.push(format!(
-                        "{}: secret values are passed as CLI args and may be visible in local process listings",
-                        candidates[i].target.name()
+                        "{name}: secret values are passed as CLI args and may be visible in local process listings",
                     ));
+                }
+                // Warn about custom targets that have {{value}} in args
+                if let Some(custom_cfg) = config.targets.custom.get(name) {
+                    if custom::has_value_in_args(&custom_cfg.deploy.args) {
+                        security_warnings.push(format!(
+                            "{name}: deploy args contain {{{{value}}}} — secret values will be \
+                             visible in process listings. Consider using stdin instead."
+                        ));
+                    }
                 }
                 true
             } else {

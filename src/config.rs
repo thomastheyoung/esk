@@ -8,6 +8,25 @@ use serde::{Deserialize, Serialize};
 use crate::store::{validate_app, validate_environment, validate_key, validate_project};
 use crate::suggest;
 
+/// Built-in target names that custom targets cannot shadow.
+const BUILTIN_TARGET_NAMES: &[&str] = &[
+    "env",
+    "cloudflare",
+    "convex",
+    "fly",
+    "netlify",
+    "vercel",
+    "github",
+    "heroku",
+    "supabase",
+    "railway",
+    "gitlab",
+    "aws_ssm",
+    "kubernetes",
+    "docker",
+    "custom",
+];
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GenerateFormat {
@@ -101,6 +120,8 @@ pub struct TargetsConfig {
     pub kubernetes: Option<KubernetesTargetConfig>,
     #[serde(default)]
     pub docker: Option<DockerTargetConfig>,
+    #[serde(default)]
+    pub custom: BTreeMap<String, CustomTargetConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -244,6 +265,27 @@ pub struct DockerTargetConfig {
 
 fn default_docker_name_pattern() -> String {
     "{project}-{environment}-{key}".to_string()
+}
+
+// --- Custom target config ---
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomTargetConfig {
+    pub deploy: CustomCommandConfig,
+    #[serde(default)]
+    pub delete: Option<CustomCommandConfig>,
+    #[serde(default)]
+    pub preflight: Option<CustomCommandConfig>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CustomCommandConfig {
+    pub program: String,
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub stdin: Option<String>,
 }
 
 // --- Remote config types ---
@@ -557,6 +599,24 @@ impl Config {
                 {
                     bail!("env_suffix for '{env}' contains unsafe path characters");
                 }
+            }
+        }
+        // Validate custom targets
+        for (name, custom) in &self.targets.custom {
+            if BUILTIN_TARGET_NAMES.contains(&name.as_str()) {
+                bail!("custom target '{name}' conflicts with built-in target name");
+            }
+            if !name
+                .chars()
+                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+            {
+                bail!(
+                    "custom target name '{name}' contains invalid characters \
+                     (only a-z, A-Z, 0-9, _, - are allowed)"
+                );
+            }
+            if custom.deploy.program.is_empty() {
+                bail!("custom target '{name}' has an empty deploy program");
             }
         }
         self.validate_remotes()?;
@@ -977,7 +1037,7 @@ impl Config {
 
     /// Get the set of configured target names.
     pub fn target_names(&self) -> Vec<&str> {
-        [
+        let mut names: Vec<&str> = [
             ("env", self.targets.env.is_some()),
             ("cloudflare", self.targets.cloudflare.is_some()),
             ("convex", self.targets.convex.is_some()),
@@ -996,7 +1056,9 @@ impl Config {
         .into_iter()
         .filter(|(_, present)| *present)
         .map(|(name, _)| name)
-        .collect()
+        .collect();
+        names.extend(self.targets.custom.keys().map(String::as_str));
+        names
     }
 
     /// Return the sorted list of group (vendor) names from config secrets.
@@ -2649,5 +2711,112 @@ generate:
             err.to_string().contains("duplicate generate output path"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn custom_target_name_collision_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    heroku:
+      deploy:
+        program: my-tool
+        args: ["set", "{{key}}"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("conflicts with built-in"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn custom_target_invalid_name_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    "my api!":
+      deploy:
+        program: my-tool
+        args: ["set"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("invalid characters"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn custom_target_empty_program_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: ""
+        args: ["set"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string().contains("empty deploy program"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn custom_target_names_included() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  env:
+    pattern: "test"
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["set", "{{key}}"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        let names = config.target_names();
+        assert!(names.contains(&"env"));
+        assert!(names.contains(&"my-api"));
+    }
+
+    #[test]
+    fn custom_target_secret_reference_valid() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["set", "{{key}}"]
+secrets:
+  General:
+    API_KEY:
+      targets:
+        my-api: [dev]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        assert!(Config::load(&path).is_ok());
     }
 }

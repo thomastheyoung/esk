@@ -22,6 +22,7 @@ For sync remotes (1Password, cloud files), see [REMOTES.md](REMOTES.md).
 | [AWS SSM](#aws-ssm)                       | `aws_ssm`    | `aws`        | Individual  | No                        |
 | [Kubernetes](#kubernetes)                 | `kubernetes` | `kubectl`    | Batch       | No                        |
 | [Docker Swarm](#docker-swarm)             | `docker`     | `docker`     | Individual  | No                        |
+| [Custom](#custom)                         | User-defined | User-defined | Individual  | No                        |
 
 **Deploy modes:**
 
@@ -832,4 +833,132 @@ secrets:
     API_KEY:
       targets:
         docker: [dev, prod]
+```
+
+---
+
+## Custom
+
+Define your own deploy targets by specifying commands directly in `esk.yaml`. Useful for services that esk doesn't have a built-in target for — internal APIs, niche platforms, or custom scripts.
+
+Custom targets are individual-mode only (one secret at a time).
+
+### How it works
+
+1. On deploy, esk substitutes template variables in the command args and stdin, then executes the program.
+2. Non-zero exit codes are treated as deploy failures.
+3. If `preflight` is configured, it runs before any deploys to verify the external service is reachable.
+4. If `delete` is configured, it's called when pruning orphaned secrets. Otherwise, delete is a no-op.
+
+### Configuration
+
+Custom targets live under `targets.custom` as a named map. Secrets reference them by name, the same way they reference built-in targets.
+
+```yaml
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST", "-d", "@-", "https://api.example.com/secrets/{{key}}"]
+        stdin: "{{value}}"
+      delete:
+        program: curl
+        args: ["-X", "DELETE", "https://api.example.com/secrets/{{key}}?env={{env}}"]
+      preflight:
+        program: curl
+        args: ["--fail", "-s", "https://api.example.com/health"]
+      env_flags:
+        prod: "--header X-Env:production"
+```
+
+| Field       | Required | Description                                                                        |
+| ----------- | -------- | ---------------------------------------------------------------------------------- |
+| `deploy`    | Yes      | Command to run for each secret. Must have `program` and `args`.                    |
+| `delete`    | No       | Command to run when pruning orphaned secrets. Same structure as `deploy`.          |
+| `preflight` | No       | Command to run before any deploys to check service availability. Same structure.   |
+| `env_flags` | No       | Map of environment name to extra CLI flags appended to deploy and delete commands. |
+
+Each command block (`deploy`, `delete`, `preflight`) has:
+
+| Field     | Required | Description                                              |
+| --------- | -------- | -------------------------------------------------------- |
+| `program` | Yes      | Executable to run (must be in PATH).                     |
+| `args`    | Yes      | List of arguments. Supports template variables.          |
+| `stdin`   | No       | String piped to the command's stdin. Supports templates. |
+
+### Template variables
+
+Variables are substituted in `args` and `stdin` at deploy time:
+
+| Variable    | Value                                            |
+| ----------- | ------------------------------------------------ |
+| `{{key}}`   | Secret name (e.g., `API_KEY`)                    |
+| `{{value}}` | Secret value                                     |
+| `{{env}}`   | Environment name (e.g., `prod`)                  |
+| `{{app}}`   | App name, or empty string if the secret has none |
+
+> **Security note**: Prefer `stdin` for `{{value}}` rather than putting it in `args`. Values in args are visible in process listings (`ps aux`). esk warns at deploy time if `{{value}}` appears in deploy args.
+
+### Naming rules
+
+- Names must contain only `a-z`, `A-Z`, `0-9`, `_`, `-`.
+- Names cannot collide with built-in target names (`env`, `cloudflare`, `convex`, `fly` etc, see the full list at the top of this doc).
+
+### Target format
+
+Targets are environment-only (no app prefix):
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        my-api: [dev, prod]
+```
+
+### Examples
+
+**Internal API with token auth:**
+
+```yaml
+targets:
+  custom:
+    internal-api:
+      deploy:
+        program: curl
+        args:
+          [
+            "-X",
+            "PUT",
+            "-H",
+            "Authorization: Bearer $TOKEN",
+            "https://config.internal/secrets/{{key}}?env={{env}}",
+          ]
+        stdin: "{{value}}"
+      delete:
+        program: curl
+        args:
+          [
+            "-X",
+            "DELETE",
+            "-H",
+            "Authorization: Bearer $TOKEN",
+            "https://config.internal/secrets/{{key}}?env={{env}}",
+          ]
+      preflight:
+        program: curl
+        args: ["--fail", "-s", "https://config.internal/health"]
+```
+
+**Custom script wrapper:**
+
+```yaml
+targets:
+  custom:
+    my-vault:
+      deploy:
+        program: ./scripts/deploy-secret.sh
+        args: ["{{key}}", "{{env}}"]
+        stdin: "{{value}}"
 ```

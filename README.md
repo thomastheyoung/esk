@@ -170,6 +170,7 @@ Full flags and behavior: [API.md](API.md).
 - `railway`
 - `supabase`
 - `vercel`
+- [Custom targets](TARGETS.md#custom) — define your own deploy commands in `esk.yaml`
 
 Target config details: [TARGETS.md](TARGETS.md).
 

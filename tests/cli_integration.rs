@@ -5698,3 +5698,236 @@ fn deploy_prune_without_env_prunes_all_environments() {
         "Real secret records should still exist"
     );
 }
+
+// === custom target integration tests ===
+
+#[test]
+fn deploy_custom_target_calls_command() {
+    let project = TestProject::with_store(CUSTOM_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "sk_test_123").unwrap();
+    store.set("DB_URL", "dev", "postgres://localhost").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"OK", b""); // preflight: curl health
+    runner.push_success(b"", b""); // deploy API_KEY
+    runner.push_success(b"", b""); // deploy DB_URL
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3); // preflight + 2 deploys
+    // Preflight
+    assert_eq!(calls[0].program, "curl");
+    assert_eq!(
+        calls[0].args,
+        vec!["--fail", "-s", "https://api.example.com/health"]
+    );
+    // Deploy calls (sorted by key name)
+    assert_eq!(calls[1].program, "curl");
+    assert_eq!(
+        calls[1].args,
+        vec![
+            "-X",
+            "POST",
+            "https://api.example.com/secrets/API_KEY?env=dev"
+        ]
+    );
+    assert_eq!(calls[1].stdin.as_deref(), Some(b"sk_test_123".as_slice()));
+    assert_eq!(calls[2].program, "curl");
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "-X",
+            "POST",
+            "https://api.example.com/secrets/DB_URL?env=dev"
+        ]
+    );
+    assert_eq!(
+        calls[2].stdin.as_deref(),
+        Some(b"postgres://localhost".as_slice())
+    );
+}
+
+#[test]
+fn deploy_custom_target_prod_env_flags() {
+    let project = TestProject::with_store(CUSTOM_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "sk_live_456").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"OK", b""); // preflight
+    runner.push_success(b"", b""); // deploy
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("prod"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(
+        calls[1].args,
+        vec![
+            "-X",
+            "POST",
+            "https://api.example.com/secrets/API_KEY?env=prod",
+            "--header",
+            "X-Env:production"
+        ]
+    );
+}
+
+#[test]
+fn deploy_custom_target_records_tracker() {
+    let project = TestProject::with_store(CUSTOM_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "sk_test_123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"OK", b""); // preflight
+    runner.push_success(b"", b""); // deploy
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let index = DeployIndex::load(&project.deploy_index_path());
+    let record = index.records.get("API_KEY:my-api:dev");
+    assert!(record.is_some(), "deploy record should exist");
+    let record = record.unwrap();
+    assert_eq!(record.target, "my-api:dev");
+    assert_eq!(
+        record.last_deploy_status,
+        esk::deploy_tracker::DeployStatus::Success
+    );
+}
+
+#[test]
+fn deploy_custom_target_failure_tracked() {
+    let project = TestProject::with_store(CUSTOM_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "sk_test_123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"OK", b""); // preflight
+    runner.push_failure(b"403 Forbidden"); // deploy fails
+
+    let result = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    );
+    assert!(result.is_err());
+
+    let index = DeployIndex::load(&project.deploy_index_path());
+    let record = index.records.get("API_KEY:my-api:dev");
+    assert!(record.is_some());
+    assert_eq!(
+        record.unwrap().last_deploy_status,
+        esk::deploy_tracker::DeployStatus::Failed
+    );
+}
+
+#[test]
+fn deploy_custom_target_skip_unchanged() {
+    let project = TestProject::with_store(CUSTOM_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "sk_test_123").unwrap();
+
+    // First deploy
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"OK", b""); // preflight
+    runner.push_success(b"", b""); // deploy
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Second deploy — same value, should skip
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"OK", b""); // preflight
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    // Only preflight, no deploy calls
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].program, "curl");
+    assert_eq!(calls[0].args[0], "--fail");
+}
