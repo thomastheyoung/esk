@@ -52,11 +52,7 @@ fn format_pull_line(name: &str, outcome: &PullOutcome) -> String {
             SYNC_LINE_WIDTH,
         ),
         PullOutcome::Failed(reason) => {
-            let status = format!(
-                "{} \u{2014} {}",
-                style("failed").red(),
-                style(reason).dim()
-            );
+            let status = format!("{} \u{2014} {}", style("failed").red(), style(reason).dim());
             ui::format_dashboard_line(&format!("\u{2193} {name}"), &status, SYNC_LINE_WIDTH)
         }
     }
@@ -78,11 +74,7 @@ fn format_push_line(name: &str, success: bool, dry_run: bool, error: Option<&str
         )
     } else {
         let status = match error {
-            Some(reason) => format!(
-                "{} \u{2014} {}",
-                style("failed").red(),
-                style(reason).dim()
-            ),
+            Some(reason) => format!("{} \u{2014} {}", style("failed").red(), style(reason).dim()),
             None => style("failed").red().to_string(),
         };
         ui::format_dashboard_line(&format!("\u{2191} {name}"), &status, SYNC_LINE_WIDTH)
@@ -350,14 +342,22 @@ pub fn run_with_runner(
         if result.local_changed {
             let label = env_version_label(&result.merged_payload, env);
             reconcile_status = if result.has_drift {
-                format!("{} Current ({}), would repair drift", ui::icon_merge(), label)
+                format!(
+                    "{} Current ({}), would repair drift",
+                    ui::icon_merge(),
+                    label
+                )
             } else {
                 format!("{} Would merge \u{2192} {}", ui::icon_merge(), label)
             };
         } else {
             let label = env_version_label(&payload, env);
             reconcile_status = if result.has_drift {
-                format!("{} Current ({}), would repair drift", ui::icon_merge(), label)
+                format!(
+                    "{} Current ({}), would repair drift",
+                    ui::icon_merge(),
+                    label
+                )
             } else {
                 format!("{} Up to date \u{2192} {}", ui::icon_success(), label)
             };
@@ -484,8 +484,7 @@ pub fn run_with_runner(
                         push_lines.push(format_push_line(name, true, false, None));
                     }
                     Err(e) => {
-                        sync_index
-                            .record_failure(name, env, pushed_version, e.to_string());
+                        sync_index.record_failure(name, env, pushed_version, e.to_string());
                         push_lines.push(format_push_line(name, false, false, Some(&e.to_string())));
                         push_failure_count += 1;
                     }
