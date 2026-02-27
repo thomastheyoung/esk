@@ -313,17 +313,15 @@ pub fn run_with_runner(
         if dry_run || !bail {
             for m in &missing {
                 cliclack::log::warning(format!(
-                    "Missing required: {}:{} ({})",
-                    m.key,
-                    m.env,
-                    m.targets.join(", ")
+                    "Missing required: {}:{}",
+                    m.key, m.env,
                 ))?;
             }
         }
         if bail && !dry_run && !force {
             let lines: Vec<String> = missing
                 .iter()
-                .map(|m| format!("  {}:{} ({})", m.key, m.env, m.targets.join(", ")))
+                .map(|m| format!("  {}:{}", m.key, m.env))
                 .collect();
             anyhow::bail!(
                 "Required secrets missing:\n{}\n\n  \
