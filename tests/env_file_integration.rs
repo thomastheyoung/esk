@@ -29,12 +29,12 @@ fn env_file_end_to_end() {
         SecretValue {
             key: "MY_SECRET".into(),
             value: "secret_dev".into(),
-            vendor: "General".into(),
+            group: "General".into(),
         },
         SecretValue {
             key: "OTHER_SECRET".into(),
             value: "other_dev".into(),
-            vendor: "General".into(),
+            group: "General".into(),
         },
     ];
     let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
@@ -47,7 +47,7 @@ fn env_file_end_to_end() {
 }
 
 #[test]
-fn env_file_multiple_vendors() {
+fn env_file_multiple_groups() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -57,17 +57,17 @@ fn env_file_multiple_vendors() {
         SecretValue {
             key: "A".into(),
             value: "1".into(),
-            vendor: "Stripe".into(),
+            group: "Stripe".into(),
         },
         SecretValue {
             key: "B".into(),
             value: "2".into(),
-            vendor: "Convex".into(),
+            group: "Convex".into(),
         },
         SecretValue {
             key: "C".into(),
             value: "3".into(),
-            vendor: "Resend".into(),
+            group: "Resend".into(),
         },
     ];
     let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
@@ -92,7 +92,7 @@ fn env_file_regeneration_replaces() {
     let secrets1 = vec![SecretValue {
         key: "OLD_KEY".into(),
         value: "old".into(),
-        vendor: "G".into(),
+        group: "G".into(),
     }];
     env_target.deploy_batch(&secrets1, &resolved);
 
@@ -100,7 +100,7 @@ fn env_file_regeneration_replaces() {
     let secrets2 = vec![SecretValue {
         key: "NEW_KEY".into(),
         value: "new".into(),
-        vendor: "G".into(),
+        group: "G".into(),
     }];
     env_target.deploy_batch(&secrets2, &resolved);
 

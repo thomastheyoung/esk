@@ -106,12 +106,12 @@ impl EnvFileTarget<'_> {
     fn write_env_file(&self, app: &str, env: &str, secrets: &[SecretValue]) -> Result<()> {
         let path = self.config.resolve_env_path(app, env)?;
 
-        // Group secrets by vendor, maintaining sorted order
-        let mut by_vendor: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
+        // Group secrets by group, maintaining sorted order
+        let mut by_group: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
         for secret in secrets {
             validate_env_file_value(&secret.key, &secret.value)?;
-            by_vendor
-                .entry(&secret.vendor)
+            by_group
+                .entry(&secret.group)
                 .or_default()
                 .push((&secret.key, &secret.value));
         }
@@ -122,10 +122,10 @@ impl EnvFileTarget<'_> {
         content.push_str("# Update secrets:  esk set <KEY> --env <ENV>\n");
         content.push_str("# Regenerate file: esk deploy --env <ENV>\n");
 
-        for (vendor, mut entries) in by_vendor {
+        for (group, mut entries) in by_group {
             entries.sort_by_key(|(k, _)| *k);
             content.push('\n');
-            let _ = writeln!(content, "# === {vendor} ===");
+            let _ = writeln!(content, "# === {group} ===");
             for (key, value) in entries {
                 let _ = writeln!(content, "{key}={}", format_env_value(value));
             }
@@ -193,11 +193,11 @@ targets:
         }
     }
 
-    fn make_secret(key: &str, value: &str, vendor: &str) -> SecretValue {
+    fn make_secret(key: &str, value: &str, group: &str) -> SecretValue {
         SecretValue {
             key: key.to_string(),
             value: value.to_string(),
-            vendor: vendor.to_string(),
+            group: group.to_string(),
         }
     }
 
@@ -252,7 +252,7 @@ targets:
     }
 
     #[test]
-    fn env_file_grouped_by_vendor() {
+    fn env_file_grouped_by_group() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
@@ -268,7 +268,7 @@ targets:
     }
 
     #[test]
-    fn env_file_sorted_within_vendor() {
+    fn env_file_sorted_within_group() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());

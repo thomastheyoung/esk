@@ -38,7 +38,7 @@ Generates `.env` files from the encrypted store. The output path is computed fro
 ### How it works
 
 1. When any secret changes for an (app, environment) pair, the **entire** `.env` file for that pair is regenerated atomically (temp file + rename).
-2. Secrets are grouped by vendor with `# === Vendor ===` section headers and sorted alphabetically within each group.
+2. Secrets are grouped with `# === Group ===` section headers and sorted alphabetically within each group.
 3. The file includes a header comment with instructions for updating and regenerating.
 4. Parent directories are created automatically if they don't exist.
 5. Generated files are marked read-only to discourage manual edits (for example `0400` on Unix).

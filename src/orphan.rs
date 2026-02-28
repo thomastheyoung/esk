@@ -92,7 +92,7 @@ mod tests {
     fn make_resolved(key: &str, service: &str, app: Option<&str>, env: &str) -> ResolvedSecret {
         ResolvedSecret {
             key: key.to_string(),
-            vendor: "Test".to_string(),
+            group: "Test".to_string(),
             description: None,
             targets: vec![ResolvedTarget {
                 service: service.to_string(),

@@ -582,7 +582,7 @@ pub struct ResolvedTarget {
 #[derive(Debug, Clone)]
 pub struct ResolvedSecret {
     pub key: String,
-    pub vendor: String,
+    pub group: String,
     pub description: Option<String>,
     pub targets: Vec<ResolvedTarget>,
     pub validate: Option<crate::validate::Validation>,
@@ -718,33 +718,33 @@ impl Config {
         self.validate_remotes()?;
 
         // --- Pass 1: collect all secret key names and check duplicates ---
-        let mut key_vendors: BTreeMap<&str, &str> = BTreeMap::new();
-        for (vendor, secrets) in &self.secrets {
+        let mut key_groups: BTreeMap<&str, &str> = BTreeMap::new();
+        for (group, secrets) in &self.secrets {
             for key in secrets.keys() {
                 validate_key(key)
-                    .with_context(|| format!("secret '{key}' in vendor '{vendor}'"))?;
-                if let Some(prev_vendor) = key_vendors.get(key.as_str()) {
-                    bail!("secret '{key}' is defined in multiple vendors: {prev_vendor}, {vendor}");
+                    .with_context(|| format!("secret '{key}' in group '{group}'"))?;
+                if let Some(prev_group) = key_groups.get(key.as_str()) {
+                    bail!("secret '{key}' is defined in multiple groups: {prev_group}, {group}");
                 }
-                key_vendors.insert(key, vendor);
+                key_groups.insert(key, group);
             }
         }
-        let known_keys: BTreeSet<&str> = key_vendors.keys().copied().collect();
+        let known_keys: BTreeSet<&str> = key_groups.keys().copied().collect();
 
         // --- Pass 2: validate each secret definition ---
-        for (vendor, secrets) in &self.secrets {
+        for (group, secrets) in &self.secrets {
             for (key, def) in secrets {
                 if let Some(ref spec) = def.validate {
                     crate::validate::validate_spec(key, spec, &known_keys)
-                        .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
+                        .with_context(|| format!("secret {key} (group: {group})"))?;
                 }
 
                 for (service, targets) in &def.targets {
                     self.validate_service(service)
-                        .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
+                        .with_context(|| format!("secret {key} (group: {group})"))?;
                     for target_str in targets {
                         self.validate_target_string(service, target_str)
-                            .with_context(|| format!("secret {key} (vendor: {vendor})"))?;
+                            .with_context(|| format!("secret {key} (group: {group})"))?;
                     }
                 }
 
@@ -967,7 +967,7 @@ impl Config {
     /// Resolve all secrets from config into a flat list.
     pub fn resolve_secrets(&self) -> Result<Vec<ResolvedSecret>> {
         let mut result = Vec::new();
-        for (vendor, secrets) in &self.secrets {
+        for (group, secrets) in &self.secrets {
             for (key, def) in secrets {
                 let mut targets = Vec::new();
                 for (service, target_strs) in &def.targets {
@@ -977,7 +977,7 @@ impl Config {
                 }
                 result.push(ResolvedSecret {
                     key: key.clone(),
-                    vendor: vendor.clone(),
+                    group: group.clone(),
                     description: def.description.clone(),
                     targets,
                     validate: def.validate.clone(),
@@ -989,11 +989,11 @@ impl Config {
         Ok(result)
     }
 
-    /// Find a secret definition by key. Returns (vendor, &SecretDef).
+    /// Find a secret definition by key. Returns (group, &SecretDef).
     pub fn find_secret(&self, key: &str) -> Option<(String, &SecretDef)> {
-        for (vendor, secrets) in &self.secrets {
+        for (group, secrets) in &self.secrets {
             if let Some(def) = secrets.get(key) {
-                return Some((vendor.clone(), def));
+                return Some((group.clone(), def));
             }
         }
         None
@@ -1166,7 +1166,7 @@ impl Config {
         names
     }
 
-    /// Return the sorted list of group (vendor) names from config secrets.
+    /// Return the sorted list of group names from config secrets.
     pub fn secret_group_names(&self) -> Vec<String> {
         self.secrets.keys().cloned().collect()
     }
@@ -1736,7 +1736,7 @@ secrets:
         // KEY_A has 2 targets, KEY_B has 1
         let key_a = resolved.iter().find(|s| s.key == "KEY_A").unwrap();
         assert_eq!(key_a.targets.len(), 2);
-        assert_eq!(key_a.vendor, "Stripe");
+        assert_eq!(key_a.group, "Stripe");
     }
 
     #[test]
@@ -1749,7 +1749,7 @@ secrets:
     }
 
     #[test]
-    fn resolve_secrets_multi_vendor() {
+    fn resolve_secrets_multi_group() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -1773,9 +1773,9 @@ secrets:
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
-        let vendors: Vec<&str> = resolved.iter().map(|s| s.vendor.as_str()).collect();
-        assert!(vendors.contains(&"Stripe"));
-        assert!(vendors.contains(&"Convex"));
+        let groups: Vec<&str> = resolved.iter().map(|s| s.group.as_str()).collect();
+        assert!(groups.contains(&"Stripe"));
+        assert!(groups.contains(&"Convex"));
     }
 
     #[test]
@@ -1799,8 +1799,8 @@ secrets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let (vendor, def) = config.find_secret("API_KEY").unwrap();
-        assert_eq!(vendor, "Stripe");
+        let (group, def) = config.find_secret("API_KEY").unwrap();
+        assert_eq!(group, "Stripe");
         assert_eq!(def.description.as_deref(), Some("test"));
     }
 
@@ -1837,7 +1837,7 @@ secrets:
     }
 
     #[test]
-    fn validate_duplicate_key_across_vendors() {
+    fn validate_duplicate_key_across_groups() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -1860,7 +1860,7 @@ secrets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
-        assert!(err.to_string().contains("defined in multiple vendors"));
+        assert!(err.to_string().contains("defined in multiple groups"));
         assert!(err.to_string().contains("DUP"));
     }
 

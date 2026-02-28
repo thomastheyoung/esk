@@ -229,7 +229,7 @@ generate:
   - format: env-example                # .env.example template
 
 # ---------------------------------------------------------------------------
-# Secrets — grouped by vendor/category
+# Secrets — grouped by category
 # ---------------------------------------------------------------------------
 secrets:
 

@@ -58,7 +58,7 @@ pub struct DeployResult {
 pub struct SecretValue {
     pub key: String,
     pub value: String,
-    pub vendor: String,
+    pub group: String,
 }
 
 /// Whether a target deploys secrets individually or as a batch per target group.
@@ -704,7 +704,7 @@ mod tests {
         SecretValue {
             key: key.to_string(),
             value: "val".to_string(),
-            vendor: "G".to_string(),
+            group: "G".to_string(),
         }
     }
 

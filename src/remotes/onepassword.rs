@@ -106,25 +106,25 @@ impl<'a> OnePasswordRemote<'a> {
 
         let existing = self.get_item(env)?;
 
-        // Build field assignments: "vendor.key[concealed]=value"
+        // Build field assignments: "group.key[concealed]=value"
         let mut assignments: Vec<String> = Vec::new();
 
-        // Group secrets by vendor using the config
-        let mut by_vendor: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
+        // Group secrets by group using the config
+        let mut by_group: BTreeMap<String, Vec<(String, String)>> = BTreeMap::new();
         for (key, value) in secrets {
-            let vendor = self
+            let group = self
                 .config
                 .find_secret(key)
-                .map_or_else(|| "General".to_string(), |(v, _)| v);
-            by_vendor
-                .entry(vendor)
+                .map_or_else(|| "General".to_string(), |(g, _)| g);
+            by_group
+                .entry(group)
                 .or_default()
                 .push((key.clone(), value.clone()));
         }
 
-        for (vendor, entries) in &by_vendor {
+        for (group, entries) in &by_group {
             for (key, value) in entries {
-                assignments.push(format!("{vendor}.{key}[concealed]={value}"));
+                assignments.push(format!("{group}.{key}[concealed]={value}"));
             }
         }
 
@@ -302,7 +302,7 @@ impl OpItem {
                 continue;
             }
 
-            // Key is the label, section is the vendor
+            // Key is the label, section is the group
             secrets.insert(label.to_string(), value.to_string());
             sections.insert(label.to_string(), section.to_string());
         }

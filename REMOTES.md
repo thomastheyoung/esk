@@ -30,14 +30,14 @@ Uses the 1Password CLI (`op`) to push and pull entire environment snapshots as v
 **Push** (during `esk sync` or auto-push from `esk set`/`delete`):
 
 1. Collects all secrets for the environment from the local store.
-2. Groups them by vendor (using the `secrets` section of `esk.yaml`).
-3. Creates or updates a 1Password item with concealed fields organized into vendor sections. On update, fields present in 1Password but absent from the local store are deleted using `[delete]` field assignments.
+2. Groups them by group (using the `secrets` section of `esk.yaml`).
+3. Creates or updates a 1Password item with concealed fields organized into group sections. On update, fields present in 1Password but absent from the local store are deleted using `[delete]` field assignments.
 4. Stores a `_Metadata.version` field for reconciliation.
 
 **Pull** (during `esk sync`):
 
 1. Fetches the 1Password item for the environment.
-2. Parses fields back into key-value pairs (section label = vendor, field label = key).
+2. Parses fields back into key-value pairs (section label = group, field label = key).
 3. Reads the version from `_Metadata`.
 4. Reconciles with the local store and other remotes using version comparison.
 

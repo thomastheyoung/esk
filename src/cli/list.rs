@@ -98,8 +98,8 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
     let mut groups: Vec<ListGroup> = Vec::new();
 
-    for (vendor, vendor_secrets) in &config.secrets {
-        let keys: Vec<&str> = vendor_secrets
+    for (group, group_secrets) in &config.secrets {
+        let keys: Vec<&str> = group_secrets
             .keys()
             .map(std::string::String::as_str)
             .collect();
@@ -128,7 +128,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         });
 
         groups.push(ListGroup {
-            name: vendor.clone(),
+            name: group.clone(),
             table: body,
         });
     }

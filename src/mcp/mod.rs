@@ -335,7 +335,7 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
 
         secrets.push(ListSecret {
             key: secret.key.clone(),
-            group: secret.vendor.clone(),
+            group: secret.group.clone(),
             description: secret.description.clone(),
             environments,
         });

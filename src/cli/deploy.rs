@@ -694,7 +694,7 @@ pub fn run_with_runner(
                         secrets_for_batch.push(SecretValue {
                             key: secret.key.clone(),
                             value: value.clone(),
-                            vendor: secret.vendor.clone(),
+                            group: secret.group.clone(),
                         });
                     }
                 }

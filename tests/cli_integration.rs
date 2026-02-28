@@ -235,8 +235,8 @@ fn set_with_group_flag_adds_to_config() {
     // Key should now appear in config under Stripe
     let reloaded = project.config().unwrap();
     assert!(reloaded.find_secret("NEW_KEY").is_some());
-    let (vendor, _) = reloaded.find_secret("NEW_KEY").unwrap();
-    assert_eq!(vendor, "Stripe");
+    let (group, _) = reloaded.find_secret("NEW_KEY").unwrap();
+    assert_eq!(group, "Stripe");
 }
 
 #[test]
@@ -259,8 +259,8 @@ fn set_with_group_flag_creates_new_group() {
     .unwrap();
 
     let reloaded = project.config().unwrap();
-    let (vendor, _) = reloaded.find_secret("API_KEY").unwrap();
-    assert_eq!(vendor, "NewVendor");
+    let (group, _) = reloaded.find_secret("API_KEY").unwrap();
+    assert_eq!(group, "NewVendor");
 }
 
 #[test]

@@ -249,7 +249,7 @@ targets:
         SecretValue {
             key: key.to_string(),
             value: value.to_string(),
-            vendor: "G".to_string(),
+            group: "G".to_string(),
         }
     }
 

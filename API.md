@@ -202,7 +202,7 @@ esk list [--env <ENV>]
 
 **Output:**
 
-- Secrets grouped by vendor (as defined in `esk.yaml`), displayed as tables.
+- Secrets grouped by group (as defined in `esk.yaml`), displayed as tables.
 - Column headers show each environment.
 - Per-cell status indicators reflect deploy state across configured targets for that key/environment:
   - `✔` (green) — deployed: all targets up to date.
