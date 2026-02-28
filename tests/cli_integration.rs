@@ -1419,16 +1419,10 @@ fn deploy_convex_calls_npx() {
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3);
     assert_eq!(calls[2].program, "npx");
-    assert_eq!(
-        calls[2].args,
-        vec![
-            "convex",
-            "env",
-            "set",
-            "CONVEX_URL",
-            "https://dev.convex.cloud"
-        ]
-    );
+    assert_eq!(calls[2].args, vec!["convex", "env", "set", "CONVEX_URL"]);
+    // Value passed via stdin, not in args
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"https://dev.convex.cloud");
     assert_eq!(
         calls[2].cwd.as_ref().unwrap(),
         &project.root().join("apps/api")
@@ -1470,15 +1464,11 @@ fn deploy_convex_prod_env_flags() {
     assert_eq!(calls.len(), 3);
     assert_eq!(
         calls[2].args,
-        vec![
-            "convex",
-            "env",
-            "set",
-            "CONVEX_URL",
-            "https://prod.convex.cloud",
-            "--prod"
-        ]
+        vec!["convex", "env", "set", "CONVEX_URL", "--prod"]
     );
+    // Value passed via stdin, not in args
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"https://prod.convex.cloud");
 }
 
 #[test]
@@ -3835,8 +3825,11 @@ fn deploy_railway_calls_cli() {
     assert_eq!(calls[2].program, "railway");
     assert_eq!(
         calls[2].args,
-        vec!["variables", "--set", "API_KEY=secret123"]
+        vec!["variables", "set", "API_KEY", "--stdin"]
     );
+    // Value passed via stdin, not in args
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"secret123");
 }
 
 #[test]
@@ -3872,12 +3865,16 @@ fn deploy_railway_prod_env_flags() {
         calls[2].args,
         vec![
             "variables",
-            "--set",
-            "API_KEY=secret456",
+            "set",
+            "API_KEY",
+            "--stdin",
             "--environment",
             "production"
         ]
     );
+    // Value passed via stdin, not in args
+    let stdin = calls[2].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"secret456");
 }
 
 #[test]
@@ -4651,7 +4648,9 @@ fn deploy_azure_app_service_preflight_failure() {
     // Only preflight calls, no deploy calls
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 2); // az --version + az account show
-    assert!(!calls.iter().any(|c| c.args.contains(&"appsettings".to_string())));
+    assert!(!calls
+        .iter()
+        .any(|c| c.args.contains(&"appsettings".to_string())));
 }
 
 // === gcp_cloud_run ===
