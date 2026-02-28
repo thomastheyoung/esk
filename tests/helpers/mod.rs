@@ -675,6 +675,29 @@ secrets:
         gcp_cloud_run: [api:dev]
 "#;
 
+/// Render target config for integration testing.
+pub const RENDER_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+
+targets:
+  render:
+    service_ids:
+      web: srv-abc123def456
+    api_key_env: RENDER_API_KEY
+    env_flags:
+      prod: "--proxy http://proxy:8080"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        render: [web:dev, web:prod]
+"#;
+
 /// Custom target config for integration testing.
 pub const CUSTOM_CONFIG: &str = r#"
 project: testapp

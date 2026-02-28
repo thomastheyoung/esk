@@ -28,6 +28,7 @@ const BUILTIN_TARGET_NAMES: &[&str] = &[
     "circleci",
     "azure_app_service",
     "gcp_cloud_run",
+    "render",
     "custom",
 ];
 
@@ -132,6 +133,8 @@ pub struct TargetsConfig {
     pub azure_app_service: Option<AzureAppServiceTargetConfig>,
     #[serde(default)]
     pub gcp_cloud_run: Option<GcpCloudRunTargetConfig>,
+    #[serde(default)]
+    pub render: Option<RenderTargetConfig>,
     #[serde(default)]
     pub custom: BTreeMap<String, CustomTargetConfig>,
 }
@@ -328,6 +331,21 @@ pub struct GcpCloudRunTargetConfig {
     pub region: String,
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RenderTargetConfig {
+    /// Maps esk app name → Render service ID (e.g. web → srv-abc123).
+    pub service_ids: BTreeMap<String, String>,
+    /// Env var name holding the Render API key (default: RENDER_API_KEY).
+    #[serde(default = "default_render_api_key_env")]
+    pub api_key_env: String,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+fn default_render_api_key_env() -> String {
+    "RENDER_API_KEY".to_string()
 }
 
 // --- Custom target config ---
@@ -1138,6 +1156,7 @@ impl Config {
             ("circleci", self.targets.circleci.is_some()),
             ("azure_app_service", self.targets.azure_app_service.is_some()),
             ("gcp_cloud_run", self.targets.gcp_cloud_run.is_some()),
+            ("render", self.targets.render.is_some()),
         ]
         .into_iter()
         .filter(|(_, present)| *present)

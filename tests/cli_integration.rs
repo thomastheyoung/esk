@@ -6568,3 +6568,258 @@ fn deploy_custom_target_skip_unchanged() {
     assert_eq!(calls[0].program, "curl");
     assert_eq!(calls[0].args[0], "--fail");
 }
+
+// === render ===
+
+#[test]
+fn deploy_render_calls_curl() {
+    std::env::set_var("RENDER_API_KEY", "rnd_integ_test_key");
+    let project = TestProject::with_store(RENDER_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"curl 7.80.0", b""); // curl --version
+    runner.push_success(b"[]", b""); // preflight GET env-vars
+    runner.push_success(b"", b""); // curl PUT
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 3);
+    // Preflight: curl --version + GET env-vars
+    assert_eq!(calls[0].program, "curl");
+    assert_eq!(calls[0].args, vec!["--version"]);
+    // Deploy call
+    assert_eq!(calls[2].program, "curl");
+    assert_eq!(calls[2].args[0..4], vec!["--config", "-", "--silent", "--fail-with-body"]);
+    // Check stdin config content
+    let stdin = String::from_utf8(calls[2].stdin.clone().unwrap()).unwrap();
+    assert!(stdin.contains("Authorization: Bearer rnd_integ_test_key"));
+    assert!(stdin.contains("request = \"PUT\""));
+    assert!(stdin.contains("srv-abc123def456/env-vars/API_KEY"));
+    // JSON body is curl-config-escaped: quotes become \"
+    assert!(stdin.contains(r#"{\"value\":\"secret123\"}"#));
+    // Secret value NOT in args
+    assert!(!calls[2].args.iter().any(|a| a.contains("secret123")));
+    std::env::remove_var("RENDER_API_KEY");
+}
+
+#[test]
+fn deploy_render_records_tracker() {
+    std::env::set_var("RENDER_API_KEY_TRACKER", "key");
+    let render_config = RENDER_CONFIG.replace("RENDER_API_KEY", "RENDER_API_KEY_TRACKER");
+    let project = TestProject::with_store(&render_config).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"curl 7.80.0", b""); // curl --version
+    runner.push_success(b"[]", b""); // preflight GET
+    runner.push_success(b"", b""); // curl PUT
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let index = DeployIndex::load(&project.deploy_index_path());
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("render")));
+    std::env::remove_var("RENDER_API_KEY_TRACKER");
+}
+
+#[test]
+fn deploy_render_failure_tracked() {
+    std::env::set_var("RENDER_API_KEY_FAIL", "key");
+    let render_config = RENDER_CONFIG.replace("RENDER_API_KEY", "RENDER_API_KEY_FAIL");
+    let project = TestProject::with_store(&render_config).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"curl 7.80.0", b""); // curl --version
+    runner.push_success(b"[]", b""); // preflight GET
+    runner.push_failure(b"api error"); // curl PUT fails
+
+    let err = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = DeployIndex::load(&project.deploy_index_path());
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("render"))
+        .unwrap();
+    assert_eq!(
+        record.last_deploy_status,
+        esk::deploy_tracker::DeployStatus::Failed
+    );
+    std::env::remove_var("RENDER_API_KEY_FAIL");
+}
+
+#[test]
+fn deploy_render_skip_unchanged() {
+    std::env::set_var("RENDER_API_KEY_SKIP", "key");
+    let render_config = RENDER_CONFIG.replace("RENDER_API_KEY", "RENDER_API_KEY_SKIP");
+    let project = TestProject::with_store(&render_config).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    // First deploy
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"curl 7.80.0", b""); // curl --version
+    runner.push_success(b"[]", b""); // preflight GET
+    runner.push_success(b"", b""); // curl PUT
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Second deploy — should skip since unchanged
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"curl 7.80.0", b""); // curl --version
+    runner.push_success(b"[]", b""); // preflight GET
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    // Only preflight calls (curl --version + GET), no deploy since hash unchanged
+    assert_eq!(calls.len(), 2);
+    std::env::remove_var("RENDER_API_KEY_SKIP");
+}
+
+#[test]
+fn deploy_render_delete() {
+    std::env::set_var("RENDER_API_KEY_DEL", "rnd_del_key");
+    let render_config = RENDER_CONFIG.replace("RENDER_API_KEY", "RENDER_API_KEY_DEL");
+    let project = TestProject::with_store(&render_config).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("API_KEY", "dev", "secret").unwrap();
+    // Deploy to establish initial state
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"curl 7.80.0", b""); // curl --version
+    runner.push_success(b"[]", b""); // preflight GET
+    runner.push_success(b"", b""); // curl PUT
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Delete the key (creates tombstone)
+    store.delete("API_KEY", "dev").unwrap();
+
+    // Deploy again — should call delete_secret
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"curl 7.80.0", b""); // curl --version
+    runner.push_success(b"[]", b""); // preflight GET
+    runner.push_success(b"", b""); // curl DELETE
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    // calls[0] = curl --version, calls[1] = preflight GET, calls[2] = DELETE
+    assert_eq!(calls[2].program, "curl");
+    let stdin = String::from_utf8(calls[2].stdin.clone().unwrap()).unwrap();
+    assert!(stdin.contains("request = \"DELETE\""));
+    assert!(stdin.contains("srv-abc123def456/env-vars/API_KEY"));
+    assert!(stdin.contains("Authorization: Bearer rnd_del_key"));
+    // No body for delete
+    assert!(!stdin.contains("data = "));
+    std::env::remove_var("RENDER_API_KEY_DEL");
+}

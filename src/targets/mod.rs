@@ -15,6 +15,7 @@ pub mod heroku;
 pub mod kubernetes;
 pub mod netlify;
 pub mod railway;
+pub mod render;
 pub mod supabase;
 pub mod vercel;
 
@@ -421,6 +422,17 @@ pub(crate) fn target_candidates<'a>(
                 runner,
             }),
             ok_message: "gcloud authenticated",
+        });
+    }
+
+    if let Some(target_config) = &config.targets.render {
+        candidates.push(TargetCandidate {
+            target: Box::new(render::RenderTarget {
+                config,
+                target_config,
+                runner,
+            }),
+            ok_message: "API authenticated",
         });
     }
 
