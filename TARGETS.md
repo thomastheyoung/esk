@@ -8,21 +8,26 @@ For sync remotes (1Password, cloud files), see [REMOTES.md](REMOTES.md).
 
 | Target                                    | Config key   | External CLI | Deploy mode | Requires app?             |
 | ----------------------------------------- | ------------ | ------------ | ----------- | ------------------------- |
-| [Env file](#env-file)                     | `env`        | None         | Batch       | Yes                       |
-| [Cloudflare Workers](#cloudflare-workers) | `cloudflare` | `wrangler`   | Individual  | Yes (Workers); No (Pages) |
-| [Convex](#convex)                         | `convex`     | `npx`        | Individual  | No                        |
-| [Fly.io](#flyio)                          | `fly`        | `fly`        | Individual  | Yes                       |
-| [Netlify](#netlify)                       | `netlify`    | `netlify`    | Individual  | No                        |
-| [Vercel](#vercel)                         | `vercel`     | `vercel`     | Individual  | No                        |
-| [GitHub Actions](#github-actions)         | `github`     | `gh`         | Individual  | No                        |
-| [Heroku](#heroku)                         | `heroku`     | `heroku`     | Individual  | Yes                       |
-| [Supabase](#supabase)                     | `supabase`   | `supabase`   | Individual  | No                        |
-| [Railway](#railway)                       | `railway`    | `railway`    | Individual  | No                        |
-| [GitLab CI](#gitlab-ci)                   | `gitlab`     | `glab`       | Individual  | No                        |
-| [AWS SSM](#aws-ssm)                       | `aws_ssm`    | `aws`        | Individual  | No                        |
-| [Kubernetes](#kubernetes)                 | `kubernetes` | `kubectl`    | Batch       | No                        |
-| [Docker Swarm](#docker-swarm)             | `docker`     | `docker`     | Individual  | No                        |
-| [Custom](#custom)                         | User-defined | User-defined | Individual  | No                        |
+| [Env file](#env-file)                         | `env`               | None         | Batch       | Yes                       |
+| [AWS Lambda](#aws-lambda)                     | `aws_lambda`        | `aws`        | Batch       | No                        |
+| [AWS SSM](#aws-ssm)                           | `aws_ssm`           | `aws`        | Individual  | No                        |
+| [Azure App Service](#azure-app-service)       | `azure_app_service` | `az`         | Individual  | Yes                       |
+| [CircleCI](#circleci)                         | `circleci`          | `circleci`   | Individual  | No                        |
+| [Cloudflare Workers](#cloudflare-workers)     | `cloudflare`        | `wrangler`   | Individual  | Yes (Workers); No (Pages) |
+| [Convex](#convex)                             | `convex`            | `npx`        | Individual  | No                        |
+| [Docker Swarm](#docker-swarm)                 | `docker`            | `docker`     | Individual  | No                        |
+| [Fly.io](#flyio)                              | `fly`               | `fly`        | Individual  | Yes                       |
+| [GCP Cloud Run](#gcp-cloud-run)               | `gcp_cloud_run`     | `gcloud`     | Individual  | Yes                       |
+| [GitHub Actions](#github-actions)             | `github`            | `gh`         | Individual  | No                        |
+| [GitLab CI](#gitlab-ci)                       | `gitlab`            | `glab`       | Individual  | No                        |
+| [Heroku](#heroku)                             | `heroku`            | `heroku`     | Individual  | Yes                       |
+| [Kubernetes](#kubernetes)                     | `kubernetes`        | `kubectl`    | Batch       | No                        |
+| [Netlify](#netlify)                           | `netlify`           | `netlify`    | Individual  | No                        |
+| [Railway](#railway)                           | `railway`           | `railway`    | Individual  | No                        |
+| [Render](#render)                             | `render`            | `curl`       | Individual  | Yes                       |
+| [Supabase](#supabase)                         | `supabase`          | `supabase`   | Individual  | No                        |
+| [Vercel](#vercel)                             | `vercel`            | `vercel`     | Individual  | No                        |
+| [Custom](#custom)                             | User-defined        | User-defined | Individual  | No                        |
 
 **Deploy modes:**
 
@@ -105,6 +110,249 @@ CONVEX_URL=https://example.convex.cloud
 # === Stripe ===
 STRIPE_KEY=sk_test_abc123
 STRIPE_WEBHOOK_SECRET=whsec_xyz
+```
+
+---
+
+## AWS Lambda
+
+Deploys secrets as Lambda environment variables using the AWS CLI. Lambda's `update-function-configuration` API replaces the entire environment variable map atomically, so this target uses a read-merge-write pattern to preserve non-esk variables (`NODE_ENV`, `AWS_REGION`, etc.).
+
+### How it works
+
+1. Reads the current environment variables and `RevisionId` via `get-function-configuration`.
+2. Overlays esk secrets on top of existing variables.
+3. Writes the merged map via `update-function-configuration` with `--cli-input-json` piped via stdin.
+4. Uses `RevisionId` as an optimistic concurrency lock. Retries up to 2 times on `ResourceConflictException`.
+
+### Prerequisites
+
+- [AWS CLI](https://aws.amazon.com/cli/) installed and authenticated (`aws configure`).
+
+Preflight runs `aws sts get-caller-identity` to verify credentials and connectivity.
+
+### Configuration
+
+```yaml
+targets:
+  aws_lambda:
+    function_name:
+      dev: myapp-dev
+      prod: myapp-prod
+    region: us-east-1
+    profile: staging
+    kms_key_arn: "arn:aws:kms:us-east-1:123:key/abc"
+    env_flags:
+      prod: "--no-paginate"
+```
+
+| Field           | Required | Description                                                         |
+| --------------- | -------- | ------------------------------------------------------------------- |
+| `function_name` | Yes      | Maps esk environment names to Lambda function names.                |
+| `region`        | No       | AWS region. Passed as `--region` flag.                              |
+| `profile`       | No       | AWS profile. Passed as `--profile` flag.                            |
+| `kms_key_arn`   | No       | KMS key ARN for encrypting environment variables at rest.           |
+| `env_flags`     | No       | Map of environment name to extra CLI flags appended to the command. |
+
+### Command executed
+
+```bash
+# Read current env vars:
+aws lambda get-function-configuration --function-name <name> [--region ...] [--profile ...] [env_flags...]
+
+# Write merged map (JSON via stdin):
+echo '{"FunctionName":"...","Environment":{"Variables":{...}},"RevisionId":"..."}' | \
+  aws lambda update-function-configuration --cli-input-json file:///dev/stdin [--region ...] [--profile ...] [env_flags...]
+
+# Delete (read-merge-write without the key):
+aws lambda get-function-configuration ...
+aws lambda update-function-configuration ...
+```
+
+### Target format
+
+Targets are environment-only:
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        aws_lambda: [dev, prod]
+```
+
+---
+
+## AWS SSM
+
+Deploys secrets to AWS Systems Manager Parameter Store using `aws ssm put-parameter`. Values are sent via stdin (`--cli-input-json file:///dev/stdin`) to avoid exposing secrets in process listings.
+
+### Prerequisites
+
+- [AWS CLI](https://aws.amazon.com/cli/) installed and authenticated (`aws configure`).
+
+Preflight runs `aws sts get-caller-identity` to verify credentials and connectivity.
+
+### Configuration
+
+```yaml
+targets:
+  aws_ssm:
+    path_prefix: "/{project}/{environment}/"
+    region: us-east-1
+    profile: staging
+    parameter_type: SecureString
+    env_flags:
+      prod: "--no-paginate"
+```
+
+| Field            | Required | Default        | Description                                                                               |
+| ---------------- | -------- | -------------- | ----------------------------------------------------------------------------------------- |
+| `path_prefix`    | Yes      | —              | Path prefix with `{project}` and `{environment}` interpolation. The key name is appended. |
+| `region`         | No       | —              | AWS region. Passed as `--region` flag.                                                    |
+| `profile`        | No       | —              | AWS profile. Passed as `--profile` flag.                                                  |
+| `parameter_type` | No       | `SecureString` | SSM parameter type: `SecureString`, `String`, or `StringList`.                            |
+| `env_flags`      | No       | —              | Map of environment name to extra CLI flags appended to the command.                       |
+
+### Path resolution
+
+The parameter name is built by replacing `{project}` and `{environment}` in `path_prefix`, then appending the key name.
+
+**Example with `path_prefix: "/{project}/{environment}/"`:**
+
+| Project | Environment | Key       | Parameter name        |
+| ------- | ----------- | --------- | --------------------- |
+| `myapp` | `dev`       | `DB_PASS` | `/myapp/dev/DB_PASS`  |
+| `myapp` | `prod`      | `API_KEY` | `/myapp/prod/API_KEY` |
+
+### Command executed
+
+```bash
+# Put parameter (value via stdin as JSON):
+echo '{"Name":"/myapp/dev/KEY","Value":"...","Type":"SecureString","Overwrite":true}' | \
+  aws ssm put-parameter --cli-input-json file:///dev/stdin [--region ...] [--profile ...] [env_flags...]
+
+# Delete parameter:
+aws ssm delete-parameter --name /myapp/dev/KEY [--region ...] [--profile ...] [env_flags...]
+```
+
+### Target format
+
+Targets are environment-only:
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        aws_ssm: [dev, prod]
+```
+
+---
+
+## Azure App Service
+
+Deploys app settings to Azure App Service web apps using `az webapp config appsettings set`.
+
+> **Security note**: Secret values are passed as CLI arguments (`--settings KEY=VALUE`) and are visible in process listings (`ps aux`). The Azure CLI has no reliable stdin support for this command. A warning is printed at deploy time.
+
+### Prerequisites
+
+- [Azure CLI](https://learn.microsoft.com/en-us/cli/azure/install-azure-cli) (`az`) installed and authenticated (`az login`).
+
+Preflight runs `az account show` to verify the CLI is authenticated.
+
+### Configuration
+
+```yaml
+targets:
+  azure_app_service:
+    app_names:
+      web: my-azure-webapp
+    resource_group: my-resource-group
+    slot:
+      staging: staging
+    subscription: my-sub-id
+    env_flags:
+      prod: "--debug"
+```
+
+| Field            | Required | Description                                                                 |
+| ---------------- | -------- | --------------------------------------------------------------------------- |
+| `app_names`      | Yes      | Maps esk app names to Azure web app names.                                  |
+| `resource_group` | Yes      | Azure resource group containing the web apps.                               |
+| `slot`           | No       | Maps esk environment names to deployment slot names (e.g., `staging`).      |
+| `subscription`   | No       | Azure subscription ID. Passed as `--subscription` flag.                     |
+| `env_flags`      | No       | Map of environment name to extra CLI flags appended to the command.         |
+
+### Command executed
+
+```bash
+az webapp config appsettings set --name <app> --resource-group <rg> --settings KEY=VALUE [--slot <slot>] [--subscription <sub>] [env_flags...]
+az webapp config appsettings delete --name <app> --resource-group <rg> --setting-names KEY [--slot <slot>] [--subscription <sub>] [env_flags...]
+```
+
+### Target format
+
+Targets must include an app: `app:environment`.
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        azure_app_service: [web:dev, web:prod]
+```
+
+---
+
+## CircleCI
+
+Deploys context secrets to CircleCI using `circleci context store-secret`. Values are sent via stdin to avoid process argument exposure.
+
+### Prerequisites
+
+- [CircleCI CLI](https://circleci.com/docs/local-cli/) installed.
+
+Preflight verifies CLI installation.
+
+### Configuration
+
+```yaml
+targets:
+  circleci:
+    org_id: "00000000-0000-0000-0000-000000000000"
+    context_name: my-context
+    env_flags:
+      prod: "--some-flag value"
+```
+
+| Field          | Required | Description                                                         |
+| -------------- | -------- | ------------------------------------------------------------------- |
+| `org_id`       | Yes      | CircleCI organization ID.                                           |
+| `context_name` | Yes      | CircleCI context name where secrets are stored.                     |
+| `env_flags`    | No       | Map of environment name to extra CLI flags appended to the command. |
+
+### Command executed
+
+```bash
+# Value piped via stdin:
+echo -n "<value>" | circleci context store-secret --org-id <org> <context> KEY [env_flags...]
+
+# Delete:
+circleci context remove-secret --org-id <org> <context> KEY [env_flags...]
+```
+
+### Target format
+
+Targets are environment-only:
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        circleci: [dev, prod]
 ```
 
 ---
@@ -295,6 +543,60 @@ secrets:
     API_KEY:
       targets:
         fly: [web:dev, web:prod]
+```
+
+---
+
+## GCP Cloud Run
+
+Deploys environment variables to GCP Cloud Run services using `gcloud run services update`.
+
+> **Security note**: Secret values are passed as CLI arguments (`--update-env-vars KEY=VALUE`) and are visible in process listings (`ps aux`). The gcloud CLI has no stdin support for env var updates. A warning is printed at deploy time.
+
+### Prerequisites
+
+- [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`) installed and authenticated.
+
+Preflight runs `gcloud auth print-access-token --project <project>` to verify authentication and project access.
+
+### Configuration
+
+```yaml
+targets:
+  gcp_cloud_run:
+    service_names:
+      web: my-web-service
+      api: my-api-service
+    project: my-gcp-project
+    region: us-central1
+    env_flags:
+      prod: "--project my-prod-project --region europe-west1"
+```
+
+| Field           | Required | Description                                                         |
+| --------------- | -------- | ------------------------------------------------------------------- |
+| `service_names` | Yes      | Maps esk app names to Cloud Run service names.                      |
+| `project`       | Yes      | GCP project ID.                                                     |
+| `region`        | Yes      | Cloud Run region (e.g., `us-central1`).                             |
+| `env_flags`     | No       | Map of environment name to extra CLI flags appended to the command. |
+
+### Command executed
+
+```bash
+gcloud run services update <service> --update-env-vars KEY=VALUE --project <project> --region <region> [env_flags...]
+gcloud run services update <service> --remove-env-vars KEY --project <project> --region <region> [env_flags...]
+```
+
+### Target format
+
+Targets must include an app: `app:environment`.
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        gcp_cloud_run: [web:dev, web:prod]
 ```
 
 ---
@@ -578,6 +880,63 @@ secrets:
 
 ---
 
+## Render
+
+Deploys environment variables to Render services via the [Render REST API](https://docs.render.com/api). Unlike other targets, Render has no CLI — esk uses `curl` to make API calls.
+
+API key and secret values are passed via `curl --config -` (stdin) to avoid exposing them in process argument lists.
+
+### Prerequisites
+
+- `curl` installed (available on most systems).
+- A Render API key set in the `RENDER_API_KEY` environment variable (or a custom env var name via `api_key_env`).
+
+Preflight verifies `curl` is installed and the API key is valid by listing env vars for the first configured service.
+
+### Configuration
+
+```yaml
+targets:
+  render:
+    service_ids:
+      web: srv-abc123def456
+    api_key_env: RENDER_API_KEY
+    env_flags:
+      prod: "--proxy http://proxy:8080"
+```
+
+| Field         | Required | Default          | Description                                                              |
+| ------------- | -------- | ---------------- | ------------------------------------------------------------------------ |
+| `service_ids` | Yes      | —                | Maps esk app names to Render service IDs.                                |
+| `api_key_env` | No       | `RENDER_API_KEY` | Environment variable name holding the Render API key.                    |
+| `env_flags`   | No       | —                | Map of environment name to extra CLI flags appended to curl commands.    |
+
+### Command executed
+
+```bash
+# Deploy (PUT via curl --config stdin):
+curl --config - --silent --fail-with-body [env_flags...]
+# stdin contains: Authorization header, Content-Type, PUT method, URL, JSON body
+
+# Delete (DELETE via curl --config stdin):
+curl --config - --silent --fail-with-body [env_flags...]
+# stdin contains: Authorization header, DELETE method, URL
+```
+
+### Target format
+
+Targets must include an app: `app:environment`.
+
+```yaml
+secrets:
+  General:
+    API_KEY:
+      targets:
+        render: [web:dev, web:prod]
+```
+
+---
+
 ## GitLab CI
 
 Deploys CI/CD variables to GitLab projects using `glab variable set`.
@@ -619,73 +978,6 @@ secrets:
     API_KEY:
       targets:
         gitlab: [dev, prod]
-```
-
----
-
-## AWS SSM
-
-Deploys secrets to AWS Systems Manager Parameter Store using `aws ssm put-parameter`. Values are sent via stdin (`--cli-input-json file:///dev/stdin`) to avoid exposing secrets in process listings.
-
-### Prerequisites
-
-- [AWS CLI](https://aws.amazon.com/cli/) installed and authenticated (`aws configure`).
-
-Preflight runs `aws sts get-caller-identity` to verify credentials and connectivity.
-
-### Configuration
-
-```yaml
-targets:
-  aws_ssm:
-    path_prefix: "/{project}/{environment}/"
-    region: us-east-1
-    profile: staging
-    parameter_type: SecureString
-    env_flags:
-      prod: "--no-paginate"
-```
-
-| Field            | Required | Default        | Description                                                                               |
-| ---------------- | -------- | -------------- | ----------------------------------------------------------------------------------------- |
-| `path_prefix`    | Yes      | —              | Path prefix with `{project}` and `{environment}` interpolation. The key name is appended. |
-| `region`         | No       | —              | AWS region. Passed as `--region` flag.                                                    |
-| `profile`        | No       | —              | AWS profile. Passed as `--profile` flag.                                                  |
-| `parameter_type` | No       | `SecureString` | SSM parameter type: `SecureString`, `String`, or `StringList`.                            |
-| `env_flags`      | No       | —              | Map of environment name to extra CLI flags appended to the command.                       |
-
-### Path resolution
-
-The parameter name is built by replacing `{project}` and `{environment}` in `path_prefix`, then appending the key name.
-
-**Example with `path_prefix: "/{project}/{environment}/"`:**
-
-| Project | Environment | Key       | Parameter name        |
-| ------- | ----------- | --------- | --------------------- |
-| `myapp` | `dev`       | `DB_PASS` | `/myapp/dev/DB_PASS`  |
-| `myapp` | `prod`      | `API_KEY` | `/myapp/prod/API_KEY` |
-
-### Command executed
-
-```bash
-# Put parameter (value via stdin as JSON):
-echo '{"Name":"/myapp/dev/KEY","Value":"...","Type":"SecureString","Overwrite":true}' | \
-  aws ssm put-parameter --cli-input-json file:///dev/stdin [--region ...] [--profile ...] [env_flags...]
-
-# Delete parameter:
-aws ssm delete-parameter --name /myapp/dev/KEY [--region ...] [--profile ...] [env_flags...]
-```
-
-### Target format
-
-Targets are environment-only:
-
-```yaml
-secrets:
-  General:
-    API_KEY:
-      targets:
-        aws_ssm: [dev, prod]
 ```
 
 ---

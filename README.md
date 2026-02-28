@@ -157,17 +157,22 @@ Full flags and behavior: [API.md](API.md).
 ## Supported deploy targets
 
 - `.env* files`
+- `aws_lambda`
 - `aws_ssm`
+- `azure_app_service`
+- `circleci`
 - `cloudflare`
 - `convex`
 - `docker`
 - `fly`
+- `gcp_cloud_run`
 - `github`
 - `gitlab`
 - `heroku`
 - `kubernetes`
 - `netlify`
 - `railway`
+- `render`
 - `supabase`
 - `vercel`
 - [Custom targets](TARGETS.md#custom) — define your own deploy commands in `esk.yaml`
@@ -183,6 +188,7 @@ Target config details: [TARGETS.md](TARGETS.md).
 - Cloud storage (`dropbox`, `gdrive`, `onedrive`, etc.)
 - `doppler`
 - `gcp`
+- `infisical`
 - `s3`
 - `sops`
 - `vault`

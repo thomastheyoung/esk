@@ -157,14 +157,14 @@ Version-counter-based reconciliation between local store and remote sources. Two
 Secrets can declare a `validate:` block (`Validation` struct) and a `required:` field (`Required` enum).
 
 - **`validate`**: checks secret values at `set` time and before `deploy`. Supports `format` (string, url, integer, number, boolean, email, json, base64), `enum`, `pattern` (regex), `min_length`/`max_length`, `range`, `optional`, and cross-field rules (`required_if`, `required_with`, `required_unless`). Cross-field cycles are detected at validation time. Use `--skip-validation` to bypass.
-- **`required`**: gates deploy — the secret must have a value in the store. `true` (default) = all targeted envs, `false` = never, `[env1, env2]` = specific envs. Use `--skip-requirements` or `--force` to bypass.
+- **`required`**: gates deploy — the secret must have a value in the store. `true` (default) = all targeted envs, `false` = never, `[env1, env2]` = specific envs. Use `--strict` to fail on missing (default: warn and continue). Use `--force` to bypass entirely.
 - These are orthogonal: `required: true` + `optional: true` = "must exist, but may be empty".
 
 `SecretDef` fields: `description`, `targets`, `validate` (`Option<Validation>`), `required` (`Required`), `allow_empty` (`bool`).
 
 ### DeployOptions
 
-`DeployOptions` struct bundles all deploy parameters: `env`, `force`, `dry_run`, `verbose`, `skip_validation`, `skip_requirements`, `allow_empty`, `prune`. Used by `deploy::run()` and `deploy::run_with_runner()`.
+`DeployOptions` struct bundles all deploy parameters: `env`, `force`, `dry_run`, `verbose`, `skip_validation`, `strict`, `allow_empty`, `prune`. Used by `deploy::run()` and `deploy::run_with_runner()`.
 
 ## Key crates
 

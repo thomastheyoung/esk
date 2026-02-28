@@ -6,18 +6,19 @@ For deploy targets (env files, Cloudflare, Convex, etc.), see [TARGETS.md](TARGE
 
 ## Overview
 
-| Remote                                      | Config key                    | External CLI | Storage location          |
-| ------------------------------------------- | ----------------------------- | ------------ | ------------------------- |
-| [1Password](#1password)                     | `1password`                   | `op`         | 1Password vault item      |
-| [Cloud file](#cloud-file)                   | Any name + `type: cloud_file` | None         | Local/cloud-synced folder |
-| [AWS Secrets Manager](#aws-secrets-manager) | `aws_secrets_manager`         | `aws`        | AWS Secrets Manager       |
-| [HashiCorp Vault](#hashicorp-vault)         | `vault`                       | `vault`      | Vault KV store            |
-| [Bitwarden](#bitwarden)                     | `bitwarden`                   | `bws`        | Bitwarden Secrets Manager |
-| [S3](#s3)                                   | `s3`                          | `aws`        | S3-compatible bucket      |
-| [GCP Secret Manager](#gcp-secret-manager)   | `gcp`                         | `gcloud`     | GCP Secret Manager        |
-| [Azure Key Vault](#azure-key-vault)         | `azure`                       | `az`         | Azure Key Vault           |
-| [Doppler](#doppler)                         | `doppler`                     | `doppler`    | Doppler project           |
-| [SOPS](#sops)                               | `sops`                        | `sops`       | SOPS-encrypted files      |
+| Remote                                      | Config key                    | External CLI  | Storage location          |
+| ------------------------------------------- | ----------------------------- | ------------- | ------------------------- |
+| [1Password](#1password)                     | `1password`                   | `op`          | 1Password vault item      |
+| [AWS Secrets Manager](#aws-secrets-manager) | `aws_secrets_manager`         | `aws`         | AWS Secrets Manager       |
+| [Azure Key Vault](#azure-key-vault)         | `azure`                       | `az`          | Azure Key Vault           |
+| [Bitwarden](#bitwarden)                     | `bitwarden`                   | `bws`         | Bitwarden Secrets Manager |
+| [Cloud file](#cloud-file)                   | Any name + `type: cloud_file` | None          | Local/cloud-synced folder |
+| [Doppler](#doppler)                         | `doppler`                     | `doppler`     | Doppler project           |
+| [GCP Secret Manager](#gcp-secret-manager)   | `gcp`                         | `gcloud`      | GCP Secret Manager        |
+| [HashiCorp Vault](#hashicorp-vault)         | `vault`                       | `vault`       | Vault KV store            |
+| [Infisical](#infisical)                     | `infisical`                   | `infisical`   | Infisical project         |
+| [S3](#s3)                                   | `s3`                          | `aws`         | S3-compatible bucket      |
+| [SOPS](#sops)                               | `sops`                        | `sops`        | SOPS-encrypted files      |
 
 ---
 
@@ -508,6 +509,54 @@ doppler secrets upload --json -p myapp-doppler -c dev_config --silent
 
 # Pull:
 doppler secrets download -p myapp-doppler -c dev_config --format json --no-file
+```
+
+---
+
+## Infisical
+
+Uses the [Infisical CLI](https://infisical.com/docs/cli/overview) to sync secrets to an Infisical project. Each esk environment maps to an Infisical environment slug via `env_map`.
+
+### How it works
+
+**Push**: Exports current remote state to detect orphaned keys, deletes them via `infisical secrets delete`, then uploads all secrets via a temp file with `infisical secrets set --file=<path>`. Includes `_esk_version` metadata for reconciliation.
+
+**Pull**: Exports secrets as JSON via `infisical export --format json` and parses the array of objects.
+
+### Prerequisites
+
+- [Infisical CLI](https://infisical.com/docs/cli/overview) installed and authenticated.
+
+Preflight verifies CLI installation.
+
+### Configuration
+
+```yaml
+remotes:
+  infisical:
+    project_id: "proj-abc-123"
+    env_map:
+      dev: development
+      prod: production
+    path: "/"
+```
+
+| Field        | Required | Default | Description                                                      |
+| ------------ | -------- | ------- | ---------------------------------------------------------------- |
+| `project_id` | Yes      | —       | Infisical project ID.                                            |
+| `env_map`    | Yes      | —       | Maps esk environment names to Infisical environment slugs.       |
+| `path`       | Yes      | —       | Folder path within Infisical (e.g., `/` for root).               |
+
+### Command executed
+
+```bash
+# Push (delete orphans, then set via temp file):
+infisical export --format json --projectId <id> --env <slug> --path <path>
+infisical secrets delete <orphan1> <orphan2> --projectId <id> --env <slug> --path <path>
+infisical secrets set --file=<tmpfile> --silent --projectId <id> --env <slug> --path <path>
+
+# Pull:
+infisical export --format json --projectId <id> --env <slug> --path <path>
 ```
 
 ---

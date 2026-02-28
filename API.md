@@ -7,8 +7,12 @@ Complete command reference for esk.
 Initialize a new esk project in the current directory.
 
 ```bash
-esk init
+esk init [--keychain]
 ```
+
+| Argument     | Required | Description                                                                 |
+| ------------ | -------- | --------------------------------------------------------------------------- |
+| `--keychain` | No       | Store encryption key in OS keychain instead of file (requires `keychain` feature) |
 
 Creates:
 
@@ -69,26 +73,26 @@ esk delete API_KEY --env dev --strict              # Fail hard on remote errors
 Deploy secrets to configured targets.
 
 ```bash
-esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose] [--skip-validation] [--skip-requirements] [--allow-empty] [--prune]
+esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose] [--skip-validation] [--strict] [--allow-empty] [--prune]
 ```
 
-| Argument              | Required | Description                                                             |
-| --------------------- | -------- | ----------------------------------------------------------------------- |
-| `--env`               | No       | Filter to a single environment                                          |
-| `--force`             | No       | Deploy all secrets, ignoring change detection hashes                    |
-| `--dry-run`           | No       | Show what would be deployed without making changes                      |
-| `--verbose` / `-v`    | No       | Show detailed output including skipped secrets                          |
-| `--skip-validation`   | No       | Bypass `validate:` checks before deploying                              |
-| `--skip-requirements` | No       | Bypass `required:` checks (missing secret errors)                       |
-| `--allow-empty`       | No       | Allow deploying empty/whitespace-only values                            |
-| `--prune`             | No       | Remove orphaned secrets from targets (deployed but no longer in config) |
+| Argument            | Required | Description                                                             |
+| ------------------- | -------- | ----------------------------------------------------------------------- |
+| `--env`             | No       | Filter to a single environment                                          |
+| `--force`           | No       | Deploy all secrets, ignoring change detection hashes                    |
+| `--dry-run`         | No       | Show what would be deployed without making changes                      |
+| `--verbose` / `-v`  | No       | Show detailed output including skipped secrets                          |
+| `--skip-validation` | No       | Bypass `validate:` checks before deploying                              |
+| `--strict`          | No       | Fail if any required secrets are missing (default: warn and continue)   |
+| `--allow-empty`     | No       | Allow deploying empty/whitespace-only values                            |
+| `--prune`           | No       | Remove orphaned secrets from targets (deployed but no longer in config) |
 
 **Pre-deploy checks:**
 
 Before deploying, esk runs three checks on the secrets in scope (unless bypassed):
 
 1. **Validation** — secrets with a `validate:` block are checked against their constraints. Failures abort deploy. Bypass with `--skip-validation`.
-2. **Requirements** — secrets with `required: true` (or a matching env list) must have a stored value. Missing secrets abort deploy. Bypass with `--skip-requirements` or `--force`.
+2. **Requirements** — secrets with `required: true` (or a matching env list) must have a stored value. By default, missing secrets produce warnings but deploy continues. With `--strict`, missing secrets abort deploy. Use `--force` to bypass entirely.
 3. **Empty values** — secrets with empty or whitespace-only values are flagged. In non-interactive/CI contexts, empty values abort deploy. Bypass with `--allow-empty`. Secrets with `allow_empty: true` in config are always exempt.
 
 **Target behavior:**
@@ -286,13 +290,14 @@ The dashboard closes with the current store version.
 Generate code or config files from secret definitions. Supports multiple output formats, including config-driven multi-output.
 
 ```bash
-esk generate [<FORMAT>] [--output <PATH>]
+esk generate [<FORMAT>] [--output <PATH>] [--preview]
 ```
 
 | Argument          | Required | Description                                                                                     |
 | ----------------- | -------- | ----------------------------------------------------------------------------------------------- |
 | `FORMAT`          | No       | Output format: `dts`, `ts`, or `env-example`. Omit to run all configured outputs (see below).   |
 | `--output` / `-o` | No       | Output file path. Requires a format argument. Overrides the default path for the chosen format. |
+| `--preview`       | No       | Print generated output to stdout without writing files.                                         |
 
 **Formats:**
 
@@ -445,7 +450,7 @@ Controls whether deploy fails when the secret has no stored value. Default: `tru
 | `false`       | Never required                                  |
 | `[dev, prod]` | Required only in listed environments            |
 
-Bypass with `--skip-requirements` or `--force` on deploy. `esk delete` warns interactively when removing a required secret.
+Use `--strict` on deploy to fail on missing required secrets (default: warn and continue). Use `--force` to bypass entirely. `esk delete` warns interactively when removing a required secret.
 
 ### `allow_empty:`
 

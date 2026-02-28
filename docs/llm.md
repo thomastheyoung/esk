@@ -65,7 +65,7 @@ Deploy secrets to configured targets. Only deploys secrets whose values have cha
 | `--dry-run` | Show what would be deployed without deploying |
 | `--verbose`, `-v` | Show detailed output |
 | `--skip-validation` | Skip value validation |
-| `--skip-requirements` | Skip required-secret checks |
+| `--strict` | Fail if any required secrets are missing (default: warn and continue) |
 | `--allow-empty` | Allow deploying empty/whitespace-only values |
 | `--prune` | Remove orphaned secrets from targets (deployed but no longer in config) |
 
@@ -177,6 +177,36 @@ targets:                           # Deploy targets (esk deploy)
     labels:
       managed-by: esk
     env_flags: {}
+  aws_lambda:                      # AWS Lambda env vars (batch)
+    function_name:
+      dev: myapp-dev
+      prod: myapp-prod
+    region: us-east-1
+    kms_key_arn: "arn:aws:kms:..."  # Optional KMS key
+    env_flags: {}
+  azure_app_service:               # Azure App Service
+    app_names:
+      web: my-azure-webapp
+    resource_group: my-rg
+    slot:
+      staging: staging
+    subscription: my-sub-id
+    env_flags: {}
+  circleci:                        # CircleCI contexts
+    org_id: "00000000-..."
+    context_name: my-context
+    env_flags: {}
+  gcp_cloud_run:                   # GCP Cloud Run
+    service_names:
+      web: my-web-service
+    project: my-gcp-project
+    region: us-central1
+    env_flags: {}
+  render:                          # Render (REST API via curl)
+    service_ids:
+      web: srv-abc123def456
+    api_key_env: RENDER_API_KEY    # Default env var name
+    env_flags: {}
 
 remotes:                           # Sync remotes (esk sync)
   1password:
@@ -211,6 +241,12 @@ remotes:                           # Sync remotes (esk sync)
     config_map:
       dev: dev
       prod: prd
+  infisical:                       # Infisical
+    project_id: "proj-abc-123"
+    env_map:
+      dev: development
+      prod: production
+    path: "/"
   sops:                            # Mozilla SOPS
     path: secrets/{environment}.enc.yaml
   aws_secrets_manager:
@@ -263,7 +299,7 @@ secrets:                           # Secrets grouped by category
 
 **Validation**: Checked at `set` time and before `deploy`. Formats: string, url, integer, number, boolean, email, json, base64. Also supports enum, pattern (regex), length, and range. Use `--skip-validation` to bypass.
 
-**Requirements**: `required: true` (default) means the secret must have a value in all targeted environments before deploy. `required: [prod]` limits to specific environments. `required: false` disables. Use `--skip-requirements` or `--force` to bypass.
+**Requirements**: `required: true` (default) means the secret must have a value in all targeted environments before deploy. `required: [prod]` limits to specific environments. `required: false` disables. Use `--strict` to fail on missing (default: warn and continue). Use `--force` to bypass entirely.
 
 **Reconciliation**: Version-counter-based. Each store modification increments the version. When syncing, higher version wins. Equal-version conflicts default to local (override with `--prefer remote`).
 

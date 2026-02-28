@@ -133,6 +133,48 @@ targets:
       team: platform
     env_flags: {}
 
+  # AWS Lambda environment variables (batch deploy — read-merge-write)
+  aws_lambda:
+    function_name:
+      dev: my-saas-dev
+      prod: my-saas-prod
+    region: us-east-1
+    # profile: my-aws-profile        # optional
+    # kms_key_arn: "arn:aws:kms:..."  # optional KMS key for encryption at rest
+    env_flags: {}
+
+  # Azure App Service
+  azure_app_service:
+    app_names:
+      web: my-saas-webapp
+    resource_group: my-resource-group
+    # slot:                           # optional deployment slot mapping
+    #   staging: staging
+    # subscription: my-sub-id         # optional subscription ID
+    env_flags: {}
+
+  # CircleCI context secrets
+  circleci:
+    org_id: "00000000-0000-0000-0000-000000000000"
+    context_name: my-saas-context
+    env_flags: {}
+
+  # GCP Cloud Run environment variables
+  gcp_cloud_run:
+    service_names:
+      web: my-saas-web
+      api: my-saas-api
+    project: my-gcp-project-id
+    region: us-central1
+    env_flags: {}
+
+  # Render (REST API via curl)
+  render:
+    service_ids:
+      web: srv-abc123def456
+    # api_key_env: RENDER_API_KEY     # default env var name for API key
+    env_flags: {}
+
   # Custom targets — define your own deploy commands
   custom:
     internal-api:
@@ -207,6 +249,15 @@ remotes:
       dev: dev
       staging: stg
       prod: prd
+
+  # Infisical
+  infisical:
+    project_id: "proj-abc-123"
+    env_map:
+      dev: development
+      staging: staging
+      prod: production
+    path: "/"
 
   # Mozilla SOPS encrypted files
   sops:
