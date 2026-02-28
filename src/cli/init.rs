@@ -1,3 +1,5 @@
+#[cfg(not(feature = "keychain"))]
+use anyhow::bail;
 use anyhow::{Context, Result};
 use console::style;
 use std::path::Path;
@@ -11,9 +13,15 @@ enum FileStatus {
     Existed,
 }
 
+enum KeyStatus {
+    File(FileStatus),
+    #[cfg(feature = "keychain")]
+    Keychain(FileStatus),
+}
+
 struct InitReport {
     config: FileStatus,
-    key: FileStatus,
+    key: KeyStatus,
     store: FileStatus,
     deploy_index: FileStatus,
     sync_index: FileStatus,
@@ -24,7 +32,6 @@ impl InitReport {
     fn render(&self, cwd: &Path) -> Result<()> {
         let config_path = cwd.join("esk.yaml");
         let esk_dir = cwd.join(".esk");
-        let key_path = esk_dir.join("store.key");
         let store_path = esk_dir.join("store.enc");
         let deploy_index_path = esk_dir.join("deploy-index.json");
         let sync_index_path = esk_dir.join("sync-index.json");
@@ -33,7 +40,26 @@ impl InitReport {
         cliclack::intro(style("esk init").bold())?;
 
         Self::render_file(&self.config, &config_path)?;
-        Self::render_file(&self.key, &key_path)?;
+        match &self.key {
+            KeyStatus::File(status) => {
+                Self::render_file(status, &esk_dir.join("store.key"))?;
+            }
+            #[cfg(feature = "keychain")]
+            KeyStatus::Keychain(status) => match status {
+                FileStatus::Created => {
+                    cliclack::log::success(format!(
+                        "Stored  {}",
+                        style("encryption key in OS keychain").dim()
+                    ))?;
+                }
+                FileStatus::Existed => {
+                    cliclack::log::remark(format!(
+                        "Exists  {}",
+                        style("encryption key in OS keychain").dim()
+                    ))?;
+                }
+            },
+        }
         Self::render_file(&self.store, &store_path)?;
         Self::render_file(&self.deploy_index, &deploy_index_path)?;
         Self::render_file(&self.sync_index, &sync_index_path)?;
@@ -67,18 +93,19 @@ const ESK_GITIGNORE_ENTRIES: &[&str] = &[
     ".esk/store.key",
     ".esk/deploy-index.json",
     ".esk/sync-index.json",
+    ".esk/lock",
+    ".esk/key-provider",
 ];
 
-pub fn run(cwd: &Path) -> Result<()> {
-    let report = ensure_project(cwd)?;
+pub fn run(cwd: &Path, keychain: bool) -> Result<()> {
+    let report = ensure_project(cwd, keychain)?;
     report.render(cwd)
 }
 
-fn ensure_project(cwd: &Path) -> Result<InitReport> {
+fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
     let config_path = cwd.join("esk.yaml");
     let esk_dir = cwd.join(".esk");
     let store_path = esk_dir.join("store.enc");
-    let key_path = esk_dir.join("store.key");
     let deploy_index_path = esk_dir.join("deploy-index.json");
     let sync_index_path = esk_dir.join("sync-index.json");
     let gitignore_path = cwd.join(".gitignore");
@@ -113,12 +140,24 @@ fn ensure_project(cwd: &Path) -> Result<InitReport> {
         FileStatus::Created
     };
 
-    // Create store (generates key + empty encrypted store)
-    let (key_status, store_status) = if key_path.is_file() && store_path.is_file() {
-        (FileStatus::Existed, FileStatus::Existed)
+    // Determine key provider and create store
+    let (key_status, store_status) = if keychain {
+        #[cfg(not(feature = "keychain"))]
+        {
+            bail!("keychain support requires the 'keychain' feature. Rebuild with: cargo install esk --features keychain");
+        }
+        #[cfg(feature = "keychain")]
+        {
+            ensure_keychain_store(cwd, &esk_dir, &store_path)?
+        }
     } else {
-        let _store = SecretStore::load_or_create(cwd)?;
-        (FileStatus::Created, FileStatus::Created)
+        let key_path = esk_dir.join("store.key");
+        if key_path.is_file() && store_path.is_file() {
+            (KeyStatus::File(FileStatus::Existed), FileStatus::Existed)
+        } else {
+            let _store = SecretStore::load_or_create(cwd)?;
+            (KeyStatus::File(FileStatus::Created), FileStatus::Created)
+        }
     };
 
     // Create empty deploy index
@@ -149,6 +188,58 @@ fn ensure_project(cwd: &Path) -> Result<InitReport> {
         sync_index: sync_index_status,
         gitignore_updated,
     })
+}
+
+#[cfg(feature = "keychain")]
+fn ensure_keychain_store(
+    cwd: &Path,
+    esk_dir: &Path,
+    store_path: &Path,
+) -> Result<(KeyStatus, FileStatus)> {
+    use crate::store::SecretStore;
+
+    let marker_path = esk_dir.join("key-provider");
+    let already_keychain = marker_path.is_file()
+        && std::fs::read_to_string(&marker_path)
+            .unwrap_or_default()
+            .trim()
+            == "keychain";
+
+    let file_key_path = esk_dir.join("store.key");
+    let has_file_key = file_key_path.is_file();
+
+    if already_keychain && store_path.is_file() {
+        // Already set up with keychain
+        return Ok((
+            KeyStatus::Keychain(FileStatus::Existed),
+            FileStatus::Existed,
+        ));
+    }
+
+    if has_file_key && store_path.is_file() {
+        // Migration: read existing file key, store in keychain, keep file as backup
+        let hex_str = std::fs::read_to_string(&file_key_path)
+            .context("failed to read existing key file for migration")?;
+        let key = hex::decode(hex_str.trim()).context("invalid key hex in existing key file")?;
+
+        // Write marker first, then create provider from it to store the key
+        crate::store::KeyProvider::write_marker(esk_dir, "keychain")?;
+        let provider = crate::store::KeyProvider::from_marker(esk_dir)?;
+        provider.store(&key)?;
+
+        return Ok((
+            KeyStatus::Keychain(FileStatus::Created),
+            FileStatus::Existed,
+        ));
+    }
+
+    // Fresh keychain setup
+    let _store = SecretStore::load_or_create_with_provider(cwd, Some("keychain"))?;
+
+    Ok((
+        KeyStatus::Keychain(FileStatus::Created),
+        FileStatus::Created,
+    ))
 }
 
 fn ensure_esk_gitignore_entries(gitignore_path: &Path) -> Result<bool> {

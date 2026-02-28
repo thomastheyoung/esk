@@ -141,10 +141,155 @@ impl std::fmt::Debug for StorePayload {
     }
 }
 
+pub(crate) enum KeyProvider {
+    File { path: PathBuf },
+    #[cfg(feature = "keychain")]
+    Keychain { service: String, account: String },
+}
+
+impl KeyProvider {
+    pub(crate) fn from_marker(esk_dir: &Path) -> Result<Self> {
+        let marker = esk_dir.join("key-provider");
+        let provider = if marker.is_file() {
+            std::fs::read_to_string(&marker)
+                .with_context(|| format!("failed to read {}", marker.display()))?
+                .trim()
+                .to_string()
+        } else {
+            "file".to_string()
+        };
+        match provider.as_str() {
+            "file" => Ok(Self::File {
+                path: esk_dir.join("store.key"),
+            }),
+            #[cfg(feature = "keychain")]
+            "keychain" => {
+                let root = esk_dir
+                    .parent()
+                    .context("esk dir has no parent")?;
+                let canonical = std::fs::canonicalize(root)
+                    .with_context(|| format!("failed to canonicalize {}", root.display()))?;
+                Ok(Self::Keychain {
+                    service: "esk".to_string(),
+                    account: canonical.to_string_lossy().into_owned(),
+                })
+            }
+            #[cfg(not(feature = "keychain"))]
+            "keychain" => bail!(
+                "keychain support requires the 'keychain' feature. Rebuild with: cargo install esk --features keychain"
+            ),
+            other => bail!("unknown key provider in .esk/key-provider: {other}"),
+        }
+    }
+
+    fn exists(&self) -> bool {
+        match self {
+            Self::File { path } => path.is_file(),
+            #[cfg(feature = "keychain")]
+            Self::Keychain { service, account } => {
+                let entry = keyring::Entry::new(service, account);
+                match entry {
+                    Ok(e) => e.get_secret().is_ok(),
+                    Err(_) => false,
+                }
+            }
+        }
+    }
+
+    fn load(&self) -> Result<Vec<u8>> {
+        match self {
+            Self::File { path } => Self::read_key_file(path),
+            #[cfg(feature = "keychain")]
+            Self::Keychain { service, account } => {
+                let entry = keyring::Entry::new(service, account)
+                    .map_err(|e| anyhow::anyhow!("failed to access OS keychain: {e}"))?;
+                let hex_str = entry.get_password().map_err(|e| match e {
+                    keyring::Error::NoEntry => anyhow::anyhow!(
+                        "encryption key not found in OS keychain for {account}. Run 'esk init --keychain' to set up."
+                    ),
+                    keyring::Error::PlatformFailure(_) | keyring::Error::NoStorageAccess(_) => {
+                        anyhow::anyhow!(
+                            "OS keychain is not available (headless or unsupported platform). Use file-based key storage instead."
+                        )
+                    }
+                    _ => anyhow::anyhow!("failed to read key from OS keychain: {e}"),
+                })?;
+                let key = hex::decode(hex_str.trim()).context("invalid key hex from keychain")?;
+                if key.len() != 32 {
+                    bail!("invalid key length from keychain: expected 32 bytes, got {}", key.len());
+                }
+                Ok(key)
+            }
+        }
+    }
+
+    fn create(&self) -> Result<Vec<u8>> {
+        let key = Self::generate_key();
+        self.store(&key)?;
+        Ok(key)
+    }
+
+    pub(crate) fn store(&self, key: &[u8]) -> Result<()> {
+        match self {
+            Self::File { path } => Self::write_key_file(path, key),
+            #[cfg(feature = "keychain")]
+            Self::Keychain { service, account } => {
+                let entry = keyring::Entry::new(service, account)
+                    .map_err(|e| anyhow::anyhow!("failed to access OS keychain: {e}"))?;
+                entry.set_password(&hex::encode(key)).map_err(|e| match e {
+                    keyring::Error::PlatformFailure(_) | keyring::Error::NoStorageAccess(_) => {
+                        anyhow::anyhow!(
+                            "OS keychain is not available (headless or unsupported platform). Use file-based key storage instead."
+                        )
+                    }
+                    _ => anyhow::anyhow!("failed to store key in OS keychain: {e}"),
+                })?;
+                Ok(())
+            }
+        }
+    }
+
+    fn generate_key() -> Vec<u8> {
+        let mut key = vec![0u8; 32];
+        rand::rng().fill_bytes(&mut key);
+        key
+    }
+
+    fn read_key_file(path: &Path) -> Result<Vec<u8>> {
+        let hex_str = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read key from {}", path.display()))?;
+        let key = hex::decode(hex_str.trim()).context("invalid key hex")?;
+        if key.len() != 32 {
+            bail!("invalid key length: expected 32 bytes, got {}", key.len());
+        }
+        Ok(key)
+    }
+
+    fn write_key_file(path: &Path, key: &[u8]) -> Result<()> {
+        let dir = path.parent().context("key path has no parent")?;
+        let tmp = NamedTempFile::new_in(dir)?;
+        std::fs::write(tmp.path(), hex::encode(key))?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
+        }
+        tmp.persist(path)
+            .with_context(|| format!("failed to persist key to {}", path.display()))?;
+        Ok(())
+    }
+
+    pub(crate) fn write_marker(esk_dir: &Path, value: &str) -> Result<()> {
+        let marker = esk_dir.join("key-provider");
+        std::fs::write(&marker, value)
+            .with_context(|| format!("failed to write {}", marker.display()))?;
+        Ok(())
+    }
+}
+
 pub struct SecretStore {
     key: Vec<u8>,
     store_path: PathBuf,
-    key_path: PathBuf,
 }
 
 impl std::fmt::Debug for SecretStore {
@@ -164,6 +309,15 @@ impl Drop for SecretStore {
 impl SecretStore {
     /// Load existing store or create a new empty one.
     pub fn load_or_create(root: &Path) -> Result<Self> {
+        Self::load_or_create_with_provider(root, None)
+    }
+
+    /// Load existing store or create a new one, optionally forcing a specific key provider.
+    /// When `provider_override` is `Some`, writes the marker file and uses that provider.
+    pub(crate) fn load_or_create_with_provider(
+        root: &Path,
+        provider_override: Option<&str>,
+    ) -> Result<Self> {
         let esk_dir = root.join(".esk");
         if !esk_dir.is_dir() {
             std::fs::create_dir_all(&esk_dir)
@@ -174,22 +328,21 @@ impl SecretStore {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(&esk_dir, std::fs::Permissions::from_mode(0o700))?;
         }
+
+        if let Some(prov) = provider_override {
+            KeyProvider::write_marker(&esk_dir, prov)?;
+        }
+
+        let provider = KeyProvider::from_marker(&esk_dir)?;
         let store_path = esk_dir.join("store.enc");
-        let key_path = esk_dir.join("store.key");
 
-        let key = if key_path.is_file() {
-            Self::read_key(&key_path)?
+        let key = if provider.exists() {
+            provider.load()?
         } else {
-            let k = Self::generate_key();
-            Self::write_key(&key_path, &k)?;
-            k
+            provider.create()?
         };
 
-        let store = Self {
-            key,
-            store_path,
-            key_path,
-        };
+        let store = Self { key, store_path };
 
         // Create empty store file if it doesn't exist
         if !store.store_path.is_file() {
@@ -208,14 +361,13 @@ impl SecretStore {
 
     /// Open an existing store (errors if key or store file is missing).
     pub fn open(root: &Path) -> Result<Self> {
-        let store_path = root.join(".esk/store.enc");
-        let key_path = root.join(".esk/store.key");
+        let esk_dir = root.join(".esk");
+        let store_path = esk_dir.join("store.enc");
 
-        if !key_path.is_file() {
-            bail!(
-                "encryption key not found at {}. Run `esk init` first.",
-                key_path.display()
-            );
+        let provider = KeyProvider::from_marker(&esk_dir)?;
+
+        if !provider.exists() {
+            bail!("encryption key not found. Run `esk init` first.");
         }
         if !store_path.is_file() {
             bail!(
@@ -224,23 +376,31 @@ impl SecretStore {
             );
         }
 
-        let key = Self::read_key(&key_path)?;
-        Ok(Self {
-            key,
-            store_path,
-            key_path,
-        })
+        let key = provider.load()?;
+        Ok(Self { key, store_path })
     }
 
-    /// Acquire an exclusive file lock on store.key, run the closure, then release.
+    fn lock_path(&self) -> PathBuf {
+        self.store_path
+            .parent()
+            .expect("store_path has no parent")
+            .join("lock")
+    }
+
+    /// Acquire an exclusive file lock on `.esk/lock`, run the closure, then release.
     fn with_lock<F, R>(&self, f: F) -> Result<R>
     where
         F: FnOnce() -> Result<R>,
     {
-        let file = std::fs::File::open(&self.key_path)
-            .with_context(|| format!("failed to open {} for locking", self.key_path.display()))?;
+        let lock_path = self.lock_path();
+        if !lock_path.exists() {
+            std::fs::File::create(&lock_path)
+                .with_context(|| format!("failed to create lock file {}", lock_path.display()))?;
+        }
+        let file = std::fs::File::open(&lock_path)
+            .with_context(|| format!("failed to open {} for locking", lock_path.display()))?;
         file.lock_exclusive()
-            .with_context(|| format!("failed to acquire lock on {}", self.key_path.display()))?;
+            .with_context(|| format!("failed to acquire lock on {}", lock_path.display()))?;
         let result = f();
         // Lock released when `file` is dropped
         drop(file);
@@ -415,36 +575,6 @@ impl SecretStore {
         serde_json::from_str(&json).context("decrypted payload is not valid JSON")
     }
 
-    fn generate_key() -> Vec<u8> {
-        let mut key = vec![0u8; 32];
-        rand::rng().fill_bytes(&mut key);
-        key
-    }
-
-    fn read_key(path: &Path) -> Result<Vec<u8>> {
-        let hex_str = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read key from {}", path.display()))?;
-        let key = hex::decode(hex_str.trim()).context("invalid key hex")?;
-        if key.len() != 32 {
-            bail!("invalid key length: expected 32 bytes, got {}", key.len());
-        }
-        Ok(key)
-    }
-
-    fn write_key(path: &Path, key: &[u8]) -> Result<()> {
-        let dir = path.parent().context("key path has no parent")?;
-        let tmp = NamedTempFile::new_in(dir)?;
-        std::fs::write(tmp.path(), hex::encode(key))?;
-        // Restrict permissions before persisting so the file is never world-readable
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
-        }
-        tmp.persist(path)
-            .with_context(|| format!("failed to persist key to {}", path.display()))?;
-        Ok(())
-    }
 }
 
 #[cfg(test)]
@@ -495,6 +625,8 @@ mod tests {
     #[test]
     fn open_missing_key() {
         let dir = tmp_root();
+        // Create .esk dir so from_marker can run, but no key file
+        std::fs::create_dir_all(dir.path().join(".esk")).unwrap();
         let err = SecretStore::open(dir.path()).unwrap_err();
         assert!(err.to_string().contains("encryption key not found"));
     }

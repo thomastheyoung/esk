@@ -69,7 +69,12 @@ pub enum Commands {
         prune: bool,
     },
     /// Initialize encrypted store and config
-    Init,
+    Init {
+        /// Store encryption key in OS keychain instead of file
+        #[arg(long)]
+        #[cfg_attr(not(feature = "keychain"), arg(hide = true))]
+        keychain: bool,
+    },
     /// Set a secret value
     Set {
         /// Secret key name

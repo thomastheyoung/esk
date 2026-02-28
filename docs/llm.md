@@ -8,6 +8,10 @@ esk manages encrypted secrets locally and deploys them to cloud services (Cloudf
 
 Initialize a new esk project in the current directory. Creates `esk.yaml`, `.esk/store.enc`, and `.esk/store.key`.
 
+| Flag | Description |
+|------|-------------|
+| `--keychain` | Store encryption key in OS keychain instead of file (requires `keychain` feature) |
+
 ### `esk set <KEY> --env <ENV>`
 
 Set a secret value. Prompts interactively for the value unless `--value` is provided.

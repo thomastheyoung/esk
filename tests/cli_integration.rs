@@ -13,7 +13,7 @@ use serde_json::json;
 #[test]
 fn init_creates_all_files() {
     let dir = tempfile::tempdir().unwrap();
-    cli::init::run(dir.path()).unwrap();
+    cli::init::run(dir.path(), false).unwrap();
     assert!(dir.path().join("esk.yaml").is_file());
     assert!(dir.path().join(".esk/store.enc").is_file());
     assert!(dir.path().join(".esk/store.key").is_file());
@@ -24,9 +24,9 @@ fn init_creates_all_files() {
 #[test]
 fn init_idempotent() {
     let dir = tempfile::tempdir().unwrap();
-    cli::init::run(dir.path()).unwrap();
+    cli::init::run(dir.path(), false).unwrap();
     let key1 = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
-    cli::init::run(dir.path()).unwrap();
+    cli::init::run(dir.path(), false).unwrap();
     let key2 = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
     assert_eq!(key1, key2); // Key not overwritten
 }
@@ -35,12 +35,12 @@ fn init_idempotent() {
 fn init_updates_gitignore_with_esk_entries() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(".gitignore"), "node_modules\n").unwrap();
-    cli::init::run(dir.path()).unwrap();
+    cli::init::run(dir.path(), false).unwrap();
 
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(
         gitignore,
-        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n"
+        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n"
     );
 }
 
@@ -49,17 +49,19 @@ fn init_gitignore_update_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
         dir.path().join(".gitignore"),
-        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n",
+        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n",
     )
     .unwrap();
 
-    cli::init::run(dir.path()).unwrap();
-    cli::init::run(dir.path()).unwrap();
+    cli::init::run(dir.path(), false).unwrap();
+    cli::init::run(dir.path(), false).unwrap();
 
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(gitignore.matches(".esk/store.key").count(), 1);
     assert_eq!(gitignore.matches(".esk/deploy-index.json").count(), 1);
     assert_eq!(gitignore.matches(".esk/sync-index.json").count(), 1);
+    assert_eq!(gitignore.matches(".esk/lock").count(), 1);
+    assert_eq!(gitignore.matches(".esk/key-provider").count(), 1);
 }
 
 #[test]
@@ -67,12 +69,12 @@ fn init_creates_gitignore_when_missing() {
     let dir = tempfile::tempdir().unwrap();
     assert!(!dir.path().join(".gitignore").exists());
 
-    cli::init::run(dir.path()).unwrap();
+    cli::init::run(dir.path(), false).unwrap();
 
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
     assert_eq!(
         gitignore,
-        "# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n"
+        "# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n"
     );
 }
 

@@ -58,9 +58,9 @@ fn run() -> Result<()> {
                 },
             )?;
         }
-        Commands::Init => {
+        Commands::Init { keychain } => {
             let cwd = std::env::current_dir()?;
-            esk::cli::init::run(&cwd)?;
+            esk::cli::init::run(&cwd, *keychain)?;
         }
         Commands::Set {
             key,
