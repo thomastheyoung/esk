@@ -201,7 +201,7 @@ remotes:                           # Sync remotes (esk sync)
     profile: my-profile
     format: encrypted
   gcp:                             # GCP Secret Manager
-    gcp_project: my-gcp-project
+    project: my-gcp-project
     secret_name: "{project}-{environment}"
   azure:                           # Azure Key Vault
     vault_name: my-vault

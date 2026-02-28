@@ -61,7 +61,7 @@ impl SyncRemote for GcpSecretManagerRemote<'_> {
             )
         })?;
 
-        let project = &self.remote_config.gcp_project;
+        let project = &self.remote_config.project;
         let output = self
             .runner
             .run(
@@ -88,7 +88,7 @@ impl SyncRemote for GcpSecretManagerRemote<'_> {
         let json = serde_json::to_string(&json_map).context("failed to serialize secrets")?;
 
         let secret_name = self.secret_name(env);
-        let project = &self.remote_config.gcp_project;
+        let project = &self.remote_config.project;
 
         // Try to add a new version
         let output = self
@@ -162,7 +162,7 @@ impl SyncRemote for GcpSecretManagerRemote<'_> {
 
     fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let secret_name = self.secret_name(env);
-        let project = &self.remote_config.gcp_project;
+        let project = &self.remote_config.project;
 
         let output = self
             .runner
@@ -232,7 +232,7 @@ project: myapp
 environments: [dev, prod]
 remotes:
   gcp:
-    gcp_project: my-gcp-project
+    project: my-gcp-project
     secret_name: "{project}-{environment}"
 "#
     }

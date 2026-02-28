@@ -444,7 +444,7 @@ pub struct S3RemoteConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct GcpSecretManagerRemoteConfig {
-    pub gcp_project: String,
+    pub project: String,
     /// Secret name pattern, e.g. "{project}-{environment}".
     pub secret_name: String,
 }

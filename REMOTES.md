@@ -396,20 +396,20 @@ Uses the `gcloud` CLI to store and retrieve environment snapshots as JSON in GCP
 
 - [Google Cloud CLI](https://cloud.google.com/sdk/docs/install) (`gcloud`) installed and authenticated.
 
-Preflight runs `gcloud auth print-access-token --project <gcp_project>` to verify authentication and project access.
+Preflight runs `gcloud auth print-access-token --project <project>` to verify authentication and project access.
 
 ### Configuration
 
 ```yaml
 remotes:
   gcp:
-    gcp_project: my-gcp-project
+    project: my-gcp-project
     secret_name: "{project}-{environment}"
 ```
 
 | Field         | Required | Description                                                                  |
 | ------------- | -------- | ---------------------------------------------------------------------------- |
-| `gcp_project` | Yes      | GCP project ID.                                                              |
+| `project`     | Yes      | GCP project ID.                                                              |
 | `secret_name` | Yes      | Secret name pattern. Supports `{project}` and `{environment}` interpolation. |
 
 ### Command executed
