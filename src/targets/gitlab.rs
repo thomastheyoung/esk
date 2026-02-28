@@ -62,7 +62,7 @@ impl DeployTarget for GitlabTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run glab for {key}"))?
+            .with_context(|| format!("failed to run glab variable set for {key}"))?
             .check("glab variable set", key)
     }
 
@@ -73,7 +73,7 @@ impl DeployTarget for GitlabTarget<'_> {
 
         self.runner
             .run("glab", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run glab delete for {key}"))?
+            .with_context(|| format!("failed to run glab variable delete for {key}"))?
             .check("glab variable delete", key)
     }
 }

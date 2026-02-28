@@ -63,7 +63,7 @@ impl DeployTarget for RailwayTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run railway for {key}"))?
+            .with_context(|| format!("failed to run railway variables set for {key}"))?
             .check("railway variables set", key)
     }
 
@@ -74,7 +74,7 @@ impl DeployTarget for RailwayTarget<'_> {
 
         self.runner
             .run("railway", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run railway delete for {key}"))?
+            .with_context(|| format!("failed to run railway variables delete for {key}"))?
             .check("railway variables delete", key)
     }
 }

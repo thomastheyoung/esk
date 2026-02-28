@@ -83,7 +83,7 @@ impl DeployTarget for FlyTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run fly for {key}"))?
+            .with_context(|| format!("failed to run fly secrets import for {key}"))?
             .check("fly secrets import", key)
     }
 
@@ -96,7 +96,7 @@ impl DeployTarget for FlyTarget<'_> {
 
         self.runner
             .run("fly", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run fly delete for {key}"))?
+            .with_context(|| format!("failed to run fly secrets unset for {key}"))?
             .check("fly secrets unset", key)
     }
 }

@@ -103,7 +103,7 @@ impl DeployTarget for ConvexTarget<'_> {
                     stdin: Some(value.as_bytes().to_vec()),
                 },
             )
-            .with_context(|| format!("failed to run convex for {key}"))?
+            .with_context(|| format!("failed to run convex env set for {key}"))?
             .check("convex env set", key)
     }
 
@@ -124,7 +124,7 @@ impl DeployTarget for ConvexTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run convex delete for {key}"))?
+            .with_context(|| format!("failed to run convex env unset for {key}"))?
             .check("convex env unset", key)
     }
 }

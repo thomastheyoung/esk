@@ -80,7 +80,7 @@ impl DeployTarget for SupabaseTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run supabase for {key}"))?
+            .with_context(|| format!("failed to run supabase secrets set for {key}"))?
             .check("supabase secrets set", key)
     }
 
@@ -93,7 +93,7 @@ impl DeployTarget for SupabaseTarget<'_> {
 
         self.runner
             .run("supabase", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run supabase delete for {key}"))?
+            .with_context(|| format!("failed to run supabase secrets unset for {key}"))?
             .check("supabase secrets unset", key)
     }
 }

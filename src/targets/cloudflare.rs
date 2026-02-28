@@ -44,7 +44,7 @@ impl CloudflareTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run wrangler pages for {key}"))?
+            .with_context(|| format!("failed to run wrangler pages secret put for {key}"))?
             .check("wrangler pages secret put", key)
     }
 
@@ -69,7 +69,7 @@ impl CloudflareTarget<'_> {
 
         self.runner
             .run("wrangler", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run wrangler pages delete for {key}"))?
+            .with_context(|| format!("failed to run wrangler pages secret delete for {key}"))?
             .check("wrangler pages secret delete", key)
     }
 }
@@ -129,7 +129,7 @@ impl DeployTarget for CloudflareTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run wrangler for {key}"))?
+            .with_context(|| format!("failed to run wrangler secret put for {key}"))?
             .check("wrangler secret put", key)
     }
 
@@ -162,7 +162,7 @@ impl DeployTarget for CloudflareTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run wrangler delete for {key}"))?
+            .with_context(|| format!("failed to run wrangler secret delete for {key}"))?
             .check("wrangler secret delete", key)
     }
 }

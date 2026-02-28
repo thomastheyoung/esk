@@ -63,7 +63,7 @@ impl DeployTarget for NetlifyTarget<'_> {
 
         self.runner
             .run("netlify", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run netlify for {key}"))?
+            .with_context(|| format!("failed to run netlify env:set for {key}"))?
             .check("netlify env:set", key)
     }
 
@@ -78,7 +78,7 @@ impl DeployTarget for NetlifyTarget<'_> {
 
         self.runner
             .run("netlify", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run netlify delete for {key}"))?
+            .with_context(|| format!("failed to run netlify env:unset for {key}"))?
             .check("netlify env:unset", key)
     }
 }

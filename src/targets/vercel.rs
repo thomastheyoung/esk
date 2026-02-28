@@ -75,7 +75,7 @@ impl DeployTarget for VercelTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run vercel for {key}"))?
+            .with_context(|| format!("failed to run vercel env add for {key}"))?
             .check("vercel env add", key)
     }
 
@@ -88,7 +88,7 @@ impl DeployTarget for VercelTarget<'_> {
 
         self.runner
             .run("vercel", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run vercel delete for {key}"))?
+            .with_context(|| format!("failed to run vercel env rm for {key}"))?
             .check("vercel env rm", key)
     }
 }

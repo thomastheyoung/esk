@@ -76,7 +76,7 @@ impl DeployTarget for HerokuTarget<'_> {
 
         self.runner
             .run("heroku", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run heroku for {key}"))?
+            .with_context(|| format!("failed to run heroku config:set for {key}"))?
             .check("heroku config:set", key)
     }
 
@@ -89,7 +89,7 @@ impl DeployTarget for HerokuTarget<'_> {
 
         self.runner
             .run("heroku", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run heroku delete for {key}"))?
+            .with_context(|| format!("failed to run heroku config:unset for {key}"))?
             .check("heroku config:unset", key)
     }
 }

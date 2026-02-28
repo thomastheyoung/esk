@@ -67,7 +67,7 @@ impl DeployTarget for GithubTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run gh for {key}"))?
+            .with_context(|| format!("failed to run gh secret set for {key}"))?
             .check("gh secret set", key)
     }
 
@@ -82,7 +82,7 @@ impl DeployTarget for GithubTarget<'_> {
 
         self.runner
             .run("gh", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run gh delete for {key}"))?
+            .with_context(|| format!("failed to run gh secret delete for {key}"))?
             .check("gh secret delete", key)
     }
 }

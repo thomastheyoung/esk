@@ -57,7 +57,7 @@ impl DeployTarget for CircleciTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run circleci for {key}"))?
+            .with_context(|| format!("failed to run circleci context store-secret for {key}"))?
             .check("circleci context store-secret", key)
     }
 
@@ -71,7 +71,7 @@ impl DeployTarget for CircleciTarget<'_> {
 
         self.runner
             .run("circleci", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run circleci delete for {key}"))?
+            .with_context(|| format!("failed to run circleci context remove-secret for {key}"))?
             .check("circleci context remove-secret", key)
     }
 }
