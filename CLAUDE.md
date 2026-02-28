@@ -199,6 +199,7 @@ Secrets can declare a `validate:` block (`Validation` struct) and a `required:` 
 - Atomic file writes for store and deploy index (write to temp, rename)
 - Secrets in memory should be zeroized when possible (`zeroize` crate)
 - No `unwrap()` on fallible operations — propagate errors
+- **Never `git push` unless explicitly asked** — commit locally, let the user decide when to push
 
 ## Environments
 
