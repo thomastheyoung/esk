@@ -4211,6 +4211,244 @@ fn deploy_gitlab_skip_unchanged() {
     assert_eq!(calls.len(), 2);
 }
 
+// === circleci target integration tests ===
+
+#[test]
+fn deploy_circleci_calls_cli() {
+    let project = TestProject::with_store(CIRCLECI_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // circleci --version
+    runner.push_success(b"", b""); // circleci context store-secret
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[1].program, "circleci");
+    assert_eq!(
+        calls[1].args,
+        vec![
+            "context",
+            "store-secret",
+            "--org-id",
+            "00000000-0000-0000-0000-000000000000",
+            "my-context",
+            "API_KEY"
+        ]
+    );
+    // Secret value passed via stdin, not in args
+    let stdin = calls[1].stdin.as_ref().expect("stdin should be set");
+    assert_eq!(stdin, b"secret123");
+}
+
+#[test]
+fn deploy_circleci_records_tracker() {
+    let project = TestProject::with_store(CIRCLECI_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // circleci --version
+    runner.push_success(b"", b""); // circleci context store-secret
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let index = DeployIndex::load(&project.deploy_index_path());
+    assert!(index
+        .records
+        .keys()
+        .any(|k| k.contains("API_KEY") && k.contains("circleci")));
+}
+
+#[test]
+fn deploy_circleci_failure_tracked() {
+    let project = TestProject::with_store(CIRCLECI_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // circleci --version
+    runner.push_failure(b"api error");
+
+    let err = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("failed"));
+
+    let index = DeployIndex::load(&project.deploy_index_path());
+    let record = index
+        .records
+        .values()
+        .find(|r| r.target.contains("circleci"))
+        .unwrap();
+    assert_eq!(
+        record.last_deploy_status,
+        esk::deploy_tracker::DeployStatus::Failed
+    );
+}
+
+#[test]
+fn deploy_circleci_skip_unchanged() {
+    let project = TestProject::with_store(CIRCLECI_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // circleci --version
+    runner.push_success(b"", b""); // circleci context store-secret
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // circleci --version
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    // Only the preflight call, no deploy since hash unchanged
+    assert_eq!(calls.len(), 1);
+}
+
+#[test]
+fn deploy_circleci_delete() {
+    let project = TestProject::with_store(CIRCLECI_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("API_KEY", "dev", "secret").unwrap();
+    // Deploy to establish initial state
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // circleci --version
+    runner.push_success(b"", b""); // circleci context store-secret
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Delete the key (creates tombstone)
+    store.delete("API_KEY", "dev").unwrap();
+
+    // Deploy again — should call delete_secret
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // circleci --version
+    runner.push_success(b"", b""); // circleci context remove-secret
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[1].program, "circleci");
+    assert_eq!(
+        calls[1].args,
+        vec![
+            "context",
+            "remove-secret",
+            "--org-id",
+            "00000000-0000-0000-0000-000000000000",
+            "my-context",
+            "API_KEY"
+        ]
+    );
+    // No stdin for delete
+    assert!(calls[1].stdin.is_none());
+}
+
 // === generate ===
 
 #[test]

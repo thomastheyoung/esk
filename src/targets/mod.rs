@@ -1,5 +1,6 @@
 pub mod aws_lambda;
 pub mod aws_ssm;
+pub mod circleci;
 pub mod cloudflare;
 pub mod convex;
 pub mod custom;
@@ -385,6 +386,17 @@ pub(crate) fn target_candidates<'a>(
                 runner,
             }),
             ok_message: "swarm active",
+        });
+    }
+
+    if let Some(target_config) = &config.targets.circleci {
+        candidates.push(TargetCandidate {
+            target: Box::new(circleci::CircleciTarget {
+                config,
+                target_config,
+                runner,
+            }),
+            ok_message: "circleci available",
         });
     }
 

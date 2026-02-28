@@ -603,6 +603,25 @@ secrets:
       targets: {}
 "#;
 
+/// CircleCI target config for integration testing.
+pub const CIRCLECI_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+targets:
+  circleci:
+    org_id: "00000000-0000-0000-0000-000000000000"
+    context: my-context
+    env_flags:
+      prod: "--some-flag value"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        circleci: [dev, prod]
+"#;
+
 /// Custom target config for integration testing.
 pub const CUSTOM_CONFIG: &str = r#"
 project: testapp

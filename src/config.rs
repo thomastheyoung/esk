@@ -25,6 +25,7 @@ const BUILTIN_TARGET_NAMES: &[&str] = &[
     "aws_lambda",
     "kubernetes",
     "docker",
+    "circleci",
     "custom",
 ];
 
@@ -123,6 +124,8 @@ pub struct TargetsConfig {
     pub kubernetes: Option<KubernetesTargetConfig>,
     #[serde(default)]
     pub docker: Option<DockerTargetConfig>,
+    #[serde(default)]
+    pub circleci: Option<CircleciTargetConfig>,
     #[serde(default)]
     pub custom: BTreeMap<String, CustomTargetConfig>,
 }
@@ -283,6 +286,14 @@ pub struct DockerTargetConfig {
 
 fn default_docker_name_pattern() -> String {
     "{project}-{environment}-{key}".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CircleciTargetConfig {
+    pub org_id: String,
+    pub context: String,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
 }
 
 // --- Custom target config ---
@@ -1071,6 +1082,7 @@ impl Config {
             ("aws_lambda", self.targets.aws_lambda.is_some()),
             ("kubernetes", self.targets.kubernetes.is_some()),
             ("docker", self.targets.docker.is_some()),
+            ("circleci", self.targets.circleci.is_some()),
         ]
         .into_iter()
         .filter(|(_, present)| *present)
