@@ -2051,7 +2051,7 @@ remotes:
     let results =
         cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
     sync_index.save().unwrap();
-    assert!(results.iter().any(|r| !r.success));
+    assert!(results.iter().any(|r| r.outcome.is_err()));
 
     let index = SyncIndex::load(&project.sync_index_path());
     assert_eq!(index.records.len(), 1);

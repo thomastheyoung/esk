@@ -20,15 +20,6 @@ use crate::targets::CommandRunner;
 /// The key used to store version metadata in remote payloads.
 pub const ESK_VERSION_KEY: &str = "_esk_version";
 
-/// Extract bare-key secrets for a specific environment from a store payload.
-/// Delegates to `StorePayload::env_secrets`.
-pub fn extract_env_secrets(
-    payload: &StorePayload,
-    env: &str,
-) -> Option<(BTreeMap<String, String>, u64)> {
-    payload.env_secrets(env)
-}
-
 /// Parse a pulled string-valued secret map back into composite-key secrets.
 /// Extracts the version from `ESK_VERSION_KEY`, strips it from the map,
 /// and re-adds the `:env` suffix to all remaining keys.
@@ -92,8 +83,7 @@ pub trait SyncRemote: Send + Sync {
 /// Health status of a configured remote.
 pub struct RemoteHealth {
     pub name: String,
-    pub ok: bool,
-    pub message: String,
+    pub status: crate::targets::HealthStatus,
 }
 
 struct RemoteCandidate<'a> {
@@ -232,13 +222,11 @@ pub fn check_remote_health(config: &Config, runner: &dyn CommandRunner) -> Vec<R
         match candidate.remote.preflight() {
             Ok(()) => health.push(RemoteHealth {
                 name,
-                ok: true,
-                message: candidate.ok_message.to_string(),
+                status: crate::targets::HealthStatus::Ok(candidate.ok_message.to_string()),
             }),
             Err(e) => health.push(RemoteHealth {
                 name,
-                ok: false,
-                message: e.to_string(),
+                status: crate::targets::HealthStatus::Failed(e.to_string()),
             }),
         }
     }
@@ -455,7 +443,7 @@ remotes:
 
         let health = check_remote_health(&config, &DummyRunner);
         assert_eq!(health.len(), 1);
-        assert!(health[0].ok);
+        assert!(health[0].status.is_ok());
         assert_eq!(health[0].name, "1password");
     }
 
@@ -477,8 +465,8 @@ remotes:
         let runner = ErrorCommandRunner::new("op not found");
         let health = check_remote_health(&config, &runner);
         assert_eq!(health.len(), 1);
-        assert!(!health[0].ok);
-        assert!(health[0].message.contains("op) is not installed"));
+        assert!(!health[0].status.is_ok());
+        assert!(health[0].status.message().contains("op) is not installed"));
     }
 
     #[test]

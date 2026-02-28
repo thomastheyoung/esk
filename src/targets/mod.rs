@@ -213,11 +213,28 @@ pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
     Ok(())
 }
 
+/// Health check outcome for a target or remote.
+pub enum HealthStatus {
+    Ok(String),
+    Failed(String),
+}
+
+impl HealthStatus {
+    pub fn is_ok(&self) -> bool {
+        matches!(self, HealthStatus::Ok(_))
+    }
+
+    pub fn message(&self) -> &str {
+        match self {
+            HealthStatus::Ok(msg) | HealthStatus::Failed(msg) => msg,
+        }
+    }
+}
+
 /// Health status of a configured target.
 pub struct TargetHealth {
     pub name: String,
-    pub ok: bool,
-    pub message: String,
+    pub status: HealthStatus,
 }
 
 pub(crate) struct TargetCandidate<'a> {
@@ -475,13 +492,11 @@ pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<T
                 s.spawn(move || match c.target.preflight() {
                     Ok(()) => TargetHealth {
                         name,
-                        ok: true,
-                        message: ok_message.to_string(),
+                        status: HealthStatus::Ok(ok_message.to_string()),
                     },
                     Err(e) => TargetHealth {
                         name,
-                        ok: false,
-                        message: e.to_string(),
+                        status: HealthStatus::Failed(e.to_string()),
                     },
                 })
             })
@@ -803,9 +818,9 @@ targets:
 
         let health = check_target_health(&config, &OkRunner);
         assert_eq!(health.len(), 2);
-        assert!(health[0].ok);
+        assert!(health[0].status.is_ok());
         assert_eq!(health[0].name, "env");
-        assert!(health[1].ok);
+        assert!(health[1].status.is_ok());
         assert_eq!(health[1].name, "cloudflare");
     }
 
@@ -831,9 +846,9 @@ targets:
         let runner = ErrorCommandRunner::new("not found");
         let health = check_target_health(&config, &runner);
         assert_eq!(health.len(), 2);
-        assert!(health[0].ok); // env always ok
-        assert!(!health[1].ok); // cloudflare fails
-        assert!(health[1].message.contains("wrangler is not installed"));
+        assert!(health[0].status.is_ok()); // env always ok
+        assert!(!health[1].status.is_ok()); // cloudflare fails
+        assert!(health[1].status.message().contains("wrangler is not installed"));
     }
 
     #[test]

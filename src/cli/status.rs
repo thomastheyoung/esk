@@ -121,12 +121,19 @@ struct GroupedEntry {
     freshness: GroupedFreshness,
 }
 
+/// Whether to keep the oldest or newest timestamp when merging groups.
+#[derive(Clone, Copy)]
+enum TimestampPick {
+    Oldest,
+    Newest,
+}
+
 /// Groups deploy entries by (key, env), merging their target names.
 ///
 /// Freshness rule: if *any* entry in the group has no `last_deployed_at`,
-/// the group is `NeverDeployed`. Otherwise keep the oldest (for pending) or
-/// newest (for deployed) timestamp — the caller decides via `pick_newest`.
-fn group_entries(entries: &[DeployEntry], pick_newest: bool) -> Vec<GroupedEntry> {
+/// the group is `NeverDeployed`. Otherwise keep the oldest or newest
+/// timestamp based on `pick`.
+fn group_entries(entries: &[DeployEntry], pick: TimestampPick) -> Vec<GroupedEntry> {
     let mut groups: Vec<GroupedEntry> = Vec::new();
     let mut index: HashMap<(&str, &str), usize> = HashMap::new();
 
@@ -141,10 +148,9 @@ fn group_entries(entries: &[DeployEntry], pick_newest: bool) -> Vec<GroupedEntry
                     None => group.freshness = GroupedFreshness::NeverDeployed,
                     Some(ts) => {
                         if let GroupedFreshness::Timestamp(ref existing) = group.freshness {
-                            let replace = if pick_newest {
-                                ts > existing
-                            } else {
-                                ts < existing
+                            let replace = match pick {
+                                TimestampPick::Newest => ts > existing,
+                                TimestampPick::Oldest => ts < existing,
                             };
                             if replace {
                                 group.freshness = GroupedFreshness::Timestamp(ts.clone());
@@ -649,12 +655,12 @@ impl Dashboard {
                 .target_health
                 .iter()
                 .map(|h| {
-                    let icon = if h.ok {
+                    let icon = if h.status.is_ok() {
                         ui::icon_success()
                     } else {
                         ui::icon_failure()
                     };
-                    format!("  {} {:<14} {}", icon, h.name, style(&h.message).dim())
+                    format!("  {} {:<14} {}", icon, h.name, style(h.status.message()).dim())
                 })
                 .collect();
             cliclack::log::step(format!("Targets\n{}", lines.join("\n")))?;
@@ -711,7 +717,7 @@ impl Dashboard {
                     &format!("{} pending", self.pending.len()),
                     ui::SectionColor::Yellow,
                 ));
-                let groups = group_entries(&self.pending, false);
+                let groups = group_entries(&self.pending, TimestampPick::Oldest);
                 let shown = if all {
                     groups.len()
                 } else {
@@ -743,7 +749,7 @@ impl Dashboard {
                     &format!("{} unset", self.unset.len()),
                     ui::SectionColor::Dim,
                 ));
-                let groups = group_entries(&self.unset, false);
+                let groups = group_entries(&self.unset, TimestampPick::Oldest);
                 let shown = if all {
                     groups.len()
                 } else {
@@ -769,7 +775,7 @@ impl Dashboard {
                         &format!("{} deployed", self.deployed.len()),
                         ui::SectionColor::Green,
                     ));
-                    let groups = group_entries(&self.deployed, true);
+                    let groups = group_entries(&self.deployed, TimestampPick::Newest);
                     for group in &groups {
                         let targets = group.targets.join(", ");
                         let freshness = match &group.freshness {
@@ -1186,7 +1192,7 @@ remotes:
                 last_deployed_at: None,
             },
         ];
-        let groups = group_entries(&entries, false);
+        let groups = group_entries(&entries, TimestampPick::Oldest);
         assert_eq!(groups.len(), 1);
         assert_eq!(
             groups[0].targets,
@@ -1213,7 +1219,7 @@ remotes:
                 last_deployed_at: Some("2025-01-01T00:00:00Z".into()),
             },
         ];
-        let groups = group_entries(&entries, false);
+        let groups = group_entries(&entries, TimestampPick::Oldest);
         assert_eq!(groups.len(), 1);
         assert_eq!(
             groups[0].freshness,
@@ -1239,7 +1245,7 @@ remotes:
                 last_deployed_at: Some("2025-01-03T00:00:00Z".into()),
             },
         ];
-        let groups = group_entries(&entries, true);
+        let groups = group_entries(&entries, TimestampPick::Newest);
         assert_eq!(groups.len(), 1);
         assert_eq!(
             groups[0].freshness,
@@ -1265,7 +1271,7 @@ remotes:
                 last_deployed_at: None,
             },
         ];
-        let groups = group_entries(&entries, false);
+        let groups = group_entries(&entries, TimestampPick::Oldest);
         assert_eq!(groups[0].freshness, GroupedFreshness::NeverDeployed);
     }
 
@@ -1287,7 +1293,7 @@ remotes:
                 last_deployed_at: None,
             },
         ];
-        let groups = group_entries(&entries, false);
+        let groups = group_entries(&entries, TimestampPick::Oldest);
         assert_eq!(groups.len(), 2);
     }
 

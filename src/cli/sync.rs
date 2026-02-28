@@ -27,8 +27,7 @@ const SYNC_LINE_WIDTH: usize = 30;
 
 pub struct RemotePushResult {
     pub remote: String,
-    pub success: bool,
-    pub error: Option<String>,
+    pub outcome: Result<(), String>,
 }
 
 fn env_version_label(payload: &StorePayload, env: &str) -> String {
@@ -59,25 +58,26 @@ fn format_pull_line(name: &str, outcome: &PullOutcome) -> String {
 }
 
 /// Format a push result line for progressive rendering.
-fn format_push_line(name: &str, success: bool, dry_run: bool, error: Option<&str>) -> String {
+fn format_push_line(name: &str, outcome: Result<(), &str>, dry_run: bool) -> String {
     if dry_run {
         ui::format_dashboard_line(
             &format!("\u{2191} {name}"),
             &style("would push").dim().to_string(),
             SYNC_LINE_WIDTH,
         )
-    } else if success {
-        ui::format_dashboard_line(
-            &format!("\u{2191} {name}"),
-            &style("synced").green().to_string(),
-            SYNC_LINE_WIDTH,
-        )
     } else {
-        let status = match error {
-            Some(reason) => format!("{} \u{2014} {}", style("failed").red(), style(reason).dim()),
-            None => style("failed").red().to_string(),
-        };
-        ui::format_dashboard_line(&format!("\u{2191} {name}"), &status, SYNC_LINE_WIDTH)
+        match outcome {
+            Ok(()) => ui::format_dashboard_line(
+                &format!("\u{2191} {name}"),
+                &style("synced").green().to_string(),
+                SYNC_LINE_WIDTH,
+            ),
+            Err(reason) => {
+                let status =
+                    format!("{} \u{2014} {}", style("failed").red(), style(reason).dim());
+                ui::format_dashboard_line(&format!("\u{2191} {name}"), &status, SYNC_LINE_WIDTH)
+            }
+        }
     }
 }
 
@@ -113,8 +113,7 @@ pub fn push_to_remotes(
                 sync_index.record_success(rem.name(), env, pushed_version);
                 results.push(RemotePushResult {
                     remote: rem.name().to_string(),
-                    success: true,
-                    error: None,
+                    outcome: Ok(()),
                 });
             }
             Err(e) => {
@@ -126,8 +125,7 @@ pub fn push_to_remotes(
                 sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
                 results.push(RemotePushResult {
                     remote: rem.name().to_string(),
-                    success: false,
-                    error: Some(e.to_string()),
+                    outcome: Err(e.to_string()),
                 });
             }
         }
@@ -370,7 +368,7 @@ pub fn run_with_runner(
             let push_lines: Vec<String> = result
                 .sources_to_update
                 .iter()
-                .map(|name| format_push_line(name, true, true, None))
+                .map(|name| format_push_line(name, Ok(()), true))
                 .collect();
             cliclack::log::step(format!(
                 "Would push {} remote{}\n{}",
@@ -482,11 +480,11 @@ pub fn run_with_runner(
                 match res {
                     Ok(()) => {
                         sync_index.record_success(name, env, pushed_version);
-                        push_lines.push(format_push_line(name, true, false, None));
+                        push_lines.push(format_push_line(name, Ok(()), false));
                     }
                     Err(e) => {
                         sync_index.record_failure(name, env, pushed_version, e.to_string());
-                        push_lines.push(format_push_line(name, false, false, Some(&e.to_string())));
+                        push_lines.push(format_push_line(name, Err(&e.to_string()), false));
                         push_failure_count += 1;
                     }
                 }
