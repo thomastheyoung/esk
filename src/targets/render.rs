@@ -136,11 +136,17 @@ impl DeployTarget for RenderTarget<'_> {
         if !output.success {
             let body = String::from_utf8_lossy(&output.stdout);
             if body.contains("401") || body.contains("Unauthorized") {
-                anyhow::bail!("Render API key is invalid. Check your {} env var.", self.target_config.api_key_env);
+                anyhow::bail!(
+                    "Render API key is invalid. Check your {} env var.",
+                    self.target_config.api_key_env
+                );
             }
             let stderr = String::from_utf8_lossy(&output.stderr);
             if stderr.contains("401") || stderr.contains("Unauthorized") {
-                anyhow::bail!("Render API key is invalid. Check your {} env var.", self.target_config.api_key_env);
+                anyhow::bail!(
+                    "Render API key is invalid. Check your {} env var.",
+                    self.target_config.api_key_env
+                );
             }
             anyhow::bail!(
                 "render preflight failed: {}{}",
@@ -279,7 +285,10 @@ targets:
         assert_eq!(calls.len(), 2);
         assert_eq!(calls[0].args, vec!["--version"]);
         // Second call should be the auth check via curl --config
-        assert_eq!(calls[1].args, vec!["--config", "-", "--silent", "--fail-with-body"]);
+        assert_eq!(
+            calls[1].args,
+            vec!["--config", "-", "--silent", "--fail-with-body"]
+        );
         let stdin = String::from_utf8(calls[1].stdin.clone().unwrap()).unwrap();
         assert!(stdin.contains("Authorization: Bearer rnd_test_key_123"));
         assert!(stdin.contains("srv-abc123def456"));
@@ -354,7 +363,10 @@ targets:
             .deploy_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].args, vec!["--config", "-", "--silent", "--fail-with-body"]);
+        assert_eq!(
+            calls[0].args,
+            vec!["--config", "-", "--silent", "--fail-with-body"]
+        );
         let stdin = String::from_utf8(calls[0].stdin.clone().unwrap()).unwrap();
         assert!(stdin.contains("Authorization: Bearer rnd_deploy_key"));
         assert!(stdin.contains("Content-Type: application/json"));
@@ -390,7 +402,14 @@ targets:
         let calls = runner.take_calls();
         assert_eq!(
             calls[0].args,
-            vec!["--config", "-", "--silent", "--fail-with-body", "--proxy", "http://proxy:8080"]
+            vec![
+                "--config",
+                "-",
+                "--silent",
+                "--fail-with-body",
+                "--proxy",
+                "http://proxy:8080"
+            ]
         );
         std::env::remove_var(&env_name);
     }
@@ -413,7 +432,11 @@ targets:
             runner: &runner,
         };
         target
-            .deploy_secret("KEY", "val with \"quotes\" and \\backslash", &make_target(Some("web"), "dev"))
+            .deploy_secret(
+                "KEY",
+                "val with \"quotes\" and \\backslash",
+                &make_target(Some("web"), "dev"),
+            )
             .unwrap();
         let calls = runner.take_calls();
         let stdin = String::from_utf8(calls[0].stdin.clone().unwrap()).unwrap();
@@ -510,7 +533,10 @@ targets:
             .delete_secret("MY_KEY", &make_target(Some("web"), "dev"))
             .unwrap();
         let calls = runner.take_calls();
-        assert_eq!(calls[0].args, vec!["--config", "-", "--silent", "--fail-with-body"]);
+        assert_eq!(
+            calls[0].args,
+            vec!["--config", "-", "--silent", "--fail-with-body"]
+        );
         let stdin = String::from_utf8(calls[0].stdin.clone().unwrap()).unwrap();
         assert!(stdin.contains("Authorization: Bearer rnd_del_key"));
         assert!(stdin.contains("request = \"DELETE\""));

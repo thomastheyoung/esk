@@ -6607,7 +6607,10 @@ fn deploy_render_calls_curl() {
     assert_eq!(calls[0].args, vec!["--version"]);
     // Deploy call
     assert_eq!(calls[2].program, "curl");
-    assert_eq!(calls[2].args[0..4], vec!["--config", "-", "--silent", "--fail-with-body"]);
+    assert_eq!(
+        calls[2].args[0..4],
+        vec!["--config", "-", "--silent", "--fail-with-body"]
+    );
     // Check stdin config content
     let stdin = String::from_utf8(calls[2].stdin.clone().unwrap()).unwrap();
     assert!(stdin.contains("Authorization: Bearer rnd_integ_test_key"));

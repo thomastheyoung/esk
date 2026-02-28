@@ -660,7 +660,12 @@ impl Dashboard {
                     } else {
                         ui::icon_failure()
                     };
-                    format!("  {} {:<14} {}", icon, h.name, style(h.status.message()).dim())
+                    format!(
+                        "  {} {:<14} {}",
+                        icon,
+                        h.name,
+                        style(h.status.message()).dim()
+                    )
                 })
                 .collect();
             cliclack::log::step(format!("Targets\n{}", lines.join("\n")))?;

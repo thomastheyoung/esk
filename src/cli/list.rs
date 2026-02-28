@@ -63,7 +63,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let resolved = config.resolve_secrets()?;
 
     // Build deploy status map: (key, env) → worst status across all targets
-    let cell_statuses = build_cell_statuses(config, &resolved, &all_secrets)?;
+    let cell_statuses = build_cell_statuses(config, &resolved, &all_secrets);
 
     // Build set of (key, env) pairs that have at least one configured target
     let targeted: BTreeSet<(&str, &str)> = resolved
@@ -161,7 +161,7 @@ fn build_cell_statuses(
     config: &Config,
     resolved: &[ResolvedSecret],
     all_secrets: &BTreeMap<String, String>,
-) -> Result<BTreeMap<(String, String), CellStatus>> {
+) -> BTreeMap<(String, String), CellStatus> {
     let target_names: Vec<&str> = config.target_names();
     let index_path = config.root.join(".esk/deploy-index.json");
     let index = DeployIndex::load(&index_path);
@@ -207,7 +207,7 @@ fn build_cell_statuses(
         }
     }
 
-    Ok(statuses)
+    statuses
 }
 
 fn render_table(

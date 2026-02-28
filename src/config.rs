@@ -721,8 +721,7 @@ impl Config {
         let mut key_groups: BTreeMap<&str, &str> = BTreeMap::new();
         for (group, secrets) in &self.secrets {
             for key in secrets.keys() {
-                validate_key(key)
-                    .with_context(|| format!("secret '{key}' in group '{group}'"))?;
+                validate_key(key).with_context(|| format!("secret '{key}' in group '{group}'"))?;
                 if let Some(prev_group) = key_groups.get(key.as_str()) {
                     bail!("secret '{key}' is defined in multiple groups: {prev_group}, {group}");
                 }
@@ -1154,7 +1153,10 @@ impl Config {
             ("kubernetes", self.targets.kubernetes.is_some()),
             ("docker", self.targets.docker.is_some()),
             ("circleci", self.targets.circleci.is_some()),
-            ("azure_app_service", self.targets.azure_app_service.is_some()),
+            (
+                "azure_app_service",
+                self.targets.azure_app_service.is_some(),
+            ),
             ("gcp_cloud_run", self.targets.gcp_cloud_run.is_some()),
             ("render", self.targets.render.is_some()),
         ]

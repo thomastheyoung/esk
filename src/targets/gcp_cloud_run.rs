@@ -96,9 +96,7 @@ impl DeployTarget for GcpCloudRunTarget<'_> {
         let output = self
             .runner
             .run("gcloud", &args, CommandOpts::default())
-            .with_context(|| {
-                format!("failed to run gcloud run services update for {key}")
-            })?;
+            .with_context(|| format!("failed to run gcloud run services update for {key}"))?;
 
         output.check("gcloud run services update", key)
     }
@@ -209,12 +207,7 @@ targets:
         assert_eq!(calls[0].1, vec!["--version"]);
         assert_eq!(
             calls[1].1,
-            vec![
-                "auth",
-                "print-access-token",
-                "--project",
-                "my-gcp-project"
-            ]
+            vec!["auth", "print-access-token", "--project", "my-gcp-project"]
         );
     }
 

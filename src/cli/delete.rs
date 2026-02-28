@@ -24,7 +24,10 @@ struct DeleteReport {
 
 impl DeleteReport {
     fn remote_failure_count(&self) -> usize {
-        self.push_results.iter().filter(|r| r.outcome.is_err()).count()
+        self.push_results
+            .iter()
+            .filter(|r| r.outcome.is_err())
+            .count()
     }
 
     fn render(&self) -> Result<()> {

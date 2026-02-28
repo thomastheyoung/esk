@@ -848,7 +848,10 @@ targets:
         assert_eq!(health.len(), 2);
         assert!(health[0].status.is_ok()); // env always ok
         assert!(!health[1].status.is_ok()); // cloudflare fails
-        assert!(health[1].status.message().contains("wrangler is not installed"));
+        assert!(health[1]
+            .status
+            .message()
+            .contains("wrangler is not installed"));
     }
 
     #[test]

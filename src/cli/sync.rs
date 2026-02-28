@@ -73,8 +73,7 @@ fn format_push_line(name: &str, outcome: Result<(), &str>, dry_run: bool) -> Str
                 SYNC_LINE_WIDTH,
             ),
             Err(reason) => {
-                let status =
-                    format!("{} \u{2014} {}", style("failed").red(), style(reason).dim());
+                let status = format!("{} \u{2014} {}", style("failed").red(), style(reason).dim());
                 ui::format_dashboard_line(&format!("\u{2191} {name}"), &status, SYNC_LINE_WIDTH)
             }
         }
