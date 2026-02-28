@@ -1,3 +1,4 @@
+pub mod aws_lambda;
 pub mod aws_ssm;
 pub mod cloudflare;
 pub mod convex;
@@ -346,6 +347,17 @@ pub(crate) fn target_candidates<'a>(
     if let Some(target_config) = &config.targets.aws_ssm {
         candidates.push(TargetCandidate {
             target: Box::new(aws_ssm::AwsSsmTarget {
+                config,
+                target_config,
+                runner,
+            }),
+            ok_message: "aws authenticated",
+        });
+    }
+
+    if let Some(target_config) = &config.targets.aws_lambda {
+        candidates.push(TargetCandidate {
+            target: Box::new(aws_lambda::AwsLambdaTarget {
                 config,
                 target_config,
                 runner,

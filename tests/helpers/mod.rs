@@ -381,6 +381,27 @@ secrets:
         kubernetes: [dev, prod]
 "#;
 
+/// AWS Lambda target config for integration testing.
+pub const AWS_LAMBDA_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+
+targets:
+  aws_lambda:
+    function_name:
+      dev: testapp-dev
+      prod: testapp-prod
+    region: us-east-1
+    env_flags:
+      prod: "--no-paginate"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        aws_lambda: [dev, prod]
+"#;
+
 /// Docker Swarm target config for integration testing.
 pub const DOCKER_CONFIG: &str = r#"
 project: testapp

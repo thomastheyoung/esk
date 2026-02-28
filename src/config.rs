@@ -22,6 +22,7 @@ const BUILTIN_TARGET_NAMES: &[&str] = &[
     "railway",
     "gitlab",
     "aws_ssm",
+    "aws_lambda",
     "kubernetes",
     "docker",
     "custom",
@@ -115,6 +116,8 @@ pub struct TargetsConfig {
     // Phase 2: Cloud infrastructure
     #[serde(default)]
     pub aws_ssm: Option<AwsSsmTargetConfig>,
+    #[serde(default)]
+    pub aws_lambda: Option<AwsLambdaTargetConfig>,
     // Phase 4: Full cloud coverage
     #[serde(default)]
     pub kubernetes: Option<KubernetesTargetConfig>,
@@ -235,6 +238,21 @@ pub struct AwsSsmTargetConfig {
 
 fn default_ssm_parameter_type() -> String {
     "SecureString".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AwsLambdaTargetConfig {
+    /// Maps esk env → Lambda function name.
+    pub function_name: BTreeMap<String, String>,
+    #[serde(default)]
+    pub region: Option<String>,
+    #[serde(default)]
+    pub profile: Option<String>,
+    /// Optional KMS key ARN for encrypting env vars at rest.
+    #[serde(default)]
+    pub kms_key_arn: Option<String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1050,6 +1068,7 @@ impl Config {
             ("railway", self.targets.railway.is_some()),
             ("gitlab", self.targets.gitlab.is_some()),
             ("aws_ssm", self.targets.aws_ssm.is_some()),
+            ("aws_lambda", self.targets.aws_lambda.is_some()),
             ("kubernetes", self.targets.kubernetes.is_some()),
             ("docker", self.targets.docker.is_some()),
         ]

@@ -833,13 +833,32 @@ pub fn run_with_runner(
                     error: None,
                 });
             } else {
-                index.remove_record(&orphan.tracker_key);
-                pruned.push(DeployEntry {
-                    key: orphan.key.clone(),
-                    env: target_env.clone(),
-                    target: target_display.clone(),
-                    error: None,
-                });
+                let (target_idx, _) = target_map[target_name.as_str()];
+                let deploy_target = &deploy_targets[target_idx];
+                let target = crate::config::ResolvedTarget {
+                    service: orphan.service.clone(),
+                    app: orphan.app.clone(),
+                    environment: orphan.env.clone(),
+                };
+                match deploy_target.delete_secret(&orphan.key, &target) {
+                    Ok(()) => {
+                        index.remove_record(&orphan.tracker_key);
+                        pruned.push(DeployEntry {
+                            key: orphan.key.clone(),
+                            env: target_env.clone(),
+                            target: target_display.clone(),
+                            error: None,
+                        });
+                    }
+                    Err(e) => {
+                        failed.push(DeployEntry {
+                            key: orphan.key.clone(),
+                            env: target_env.clone(),
+                            target: target_display.clone(),
+                            error: Some(e.to_string()),
+                        });
+                    }
+                }
             }
         }
     }
