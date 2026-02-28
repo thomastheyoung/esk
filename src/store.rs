@@ -516,27 +516,18 @@ impl SecretStore {
         Ok(())
     }
 
-    /// Encrypt arbitrary plaintext into nonce:ciphertext:tag hex format.
-    pub fn encrypt_raw(&self, plaintext: &str) -> Result<String> {
-        encrypt_with_key(&self.key, plaintext)
-    }
-
-    /// Decrypt raw ciphertext (nonce:ciphertext:tag hex format) into a StorePayload.
-    pub fn decrypt_raw(&self, encoded: &str) -> Result<StorePayload> {
-        let json = decrypt_with_key(&self.key, encoded)?;
-        serde_json::from_str(&json).context("decrypted payload is not valid JSON")
-    }
-
     /// Expose the master key for domain-specific derivation.
     pub(crate) fn master_key(&self) -> &[u8] {
         &self.key
     }
 
-    fn encrypt(&self, plaintext: &str) -> Result<String> {
+    /// Encrypt arbitrary plaintext into nonce:ciphertext:tag hex format.
+    pub(crate) fn encrypt(&self, plaintext: &str) -> Result<String> {
         encrypt_with_key(&self.key, plaintext)
     }
 
-    fn decrypt(&self, encoded: &str) -> Result<StorePayload> {
+    /// Decrypt ciphertext (nonce:ciphertext:tag hex format) into a StorePayload.
+    pub(crate) fn decrypt(&self, encoded: &str) -> Result<StorePayload> {
         let json = decrypt_with_key(&self.key, encoded)?;
         serde_json::from_str(&json).context("decrypted payload is not valid JSON")
     }

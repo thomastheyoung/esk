@@ -156,7 +156,7 @@ impl SyncRemote for S3Remote<'_> {
                 let store = SecretStore::open(&self.config.root)?;
                 let json = serde_json::to_string(&env_payload)
                     .context("failed to serialize env payload")?;
-                store.encrypt_raw(&json)?
+                store.encrypt(&json)?
             }
             CloudFileFormat::Cleartext => serde_json::to_string_pretty(&env_payload)
                 .context("failed to serialize env payload")?,
@@ -230,7 +230,7 @@ impl SyncRemote for S3Remote<'_> {
         let payload = match self.remote_config.format {
             CloudFileFormat::Encrypted => {
                 let store = SecretStore::open(&self.config.root)?;
-                store.decrypt_raw(content)?
+                store.decrypt(content)?
             }
             CloudFileFormat::Cleartext => {
                 serde_json::from_str(content).context("failed to parse secrets JSON from S3")?

@@ -196,7 +196,7 @@ impl SyncRemote for CloudFileRemote {
                 let payload: StorePayload = match decrypt_with_key(&dk, content) {
                     Ok(json) => serde_json::from_str(&json)
                         .context("decrypted payload is not valid JSON")?,
-                    Err(_) => store.decrypt_raw(content)?, // legacy: master key
+                    Err(_) => store.decrypt(content)?, // legacy: master key
                 };
                 // Per-env files have bare keys — convert to composite
                 // Legacy files have composite keys — detect by checking if keys contain ":"
