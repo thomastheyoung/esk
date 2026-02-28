@@ -1931,7 +1931,7 @@ fn push_records_sync_index() {
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(record.remote, "1password");
-    assert_eq!(record.environment, "dev");
+    assert_eq!(record.env, "dev");
     assert_eq!(record.pushed_version, 1);
     assert_eq!(
         record.last_push_status,

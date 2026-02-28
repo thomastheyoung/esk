@@ -611,7 +611,7 @@ environments: [dev, prod]
 targets:
   circleci:
     org_id: "00000000-0000-0000-0000-000000000000"
-    context: my-context
+    context_name: my-context
     env_flags:
       prod: "--some-flag value"
 

@@ -44,7 +44,7 @@ impl DeployTarget for CircleciTarget<'_> {
     fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let org_id = &self.target_config.org_id;
-        let context = &self.target_config.context;
+        let context = &self.target_config.context_name;
         let mut args: Vec<&str> = vec!["context", "store-secret", "--org-id", org_id, context, key];
         args.extend(flag_parts.iter().map(String::as_str));
 
@@ -68,7 +68,7 @@ impl DeployTarget for CircleciTarget<'_> {
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let org_id = &self.target_config.org_id;
-        let context = &self.target_config.context;
+        let context = &self.target_config.context_name;
         let mut args: Vec<&str> =
             vec!["context", "remove-secret", "--org-id", org_id, context, key];
         args.extend(flag_parts.iter().map(String::as_str));
@@ -107,7 +107,7 @@ environments: [dev, prod]
 targets:
   circleci:
     org_id: "00000000-0000-0000-0000-000000000000"
-    context: my-context
+    context_name: my-context
     env_flags:
       prod: "--some-flag value"
 "#;

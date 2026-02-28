@@ -9,7 +9,7 @@
 //!
 //! Secrets are pushed and pulled as JSON objects via **stdin**. Requires a
 //! `--project` and `-c <config>` flag for each operation. esk environment names
-//! are mapped to Doppler config names via the `config_names` config field.
+//! are mapped to Doppler config names via the `config_map` config field.
 
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;

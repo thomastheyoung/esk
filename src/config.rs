@@ -300,7 +300,7 @@ fn default_docker_name_pattern() -> String {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CircleciTargetConfig {
     pub org_id: String,
-    pub context: String,
+    pub context_name: String,
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }

@@ -14,7 +14,7 @@ pub struct SyncIndex {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SyncRecord {
     pub remote: String,
-    pub environment: String,
+    pub env: String,
     pub pushed_version: u64,
     pub last_pushed_at: String,
     pub last_push_status: SyncStatus,
@@ -84,7 +84,7 @@ impl SyncIndex {
             key,
             SyncRecord {
                 remote: remote.to_string(),
-                environment: env.to_string(),
+                env: env.to_string(),
                 pushed_version: version,
                 last_pushed_at: chrono::Utc::now().to_rfc3339(),
                 last_push_status: SyncStatus::Success,
@@ -99,7 +99,7 @@ impl SyncIndex {
             key,
             SyncRecord {
                 remote: remote.to_string(),
-                environment: env.to_string(),
+                env: env.to_string(),
                 pushed_version: version,
                 last_pushed_at: chrono::Utc::now().to_rfc3339(),
                 last_push_status: SyncStatus::Failed,
@@ -189,7 +189,7 @@ mod tests {
         index.record_success("1password", "dev", 5);
         let record = &index.records["1password:dev"];
         assert_eq!(record.remote, "1password");
-        assert_eq!(record.environment, "dev");
+        assert_eq!(record.env, "dev");
         assert_eq!(record.pushed_version, 5);
         assert_eq!(record.last_push_status, SyncStatus::Success);
         assert!(record.last_error.is_none());
@@ -201,7 +201,7 @@ mod tests {
         index.record_failure("dropbox", "prod", 3, "timeout".to_string());
         let record = &index.records["dropbox:prod"];
         assert_eq!(record.remote, "dropbox");
-        assert_eq!(record.environment, "prod");
+        assert_eq!(record.env, "prod");
         assert_eq!(record.pushed_version, 3);
         assert_eq!(record.last_push_status, SyncStatus::Failed);
         assert_eq!(record.last_error.as_deref(), Some("timeout"));
