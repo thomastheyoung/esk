@@ -5,6 +5,7 @@ pub mod cloud_file;
 pub mod doppler;
 pub mod gcp_secret_manager;
 pub mod hashicorp_vault;
+pub mod infisical;
 pub mod onepassword;
 pub mod s3;
 pub mod sops;
@@ -185,6 +186,15 @@ fn remote_candidates<'a>(
         candidates.push(RemoteCandidate {
             remote: Box::new(doppler::DopplerRemote::new(doppler_config, runner)),
             ok_message: "authenticated",
+        });
+    }
+
+    if let Some(infisical_config) =
+        config.remote_config::<crate::config::InfisicalRemoteConfig>("infisical")
+    {
+        candidates.push(RemoteCandidate {
+            remote: Box::new(infisical::InfisicalRemote::new(infisical_config, runner)),
+            ok_message: "CLI available",
         });
     }
 

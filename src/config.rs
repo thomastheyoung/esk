@@ -412,6 +412,21 @@ pub struct DopplerRemoteConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InfisicalRemoteConfig {
+    pub project_id: String,
+    /// Maps esk env → Infisical environment slug. When absent, the esk env name is used directly.
+    #[serde(default)]
+    pub env_map: BTreeMap<String, String>,
+    /// Infisical folder path. Defaults to "/".
+    #[serde(default = "default_infisical_path")]
+    pub path: String,
+}
+
+fn default_infisical_path() -> String {
+    "/".to_string()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SopsRemoteConfig {
     /// File path pattern with {environment} interpolation.
     pub path: String,
@@ -827,6 +842,10 @@ impl Config {
                 "doppler" => {
                     let _: DopplerRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid doppler remote config")?;
+                }
+                "infisical" => {
+                    let _: InfisicalRemoteConfig = serde_json::from_value(value.clone())
+                        .context("invalid infisical remote config")?;
                 }
                 "sops" => {
                     let _: SopsRemoteConfig = serde_json::from_value(value.clone())
