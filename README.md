@@ -20,7 +20,7 @@ It is built for teams that want:
 ## What esk does
 
 - Stores secrets in `.esk/store.enc` (AES-256-GCM encrypted)
-- Keeps the decryption key in `.esk/store.key` (local only)
+- Keeps the decryption key locally (file or OS keychain)
 - Deploys to targets like `.env` files, Cloudflare, Convex, Vercel, GitHub Actions, Kubernetes, Docker Swarm, and more
 - Syncs with remotes like 1Password, cloud folders, AWS Secrets Manager, Vault, Bitwarden, S3, GCP, Azure, Doppler, and SOPS
 - Validates values against format, pattern, enum, and range constraints
@@ -86,7 +86,7 @@ esk status --env dev
 | ------------------------ | ------------------------------------------------------------------------ | --------------- |
 | `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets, generate) | Yes             |
 | `.esk/store.enc`         | Encrypted secret store                                                   | Yes             |
-| `.esk/store.key`         | Local encryption key (32-byte hex)                                       | No              |
+| `.esk/store.key`         | Local encryption key (32-byte hex); or stored in OS keychain             | No              |
 | `.esk/deploy-index.json` | Deploy state tracker                                                     | No (gitignored) |
 | `.esk/sync-index.json`   | Sync state tracker                                                       | No (gitignored) |
 
@@ -94,7 +94,7 @@ esk status --env dev
 
 `esk` has 3 parts:
 
-1. **Store**: local encrypted data (`.esk/store.enc` + `.esk/store.key`)
+1. **Store**: local encrypted data (`.esk/store.enc` + local key)
 2. **Targets**: deploy secrets to runtime services (`esk deploy`)
 3. **Remotes**: sync full secret state to team/shared backends (`esk sync`)
 
@@ -198,10 +198,25 @@ Remote config details: [REMOTES.md](REMOTES.md).
 
 The encrypted store file is safe to commit. The key file is not.
 
+### Key storage
+
+The encryption key can be stored in two ways:
+
+| Provider | How | When to use |
+|----------|-----|-------------|
+| File (default) | `.esk/store.key`, gitignored | Works everywhere, including CI and headless |
+| OS keychain | macOS Keychain, Windows Credential Manager, Linux Secret Service | Interactive workstations; hardware-backed on macOS/Windows |
+
+Initialize with `esk init` (file) or `esk init --keychain` (keychain). The `keychain` feature must be enabled at build time.
+
+**Why not 1Password, Bitwarden, or other password managers?** The encryption key is read on every `esk` command. It must be local, instant, and available offline. Password managers require network access and interactive auth, making them unsuitable as a key provider. They also create a circular dependency: esk uses these services as sync remotes for the encrypted store, so the key that decrypts the store cannot itself depend on reaching those services.
+
+For team key distribution, share the key out-of-band (paste it into a shared vault, send via a secure channel). The encrypted store is then shared via remotes as usual.
+
 ## Quick troubleshooting
 
 - `esk.yaml not found`: run commands from your project root, or run `esk init`
-- `encryption key not found`: run `esk init` to create `.esk/store.key`
+- `encryption key not found`: run `esk init` to create `.esk/store.key`, or `esk init --keychain` for OS keychain
 - Target/remote CLI errors: install and authenticate required CLIs (for example `wrangler`, `op`, `aws`)
 - Unknown environment/app in target: verify names match `environments` and `apps` in `esk.yaml`
 
