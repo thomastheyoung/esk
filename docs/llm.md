@@ -22,7 +22,7 @@ Set a secret value. Prompts interactively for the value unless `--value` is prov
 | `--value <VAL>` | Secret value (visible in process list; omit for interactive prompt) |
 | `--group <GROUP>` | Config group to register the secret under (skips interactive prompt) |
 | `--no-sync` | Skip auto-sync after setting |
-| `--bail` | Fail if any remote push fails (skip target deploy) |
+| `--strict` | Strict mode: fail if any remote push fails (skip target deploy) |
 | `--skip-validation` | Skip value validation |
 | `--force` | Bypass interactive confirmations (empty value, etc.) |
 
@@ -44,7 +44,7 @@ Delete a secret value from the store.
 |------|-------------|
 | `--env <ENV>` | Environment (required) |
 | `--no-sync` | Skip auto-sync after deleting |
-| `--bail` | Fail if any remote push fails (skip target deploy) |
+| `--strict` | Strict mode: fail if any remote push fails (skip target deploy) |
 
 ### `esk list`
 
@@ -87,7 +87,7 @@ Sync secrets with remotes. Pulls from remote, reconciles with local store, pushe
 | `--env <ENV>` | Environment to sync (omit to sync all) |
 | `--only <REMOTE>` | Sync a specific remote only |
 | `--dry-run` | Show what would change without modifying anything |
-| `--bail` | Fail if any remote is unreachable (no partial reconciliation) |
+| `--strict` | Strict mode: fail if any remote is unreachable (no partial reconciliation) |
 | `--force` | Bypass version jump protection |
 | `--with-deploy` | Auto-deploy targets after syncing |
 | `--prefer <SIDE>` | When versions match but content differs: `local` (default) or `remote` |

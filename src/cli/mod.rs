@@ -37,9 +37,9 @@ pub enum Commands {
         /// Skip auto-sync after deleting
         #[arg(long)]
         no_sync: bool,
-        /// Fail if any remote push fails (skip target deploy)
+        /// Strict mode: fail if any remote push fails (skip target deploy)
         #[arg(long)]
-        bail: bool,
+        strict: bool,
     },
     /// Deploy secrets to configured targets
     Deploy {
@@ -58,9 +58,9 @@ pub enum Commands {
         /// Skip value validation
         #[arg(long)]
         skip_validation: bool,
-        /// Fail if any required secrets are missing (default: warn and deploy available)
+        /// Strict mode: fail if any required secrets are missing (default: warn and deploy available)
         #[arg(long)]
-        bail: bool,
+        strict: bool,
         /// Allow deploying empty/whitespace-only values
         #[arg(long)]
         allow_empty: bool,
@@ -91,9 +91,9 @@ pub enum Commands {
         /// Skip auto-sync after setting
         #[arg(long)]
         no_sync: bool,
-        /// Fail if any remote push fails (skip target deploy)
+        /// Strict mode: fail if any remote push fails (skip target deploy)
         #[arg(long)]
-        bail: bool,
+        strict: bool,
         /// Skip value validation
         #[arg(long)]
         skip_validation: bool,
@@ -150,9 +150,9 @@ pub enum Commands {
         /// Show what would change without modifying anything
         #[arg(long)]
         dry_run: bool,
-        /// Fail if any remote is unreachable (no partial reconciliation)
+        /// Strict mode: fail if any remote is unreachable (no partial reconciliation)
         #[arg(long)]
-        bail: bool,
+        strict: bool,
         /// Bypass version jump protection (use with caution)
         #[arg(long)]
         force: bool,

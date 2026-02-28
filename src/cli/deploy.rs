@@ -17,7 +17,7 @@ pub struct DeployOptions<'a> {
     pub dry_run: bool,
     pub verbose: bool,
     pub skip_validation: bool,
-    pub bail: bool,
+    pub strict: bool,
     pub allow_empty: bool,
     pub prune: bool,
 }
@@ -256,7 +256,7 @@ pub fn run_with_runner(
         dry_run,
         verbose,
         skip_validation,
-        bail,
+        strict,
         allow_empty,
         prune,
     } = *opts;
@@ -381,12 +381,12 @@ pub fn run_with_runner(
         .map(|m| (m.key.clone(), m.env.clone()))
         .collect();
     if !missing.is_empty() {
-        if dry_run || !bail {
+        if dry_run || !strict {
             for m in &missing {
                 cliclack::log::warning(format!("Missing required: {}:{}", m.key, m.env,))?;
             }
         }
-        if bail && !dry_run && !force {
+        if strict && !dry_run && !force {
             let lines: Vec<String> = missing
                 .iter()
                 .map(|m| format!("  {}:{}", m.key, m.env))

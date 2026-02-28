@@ -12,7 +12,7 @@ pub struct DeleteOptions<'a> {
     pub key: &'a str,
     pub env: &'a str,
     pub no_sync: bool,
-    pub bail: bool,
+    pub strict: bool,
 }
 
 struct DeleteReport {
@@ -106,9 +106,9 @@ pub fn run_with_runner(
     }
 
     let remote_failures = report.remote_failure_count();
-    if remote_failures > 0 && opts.bail {
+    if remote_failures > 0 && opts.strict {
         bail!(
-            "{remote_failures} remote(s) failed to push (--bail). Target deploy skipped.\n\
+            "{remote_failures} remote(s) failed to push (--strict). Target deploy skipped.\n\
              Fix the remote issue, then run:\n  \
              esk sync --env {env}\n  \
              esk deploy --env {env}"
@@ -116,7 +116,7 @@ pub fn run_with_runner(
     }
 
     // Auto-deploy targets (env files regenerate without deleted key; individual targets delete)
-    // bail: false — the user intentionally deleted this secret
+    // strict: false — the user intentionally deleted this secret
     crate::cli::deploy::run_with_runner(
         config,
         &crate::cli::deploy::DeployOptions {
@@ -125,7 +125,7 @@ pub fn run_with_runner(
             dry_run: false,
             verbose: false,
             skip_validation: false,
-            bail: false,
+            strict: false,
             allow_empty: true,
             prune: false,
         },

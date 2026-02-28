@@ -34,7 +34,7 @@ Idempotent — skips files that already exist. Updates `.gitignore` to include:
 Delete a secret value from an environment.
 
 ```bash
-esk delete <KEY> --env <ENV> [--no-sync] [--bail]
+esk delete <KEY> --env <ENV> [--no-sync] [--strict]
 ```
 
 | Argument    | Required | Description                                            |
@@ -42,7 +42,7 @@ esk delete <KEY> --env <ENV> [--no-sync] [--bail]
 | `KEY`       | Yes      | Secret key name (e.g., `STRIPE_SECRET_KEY`)            |
 | `--env`     | Yes      | Environment to delete from                             |
 | `--no-sync` | No       | Store only — skip auto-push to remotes and auto-deploy |
-| `--bail`    | No       | Fail if any remote push fails and skip deploy          |
+| `--strict`    | No       | Fail if any remote push fails and skip deploy          |
 
 **Behavior:**
 
@@ -51,15 +51,15 @@ esk delete <KEY> --env <ENV> [--no-sync] [--bail]
 3. Removes the value from the encrypted store and records a tombstone, incrementing the version counter. Errors if the key has no stored value for the environment.
 4. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
 5. Unless `--no-sync`: runs `deploy` for the affected environment (batch targets regenerate without the deleted key; individual targets call their delete command).
-6. With `--bail`: if any remote push fails, exits with an error and skips deploy entirely.
-7. Without `--bail`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
+6. With `--strict`: if any remote push fails, exits with an error and skips deploy entirely.
+7. Without `--strict`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
 
 **Examples:**
 
 ```bash
 esk delete API_KEY --env dev                     # Delete + auto-deploy
 esk delete API_KEY --env dev --no-sync           # Store only, skip sync and deploy
-esk delete API_KEY --env dev --bail              # Fail hard on remote errors
+esk delete API_KEY --env dev --strict              # Fail hard on remote errors
 ```
 
 ---
@@ -123,7 +123,7 @@ With `--prune`, esk detects secrets that were previously deployed to targets but
 Set a secret value for an environment.
 
 ```bash
-esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--bail] [--skip-validation] [--force]
+esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--strict] [--skip-validation] [--force]
 ```
 
 | Argument            | Required | Description                                                          |
@@ -133,7 +133,7 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--bai
 | `--value`           | No       | Secret value. If omitted, prompts interactively (hidden input)       |
 | `--group`           | No       | Config group to register the secret under (skips interactive prompt) |
 | `--no-sync`         | No       | Store only — skip auto-push to remotes and auto-deploy               |
-| `--bail`            | No       | Fail if any remote push fails and skip deploy                        |
+| `--strict`            | No       | Fail if any remote push fails and skip deploy                        |
 | `--skip-validation` | No       | Bypass `validate:` checks on the value                               |
 | `--force`           | No       | Skip empty-value confirmation prompt                                 |
 
@@ -149,8 +149,8 @@ esk set <KEY> --env <ENV> [--value <VALUE>] [--group <GROUP>] [--no-sync] [--bai
 5. Stores the value in the encrypted store, incrementing the version counter.
 6. Unless `--no-sync`: auto-pushes the environment's secrets to all configured remotes.
 7. Unless `--no-sync`: runs `deploy` for the affected environment.
-8. With `--bail`: if any remote push fails, exits with an error and skips deploy entirely.
-9. Without `--bail`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
+8. With `--strict`: if any remote push fails, exits with an error and skips deploy entirely.
+9. Without `--strict`: deploy still runs, but the command exits non-zero if any remote push failed (to surface retry work).
 
 **Examples:**
 
@@ -159,7 +159,7 @@ esk set API_KEY --env dev                        # Interactive prompt for value
 esk set API_KEY --env dev --value sk_test_123    # Inline value
 esk set API_KEY --env dev --group Stripe          # Register under Stripe group
 esk set API_KEY --env dev --no-sync              # Store only, skip sync and deploy
-esk set API_KEY --env dev --bail                 # Fail hard on remote errors
+esk set API_KEY --env dev --strict                 # Fail hard on remote errors
 ```
 
 ---
@@ -352,7 +352,7 @@ esk generate ts --output src/env.ts             # Custom output path
 Sync secrets with configured remotes. Pulls from remotes, reconciles with the local store, then pushes merged data to stale or drifted remotes.
 
 ```bash
-esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--bail] [--force] [--with-deploy] [--prefer <local|remote>]
+esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--strict] [--force] [--with-deploy] [--prefer <local|remote>]
 ```
 
 | Argument        | Required | Description                                                          |
@@ -360,7 +360,7 @@ esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--bail] [--force] [--with-
 | `--env`         | No       | Environment to sync (omit to sync all configured environments)       |
 | `--only`        | No       | Sync a specific remote only                                          |
 | `--dry-run`     | No       | Show what would change without modifying anything                    |
-| `--bail`        | No       | Fail on first error (remote pull failure or per-environment failure) |
+| `--strict`        | No       | Fail on first error (remote pull failure or per-environment failure) |
 | `--force`       | No       | Bypass version jump protection (use with caution)                    |
 | `--with-deploy` | No       | Auto-run `deploy` after syncing                                      |
 | `--prefer`      | No       | Conflict preference at equal version (`local` default, or `remote`)  |
@@ -374,7 +374,7 @@ esk sync [--env <ENV>] [--only <REMOTE>] [--dry-run] [--bail] [--force] [--with-
 3. Uses the highest version as the base and merges unique keys from lower versions.
 4. Updates local store state when reconciliation changes it.
 5. Pushes merged/current data to stale remotes, including equal-version drift repair (no interactive push prompt).
-6. With `--bail`: aborts on the first remote pull failure or the first environment sync failure. Without `--bail`: logs failing environments and continues; exits non-zero if any failed.
+6. With `--strict`: aborts on the first remote pull failure or the first environment sync failure. Without `--strict`: logs failing environments and continues; exits non-zero if any failed.
 7. With `--with-deploy`, runs `esk deploy --env <ENV>` only for environments where local store state changed.
 8. With `--dry-run`, shows what would change without modifying store or remote state.
 

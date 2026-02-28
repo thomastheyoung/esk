@@ -17,7 +17,7 @@ pub struct SyncOptions<'a> {
     pub env: Option<&'a str>,
     pub only: Option<&'a str>,
     pub dry_run: bool,
-    pub bail: bool,
+    pub strict: bool,
     pub force: bool,
     pub auto_deploy: bool,
     pub prefer: ConflictPreference,
@@ -159,7 +159,7 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
             ..options
         };
         if let Err(e) = run_with_runner(config, &per_env_opts, &runner) {
-            if options.bail {
+            if options.strict {
                 bail!("sync failed for environment '{env}': {e}");
             }
             cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
@@ -187,7 +187,7 @@ pub fn run_with_runner(
     config.validate_env(env)?;
     let only = opts.only;
     let dry_run = opts.dry_run;
-    let bail_on_err = opts.bail;
+    let strict = opts.strict;
     let force = opts.force;
     let auto_deploy = opts.auto_deploy;
     let prefer = opts.prefer;
@@ -281,9 +281,9 @@ pub fn run_with_runner(
     ));
     cliclack::log::step(pull_lines.join("\n"))?;
 
-    if !pull_failures.is_empty() && bail_on_err {
+    if !pull_failures.is_empty() && strict {
         bail!(
-            "{} remote(s) failed to respond: {}. Use without --bail to reconcile with partial data.",
+            "{} remote(s) failed to respond: {}. Use without --strict to reconcile with partial data.",
             pull_failures.len(),
             pull_failures.join(", ")
         );
@@ -511,7 +511,7 @@ pub fn run_with_runner(
                 dry_run: false,
                 verbose: false,
                 skip_validation: false,
-                bail: false,
+                strict: false,
                 allow_empty: true,
                 prune: false,
             },

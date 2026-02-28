@@ -13,7 +13,7 @@ pub struct SetOptions<'a> {
     pub value: Option<&'a str>,
     pub group: Option<&'a str>,
     pub no_sync: bool,
-    pub bail: bool,
+    pub strict: bool,
     pub skip_validation: bool,
     pub force: bool,
 }
@@ -50,7 +50,7 @@ pub fn run_with_runner(
     let value = opts.value;
     let group = opts.group;
     let no_sync = opts.no_sync;
-    let bail = opts.bail;
+    let strict = opts.strict;
     let skip_validation = opts.skip_validation;
 
     config.validate_env(env)?;
@@ -177,9 +177,9 @@ pub fn run_with_runner(
     }
 
     let remote_failures = report.remote_failure_count();
-    if remote_failures > 0 && bail {
+    if remote_failures > 0 && strict {
         bail!(
-            "{remote_failures} remote(s) failed to push (--bail). Target deploy skipped.\n\
+            "{remote_failures} remote(s) failed to push (--strict). Target deploy skipped.\n\
              Fix the remote issue, then run:\n  \
              esk sync --env {env}\n  \
              esk deploy --env {env}"
@@ -187,7 +187,7 @@ pub fn run_with_runner(
     }
 
     // Auto-deploy affected targets (skip validation — already validated above)
-    // bail: false — user may be setting secrets incrementally
+    // strict: false — user may be setting secrets incrementally
     // allow_empty: user already confirmed at set time, don't double-prompt
     crate::cli::deploy::run_with_runner(
         config,
@@ -197,7 +197,7 @@ pub fn run_with_runner(
             dry_run: false,
             verbose: false,
             skip_validation: true,
-            bail: false,
+            strict: false,
             allow_empty: true,
             prune: false,
         },

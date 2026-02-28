@@ -20,7 +20,7 @@ fn run() -> Result<()> {
             key,
             env,
             no_sync,
-            bail,
+            strict,
         } => {
             let config = Config::find_and_load()?;
             esk::cli::delete::run(
@@ -29,7 +29,7 @@ fn run() -> Result<()> {
                     key,
                     env,
                     no_sync: *no_sync,
-                    bail: *bail,
+                    strict: *strict,
                 },
             )?;
         }
@@ -39,7 +39,7 @@ fn run() -> Result<()> {
             dry_run,
             verbose,
             skip_validation,
-            bail,
+            strict,
             allow_empty,
             prune,
         } => {
@@ -52,7 +52,7 @@ fn run() -> Result<()> {
                     dry_run: *dry_run,
                     verbose: *verbose,
                     skip_validation: *skip_validation,
-                    bail: *bail,
+                    strict: *strict,
                     allow_empty: *allow_empty,
                     prune: *prune,
                 },
@@ -68,7 +68,7 @@ fn run() -> Result<()> {
             value,
             group,
             no_sync,
-            bail,
+            strict,
             skip_validation,
             force,
         } => {
@@ -81,7 +81,7 @@ fn run() -> Result<()> {
                     value: value.as_deref(),
                     group: group.as_deref(),
                     no_sync: *no_sync,
-                    bail: *bail,
+                    strict: *strict,
                     skip_validation: *skip_validation,
                     force: *force,
                 },
@@ -114,7 +114,7 @@ fn run() -> Result<()> {
             env,
             only,
             dry_run,
-            bail,
+            strict,
             force,
             with_deploy,
             prefer,
@@ -126,7 +126,7 @@ fn run() -> Result<()> {
                     env: env.as_deref(),
                     only: only.as_deref(),
                     dry_run: *dry_run,
-                    bail: *bail,
+                    strict: *strict,
                     force: *force,
                     auto_deploy: *with_deploy,
                     prefer: *prefer,
