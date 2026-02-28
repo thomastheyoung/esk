@@ -388,13 +388,10 @@ targets:
     }
 
     /// Build a mock get-function-configuration JSON response.
-    fn get_config_response(
-        vars: &[(&str, &str)],
-        revision_id: &str,
-    ) -> CommandOutput {
+    fn get_config_response(vars: &[(&str, &str)], revision_id: &str) -> CommandOutput {
         let variables: serde_json::Value = vars
             .iter()
-            .map(|(k, v)| (k.to_string(), serde_json::json!(v)))
+            .map(|(k, v)| ((*k).to_string(), serde_json::json!(v)))
             .collect::<serde_json::Map<String, serde_json::Value>>()
             .into();
 
@@ -513,7 +510,10 @@ targets:
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // get-function-configuration returns existing vars
-            get_config_response(&[("NODE_ENV", "production"), ("AWS_REGION", "us-east-1")], "rev-1"),
+            get_config_response(
+                &[("NODE_ENV", "production"), ("AWS_REGION", "us-east-1")],
+                "rev-1",
+            ),
             // update-function-configuration succeeds
             success_output(),
         ]);
@@ -561,10 +561,8 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
-        let runner = MockCommandRunner::from_outputs(vec![
-            get_config_response_empty(),
-            success_output(),
-        ]);
+        let runner =
+            MockCommandRunner::from_outputs(vec![get_config_response_empty(), success_output()]);
         let target = AwsLambdaTarget {
             config: &config,
             target_config,
@@ -688,9 +686,10 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
-        let runner = MockCommandRunner::from_outputs(vec![
-            get_config_response(&[("NODE_ENV", "production")], "rev-1"),
-        ]);
+        let runner = MockCommandRunner::from_outputs(vec![get_config_response(
+            &[("NODE_ENV", "production")],
+            "rev-1",
+        )]);
         let target = AwsLambdaTarget {
             config: &config,
             target_config,

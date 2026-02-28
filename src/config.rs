@@ -2768,10 +2768,7 @@ targets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
-        assert!(
-            err.to_string().contains("invalid characters"),
-            "got: {err}"
-        );
+        assert!(err.to_string().contains("invalid characters"), "got: {err}");
     }
 
     #[test]

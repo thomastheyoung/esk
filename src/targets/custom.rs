@@ -256,7 +256,11 @@ mod tests {
             runner: &runner,
         };
         target
-            .deploy_secret("API_KEY", "secret123", &make_resolved("my-api", None, "prod"))
+            .deploy_secret(
+                "API_KEY",
+                "secret123",
+                &make_resolved("my-api", None, "prod"),
+            )
             .unwrap();
 
         let calls = runner.take_calls();
@@ -350,7 +354,10 @@ mod tests {
         let mut config = make_target_config(vec!["set", "{{key}}"], None);
         config.preflight = Some(CustomCommandConfig {
             program: "curl".to_string(),
-            args: vec!["--fail".to_string(), "https://api.example.com/health".to_string()],
+            args: vec![
+                "--fail".to_string(),
+                "https://api.example.com/health".to_string(),
+            ],
             stdin: None,
         });
         let runner = MockCommandRunner::new();
@@ -364,7 +371,10 @@ mod tests {
         assert!(target.preflight().is_ok());
         let calls = runner.take_calls();
         assert_eq!(calls[0].program, "curl");
-        assert_eq!(calls[0].args, vec!["--fail", "https://api.example.com/health"]);
+        assert_eq!(
+            calls[0].args,
+            vec!["--fail", "https://api.example.com/health"]
+        );
     }
 
     #[test]
@@ -372,7 +382,10 @@ mod tests {
         let mut config = make_target_config(vec!["set", "{{key}}"], None);
         config.preflight = Some(CustomCommandConfig {
             program: "curl".to_string(),
-            args: vec!["--fail".to_string(), "https://api.example.com/health".to_string()],
+            args: vec![
+                "--fail".to_string(),
+                "https://api.example.com/health".to_string(),
+            ],
             stdin: None,
         });
         let runner = MockCommandRunner::new();

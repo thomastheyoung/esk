@@ -142,9 +142,14 @@ impl std::fmt::Debug for StorePayload {
 }
 
 pub(crate) enum KeyProvider {
-    File { path: PathBuf },
+    File {
+        path: PathBuf,
+    },
     #[cfg(feature = "keychain")]
-    Keychain { service: String, account: String },
+    Keychain {
+        service: String,
+        account: String,
+    },
 }
 
 impl KeyProvider {
@@ -216,7 +221,10 @@ impl KeyProvider {
                 })?;
                 let key = hex::decode(hex_str.trim()).context("invalid key hex from keychain")?;
                 if key.len() != 32 {
-                    bail!("invalid key length from keychain: expected 32 bytes, got {}", key.len());
+                    bail!(
+                        "invalid key length from keychain: expected 32 bytes, got {}",
+                        key.len()
+                    );
                 }
                 Ok(key)
             }
@@ -574,7 +582,6 @@ impl SecretStore {
         let json = String::from_utf8(plaintext).context("decrypted payload is not valid UTF-8")?;
         serde_json::from_str(&json).context("decrypted payload is not valid JSON")
     }
-
 }
 
 #[cfg(test)]

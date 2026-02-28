@@ -5734,7 +5734,7 @@ fn deploy_custom_target_calls_command() {
 
     let calls = runner.take_calls();
     assert_eq!(calls.len(), 3); // preflight + 2 deploys
-    // Preflight
+                                // Preflight
     assert_eq!(calls[0].program, "curl");
     assert_eq!(
         calls[0].args,

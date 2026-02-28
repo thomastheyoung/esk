@@ -448,7 +448,7 @@ fn do_generate(params: &GenerateParams) -> anyhow::Result<GenerateResponse> {
         None => None,
     };
 
-    match crate::cli::generate::run(&config, format.as_ref(), None) {
+    match crate::cli::generate::run(&config, format.as_ref(), None, false) {
         Ok(()) => Ok(GenerateResponse {
             success: true,
             message: "Generate completed successfully".to_string(),

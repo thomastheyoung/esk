@@ -102,7 +102,6 @@ impl DeployTarget for ConvexTarget<'_> {
                     cwd: Some(cwd),
                     env: env_vars,
                     stdin: Some(value.as_bytes().to_vec()),
-                    ..Default::default()
                 },
             )
             .with_context(|| format!("failed to run convex for {key}"))?;
