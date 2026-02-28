@@ -253,23 +253,23 @@ pub fn run_with_runner(
     let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
     let mut pull_failures: Vec<String> = Vec::new();
 
-    for (name, result) in &pull_results {
+    for (name, result) in pull_results {
         match result {
             Ok(Some((secrets, version))) => {
                 let outcome = PullOutcome::Fetched {
-                    version: *version,
+                    version,
                     secret_count: secrets.len(),
                 };
-                pull_lines.push(format_pull_line(name, &outcome));
-                remote_data.push((name.clone(), secrets.clone(), *version));
+                pull_lines.push(format_pull_line(&name, &outcome));
+                remote_data.push((name, secrets, version));
             }
             Ok(None) => {
-                pull_lines.push(format_pull_line(name, &PullOutcome::Empty));
-                remote_data.push((name.clone(), BTreeMap::new(), 0));
+                pull_lines.push(format_pull_line(&name, &PullOutcome::Empty));
+                remote_data.push((name, BTreeMap::new(), 0));
             }
             Err(e) => {
-                pull_lines.push(format_pull_line(name, &PullOutcome::Failed(e.to_string())));
-                pull_failures.push(name.clone());
+                pull_lines.push(format_pull_line(&name, &PullOutcome::Failed(e.to_string())));
+                pull_failures.push(name);
             }
         }
     }

@@ -4,7 +4,7 @@ use std::fmt::Write;
 use anyhow::Result;
 use console::style;
 
-use crate::config::Config;
+use crate::config::{Config, ResolvedSecret};
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
 use crate::ui;
@@ -60,11 +60,12 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
             .collect(),
     };
 
+    let resolved = config.resolve_secrets()?;
+
     // Build deploy status map: (key, env) → worst status across all targets
-    let cell_statuses = build_cell_statuses(config, &all_secrets)?;
+    let cell_statuses = build_cell_statuses(config, &resolved, &all_secrets)?;
 
     // Build set of (key, env) pairs that have at least one configured target
-    let resolved = config.resolve_secrets()?;
     let targeted: BTreeSet<(&str, &str)> = resolved
         .iter()
         .flat_map(|s| {
@@ -158,16 +159,16 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 /// Compute the worst deploy status for each (key, env) pair across all its targets.
 fn build_cell_statuses(
     config: &Config,
+    resolved: &[ResolvedSecret],
     all_secrets: &BTreeMap<String, String>,
 ) -> Result<BTreeMap<(String, String), CellStatus>> {
-    let resolved = config.resolve_secrets()?;
     let target_names: Vec<&str> = config.target_names();
     let index_path = config.root.join(".esk/deploy-index.json");
     let index = DeployIndex::load(&index_path);
 
     let mut statuses: BTreeMap<(String, String), CellStatus> = BTreeMap::new();
 
-    for secret in &resolved {
+    for secret in resolved {
         for target in &secret.targets {
             if !target_names.contains(&target.service.as_str()) {
                 continue;
