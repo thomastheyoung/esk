@@ -2,12 +2,14 @@ use aes_gcm::aead::{Aead, KeyInit};
 use aes_gcm::{Aes256Gcm, Nonce};
 use anyhow::{bail, Context, Result};
 use fs2::FileExt;
+use hkdf::Hkdf;
 use rand::Rng;
 use serde::{Deserialize, Serialize};
+use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
-use zeroize::Zeroize;
+use zeroize::{Zeroize, Zeroizing};
 
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.
@@ -516,72 +518,97 @@ impl SecretStore {
 
     /// Encrypt arbitrary plaintext into nonce:ciphertext:tag hex format.
     pub fn encrypt_raw(&self, plaintext: &str) -> Result<String> {
-        self.encrypt(plaintext)
+        encrypt_with_key(&self.key, plaintext)
     }
 
     /// Decrypt raw ciphertext (nonce:ciphertext:tag hex format) into a StorePayload.
     pub fn decrypt_raw(&self, encoded: &str) -> Result<StorePayload> {
-        self.decrypt(encoded)
+        let json = decrypt_with_key(&self.key, encoded)?;
+        serde_json::from_str(&json).context("decrypted payload is not valid JSON")
+    }
+
+    /// Expose the master key for domain-specific derivation.
+    pub(crate) fn master_key(&self) -> &[u8] {
+        &self.key
     }
 
     fn encrypt(&self, plaintext: &str) -> Result<String> {
-        let cipher = Aes256Gcm::new_from_slice(&self.key)
-            .map_err(|e| anyhow::anyhow!("failed to create cipher: {e}"))?;
-
-        let mut nonce_bytes = [0u8; 12];
-        rand::rng().fill_bytes(&mut nonce_bytes);
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        let ciphertext = cipher
-            .encrypt(nonce, plaintext.as_bytes())
-            .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
-
-        // AES-GCM appends tag to ciphertext. Split for our format.
-        // aes-gcm crate: ciphertext includes the 16-byte tag at the end
-        let tag_start = ciphertext.len() - 16;
-        let ct = &ciphertext[..tag_start];
-        let tag = &ciphertext[tag_start..];
-
-        Ok(format!(
-            "{}:{}:{}",
-            hex::encode(nonce_bytes),
-            hex::encode(ct),
-            hex::encode(tag)
-        ))
+        encrypt_with_key(&self.key, plaintext)
     }
 
     fn decrypt(&self, encoded: &str) -> Result<StorePayload> {
-        let parts: Vec<&str> = encoded.split(':').collect();
-        if parts.len() != 3 {
-            bail!("invalid store format: expected nonce:ciphertext:tag");
-        }
-
-        let nonce_bytes = hex::decode(parts[0]).context("invalid nonce hex")?;
-        let ct_bytes = hex::decode(parts[1]).context("invalid ciphertext hex")?;
-        let tag_bytes = hex::decode(parts[2]).context("invalid tag hex")?;
-
-        if nonce_bytes.len() != 12 {
-            bail!(
-                "invalid nonce length: expected 12, got {}",
-                nonce_bytes.len()
-            );
-        }
-
-        let cipher = Aes256Gcm::new_from_slice(&self.key)
-            .map_err(|e| anyhow::anyhow!("failed to create cipher: {e}"))?;
-        let nonce = Nonce::from_slice(&nonce_bytes);
-
-        // Recombine ciphertext + tag for aes-gcm
-        let mut combined = ct_bytes;
-        combined.extend_from_slice(&tag_bytes);
-
-        let plaintext = cipher
-            .decrypt(nonce, combined.as_ref())
-            .map_err(|_| anyhow::anyhow!("decryption failed — wrong key or corrupted store"))?;
-
-        let json = String::from_utf8(plaintext).context("decrypted payload is not valid UTF-8")?;
+        let json = decrypt_with_key(&self.key, encoded)?;
         serde_json::from_str(&json).context("decrypted payload is not valid JSON")
     }
+}
+
+/// Encrypt plaintext with the given key. Returns nonce:ciphertext:tag hex.
+pub(crate) fn encrypt_with_key(key: &[u8], plaintext: &str) -> Result<String> {
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| anyhow::anyhow!("failed to create cipher: {e}"))?;
+
+    let mut nonce_bytes = [0u8; 12];
+    rand::rng().fill_bytes(&mut nonce_bytes);
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    let ciphertext = cipher
+        .encrypt(nonce, plaintext.as_bytes())
+        .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
+
+    // AES-GCM appends tag to ciphertext. Split for our format.
+    // aes-gcm crate: ciphertext includes the 16-byte tag at the end
+    let tag_start = ciphertext.len() - 16;
+    let ct = &ciphertext[..tag_start];
+    let tag = &ciphertext[tag_start..];
+
+    Ok(format!(
+        "{}:{}:{}",
+        hex::encode(nonce_bytes),
+        hex::encode(ct),
+        hex::encode(tag)
+    ))
+}
+
+/// Decrypt nonce:ciphertext:tag hex with the given key. Returns plaintext string.
+pub(crate) fn decrypt_with_key(key: &[u8], encoded: &str) -> Result<String> {
+    let parts: Vec<&str> = encoded.split(':').collect();
+    if parts.len() != 3 {
+        bail!("invalid store format: expected nonce:ciphertext:tag");
+    }
+
+    let nonce_bytes = hex::decode(parts[0]).context("invalid nonce hex")?;
+    let ct_bytes = hex::decode(parts[1]).context("invalid ciphertext hex")?;
+    let tag_bytes = hex::decode(parts[2]).context("invalid tag hex")?;
+
+    if nonce_bytes.len() != 12 {
+        bail!(
+            "invalid nonce length: expected 12, got {}",
+            nonce_bytes.len()
+        );
+    }
+
+    let cipher = Aes256Gcm::new_from_slice(key)
+        .map_err(|e| anyhow::anyhow!("failed to create cipher: {e}"))?;
+    let nonce = Nonce::from_slice(&nonce_bytes);
+
+    // Recombine ciphertext + tag for aes-gcm
+    let mut combined = ct_bytes;
+    combined.extend_from_slice(&tag_bytes);
+
+    let plaintext = cipher
+        .decrypt(nonce, combined.as_ref())
+        .map_err(|_| anyhow::anyhow!("decryption failed — wrong key or corrupted store"))?;
+
+    String::from_utf8(plaintext).context("decrypted payload is not valid UTF-8")
+}
+
+/// Derive a 32-byte domain-specific key from the master key via HKDF-SHA256.
+pub(crate) fn derive_key(master: &[u8], domain: &[u8]) -> Zeroizing<Vec<u8>> {
+    let hk = Hkdf::<Sha256>::new(None, master);
+    let mut out = Zeroizing::new(vec![0u8; 32]);
+    hk.expand(domain, &mut out)
+        .expect("32 bytes is valid HKDF-SHA256 output");
+    out
 }
 
 #[cfg(test)]

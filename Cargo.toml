@@ -23,6 +23,7 @@ cliclack = "0.3"
 fs2 = "0.4"
 console = "0.16"
 hex = "0.4"
+hkdf = "0.12"
 rand = "0.10"
 regex-lite = "0.1"
 serde = { version = "1", features = ["derive"] }

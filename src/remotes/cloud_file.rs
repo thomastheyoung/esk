@@ -7,9 +7,10 @@
 //! No external CLI required — reads and writes files directly.
 //!
 //! The store payload is serialized as JSON (one file per environment). The file
-//! can be stored either in cleartext or encrypted using the same AES-256-GCM
-//! scheme as the local store. Paths support `{project}`, `{environment}`, and
-//! `~` expansion. Writes are atomic via temp-file-then-rename.
+//! can be stored either in cleartext or encrypted using AES-256-GCM with a
+//! domain-derived key (HKDF-SHA256 from the master key). Paths support
+//! `{project}`, `{environment}`, and `~` expansion. Writes are atomic via
+//! temp-file-then-rename.
 
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
@@ -18,9 +19,11 @@ use tempfile::NamedTempFile;
 
 use crate::config::{CloudFileFormat, CloudFileRemoteConfig, Config};
 use crate::reconcile::extract_env_secrets;
-use crate::store::{SecretStore, StorePayload};
+use crate::store::{decrypt_with_key, derive_key, encrypt_with_key, SecretStore, StorePayload};
 
 use super::SyncRemote;
+
+const CLOUD_SYNC_DOMAIN: &[u8] = b"esk-cloud-sync-v1";
 
 pub struct CloudFileRemote {
     name: String,
@@ -140,11 +143,12 @@ impl SyncRemote for CloudFileRemote {
 
         match self.remote_config.format {
             CloudFileFormat::Encrypted => {
-                // Build per-env payload, encrypt it using the local store key
+                // Build per-env payload, encrypt with a domain-derived key
                 let store = SecretStore::open(&config.root)?;
+                let dk = derive_key(store.master_key(), CLOUD_SYNC_DOMAIN);
                 let json = serde_json::to_string(&env_payload)
                     .context("failed to serialize env payload")?;
-                let encrypted = store.encrypt_raw(&json)?;
+                let encrypted = encrypt_with_key(&dk, &json)?;
                 let dest = base_path.join(format!("secrets-{env}.enc"));
                 Self::atomic_write(&dest, encrypted.as_bytes())?;
             }
@@ -188,7 +192,12 @@ impl SyncRemote for CloudFileRemote {
                     return Ok(None);
                 }
                 let store = SecretStore::open(&config.root)?;
-                let payload = store.decrypt_raw(content)?;
+                let dk = derive_key(store.master_key(), CLOUD_SYNC_DOMAIN);
+                let payload: StorePayload = match decrypt_with_key(&dk, content) {
+                    Ok(json) => serde_json::from_str(&json)
+                        .context("decrypted payload is not valid JSON")?,
+                    Err(_) => store.decrypt_raw(content)?, // legacy: master key
+                };
                 // Per-env files have bare keys — convert to composite
                 // Legacy files have composite keys — detect by checking if keys contain ":"
                 let has_composite = payload.secrets.keys().any(|k| k.contains(':'));
