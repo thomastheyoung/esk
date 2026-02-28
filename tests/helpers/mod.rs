@@ -622,6 +622,59 @@ secrets:
         circleci: [dev, prod]
 "#;
 
+/// Azure App Service target config for integration testing.
+pub const AZURE_APP_SERVICE_CONFIG: &str = r#"
+project: testapp
+environments: [dev, staging, prod]
+apps:
+  web:
+    path: apps/web
+targets:
+  azure_app_service:
+    resource_group: my-resource-group
+    app_names:
+      web: my-azure-webapp
+    slot:
+      staging: staging
+    env_flags:
+      prod: "--subscription my-sub-id"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        azure_app_service: [web:dev, web:staging, web:prod]
+"#;
+
+/// GCP Cloud Run target config for integration testing.
+pub const GCP_CLOUD_RUN_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+  api:
+    path: apps/api
+targets:
+  gcp_cloud_run:
+    service_names:
+      web: my-web-service
+      api: my-api-service
+    project: my-gcp-project
+    region: us-central1
+    env_flags:
+      prod: "--project my-prod-project"
+
+secrets:
+  General:
+    API_KEY:
+      targets:
+        gcp_cloud_run: [web:dev, web:prod]
+    DB_URL:
+      targets:
+        gcp_cloud_run: [api:dev]
+"#;
+
 /// Custom target config for integration testing.
 pub const CUSTOM_CONFIG: &str = r#"
 project: testapp

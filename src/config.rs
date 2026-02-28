@@ -26,6 +26,8 @@ const BUILTIN_TARGET_NAMES: &[&str] = &[
     "kubernetes",
     "docker",
     "circleci",
+    "azure_app_service",
+    "gcp_cloud_run",
     "custom",
 ];
 
@@ -126,6 +128,10 @@ pub struct TargetsConfig {
     pub docker: Option<DockerTargetConfig>,
     #[serde(default)]
     pub circleci: Option<CircleciTargetConfig>,
+    #[serde(default)]
+    pub azure_app_service: Option<AzureAppServiceTargetConfig>,
+    #[serde(default)]
+    pub gcp_cloud_run: Option<GcpCloudRunTargetConfig>,
     #[serde(default)]
     pub custom: BTreeMap<String, CustomTargetConfig>,
 }
@@ -292,6 +298,34 @@ fn default_docker_name_pattern() -> String {
 pub struct CircleciTargetConfig {
     pub org_id: String,
     pub context: String,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AzureAppServiceTargetConfig {
+    /// Maps esk app name → Azure web app name.
+    pub app_names: BTreeMap<String, String>,
+    /// Azure resource group containing the web apps.
+    pub resource_group: String,
+    /// Maps esk env → deployment slot name (e.g. staging → staging).
+    #[serde(default)]
+    pub slot: BTreeMap<String, String>,
+    /// Azure subscription ID (for multi-tenant setups).
+    #[serde(default)]
+    pub subscription: Option<String>,
+    #[serde(default)]
+    pub env_flags: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GcpCloudRunTargetConfig {
+    /// Maps esk app name → Cloud Run service name.
+    pub service_names: BTreeMap<String, String>,
+    /// GCP project ID.
+    pub project: String,
+    /// Cloud Run region (e.g. "us-central1").
+    pub region: String,
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }
@@ -1102,6 +1136,8 @@ impl Config {
             ("kubernetes", self.targets.kubernetes.is_some()),
             ("docker", self.targets.docker.is_some()),
             ("circleci", self.targets.circleci.is_some()),
+            ("azure_app_service", self.targets.azure_app_service.is_some()),
+            ("gcp_cloud_run", self.targets.gcp_cloud_run.is_some()),
         ]
         .into_iter()
         .filter(|(_, present)| *present)

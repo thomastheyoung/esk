@@ -1,5 +1,6 @@
 pub mod aws_lambda;
 pub mod aws_ssm;
+pub mod azure_app_service;
 pub mod circleci;
 pub mod cloudflare;
 pub mod convex;
@@ -7,6 +8,7 @@ pub mod custom;
 pub mod docker;
 pub mod env_file;
 pub mod fly;
+pub mod gcp_cloud_run;
 pub mod github;
 pub mod gitlab;
 pub mod heroku;
@@ -400,6 +402,28 @@ pub(crate) fn target_candidates<'a>(
         });
     }
 
+    if let Some(target_config) = &config.targets.azure_app_service {
+        candidates.push(TargetCandidate {
+            target: Box::new(azure_app_service::AzureAppServiceTarget {
+                config,
+                target_config,
+                runner,
+            }),
+            ok_message: "az authenticated",
+        });
+    }
+
+    if let Some(target_config) = &config.targets.gcp_cloud_run {
+        candidates.push(TargetCandidate {
+            target: Box::new(gcp_cloud_run::GcpCloudRunTarget {
+                config,
+                target_config,
+                runner,
+            }),
+            ok_message: "gcloud authenticated",
+        });
+    }
+
     for (name, target_config) in &config.targets.custom {
         candidates.push(TargetCandidate {
             target: Box::new(custom::CustomTarget {
@@ -415,7 +439,10 @@ pub(crate) fn target_candidates<'a>(
 }
 
 fn needs_cli_secret_arg_warning(name: &str) -> bool {
-    matches!(name, "netlify" | "heroku")
+    matches!(
+        name,
+        "netlify" | "heroku" | "azure_app_service" | "gcp_cloud_run"
+    )
 }
 
 /// Check the health of all configured targets without filtering.

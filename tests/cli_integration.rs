@@ -4449,6 +4449,404 @@ fn deploy_circleci_delete() {
     assert!(calls[1].stdin.is_none());
 }
 
+// === azure_app_service ===
+
+#[test]
+fn deploy_azure_app_service_calls_cli() {
+    let project = TestProject::with_store(AZURE_APP_SERVICE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // az --version
+    runner.push_success(b"", b""); // az account show
+    runner.push_success(b"", b""); // az webapp config appsettings set
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    // az --version, az account show, az webapp config appsettings set
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "az");
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "webapp",
+            "config",
+            "appsettings",
+            "set",
+            "--name",
+            "my-azure-webapp",
+            "--resource-group",
+            "my-resource-group",
+            "--settings",
+            "API_KEY=secret123",
+        ]
+    );
+}
+
+#[test]
+fn deploy_azure_app_service_with_slot() {
+    let project = TestProject::with_store(AZURE_APP_SERVICE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "staging", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // az --version
+    runner.push_success(b"", b""); // az account show
+    runner.push_success(b"", b""); // az webapp config appsettings set
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("staging"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].program, "az");
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "webapp",
+            "config",
+            "appsettings",
+            "set",
+            "--name",
+            "my-azure-webapp",
+            "--resource-group",
+            "my-resource-group",
+            "--settings",
+            "API_KEY=secret123",
+            "--slot",
+            "staging",
+        ]
+    );
+}
+
+#[test]
+fn deploy_azure_app_service_delete() {
+    let project = TestProject::with_store(AZURE_APP_SERVICE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("API_KEY", "dev", "secret").unwrap();
+    // Deploy to establish initial state
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // az --version
+    runner.push_success(b"", b""); // az account show
+    runner.push_success(b"", b""); // az webapp config appsettings set
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Delete the key (creates tombstone)
+    store.delete("API_KEY", "dev").unwrap();
+
+    // Deploy again — should call delete_secret
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // az --version
+    runner.push_success(b"", b""); // az account show
+    runner.push_success(b"", b""); // az webapp config appsettings delete
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].program, "az");
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "webapp",
+            "config",
+            "appsettings",
+            "delete",
+            "--name",
+            "my-azure-webapp",
+            "--resource-group",
+            "my-resource-group",
+            "--setting-names",
+            "API_KEY",
+        ]
+    );
+}
+
+#[test]
+fn deploy_azure_app_service_preflight_failure() {
+    let project = TestProject::with_store(AZURE_APP_SERVICE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"2.50.0", b""); // az --version
+    runner.push_failure(b"Please run 'az login'"); // az account show fails
+
+    // Deploy succeeds but skips the target (preflight failure filters it out)
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Only preflight calls, no deploy calls
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2); // az --version + az account show
+    assert!(!calls.iter().any(|c| c.args.contains(&"appsettings".to_string())));
+}
+
+// === gcp_cloud_run ===
+
+#[test]
+fn deploy_gcp_cloud_run_calls_cli() {
+    let project = TestProject::with_store(GCP_CLOUD_RUN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gcloud --version
+    runner.push_success(b"ya29.token", b""); // gcloud auth print-access-token
+    runner.push_success(b"", b""); // gcloud run services update
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    // gcloud --version, gcloud auth print-access-token, gcloud run services update
+    assert_eq!(calls.len(), 3);
+    assert_eq!(calls[2].program, "gcloud");
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "run",
+            "services",
+            "update",
+            "my-web-service",
+            "--update-env-vars",
+            "API_KEY=secret123",
+            "--project",
+            "my-gcp-project",
+            "--region",
+            "us-central1",
+        ]
+    );
+}
+
+#[test]
+fn deploy_gcp_cloud_run_with_env_flags() {
+    let project = TestProject::with_store(GCP_CLOUD_RUN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "prod", "secret123").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gcloud --version
+    runner.push_success(b"ya29.token", b""); // gcloud auth print-access-token
+    runner.push_success(b"", b""); // gcloud run services update
+
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("prod"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].program, "gcloud");
+    // env_flags for prod should include "--project my-prod-project"
+    assert!(calls[2].args.contains(&"--project".to_string()));
+    assert!(calls[2].args.contains(&"my-prod-project".to_string()));
+}
+
+#[test]
+fn deploy_gcp_cloud_run_delete() {
+    let project = TestProject::with_store(GCP_CLOUD_RUN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+
+    store.set("API_KEY", "dev", "secret").unwrap();
+    // Deploy to establish initial state
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gcloud --version
+    runner.push_success(b"ya29.token", b""); // gcloud auth print-access-token
+    runner.push_success(b"", b""); // gcloud run services update
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Delete the key (creates tombstone)
+    store.delete("API_KEY", "dev").unwrap();
+
+    // Deploy again — should call delete_secret
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // gcloud --version
+    runner.push_success(b"ya29.token", b""); // gcloud auth print-access-token
+    runner.push_success(b"", b""); // gcloud run services update --remove-env-vars
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let calls = runner.take_calls();
+    assert_eq!(calls[2].program, "gcloud");
+    assert_eq!(
+        calls[2].args,
+        vec![
+            "run",
+            "services",
+            "update",
+            "my-web-service",
+            "--remove-env-vars",
+            "API_KEY",
+            "--project",
+            "my-gcp-project",
+            "--region",
+            "us-central1",
+        ]
+    );
+}
+
+#[test]
+fn deploy_gcp_cloud_run_preflight_failure() {
+    let project = TestProject::with_store(GCP_CLOUD_RUN_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "secret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"Google Cloud SDK 400.0.0", b""); // gcloud --version
+    runner.push_failure(b"ERROR: not authenticated"); // gcloud auth print-access-token fails
+
+    // Deploy succeeds but skips the target (preflight failure filters it out)
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            bail: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Only preflight calls, no deploy calls
+    let calls = runner.take_calls();
+    assert_eq!(calls.len(), 2); // gcloud --version + gcloud auth print-access-token
+    assert!(!calls
+        .iter()
+        .any(|c| c.args.contains(&"services".to_string())));
+}
+
 // === generate ===
 
 #[test]
