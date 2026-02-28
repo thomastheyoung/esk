@@ -108,9 +108,7 @@ impl DeployTarget for DockerTarget<'_> {
         // Create secret via stdin
         let label_parts = self.label_args();
         let mut create_args: Vec<&str> = vec!["secret", "create"];
-        for part in &label_parts {
-            create_args.push(part);
-        }
+        create_args.extend(label_parts.iter().map(String::as_str));
         create_args.push(&resolved_name);
         create_args.push("-");
         create_args.extend(flag_parts.iter().map(String::as_str));
@@ -127,9 +125,7 @@ impl DeployTarget for DockerTarget<'_> {
             )
             .with_context(|| format!("failed to run docker secret create for {key}"))?;
 
-        output.check("docker secret create", key)?;
-
-        Ok(())
+        output.check("docker secret create", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -139,14 +135,10 @@ impl DeployTarget for DockerTarget<'_> {
         let mut args: Vec<&str> = vec!["secret", "rm", &resolved_name];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("docker", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run docker secret rm for {key}"))?;
-
-        output.check("docker secret rm", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run docker secret rm for {key}"))?
+            .check("docker secret rm", key)
     }
 }
 

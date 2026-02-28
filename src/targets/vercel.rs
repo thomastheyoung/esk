@@ -66,8 +66,7 @@ impl DeployTarget for VercelTarget<'_> {
         let mut args: Vec<&str> = vec!["env", "add", key, vercel_env, "--force"];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "vercel",
                 &args,
@@ -76,11 +75,8 @@ impl DeployTarget for VercelTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run vercel for {key}"))?;
-
-        output.check("vercel env add", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run vercel for {key}"))?
+            .check("vercel env add", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -90,14 +86,10 @@ impl DeployTarget for VercelTarget<'_> {
         let mut args: Vec<&str> = vec!["env", "rm", key, vercel_env, "--yes"];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("vercel", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run vercel delete for {key}"))?;
-
-        output.check("vercel env rm", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run vercel delete for {key}"))?
+            .check("vercel env rm", key)
     }
 }
 

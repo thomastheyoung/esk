@@ -108,8 +108,7 @@ impl DeployTarget for CustomTarget<'_> {
                 )
             })?;
 
-        output.check(&format!("{} deploy", self.target_name), key)?;
-        Ok(())
+        output.check(&format!("{} deploy", self.target_name), key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -141,8 +140,7 @@ impl DeployTarget for CustomTarget<'_> {
                 )
             })?;
 
-        output.check(&format!("{} delete", self.target_name), key)?;
-        Ok(())
+        output.check(&format!("{} delete", self.target_name), key)
     }
 }
 

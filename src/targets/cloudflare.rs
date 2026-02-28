@@ -35,8 +35,7 @@ impl CloudflareTarget<'_> {
         let mut args: Vec<&str> = vec!["pages", "secret", "put", key, "--project", project];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "wrangler",
                 &args,
@@ -45,10 +44,8 @@ impl CloudflareTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run wrangler pages for {key}"))?;
-        output.check("wrangler pages secret put", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run wrangler pages for {key}"))?
+            .check("wrangler pages secret put", key)
     }
 
     fn delete_pages_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -70,13 +67,10 @@ impl CloudflareTarget<'_> {
         ];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("wrangler", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run wrangler pages delete for {key}"))?;
-        output.check("wrangler pages secret delete", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run wrangler pages delete for {key}"))?
+            .check("wrangler pages secret delete", key)
     }
 }
 
@@ -125,8 +119,7 @@ impl DeployTarget for CloudflareTarget<'_> {
         let mut args: Vec<&str> = vec!["secret", "put", key];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "wrangler",
                 &args,
@@ -136,10 +129,8 @@ impl DeployTarget for CloudflareTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run wrangler for {key}"))?;
-        output.check("wrangler secret put", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run wrangler for {key}"))?
+            .check("wrangler secret put", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -162,8 +153,7 @@ impl DeployTarget for CloudflareTarget<'_> {
         let mut args: Vec<&str> = vec!["secret", "delete", key, "--force"];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "wrangler",
                 &args,
@@ -172,10 +162,8 @@ impl DeployTarget for CloudflareTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run wrangler delete for {key}"))?;
-        output.check("wrangler secret delete", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run wrangler delete for {key}"))?
+            .check("wrangler secret delete", key)
     }
 }
 

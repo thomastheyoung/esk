@@ -53,8 +53,7 @@ impl DeployTarget for GitlabTarget<'_> {
         let mut args: Vec<&str> = vec!["variable", "set", key, "--scope", &target.environment];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "glab",
                 &args,
@@ -63,11 +62,8 @@ impl DeployTarget for GitlabTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run glab for {key}"))?;
-
-        output.check("glab variable set", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run glab for {key}"))?
+            .check("glab variable set", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -75,14 +71,10 @@ impl DeployTarget for GitlabTarget<'_> {
         let mut args: Vec<&str> = vec!["variable", "delete", key, "--scope", &target.environment];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("glab", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run glab delete for {key}"))?;
-
-        output.check("glab variable delete", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run glab delete for {key}"))?
+            .check("glab variable delete", key)
     }
 }
 

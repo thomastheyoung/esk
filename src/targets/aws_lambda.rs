@@ -71,9 +71,7 @@ impl AwsLambdaTarget<'_> {
             "--function-name",
             function_name,
         ];
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         args.extend(env_flags.iter().map(String::as_str));
 
         let output = self
@@ -143,9 +141,7 @@ impl AwsLambdaTarget<'_> {
             "--cli-input-json",
             "file:///dev/stdin",
         ];
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         args.extend(env_flags.iter().map(String::as_str));
 
         let output = self
@@ -198,9 +194,7 @@ impl DeployTarget for AwsLambdaTarget<'_> {
         })?;
         let base = self.base_args();
         let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         let output = self
             .runner
             .run("aws", &args, CommandOpts::default())
@@ -218,8 +212,7 @@ impl DeployTarget for AwsLambdaTarget<'_> {
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let function_name = self.resolve_function_name(&target.environment)?;
-        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
-        let env_flags: Vec<String> = flag_parts;
+        let env_flags = resolve_env_flags(&self.target_config.env_flags, &target.environment);
 
         let (mut vars, revision_id) = self.read_env_vars(function_name, &env_flags)?;
 

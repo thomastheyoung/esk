@@ -67,9 +67,7 @@ impl DeployTarget for AwsSsmTarget<'_> {
         })?;
         let base = self.base_args();
         let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         let output = self
             .runner
             .run("aws", &args, CommandOpts::default())
@@ -100,9 +98,7 @@ impl DeployTarget for AwsSsmTarget<'_> {
             "--cli-input-json",
             "file:///dev/stdin",
         ];
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
@@ -117,9 +113,7 @@ impl DeployTarget for AwsSsmTarget<'_> {
             )
             .with_context(|| format!("failed to run aws ssm put-parameter for {key}"))?;
 
-        output.check("aws ssm put-parameter", key)?;
-
-        Ok(())
+        output.check("aws ssm put-parameter", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -128,9 +122,7 @@ impl DeployTarget for AwsSsmTarget<'_> {
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["ssm", "delete-parameter", "--name", &param_path];
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
@@ -138,9 +130,7 @@ impl DeployTarget for AwsSsmTarget<'_> {
             .run("aws", &args, CommandOpts::default())
             .with_context(|| format!("failed to run aws ssm delete-parameter for {key}"))?;
 
-        output.check("aws ssm delete-parameter", key)?;
-
-        Ok(())
+        output.check("aws ssm delete-parameter", key)
     }
 }
 

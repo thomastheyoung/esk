@@ -69,9 +69,7 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
         })?;
         let base = self.base_args();
         let mut args: Vec<&str> = vec!["account", "show"];
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         let output = self
             .runner
             .run("az", &args, CommandOpts::default())
@@ -107,9 +105,7 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
             args.push("--slot");
             args.push(slot);
         }
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
@@ -117,9 +113,7 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
             .run("az", &args, CommandOpts::default())
             .with_context(|| format!("failed to run az webapp config appsettings set for {key}"))?;
 
-        output.check("az webapp config appsettings set", key)?;
-
-        Ok(())
+        output.check("az webapp config appsettings set", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -144,9 +138,7 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
             args.push("--slot");
             args.push(slot);
         }
-        for a in &base {
-            args.push(a);
-        }
+        args.extend(base.iter().map(String::as_str));
         args.extend(flag_parts.iter().map(String::as_str));
 
         let output = self
@@ -156,9 +148,7 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
                 format!("failed to run az webapp config appsettings delete for {key}")
             })?;
 
-        output.check("az webapp config appsettings delete", key)?;
-
-        Ok(())
+        output.check("az webapp config appsettings delete", key)
     }
 }
 

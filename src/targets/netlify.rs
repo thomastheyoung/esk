@@ -61,14 +61,10 @@ impl DeployTarget for NetlifyTarget<'_> {
         }
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("netlify", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run netlify for {key}"))?;
-
-        output.check("netlify env:set", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run netlify for {key}"))?
+            .check("netlify env:set", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -80,14 +76,10 @@ impl DeployTarget for NetlifyTarget<'_> {
         }
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("netlify", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run netlify delete for {key}"))?;
-
-        output.check("netlify env:unset", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run netlify delete for {key}"))?
+            .check("netlify env:unset", key)
     }
 }
 

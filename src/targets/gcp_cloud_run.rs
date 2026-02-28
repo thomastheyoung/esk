@@ -100,9 +100,7 @@ impl DeployTarget for GcpCloudRunTarget<'_> {
                 format!("failed to run gcloud run services update for {key}")
             })?;
 
-        output.check("gcloud run services update", key)?;
-
-        Ok(())
+        output.check("gcloud run services update", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -132,9 +130,7 @@ impl DeployTarget for GcpCloudRunTarget<'_> {
                 format!("failed to run gcloud run services update --remove-env-vars for {key}")
             })?;
 
-        output.check("gcloud run services update --remove-env-vars", key)?;
-
-        Ok(())
+        output.check("gcloud run services update --remove-env-vars", key)
     }
 }
 

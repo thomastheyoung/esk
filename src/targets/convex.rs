@@ -93,8 +93,7 @@ impl DeployTarget for ConvexTarget<'_> {
         let mut args: Vec<&str> = vec!["convex", "env", "set", key];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "npx",
                 &args,
@@ -104,11 +103,8 @@ impl DeployTarget for ConvexTarget<'_> {
                     stdin: Some(value.as_bytes().to_vec()),
                 },
             )
-            .with_context(|| format!("failed to run convex for {key}"))?;
-
-        output.check("convex env set", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run convex for {key}"))?
+            .check("convex env set", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -118,8 +114,7 @@ impl DeployTarget for ConvexTarget<'_> {
         let mut args: Vec<&str> = vec!["convex", "env", "unset", key];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "npx",
                 &args,
@@ -129,11 +124,8 @@ impl DeployTarget for ConvexTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run convex delete for {key}"))?;
-
-        output.check("convex env unset", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run convex delete for {key}"))?
+            .check("convex env unset", key)
     }
 }
 

@@ -181,8 +181,7 @@ impl DeployTarget for RenderTarget<'_> {
             )
             .with_context(|| format!("failed to run curl for render deploy {key}"))?;
 
-        check_curl_output(&output, "deploy", key)?;
-        Ok(())
+        check_curl_output(&output, "deploy", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -208,8 +207,7 @@ impl DeployTarget for RenderTarget<'_> {
             )
             .with_context(|| format!("failed to run curl for render delete {key}"))?;
 
-        check_curl_output(&output, "delete", key)?;
-        Ok(())
+        check_curl_output(&output, "delete", key)
     }
 }
 

@@ -71,8 +71,7 @@ impl DeployTarget for SupabaseTarget<'_> {
         let mut args: Vec<&str> = vec!["secrets", "set", "--project-ref", project_ref];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "supabase",
                 &args,
@@ -81,11 +80,8 @@ impl DeployTarget for SupabaseTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run supabase for {key}"))?;
-
-        output.check("supabase secrets set", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run supabase for {key}"))?
+            .check("supabase secrets set", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -95,14 +91,10 @@ impl DeployTarget for SupabaseTarget<'_> {
         let mut args: Vec<&str> = vec!["secrets", "unset", key, "--project-ref", project_ref];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("supabase", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run supabase delete for {key}"))?;
-
-        output.check("supabase secrets unset", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run supabase delete for {key}"))?
+            .check("supabase secrets unset", key)
     }
 }
 

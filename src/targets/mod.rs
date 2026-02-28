@@ -685,7 +685,7 @@ mod tests {
         }
 
         fn deploy_secret(&self, key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
-            if self.fail_keys.contains(&key.to_string()) {
+            if self.fail_keys.iter().any(|k| k == key) {
                 anyhow::bail!("deploy failed for {key}");
             }
             Ok(())

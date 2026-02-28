@@ -74,8 +74,7 @@ impl DeployTarget for FlyTarget<'_> {
         let mut args: Vec<&str> = vec!["secrets", "import", "-a", fly_app];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "fly",
                 &args,
@@ -84,11 +83,8 @@ impl DeployTarget for FlyTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run fly for {key}"))?;
-
-        output.check("fly secrets import", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run fly for {key}"))?
+            .check("fly secrets import", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -98,14 +94,10 @@ impl DeployTarget for FlyTarget<'_> {
         let mut args: Vec<&str> = vec!["secrets", "unset", key, "-a", fly_app];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("fly", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run fly delete for {key}"))?;
-
-        output.check("fly secrets unset", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run fly delete for {key}"))?
+            .check("fly secrets unset", key)
     }
 }
 

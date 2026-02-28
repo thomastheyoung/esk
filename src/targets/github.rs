@@ -58,8 +58,7 @@ impl DeployTarget for GithubTarget<'_> {
         }
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "gh",
                 &args,
@@ -68,11 +67,8 @@ impl DeployTarget for GithubTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run gh for {key}"))?;
-
-        output.check("gh secret set", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run gh for {key}"))?
+            .check("gh secret set", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -84,14 +80,10 @@ impl DeployTarget for GithubTarget<'_> {
         }
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("gh", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run gh delete for {key}"))?;
-
-        output.check("gh secret delete", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run gh delete for {key}"))?
+            .check("gh secret delete", key)
     }
 }
 

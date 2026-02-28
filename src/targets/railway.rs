@@ -54,8 +54,7 @@ impl DeployTarget for RailwayTarget<'_> {
         let mut args: Vec<&str> = vec!["variables", "set", key, "--stdin"];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run(
                 "railway",
                 &args,
@@ -64,11 +63,8 @@ impl DeployTarget for RailwayTarget<'_> {
                     ..Default::default()
                 },
             )
-            .with_context(|| format!("failed to run railway for {key}"))?;
-
-        output.check("railway variables set", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run railway for {key}"))?
+            .check("railway variables set", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -76,14 +72,10 @@ impl DeployTarget for RailwayTarget<'_> {
         let mut args: Vec<&str> = vec!["variables", "delete", key];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("railway", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run railway delete for {key}"))?;
-
-        output.check("railway variables delete", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run railway delete for {key}"))?
+            .check("railway variables delete", key)
     }
 }
 

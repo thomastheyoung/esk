@@ -74,14 +74,10 @@ impl DeployTarget for HerokuTarget<'_> {
         let mut args: Vec<&str> = vec!["config:set", &kv, "-a", heroku_app];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("heroku", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run heroku for {key}"))?;
-
-        output.check("heroku config:set", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run heroku for {key}"))?
+            .check("heroku config:set", key)
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -91,14 +87,10 @@ impl DeployTarget for HerokuTarget<'_> {
         let mut args: Vec<&str> = vec!["config:unset", key, "-a", heroku_app];
         args.extend(flag_parts.iter().map(String::as_str));
 
-        let output = self
-            .runner
+        self.runner
             .run("heroku", &args, CommandOpts::default())
-            .with_context(|| format!("failed to run heroku delete for {key}"))?;
-
-        output.check("heroku config:unset", key)?;
-
-        Ok(())
+            .with_context(|| format!("failed to run heroku delete for {key}"))?
+            .check("heroku config:unset", key)
     }
 }
 
