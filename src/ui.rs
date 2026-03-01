@@ -99,19 +99,15 @@ pub fn format_deploy_summary(
     unset: usize,
     pruned: usize,
 ) -> String {
-    let keys_str = style(format!("{keys} keys")).bold().to_string();
-    let targets_str = style(format!("{deployed} targets")).bold().to_string();
-    let mut parts = vec![format!("deployed {keys_str} to {targets_str}")];
-    if failed > 0 {
-        parts.push(format!("{failed} failed"));
+    let keys_str = style(format!("{keys} keys")).bold();
+    let targets_str = style(format!("{deployed} targets")).bold();
+    let base = format!("deployed {keys_str} to {targets_str}");
+    let suffix = format_count_summary(&[("failed", failed), ("unset", unset), ("pruned", pruned)]);
+    if suffix.is_empty() {
+        base
+    } else {
+        format!("{base}, {suffix}")
     }
-    if unset > 0 {
-        parts.push(format!("{unset} unset"));
-    }
-    if pruned > 0 {
-        parts.push(format!("{pruned} pruned"));
-    }
-    parts.join(", ")
 }
 
 // ---------------------------------------------------------------------------
@@ -148,12 +144,8 @@ pub fn section_header(icon: impl fmt::Display, label: &str, color: SectionColor)
 }
 
 /// Renders a section entry like `"     API_KEY:prod  details here"`.
-pub fn section_entry(left: &str, right: &str) -> String {
-    format!("     {}  {}", style(left).dim(), right)
-}
-
-/// Like [`section_entry`] but pads `left` to `width` visible characters for column alignment.
-pub fn section_entry_aligned(left: &str, right: &str, width: usize) -> String {
+/// When `width > 0`, pads `left` to that many characters for column alignment.
+pub fn section_entry(left: &str, right: &str, width: usize) -> String {
     let pad = width.saturating_sub(left.len());
     format!("     {}{}  {}", style(left).dim(), " ".repeat(pad), right)
 }

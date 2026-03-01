@@ -708,7 +708,7 @@ impl Dashboard {
                         .as_deref()
                         .map(|e| format!(" {}", style(format!("({e})")).dim()))
                         .unwrap_or_default();
-                    deploy_lines.push(ui::section_entry_aligned(
+                    deploy_lines.push(ui::section_entry(
                         &format!("{}:{}", entry.key, entry.env),
                         &format!("→ {}  {}{}", entry.target, style(freshness).dim(), err_text,),
                         deploy_label_width,
@@ -737,7 +737,7 @@ impl Dashboard {
                             format!("last deployed {ago}")
                         }
                     };
-                    deploy_lines.push(ui::section_entry_aligned(
+                    deploy_lines.push(ui::section_entry(
                         &format!("{}:{}", group.key, group.env),
                         &format!("→ {}  {}", targets, style(freshness).dim()),
                         deploy_label_width,
@@ -762,7 +762,7 @@ impl Dashboard {
                 };
                 for group in groups.iter().take(shown) {
                     let targets = group.targets.join(", ");
-                    deploy_lines.push(ui::section_entry_aligned(
+                    deploy_lines.push(ui::section_entry(
                         &format!("{}:{}", group.key, group.env),
                         &format!("→ {}", style(targets).dim()),
                         deploy_label_width,
@@ -787,7 +787,7 @@ impl Dashboard {
                             GroupedFreshness::NeverDeployed => String::new(),
                             GroupedFreshness::Timestamp(ts) => ui::format_relative_time(ts),
                         };
-                        deploy_lines.push(ui::section_entry_aligned(
+                        deploy_lines.push(ui::section_entry(
                             &format!("{}:{}", group.key, group.env),
                             &format!("→ {}  {}", targets, style(freshness).dim()),
                             deploy_label_width,
@@ -823,6 +823,7 @@ impl Dashboard {
                     val_lines.push(ui::section_entry(
                         &format!("{}:{}", w.key, w.env),
                         &style(&w.message).dim().to_string(),
+                        0,
                     ));
                 }
             }
@@ -836,6 +837,7 @@ impl Dashboard {
                     val_lines.push(ui::section_entry(
                         &format!("{}:{}", v.key, v.env),
                         &style(&v.message).dim().to_string(),
+                        0,
                     ));
                 }
             }
@@ -854,6 +856,7 @@ impl Dashboard {
                 empty_lines.push(ui::section_entry(
                     &format!("{}:{}", w.key, w.env),
                     &style(w.kind).dim().to_string(),
+                    0,
                 ));
             }
             cliclack::log::step(format!("Empty values\n{}", empty_lines.join("\n")))?;
@@ -881,6 +884,7 @@ impl Dashboard {
                 req_lines.push(ui::section_entry(
                     &format!("{}:{}", m.key, m.env),
                     &target_info,
+                    0,
                 ));
             }
             if let Some(footer) = ui::truncation_footer(self.missing_required.len(), shown) {
@@ -918,6 +922,7 @@ impl Dashboard {
                         style(missing_env).yellow(),
                         style(format!("(set in {present})")).dim(),
                     ),
+                    0,
                 ));
             }
         }
@@ -955,6 +960,7 @@ impl Dashboard {
                     cov_lines.push(ui::section_entry(
                         &format!("{}:{}", orphan.key, orphan.env),
                         "",
+                        0,
                     ));
                 }
             }
@@ -979,6 +985,7 @@ impl Dashboard {
                             style(format!("{} ({})", target_display, orphan.env)),
                             style(freshness).dim(),
                         ),
+                        0,
                     ));
                 }
             }
