@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
-use crate::targets::{check_target_health, CommandRunner, RealCommandRunner, TargetHealth};
+use crate::targets::{render_target_health, CommandRunner, RealCommandRunner};
 use crate::ui;
 use crate::validate;
 
@@ -87,7 +87,6 @@ pub(crate) struct Dashboard {
     pub(crate) version: u64,
     pub(crate) filtered_env: Option<String>,
     pub(crate) env_versions: Vec<(String, u64)>,
-    pub(crate) target_health: Vec<TargetHealth>,
     pub(crate) failed: Vec<DeployEntry>,
     pub(crate) pending: Vec<DeployEntry>,
     pub(crate) deployed: Vec<DeployEntry>,
@@ -204,11 +203,8 @@ impl Dashboard {
                 .collect(),
         };
 
-        // 1. Health checks (parallel)
-        let spinner = cliclack::spinner();
-        spinner.start("Checking targets...");
-        let target_health = check_target_health(config, runner);
-        spinner.set_message("Checking status...");
+        // 1. Health checks (parallel, animated)
+        render_target_health(config, runner, "Targets");
 
         // 2. Deploy entries
         let mut failed = Vec::new();
@@ -560,14 +556,11 @@ impl Dashboard {
             .map(|e| ((*e).to_string(), payload.env_version(e)))
             .collect();
 
-        spinner.stop("");
-
         Ok(Dashboard {
             project: config.project.clone(),
             version: payload.version,
             filtered_env,
             env_versions,
-            target_health,
             failed,
             pending,
             deployed,
@@ -648,28 +641,6 @@ impl Dashboard {
         };
 
         cliclack::intro(style(summary).to_string())?;
-
-        // Targets section
-        if !self.target_health.is_empty() {
-            let lines: Vec<String> = self
-                .target_health
-                .iter()
-                .map(|h| {
-                    let icon = if h.status.is_ok() {
-                        ui::Icon::Success
-                    } else {
-                        ui::Icon::Failure
-                    };
-                    format!(
-                        "  {} {:<14} {}",
-                        icon,
-                        h.name,
-                        style(h.status.message()).dim()
-                    )
-                })
-                .collect();
-            cliclack::log::step(format!("Targets\n{}", lines.join("\n")))?;
-        }
 
         // Deploy section
         let has_problems =

@@ -505,15 +505,17 @@ pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<T
     })
 }
 
-/// Build all configured deploy targets from the config.
-/// Runs preflight checks in parallel and filters out targets that fail.
-/// Renders animated per-target spinners that resolve to checkmarks/X marks.
-pub fn build_targets<'a>(
-    config: &'a Config,
-    runner: &'a dyn CommandRunner,
-) -> Vec<Box<dyn DeployTarget + 'a>> {
-    let candidates = target_candidates(config, runner);
-    if candidates.is_empty() {
+/// Run preflight checks in parallel with animated rendering.
+///
+/// TTY path: animated spinners with diamond header using `section_name`.
+/// Non-TTY path: static `cliclack::log::step` using `section_name`.
+/// Returns `Vec<(bool, String)>` — one `(passed, message)` per candidate, parallel to input.
+pub(crate) fn run_preflight_section(
+    candidates: &[TargetCandidate],
+    section_name: &str,
+) -> Vec<(bool, String)> {
+    let n = candidates.len();
+    if n == 0 {
         return Vec::new();
     }
 
@@ -522,7 +524,6 @@ pub fn build_targets<'a>(
         .map(|c| c.target.name().len())
         .max()
         .unwrap_or(0);
-    let n = candidates.len();
     let is_tty = std::io::stderr().is_terminal();
 
     // Shared preflight results: None = in progress
@@ -550,8 +551,8 @@ pub fn build_targets<'a>(
             let bar = style("\u{2502}").dim();
 
             // Print header + initial spinner lines
-            let _ = term.write_line(&format!("{}  Preflight", style("\u{25C7}").dim()));
-            for c in &candidates {
+            let _ = term.write_line(&format!("{}  {section_name}", style("\u{25C7}").dim()));
+            for c in candidates {
                 let _ = term.write_line(&format!(
                     "{bar}    {} {:<name_width$}",
                     style(frames[0]).magenta(),
@@ -616,7 +617,7 @@ pub fn build_targets<'a>(
             };
             let _ = term.move_cursor_up(n + 1);
             let _ = term.clear_line();
-            let _ = term.write_line(&format!("{header_icon}  Preflight"));
+            let _ = term.write_line(&format!("{header_icon}  {section_name}"));
             let _ = term.move_cursor_down(n);
 
             // Trailing bar line to match cliclack::note spacing
@@ -637,39 +638,73 @@ pub fn build_targets<'a>(
                 format!("  {mark} {name:<name_width$}  {msg}")
             })
             .collect();
-        let _ = cliclack::log::step(format!("Preflight\n{}", lines.join("\n")));
+        let _ = cliclack::log::step(format!("{section_name}\n{}", lines.join("\n")));
     }
 
-    // Emit security warnings after the section
+    // Unwrap results — all slots are filled after thread::scope completes
     let state = results.lock().unwrap();
-    let mut security_warnings: Vec<String> = Vec::new();
-    let passing: Vec<bool> = state
+    state.iter().map(|r| r.clone().unwrap()).collect()
+}
+
+/// Render target health with animated spinners, returning health results.
+///
+/// Creates candidates from config, runs `run_preflight_section()` with the
+/// given section name, and converts results to `Vec<TargetHealth>`.
+pub fn render_target_health(
+    config: &Config,
+    runner: &dyn CommandRunner,
+    section_name: &str,
+) -> Vec<TargetHealth> {
+    let candidates = target_candidates(config, runner);
+    let results = run_preflight_section(&candidates, section_name);
+    candidates
         .iter()
-        .enumerate()
-        .map(|(i, r)| {
-            if let Some((true, _)) = r {
-                let name = candidates[i].target.name();
-                if needs_cli_secret_arg_warning(name) {
+        .zip(results)
+        .map(|(c, (ok, msg))| TargetHealth {
+            name: c.target.name().to_string(),
+            status: if ok {
+                HealthStatus::Ok(msg)
+            } else {
+                HealthStatus::Failed(msg)
+            },
+        })
+        .collect()
+}
+
+/// Build all configured deploy targets from the config.
+/// Runs preflight checks in parallel and filters out targets that fail.
+/// Renders animated per-target spinners that resolve to checkmarks/X marks.
+pub fn build_targets<'a>(
+    config: &'a Config,
+    runner: &'a dyn CommandRunner,
+) -> Vec<Box<dyn DeployTarget + 'a>> {
+    let candidates = target_candidates(config, runner);
+    if candidates.is_empty() {
+        return Vec::new();
+    }
+
+    let results = run_preflight_section(&candidates, "Preflight");
+
+    // Emit security warnings for passing targets
+    let mut security_warnings: Vec<String> = Vec::new();
+    for (i, (ok, _)) in results.iter().enumerate() {
+        if *ok {
+            let name = candidates[i].target.name();
+            if needs_cli_secret_arg_warning(name) {
+                security_warnings.push(format!(
+                    "{name}: secret values are passed as CLI args and may be visible in local process listings",
+                ));
+            }
+            if let Some(custom_cfg) = config.targets.custom.get(name) {
+                if custom::has_value_in_args(&custom_cfg.deploy.args) {
                     security_warnings.push(format!(
-                        "{name}: secret values are passed as CLI args and may be visible in local process listings",
+                        "{name}: deploy args contain {{{{value}}}} — secret values will be \
+                         visible in process listings. Consider using stdin instead."
                     ));
                 }
-                // Warn about custom targets that have {{value}} in args
-                if let Some(custom_cfg) = config.targets.custom.get(name) {
-                    if custom::has_value_in_args(&custom_cfg.deploy.args) {
-                        security_warnings.push(format!(
-                            "{name}: deploy args contain {{{{value}}}} — secret values will be \
-                             visible in process listings. Consider using stdin instead."
-                        ));
-                    }
-                }
-                true
-            } else {
-                false
             }
-        })
-        .collect();
-    drop(state);
+        }
+    }
 
     for warning in &security_warnings {
         let _ = cliclack::log::warning(warning);
@@ -678,8 +713,8 @@ pub fn build_targets<'a>(
     // Filter to passing targets
     candidates
         .into_iter()
-        .enumerate()
-        .filter_map(|(i, c)| if passing[i] { Some(c.target) } else { None })
+        .zip(results)
+        .filter_map(|(c, (ok, _))| if ok { Some(c.target) } else { None })
         .collect()
 }
 
