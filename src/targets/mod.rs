@@ -601,6 +601,26 @@ pub fn build_targets<'a>(
                     break;
                 }
             }
+
+            // Repaint header with status color
+            let state = results.lock().unwrap();
+            let all_ok = state.iter().all(|r| matches!(r, Some((true, _))));
+            let any_ok = state.iter().any(|r| matches!(r, Some((true, _))));
+            drop(state);
+            let header_icon = if all_ok {
+                style("\u{25C6}").green()
+            } else if any_ok {
+                style("\u{25C6}").yellow()
+            } else {
+                style("\u{25C6}").red()
+            };
+            let _ = term.move_cursor_up(n + 1);
+            let _ = term.clear_line();
+            let _ = term.write_line(&format!("{header_icon}  Preflight"));
+            let _ = term.move_cursor_down(n);
+
+            // Trailing bar line to match cliclack::note spacing
+            let _ = term.write_line(&format!("{bar}"));
         }
     });
 

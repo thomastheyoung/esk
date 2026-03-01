@@ -34,6 +34,9 @@ pub fn icon_alert_red() -> StyledObject<&'static str> {
 pub fn icon_merge() -> StyledObject<&'static str> {
     style("↻").yellow()
 }
+pub fn icon_summary() -> StyledObject<&'static str> {
+    style("●").green()
+}
 
 // ---------------------------------------------------------------------------
 // Text measurement
@@ -69,6 +72,30 @@ pub fn format_count_summary(counts: &[(&str, usize)]) -> String {
         .map(|(label, n)| format!("{n} {label}"))
         .collect::<Vec<_>>()
         .join(", ")
+}
+
+/// Builds a deploy summary like "deployed 6 keys to 7 targets" or
+/// "deployed 6 keys to 7 targets, 2 failed".
+pub fn format_deploy_summary(
+    keys: usize,
+    deployed: usize,
+    failed: usize,
+    unset: usize,
+    pruned: usize,
+) -> String {
+    let keys_str = style(format!("{keys} keys")).bold().to_string();
+    let targets_str = style(format!("{deployed} targets")).bold().to_string();
+    let mut parts = vec![format!("deployed {keys_str} to {targets_str}")];
+    if failed > 0 {
+        parts.push(format!("{failed} failed"));
+    }
+    if unset > 0 {
+        parts.push(format!("{unset} unset"));
+    }
+    if pruned > 0 {
+        parts.push(format!("{pruned} pruned"));
+    }
+    parts.join(", ")
 }
 
 // ---------------------------------------------------------------------------
@@ -110,8 +137,8 @@ pub fn section_entry_aligned(left: &str, right: &str, width: usize) -> String {
 // ---------------------------------------------------------------------------
 
 pub const SPINNER_FRAMES: &[char] = &[
-    '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
-    '\u{2827}', '\u{2807}', '\u{280F}',
+    '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}', '\u{2827}',
+    '\u{2807}', '\u{280F}',
 ];
 pub const SPINNER_INTERVAL: std::time::Duration = std::time::Duration::from_millis(80);
 

@@ -30,6 +30,7 @@ const DEPLOY_LINE_WIDTH: usize = 20;
 
 #[derive(Default)]
 struct EnvStatus {
+    keys: usize,
     deployed: usize,
     failed: usize,
     unset: usize,
@@ -103,6 +104,7 @@ impl DeployReport {
 
             // Render deployed entries (grouped by key, targets on one line)
             for ((env, key), (targets, _)) in group_entries(&self.deployed) {
+                env_status.entry(env.clone()).or_default().keys += 1;
                 let label = format!("{} {}", ui::icon_success(), style(&key).dim());
                 env_map
                     .entry(env)
@@ -168,22 +170,21 @@ impl DeployReport {
 
             for (env_name, mut lines) in env_map {
                 let es = env_status.get(&env_name).unwrap();
-                let status_summary = ui::format_count_summary(&[
-                    ("failed", es.failed),
-                    ("deployed", es.deployed),
-                    ("unset", es.unset),
-                    ("pruned", es.pruned),
-                ]);
+                let status_summary = ui::format_deploy_summary(
+                    es.keys,
+                    es.deployed,
+                    es.failed,
+                    es.unset,
+                    es.pruned,
+                );
 
                 lines.push(String::new());
                 let status_icon = if es.failed > 0 {
                     ui::icon_failure()
                 } else {
-                    ui::icon_success()
+                    ui::icon_summary()
                 };
-                lines.push(format!(
-                    "{status_icon} Deployment complete ({status_summary})"
-                ));
+                lines.push(format!("{status_icon} {status_summary}"));
 
                 cliclack::note(env_name, lines.join("\n"))?;
             }
@@ -1426,20 +1427,38 @@ pub fn run_with_runner(
                 }
             }
 
+            // Repaint header with status color
+            let header_icon = if env_failed > 0 && env_deployed == 0 {
+                style("\u{25C6}").red()
+            } else if env_failed > 0 {
+                style("\u{25C6}").yellow()
+            } else {
+                style("\u{25C6}").green()
+            };
+            let _ = term.move_cursor_up(n + 1);
+            let _ = term.clear_line();
+            let _ = term.write_line(&format!("{header_icon}  {env_name}"));
+            let _ = term.move_cursor_down(n);
+
             // Print summary line
-            let summary = ui::format_count_summary(&[
-                ("failed", env_failed),
-                ("deployed", env_deployed),
-                ("unset", env_unset_count),
-                ("pruned", env_pruned),
-            ]);
+            let env_keys = key_lines
+                .iter()
+                .filter(|kl| kl.total_ops > 0)
+                .count();
+            let summary = ui::format_deploy_summary(
+                env_keys,
+                env_deployed,
+                env_failed,
+                env_unset_count,
+                env_pruned,
+            );
             let summary_icon = if env_failed > 0 {
                 ui::icon_failure()
             } else {
-                ui::icon_success()
+                ui::icon_summary()
             };
             let _ = term.write_line(&format!(
-                "{}    {} Deployment complete ({})",
+                "{}    {} {}",
                 style("\u{2502}").dim(),
                 summary_icon,
                 summary,
