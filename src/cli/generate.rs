@@ -3,6 +3,7 @@ use std::fmt::Write;
 use std::path::Path;
 
 use anyhow::{bail, Result};
+use console::style;
 
 use crate::config::{Config, GenerateFormat, GenerateOutput};
 use crate::validate::Format;
@@ -69,6 +70,18 @@ pub fn run(
     }
 
     let outputs = resolve_outputs(format, output, &config.generate)?;
+
+    if !preview {
+        cliclack::intro(
+            style(format!(
+                "{} · {} output{}",
+                style(&config.project).bold(),
+                outputs.len(),
+                if outputs.len() == 1 { "" } else { "s" },
+            ))
+            .to_string(),
+        )?;
+    }
 
     if preview {
         for (i, entry) in outputs.iter().enumerate() {

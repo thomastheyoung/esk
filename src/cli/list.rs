@@ -45,6 +45,38 @@ enum CellStatus {
 pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let all_secrets = store.list()?;
+    let version = store.payload()?.version;
+
+    // Count unique keys (composite keys are "KEY:env")
+    let unique_keys: BTreeSet<&str> = all_secrets
+        .keys()
+        .filter_map(|k| k.rsplit_once(':').map(|(key, _)| key))
+        .collect();
+
+    let scope = match env {
+        Some(e) => e.to_string(),
+        None => format!(
+            "{} env{}",
+            config.environments.len(),
+            if config.environments.len() == 1 {
+                ""
+            } else {
+                "s"
+            }
+        ),
+    };
+
+    cliclack::intro(
+        style(format!(
+            "{} · {} · {} secret{} · {}",
+            style(&config.project).bold(),
+            style(format!("v{version}")).dim(),
+            unique_keys.len(),
+            if unique_keys.len() == 1 { "" } else { "s" },
+            scope,
+        ))
+        .to_string(),
+    )?;
 
     if all_secrets.is_empty() {
         let report = ListReport { groups: Vec::new() };

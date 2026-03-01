@@ -1,6 +1,7 @@
 use std::io::IsTerminal;
 
 use anyhow::{bail, Result};
+use console::style;
 
 use crate::config::Config;
 use crate::remotes;
@@ -40,6 +41,15 @@ impl DeleteReport {
 }
 
 pub fn run(config: &Config, opts: &DeleteOptions<'_>) -> Result<()> {
+    let version = SecretStore::open(&config.root)?.payload()?.version;
+    cliclack::intro(
+        style(format!(
+            "{} · {}",
+            style(&config.project).bold(),
+            style(format!("v{version}")).dim()
+        ))
+        .to_string(),
+    )?;
     run_with_runner(config, opts, &RealCommandRunner)
 }
 

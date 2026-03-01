@@ -391,6 +391,30 @@ fn new_env_work_plan() -> EnvWorkPlan {
 }
 
 pub fn run(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
+    let version = SecretStore::open(&config.root)?.payload()?.version;
+    let target_count = config.target_names().len();
+    let scope = match opts.env {
+        Some(e) => format!(
+            "{} target{} · {}",
+            target_count,
+            if target_count == 1 { "" } else { "s" },
+            e
+        ),
+        None => format!(
+            "{} target{}",
+            target_count,
+            if target_count == 1 { "" } else { "s" }
+        ),
+    };
+    cliclack::intro(
+        style(format!(
+            "{} · {} · {}",
+            style(&config.project).bold(),
+            style(format!("v{version}")).dim(),
+            scope,
+        ))
+        .to_string(),
+    )?;
     run_with_runner(config, opts, &RealCommandRunner)
 }
 

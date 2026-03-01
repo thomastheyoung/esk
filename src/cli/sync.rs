@@ -147,6 +147,31 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
             .collect(),
     };
 
+    let version = SecretStore::open(&config.root)?.payload()?.version;
+    let remote_count = config.remotes.len();
+    let scope = match options.env {
+        Some(e) => format!(
+            "{} remote{} · {}",
+            remote_count,
+            if remote_count == 1 { "" } else { "s" },
+            e
+        ),
+        None => format!(
+            "{} remote{}",
+            remote_count,
+            if remote_count == 1 { "" } else { "s" }
+        ),
+    };
+    cliclack::intro(
+        style(format!(
+            "{} · {} · {}",
+            style(&config.project).bold(),
+            style(format!("v{version}")).dim(),
+            scope,
+        ))
+        .to_string(),
+    )?;
+
     if envs.len() == 1 {
         return run_with_runner(config, &options, &runner);
     }

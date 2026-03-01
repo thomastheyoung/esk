@@ -1,4 +1,5 @@
 use anyhow::{bail, Result};
+use console::style;
 use std::io::IsTerminal;
 
 use crate::config::{self, Config};
@@ -40,6 +41,15 @@ impl SetReport {
 }
 
 pub fn run(config: &Config, opts: &SetOptions<'_>) -> Result<()> {
+    let version = SecretStore::open(&config.root)?.payload()?.version;
+    cliclack::intro(
+        style(format!(
+            "{} · {}",
+            style(&config.project).bold(),
+            style(format!("v{version}")).dim()
+        ))
+        .to_string(),
+    )?;
     run_with_runner(config, opts, &RealCommandRunner)
 }
 
