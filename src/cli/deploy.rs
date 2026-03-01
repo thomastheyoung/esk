@@ -415,7 +415,23 @@ pub fn run(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
         ))
         .to_string(),
     )?;
-    run_with_runner(config, opts, &RealCommandRunner)
+    run_with_runner(config, opts, &RealCommandRunner)?;
+    let payload = SecretStore::open(&config.root)?.payload()?;
+    let env_versions: Vec<(String, u64)> = config
+        .environments
+        .iter()
+        .map(|e| (e.clone(), payload.env_version(e)))
+        .collect();
+    cliclack::outro(
+        style(ui::format_store_outro(
+            payload.version,
+            &env_versions,
+            opts.env,
+        ))
+        .dim()
+        .to_string(),
+    )?;
+    Ok(())
 }
 
 pub fn run_with_runner(

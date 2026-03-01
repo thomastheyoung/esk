@@ -173,32 +173,47 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
     )?;
 
     if envs.len() == 1 {
-        return run_with_runner(config, &options, &runner);
-    }
-
-    let mut failures: Vec<String> = Vec::new();
-    for env in &envs {
-        let per_env_opts = SyncOptions {
-            env: Some(env),
-            ..options
-        };
-        if let Err(e) = run_with_runner(config, &per_env_opts, &runner) {
-            if options.strict {
-                bail!("sync failed for environment '{env}': {e}");
+        run_with_runner(config, &options, &runner)?;
+    } else {
+        let mut failures: Vec<String> = Vec::new();
+        for env in &envs {
+            let per_env_opts = SyncOptions {
+                env: Some(env),
+                ..options
+            };
+            if let Err(e) = run_with_runner(config, &per_env_opts, &runner) {
+                if options.strict {
+                    bail!("sync failed for environment '{env}': {e}");
+                }
+                cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
+                failures.push((*env).to_string());
             }
-            cliclack::log::error(format!("sync failed for environment '{env}': {e}"))?;
-            failures.push((*env).to_string());
+        }
+
+        if !failures.is_empty() {
+            bail!(
+                "{} environment(s) failed to sync: {}",
+                failures.len(),
+                failures.join(", ")
+            );
         }
     }
 
-    if !failures.is_empty() {
-        bail!(
-            "{} environment(s) failed to sync: {}",
-            failures.len(),
-            failures.join(", ")
-        );
-    }
-
+    let payload = SecretStore::open(&config.root)?.payload()?;
+    let env_versions: Vec<(String, u64)> = config
+        .environments
+        .iter()
+        .map(|e| (e.clone(), payload.env_version(e)))
+        .collect();
+    cliclack::outro(
+        style(ui::format_store_outro(
+            payload.version,
+            &env_versions,
+            options.env,
+        ))
+        .dim()
+        .to_string(),
+    )?;
     Ok(())
 }
 

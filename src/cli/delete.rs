@@ -8,6 +8,7 @@ use crate::remotes;
 use crate::store::SecretStore;
 use crate::sync_tracker::SyncIndex;
 use crate::targets::{CommandRunner, RealCommandRunner};
+use crate::ui;
 
 pub struct DeleteOptions<'a> {
     pub key: &'a str,
@@ -50,7 +51,23 @@ pub fn run(config: &Config, opts: &DeleteOptions<'_>) -> Result<()> {
         ))
         .to_string(),
     )?;
-    run_with_runner(config, opts, &RealCommandRunner)
+    run_with_runner(config, opts, &RealCommandRunner)?;
+    let payload = SecretStore::open(&config.root)?.payload()?;
+    let env_versions: Vec<(String, u64)> = config
+        .environments
+        .iter()
+        .map(|e| (e.clone(), payload.env_version(e)))
+        .collect();
+    cliclack::outro(
+        style(ui::format_store_outro(
+            payload.version,
+            &env_versions,
+            Some(opts.env),
+        ))
+        .dim()
+        .to_string(),
+    )?;
+    Ok(())
 }
 
 pub fn run_with_runner(

@@ -45,7 +45,8 @@ enum CellStatus {
 pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let store = SecretStore::open(&config.root)?;
     let all_secrets = store.list()?;
-    let version = store.payload()?.version;
+    let payload = store.payload()?;
+    let version = payload.version;
 
     // Count unique keys (composite keys are "KEY:env")
     let unique_keys: BTreeSet<&str> = all_secrets
@@ -185,7 +186,17 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     }
 
     let report = ListReport { groups };
-    report.render()
+    report.render()?;
+
+    let env_versions: Vec<(String, u64)> = config
+        .environments
+        .iter()
+        .map(|e| (e.clone(), payload.env_version(e)))
+        .collect();
+    cliclack::outro(
+        style(ui::format_store_outro(version, &env_versions, env)).dim().to_string(),
+    )?;
+    Ok(())
 }
 
 /// Compute the worst deploy status for each (key, env) pair across all its targets.

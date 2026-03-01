@@ -203,6 +203,40 @@ pub fn format_relative_time(ts: &str) -> String {
 }
 
 // ---------------------------------------------------------------------------
+// Store outro
+// ---------------------------------------------------------------------------
+
+/// Formats a consistent store-version outro line for CLI commands.
+///
+/// Returns text like `Store version: 14 (dev: v6, staging: v2, prod: v6)`.
+pub fn format_store_outro(
+    version: u64,
+    env_versions: &[(String, u64)],
+    filtered_env: Option<&str>,
+) -> String {
+    let display_version = match filtered_env {
+        Some(env) => env_versions
+            .iter()
+            .find(|(e, _)| e == env)
+            .map_or(version, |(_, v)| *v),
+        None => version,
+    };
+    match filtered_env {
+        Some(env) => format!("Store version: {display_version} ({env})"),
+        None if env_versions.is_empty() => {
+            format!("Store version: {display_version}")
+        }
+        None => {
+            let parts: Vec<String> = env_versions
+                .iter()
+                .map(|(e, v)| format!("{e}: v{v}"))
+                .collect();
+            format!("Store version: {} ({})", display_version, parts.join(", "))
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Truncation
 // ---------------------------------------------------------------------------
 

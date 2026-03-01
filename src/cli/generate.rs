@@ -107,7 +107,22 @@ pub fn run(
     }
 
     let report = GenerateReport { results };
-    report.render()
+    report.render()?;
+
+    let file_count = report.results.len();
+    let secret_count = report.results.first().map_or(0, |r| r.secret_count);
+    cliclack::outro(
+        style(format!(
+            "Generated {} file{} from {} secret{}",
+            file_count,
+            if file_count == 1 { "" } else { "s" },
+            secret_count,
+            if secret_count == 1 { "" } else { "s" },
+        ))
+        .dim()
+        .to_string(),
+    )?;
+    Ok(())
 }
 
 fn resolve_outputs(

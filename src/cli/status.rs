@@ -1034,20 +1034,11 @@ impl Dashboard {
             cliclack::log::step(format!("Next steps\n{}", lines.join("\n")))?;
         }
 
-        let outro_text = match &self.filtered_env {
-            Some(env) => format!("Store version: {display_version} ({env})"),
-            None if self.env_versions.is_empty() => {
-                format!("Store version: {display_version}")
-            }
-            None => {
-                let parts: Vec<String> = self
-                    .env_versions
-                    .iter()
-                    .map(|(e, v)| format!("{e}: v{v}"))
-                    .collect();
-                format!("Store version: {} ({})", display_version, parts.join(", "))
-            }
-        };
+        let outro_text = ui::format_store_outro(
+            self.version,
+            &self.env_versions,
+            self.filtered_env.as_deref(),
+        );
         cliclack::outro(style(outro_text).dim().to_string())?;
 
         Ok(())
