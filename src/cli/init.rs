@@ -103,8 +103,8 @@ pub fn run(cwd: &Path, keychain: bool) -> Result<()> {
 ///
 /// Priority:
 /// 1. `--keychain` flag → keychain (skip prompt)
-/// 2. Existing `store.enc` (re-init) → preserve current provider from marker
-/// 3. TTY + keychain available at runtime → interactive prompt
+/// 2. TTY + keychain available → interactive prompt (pre-selects current provider on re-init)
+/// 3. Re-init, non-TTY → preserve current provider from marker
 /// 4. Default (CI, headless, non-TTY) → file
 fn resolve_key_provider(cwd: &Path, keychain_flag: bool) -> Result<bool> {
     if keychain_flag {
@@ -114,20 +114,27 @@ fn resolve_key_provider(cwd: &Path, keychain_flag: bool) -> Result<bool> {
     let esk_dir = cwd.join(".esk");
     let store_path = esk_dir.join("store.enc");
 
-    // Re-init: preserve existing provider
-    if store_path.is_file() {
+    let current_is_keychain = if store_path.is_file() {
         let marker_path = esk_dir.join("key-provider");
-        let is_keychain = marker_path.is_file()
-            && std::fs::read_to_string(&marker_path)
-                .unwrap_or_default()
-                .trim()
-                == "keychain";
-        return Ok(is_keychain);
+        Some(
+            marker_path.is_file()
+                && std::fs::read_to_string(&marker_path)
+                    .unwrap_or_default()
+                    .trim()
+                    == "keychain",
+        )
+    } else {
+        None
+    };
+
+    // TTY + keychain available: always prompt (fresh or re-init)
+    if std::io::stdin().is_terminal() && keychain_available() {
+        return prompt_key_storage(current_is_keychain.unwrap_or(true));
     }
 
-    // Fresh project: prompt if keychain available and TTY
-    if std::io::stdin().is_terminal() && keychain_available() {
-        return prompt_key_storage();
+    // Non-TTY re-init: preserve current provider
+    if let Some(is_keychain) = current_is_keychain {
+        return Ok(is_keychain);
     }
 
     Ok(false)
@@ -144,12 +151,13 @@ fn keychain_available() -> bool {
     }
 }
 
-fn prompt_key_storage() -> Result<bool> {
+fn prompt_key_storage(default_keychain: bool) -> Result<bool> {
     let use_keychain: bool = cliclack::select("Where should esk store the encryption key?")
         .items(&[
             (true, "OS keychain (recommended)", "key never stored on disk"),
             (false, "File on disk", "saved to .esk/store.key (gitignored)"),
         ])
+        .initial_value(default_keychain)
         .interact()?;
     Ok(use_keychain)
 }
@@ -196,13 +204,7 @@ fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
     let (key_status, store_status) = if keychain {
         ensure_keychain_store(cwd, &esk_dir, &store_path)?
     } else {
-        let key_path = esk_dir.join("store.key");
-        if key_path.is_file() && store_path.is_file() {
-            (KeyStatus::File(FileStatus::Existed), FileStatus::Existed)
-        } else {
-            let _store = SecretStore::load_or_create(cwd)?;
-            (KeyStatus::File(FileStatus::Created), FileStatus::Created)
-        }
+        ensure_file_store(cwd, &esk_dir, &store_path)?
     };
 
     // Create empty deploy index
@@ -233,6 +235,37 @@ fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
         sync_index: sync_index_status,
         gitignore_updated,
     })
+}
+
+fn ensure_file_store(
+    cwd: &Path,
+    esk_dir: &Path,
+    store_path: &Path,
+) -> Result<(KeyStatus, FileStatus)> {
+    let key_path = esk_dir.join("store.key");
+    let marker_path = esk_dir.join("key-provider");
+    let was_keychain = marker_path.is_file()
+        && std::fs::read_to_string(&marker_path)
+            .unwrap_or_default()
+            .trim()
+            == "keychain";
+
+    if was_keychain && store_path.is_file() {
+        // Migration: read key from keychain, write to file
+        let provider = crate::store::KeyProvider::from_marker(esk_dir)?;
+        let key = provider.load()?;
+        crate::store::KeyProvider::write_marker(esk_dir, "file")?;
+        let file_provider = crate::store::KeyProvider::from_marker(esk_dir)?;
+        file_provider.store(&key)?;
+        return Ok((KeyStatus::File(FileStatus::Created), FileStatus::Existed));
+    }
+
+    if key_path.is_file() && store_path.is_file() {
+        return Ok((KeyStatus::File(FileStatus::Existed), FileStatus::Existed));
+    }
+
+    let _store = SecretStore::load_or_create(cwd)?;
+    Ok((KeyStatus::File(FileStatus::Created), FileStatus::Created))
 }
 
 fn ensure_keychain_store(

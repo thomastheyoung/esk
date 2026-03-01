@@ -196,7 +196,7 @@ impl KeyProvider {
         }
     }
 
-    fn load(&self) -> Result<Vec<u8>> {
+    pub(crate) fn load(&self) -> Result<Vec<u8>> {
         match self {
             Self::File { path } => Self::read_key_file(path),
             Self::Keychain { service, account } => {
