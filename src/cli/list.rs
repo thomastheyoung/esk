@@ -194,7 +194,9 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         .map(|e| (e.clone(), payload.env_version(e)))
         .collect();
     cliclack::outro(
-        style(ui::format_store_outro(version, &env_versions, env)).dim().to_string(),
+        style(ui::format_store_outro(version, &env_versions, env))
+            .dim()
+            .to_string(),
     )?;
     Ok(())
 }
