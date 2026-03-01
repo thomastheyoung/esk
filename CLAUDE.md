@@ -21,7 +21,7 @@ src/
 │   └── mod.rs           # Unit test helpers (MockCommandRunner, ErrorCommandRunner, ConfigFixture)
 ├── targets/
 │   ├── mod.rs           # DeployTarget + CommandRunner traits, build_targets()
-│   ├── env_file.rs      # .env file generation (batch deploy)
+│   ├── dotenv.rs        # .env file generation (batch deploy)
 │   ├── cloudflare.rs    # wrangler secret put/delete (individual deploy)
 │   ├── convex.rs        # convex env set/unset (individual deploy)
 │   ├── docker.rs        # docker secret create/rm (individual deploy, stdin)
@@ -69,7 +69,7 @@ tests/
 │   └── mod.rs              # TestProject, fixtures, MockCommandRunner
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
-├── env_file_integration.rs # Env file e2e tests (3)
+├── dotenv_integration.rs    # Dotenv file e2e tests (3)
 └── cli_integration.rs      # CLI command tests (174)
 ```
 

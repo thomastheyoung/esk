@@ -476,7 +476,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env.local"
 remotes:
   1password:
@@ -486,7 +486,7 @@ secrets:
   General:
     MY_SECRET:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -529,7 +529,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env.local"
 remotes:
   1password:
@@ -539,10 +539,10 @@ secrets:
   General:
     MY_SECRET:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
     OTHER:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
@@ -803,7 +803,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -811,7 +811,7 @@ secrets:
   G:
     MY_SECRET:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
@@ -819,7 +819,7 @@ secrets:
     let store = project.store().unwrap();
     store.set("MY_SECRET", "dev", "val").unwrap();
 
-    // Deploy should succeed — only hitting env target
+    // Deploy should succeed — only hitting .env target
     cli::deploy::run(
         &config,
         &cli::deploy::DeployOptions {
@@ -861,7 +861,7 @@ fn deploy_skips_no_value_secrets() {
 
 #[test]
 fn deploy_failure_count_causes_error() {
-    // This tests uses env target with an app that can't write
+    // This tests uses .env target with an app that can't write
     let yaml = r#"
 project: x
 environments: [dev]
@@ -869,13 +869,13 @@ apps:
   web:
     path: /nonexistent/path/that/wont/work
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env"
 secrets:
   G:
     KEY:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();

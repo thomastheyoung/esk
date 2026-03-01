@@ -43,22 +43,22 @@ fn format_env_value(value: &str) -> String {
     format!("\"{escaped}\"")
 }
 
-fn validate_env_file_value(key: &str, value: &str) -> Result<()> {
+fn validate_dotenv_value(key: &str, value: &str) -> Result<()> {
     if value.contains('\n') || value.contains('\r') {
         anyhow::bail!(
-            "env: secret '{key}' contains newlines, refusing to write multiline values to .env files"
+            ".env: secret '{key}' contains newlines, refusing to write multiline values to .env files"
         );
     }
     Ok(())
 }
 
-pub struct EnvFileTarget<'a> {
+pub struct DotenvTarget<'a> {
     pub config: &'a Config,
 }
 
-impl DeployTarget for EnvFileTarget<'_> {
+impl DeployTarget for DotenvTarget<'_> {
     fn name(&self) -> &'static str {
-        "env"
+        ".env"
     }
 
     fn deploy_mode(&self) -> DeployMode {
@@ -78,12 +78,12 @@ impl DeployTarget for EnvFileTarget<'_> {
                 .iter()
                 .map(|s| DeployResult {
                     key: s.key.clone(),
-                    outcome: DeployOutcome::Failed("env target requires an app".to_string()),
+                    outcome: DeployOutcome::Failed(".env target requires an app".to_string()),
                 })
                 .collect();
         };
 
-        match self.write_env_file(app, &target.environment, secrets) {
+        match self.write_dotenv_file(app, &target.environment, secrets) {
             Ok(()) => secrets
                 .iter()
                 .map(|s| DeployResult {
@@ -102,14 +102,14 @@ impl DeployTarget for EnvFileTarget<'_> {
     }
 }
 
-impl EnvFileTarget<'_> {
-    fn write_env_file(&self, app: &str, env: &str, secrets: &[SecretValue]) -> Result<()> {
-        let path = self.config.resolve_env_path(app, env)?;
+impl DotenvTarget<'_> {
+    fn write_dotenv_file(&self, app: &str, env: &str, secrets: &[SecretValue]) -> Result<()> {
+        let path = self.config.resolve_dotenv_path(app, env)?;
 
         // Group secrets by group, maintaining sorted order
         let mut by_group: BTreeMap<&str, Vec<(&str, &str)>> = BTreeMap::new();
         for secret in secrets {
-            validate_env_file_value(&secret.key, &secret.value)?;
+            validate_dotenv_value(&secret.key, &secret.value)?;
             by_group
                 .entry(&secret.group)
                 .or_default()
@@ -174,7 +174,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -187,7 +187,7 @@ targets:
 
     fn make_target(app: Option<&str>, env: &str) -> ResolvedTarget {
         ResolvedTarget {
-            service: "env".to_string(),
+            service: ".env".to_string(),
             app: app.map(String::from),
             environment: env.to_string(),
         }
@@ -205,7 +205,7 @@ targets:
     fn deploy_secret_is_noop() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         target
             .deploy_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap();
@@ -215,7 +215,7 @@ targets:
     fn deploy_batch_no_app_errors() {
         let dir = tempfile::tempdir().unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![make_secret("A", "1", "G"), make_secret("B", "2", "G")];
         let results = target.deploy_batch(&secrets, &make_target(None, "dev"));
         assert!(results.iter().all(|r| !r.outcome.is_success()));
@@ -231,7 +231,7 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![make_secret("KEY", "value123", "General")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results.iter().all(|r| r.outcome.is_success()));
@@ -244,7 +244,7 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![make_secret("K", "v", "G")];
         target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         let content = std::fs::read_to_string(dir.path().join("apps/web/.env.local")).unwrap();
@@ -256,7 +256,7 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![
             make_secret("A", "1", "Stripe"),
             make_secret("B", "2", "Convex"),
@@ -272,7 +272,7 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![
             make_secret("ZEBRA", "z", "G"),
             make_secret("APPLE", "a", "G"),
@@ -289,7 +289,7 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         // Don't pre-create apps/web — target should create it
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![make_secret("K", "v", "G")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results[0].outcome.is_success());
@@ -301,7 +301,7 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![
             make_secret("A", "1", "G"),
             make_secret("B", "2", "G"),
@@ -352,7 +352,7 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![make_secret("CERT", "line1\nline2", "General")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results.iter().all(|r| !r.outcome.is_success()));
@@ -371,7 +371,7 @@ targets:
         let dir = tempfile::tempdir().unwrap();
         std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
         let config = make_config(dir.path());
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![make_secret("KEY", "value", "General")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results.iter().all(|r| r.outcome.is_success()));
@@ -391,7 +391,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env"
 "#;
         let path = dir.path().join("esk.yaml");
@@ -399,7 +399,7 @@ targets:
         let mut config = Config::load(&path).unwrap();
         // Point root to a read-only location to force write failure
         config.root = std::path::PathBuf::from("/nonexistent/root");
-        let target = EnvFileTarget { config: &config };
+        let target = DotenvTarget { config: &config };
         let secrets = vec![make_secret("K", "v", "G")];
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(!results[0].outcome.is_success());

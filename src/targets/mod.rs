@@ -6,7 +6,7 @@ pub mod cloudflare;
 pub mod convex;
 pub mod custom;
 pub mod docker;
-pub mod env_file;
+pub mod dotenv;
 pub mod fly;
 pub mod gcp_cloud_run;
 pub mod github;
@@ -248,9 +248,9 @@ pub(crate) fn target_candidates<'a>(
 ) -> Vec<TargetCandidate<'a>> {
     let mut candidates: Vec<TargetCandidate<'a>> = Vec::new();
 
-    if config.targets.env.is_some() {
+    if config.targets.dotenv.is_some() {
         candidates.push(TargetCandidate {
-            target: Box::new(env_file::EnvFileTarget { config }),
+            target: Box::new(dotenv::DotenvTarget { config }),
             ok_message: "writable",
         });
     }
@@ -787,7 +787,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env"
   cloudflare:
     env_flags: {}
@@ -798,9 +798,9 @@ targets:
 
         let runner = ErrorCommandRunner::new("not found");
         let targets = build_targets(&config, &runner);
-        // env target has no preflight check, so it passes; cloudflare fails
+        // .env target has no preflight check, so it passes; cloudflare fails
         assert_eq!(targets.len(), 1);
-        assert_eq!(targets[0].name(), "env");
+        assert_eq!(targets[0].name(), ".env");
     }
 
     #[test]
@@ -824,7 +824,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env"
   cloudflare:
     env_flags: {}
@@ -836,7 +836,7 @@ targets:
         let health = check_target_health(&config, &OkRunner);
         assert_eq!(health.len(), 2);
         assert!(health[0].status.is_ok());
-        assert_eq!(health[0].name, "env");
+        assert_eq!(health[0].name, ".env");
         assert!(health[1].status.is_ok());
         assert_eq!(health[1].name, "cloudflare");
     }
@@ -851,7 +851,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env"
   cloudflare:
     env_flags: {}
@@ -863,7 +863,7 @@ targets:
         let runner = ErrorCommandRunner::new("not found");
         let health = check_target_health(&config, &runner);
         assert_eq!(health.len(), 2);
-        assert!(health[0].status.is_ok()); // env always ok
+        assert!(health[0].status.is_ok()); // .env always ok
         assert!(!health[1].status.is_ok()); // cloudflare fails
         assert!(health[1]
             .status

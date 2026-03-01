@@ -2,6 +2,8 @@
 use anyhow::bail;
 use anyhow::{Context, Result};
 use console::style;
+#[cfg(feature = "keychain")]
+use std::io::IsTerminal;
 use std::path::Path;
 
 use crate::deploy_tracker::DeployIndex;
@@ -36,8 +38,6 @@ impl InitReport {
         let deploy_index_path = esk_dir.join("deploy-index.json");
         let sync_index_path = esk_dir.join("sync-index.json");
         let gitignore_path = cwd.join(".gitignore");
-
-        cliclack::intro(style("esk init").bold())?;
 
         Self::render_file(&self.config, &config_path)?;
         match &self.key {
@@ -98,8 +98,56 @@ const ESK_GITIGNORE_ENTRIES: &[&str] = &[
 ];
 
 pub fn run(cwd: &Path, keychain: bool) -> Result<()> {
-    let report = ensure_project(cwd, keychain)?;
+    cliclack::intro(style("esk init").bold())?;
+    let use_keychain = resolve_key_provider(cwd, keychain)?;
+    let report = ensure_project(cwd, use_keychain)?;
     report.render(cwd)
+}
+
+/// Determines whether to use keychain or file-based key storage.
+///
+/// Priority:
+/// 1. `--keychain` flag → keychain (skip prompt)
+/// 2. Existing `store.enc` (re-init) → preserve current provider from marker
+/// 3. `keychain` feature + TTY + fresh project → interactive prompt
+/// 4. Default (CI, no feature, non-TTY) → file
+fn resolve_key_provider(cwd: &Path, keychain_flag: bool) -> Result<bool> {
+    if keychain_flag {
+        return Ok(true);
+    }
+
+    let esk_dir = cwd.join(".esk");
+    let store_path = esk_dir.join("store.enc");
+
+    // Re-init: preserve existing provider
+    if store_path.is_file() {
+        let marker_path = esk_dir.join("key-provider");
+        let is_keychain = marker_path.is_file()
+            && std::fs::read_to_string(&marker_path)
+                .unwrap_or_default()
+                .trim()
+                == "keychain";
+        return Ok(is_keychain);
+    }
+
+    // Fresh project: prompt if keychain feature available and TTY
+    #[cfg(feature = "keychain")]
+    if std::io::stdin().is_terminal() {
+        return prompt_key_storage();
+    }
+
+    Ok(false)
+}
+
+#[cfg(feature = "keychain")]
+fn prompt_key_storage() -> Result<bool> {
+    let use_keychain: bool = cliclack::select("Where should esk store the encryption key?")
+        .items(&[
+            (true, "OS keychain (recommended)", "key never stored on disk"),
+            (false, "File on disk", "saved to .esk/store.key (gitignored)"),
+        ])
+        .interact()?;
+    Ok(use_keychain)
 }
 
 fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
@@ -123,7 +171,7 @@ fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
         path: apps/web
 
     targets:
-      env:
+      .env:
         pattern: "{app_path}/.env{env_suffix}.local"
         env_suffix:
           dev: ""
@@ -134,7 +182,7 @@ fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
         # EXAMPLE_SECRET:
         #   description: An example secret
         #   targets:
-        #     env: [web:dev, web:prod]
+        #     .env: [web:dev, web:prod]
     "#;
         std::fs::write(&config_path, scaffold).context("failed to write esk.yaml")?;
         FileStatus::Created
@@ -283,4 +331,57 @@ fn ensure_esk_gitignore_entries(gitignore_path: &Path) -> Result<bool> {
     std::fs::write(gitignore_path, contents)
         .with_context(|| format!("failed to update {}", gitignore_path.display()))?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn resolve_flag_true_returns_keychain() {
+        let dir = TempDir::new().unwrap();
+        let result = resolve_key_provider(dir.path(), true).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn resolve_existing_project_no_marker_returns_file() {
+        let dir = TempDir::new().unwrap();
+        let esk_dir = dir.path().join(".esk");
+        std::fs::create_dir_all(&esk_dir).unwrap();
+        std::fs::write(esk_dir.join("store.enc"), b"dummy").unwrap();
+        let result = resolve_key_provider(dir.path(), false).unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn resolve_existing_project_file_marker_returns_file() {
+        let dir = TempDir::new().unwrap();
+        let esk_dir = dir.path().join(".esk");
+        std::fs::create_dir_all(&esk_dir).unwrap();
+        std::fs::write(esk_dir.join("store.enc"), b"dummy").unwrap();
+        std::fs::write(esk_dir.join("key-provider"), "file\n").unwrap();
+        let result = resolve_key_provider(dir.path(), false).unwrap();
+        assert!(!result);
+    }
+
+    #[test]
+    fn resolve_existing_project_keychain_marker_returns_keychain() {
+        let dir = TempDir::new().unwrap();
+        let esk_dir = dir.path().join(".esk");
+        std::fs::create_dir_all(&esk_dir).unwrap();
+        std::fs::write(esk_dir.join("store.enc"), b"dummy").unwrap();
+        std::fs::write(esk_dir.join("key-provider"), "keychain\n").unwrap();
+        let result = resolve_key_provider(dir.path(), false).unwrap();
+        assert!(result);
+    }
+
+    #[test]
+    fn resolve_fresh_project_non_tty_returns_file() {
+        // CI / non-TTY: no store.enc, no flag → file
+        let dir = TempDir::new().unwrap();
+        let result = resolve_key_provider(dir.path(), false).unwrap();
+        assert!(!result);
+    }
 }

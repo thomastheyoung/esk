@@ -65,6 +65,7 @@ impl DeployIndex {
         match serde_json::from_str::<DeployIndex>(&contents) {
             Ok(mut index) => {
                 index.path = path.to_path_buf();
+                index.migrate_legacy_target_names();
                 index
             }
             Err(e) => {
@@ -173,6 +174,30 @@ impl DeployIndex {
         hasher.update(value.as_bytes());
         hex::encode(hasher.finalize())
     }
+
+    /// Rewrite legacy tracker keys that use `"env"` as the target name to `".env"`.
+    ///
+    /// The "env" target was renamed to ".env" — this ensures existing deploy
+    /// indexes don't orphan records and `should_deploy()` still matches.
+    fn migrate_legacy_target_names(&mut self) {
+        let legacy_keys: Vec<String> = self
+            .records
+            .keys()
+            .filter(|k| {
+                Self::parse_tracker_key(k)
+                    .is_some_and(|parts| parts.service == "env")
+            })
+            .cloned()
+            .collect();
+
+        for old_key in legacy_keys {
+            if let Some(mut record) = self.records.remove(&old_key) {
+                let new_key = old_key.replacen(":env:", ":.env:", 1);
+                record.target = record.target.replacen("env:", ".env:", 1);
+                self.records.insert(new_key, record);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
@@ -197,15 +222,15 @@ mod tests {
         let path = dir.path().join("index.json");
         let mut index = DeployIndex::new(&path);
         index.record_success(
-            "KEY:env:web:dev".to_string(),
-            "env:web:dev".to_string(),
+            "KEY:.env:web:dev".to_string(),
+            ".env:web:dev".to_string(),
             "abc".to_string(),
         );
         index.save().unwrap();
 
         let loaded = DeployIndex::load(&path);
         assert_eq!(loaded.records.len(), 1);
-        assert!(loaded.records.contains_key("KEY:env:web:dev"));
+        assert!(loaded.records.contains_key("KEY:.env:web:dev"));
     }
 
     #[test]
@@ -223,8 +248,8 @@ mod tests {
         let path = dir.path().join("index.json");
         let mut index = DeployIndex::new(&path);
         index.record_success(
-            "A:env:web:dev".to_string(),
-            "env:web:dev".to_string(),
+            "A:.env:web:dev".to_string(),
+            ".env:web:dev".to_string(),
             "hash1".to_string(),
         );
         index.record_failure(
@@ -238,7 +263,7 @@ mod tests {
         let loaded = DeployIndex::load(&path);
         assert_eq!(loaded.records.len(), 2);
         assert_eq!(
-            loaded.records["A:env:web:dev"].last_deploy_status,
+            loaded.records["A:.env:web:dev"].last_deploy_status,
             DeployStatus::Success
         );
         assert_eq!(
@@ -258,8 +283,8 @@ mod tests {
 
     #[test]
     fn tracker_key_with_app() {
-        let key = DeployIndex::tracker_key("SECRET", "env", Some("web"), "dev");
-        assert_eq!(key, "SECRET:env:web:dev");
+        let key = DeployIndex::tracker_key("SECRET", ".env", Some("web"), "dev");
+        assert_eq!(key, "SECRET:.env:web:dev");
     }
 
     #[test]
@@ -312,11 +337,11 @@ mod tests {
         let mut index = DeployIndex::new(Path::new("/tmp/test.json"));
         index.record_success(
             "K".to_string(),
-            "env:web:dev".to_string(),
+            ".env:web:dev".to_string(),
             "abc".to_string(),
         );
         let record = &index.records["K"];
-        assert_eq!(record.target, "env:web:dev");
+        assert_eq!(record.target, ".env:web:dev");
         assert_eq!(record.value_hash, "abc");
         assert_eq!(record.last_deploy_status, DeployStatus::Success);
         assert!(record.last_error.is_none());
@@ -412,12 +437,12 @@ mod tests {
 
     #[test]
     fn parse_tracker_key_with_app() {
-        let parsed = DeployIndex::parse_tracker_key("SECRET:env:web:dev").unwrap();
+        let parsed = DeployIndex::parse_tracker_key("SECRET:.env:web:dev").unwrap();
         assert_eq!(
             parsed,
             TrackerKeyParts {
                 key: "SECRET".to_string(),
-                service: "env".to_string(),
+                service: ".env".to_string(),
                 app: Some("web".to_string()),
                 env: "dev".to_string(),
             }
@@ -436,10 +461,10 @@ mod tests {
 
     #[test]
     fn parse_tracker_key_roundtrip_with_app() {
-        let key = DeployIndex::tracker_key("DB_URL", "env", Some("web"), "staging");
+        let key = DeployIndex::tracker_key("DB_URL", ".env", Some("web"), "staging");
         let parsed = DeployIndex::parse_tracker_key(&key).unwrap();
         assert_eq!(parsed.key, "DB_URL");
-        assert_eq!(parsed.service, "env");
+        assert_eq!(parsed.service, ".env");
         assert_eq!(parsed.app, Some("web".to_string()));
         assert_eq!(parsed.env, "staging");
     }
@@ -474,5 +499,33 @@ mod tests {
             "err".to_string(),
         );
         assert!(index.should_deploy("K", DeployIndex::TOMBSTONE_HASH, false));
+    }
+
+    #[test]
+    fn migrate_legacy_env_target_name() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("index.json");
+        let mut index = DeployIndex::new(&path);
+        // Write with legacy "env" target name
+        index.record_success(
+            "KEY:env:web:dev".to_string(),
+            "env:web:dev".to_string(),
+            "hash1".to_string(),
+        );
+        index.record_success(
+            "OTHER:cloudflare:prod".to_string(),
+            "cloudflare:prod".to_string(),
+            "hash2".to_string(),
+        );
+        index.save().unwrap();
+
+        // Reload triggers migration
+        let loaded = DeployIndex::load(&path);
+        assert_eq!(loaded.records.len(), 2);
+        assert!(loaded.records.contains_key("KEY:.env:web:dev"));
+        assert!(!loaded.records.contains_key("KEY:env:web:dev"));
+        assert_eq!(loaded.records["KEY:.env:web:dev"].target, ".env:web:dev");
+        // Non-env records are untouched
+        assert!(loaded.records.contains_key("OTHER:cloudflare:prod"));
     }
 }

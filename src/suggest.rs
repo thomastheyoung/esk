@@ -165,9 +165,9 @@ mod tests {
 
     #[test]
     fn works_with_str_slices() {
-        let candidates: Vec<&str> = vec!["env", "cloudflare", "convex"];
+        let candidates: Vec<&str> = vec![".env", "cloudflare", "convex"];
         assert_eq!(closest("cloudflar", &candidates), Some("cloudflare"));
-        assert_eq!(closest("envv", &candidates), Some("env"));
+        assert_eq!(closest(".envv", &candidates), Some(".env"));
         assert_eq!(closest("xyz", &candidates), None);
     }
 
@@ -239,7 +239,7 @@ mod tests {
 
     #[test]
     fn unknown_target_with_suggestion() {
-        let candidates: Vec<&str> = vec!["env", "cloudflare", "convex"];
+        let candidates: Vec<&str> = vec![".env", "cloudflare", "convex"];
         let msg = strip(&unknown_target("cloudflar", &candidates));
         assert!(msg.contains("target 'cloudflar' is not configured"));
         assert!(msg.contains("did you mean cloudflare"));
@@ -248,11 +248,11 @@ mod tests {
 
     #[test]
     fn unknown_target_no_suggestion() {
-        let candidates: Vec<&str> = vec!["env"];
+        let candidates: Vec<&str> = vec![".env"];
         let msg = strip(&unknown_target("xyz", &candidates));
         assert!(msg.contains("target 'xyz' is not configured"));
         assert!(!msg.contains("did you mean"));
-        assert!(msg.contains("configured: env"));
+        assert!(msg.contains("configured: .env"));
     }
 
     #[test]

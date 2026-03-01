@@ -10,7 +10,7 @@ use crate::suggest;
 
 /// Built-in target names that custom targets cannot shadow.
 const BUILTIN_TARGET_NAMES: &[&str] = &[
-    "env",
+    ".env",
     "cloudflare",
     "convex",
     "fly",
@@ -95,8 +95,8 @@ pub struct AppConfig {
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct TargetsConfig {
-    #[serde(default)]
-    pub env: Option<EnvTargetConfig>,
+    #[serde(default, rename = ".env")]
+    pub dotenv: Option<DotenvTargetConfig>,
     #[serde(default)]
     pub cloudflare: Option<CloudflareTargetConfig>,
     #[serde(default)]
@@ -140,7 +140,7 @@ pub struct TargetsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct EnvTargetConfig {
+pub struct DotenvTargetConfig {
     pub pattern: String,
     #[serde(default)]
     pub env_suffix: BTreeMap<String, String>,
@@ -682,12 +682,12 @@ impl Config {
         for app_name in self.apps.keys() {
             validate_app(app_name)?;
         }
-        // Validate env target pattern and env_suffix for unsafe path characters
-        if let Some(env_config) = &self.targets.env {
-            if env_config.pattern.contains("..") {
-                bail!("env target pattern must not contain '..'");
+        // Validate .env target pattern and env_suffix for unsafe path characters
+        if let Some(dotenv_config) = &self.targets.dotenv {
+            if dotenv_config.pattern.contains("..") {
+                bail!(".env target pattern must not contain '..'");
             }
-            for (env, suffix) in &env_config.env_suffix {
+            for (env, suffix) in &dotenv_config.env_suffix {
                 if suffix.contains("..")
                     || suffix.contains('/')
                     || suffix.contains('\\')
@@ -1051,22 +1051,22 @@ impl Config {
             .collect()
     }
 
-    /// Resolve the env file path for an (app, env) pair.
-    pub fn resolve_env_path(&self, app: &str, env: &str) -> Result<PathBuf> {
-        let env_config = self
+    /// Resolve the .env file path for an (app, env) pair.
+    pub fn resolve_dotenv_path(&self, app: &str, env: &str) -> Result<PathBuf> {
+        let dotenv_config = self
             .targets
-            .env
+            .dotenv
             .as_ref()
-            .context("env target not configured")?;
+            .context(".env target not configured")?;
 
         let app_config = self
             .apps
             .get(app)
             .with_context(|| format!("unknown app '{app}'"))?;
 
-        let suffix = env_config.env_suffix.get(env).cloned().unwrap_or_default();
+        let suffix = dotenv_config.env_suffix.get(env).cloned().unwrap_or_default();
 
-        let path = env_config
+        let path = dotenv_config
             .pattern
             .replace("{app_path}", &app_config.path)
             .replace("{env_suffix}", &suffix);
@@ -1137,7 +1137,7 @@ impl Config {
     /// Get the set of configured target names.
     pub fn target_names(&self) -> Vec<&str> {
         let mut names: Vec<&str> = [
-            ("env", self.targets.env.is_some()),
+            (".env", self.targets.dotenv.is_some()),
             ("cloudflare", self.targets.cloudflare.is_some()),
             ("convex", self.targets.convex.is_some()),
             ("fly", self.targets.fly.is_some()),
@@ -1382,7 +1382,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
       dev: ""
@@ -1400,7 +1400,7 @@ secrets:
   Stripe:
     KEY:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         cloudflare: [web:prod]
         convex: [dev]
 "#;
@@ -1408,7 +1408,7 @@ secrets:
         let config = Config::load(&path).unwrap();
         assert_eq!(config.project, "myapp");
         assert_eq!(config.environments.len(), 2);
-        assert!(config.targets.env.is_some());
+        assert!(config.targets.dotenv.is_some());
         assert!(config.targets.cloudflare.is_some());
         assert!(config.targets.convex.is_some());
         assert!(config.onepassword_remote_config().is_some());
@@ -1483,7 +1483,7 @@ secrets:
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "test"
 secrets:
   G:
@@ -1507,12 +1507,12 @@ secrets:
   G:
     KEY:
       targets:
-        env: [dev]
+        .env: [dev]
 ";
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
         let chain = console::strip_ansi_codes(&format!("{err:?}")).to_string();
-        assert!(chain.contains("target 'env' is not configured"));
+        assert!(chain.contains("target '.env' is not configured"));
     }
 
     #[test]
@@ -1525,13 +1525,13 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "test"
 secrets:
   G:
     KEY:
       targets:
-        env: [web:staging]
+        .env: [web:staging]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
@@ -1549,13 +1549,13 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "test"
 secrets:
   G:
     KEY:
       targets:
-        env: [api:dev]
+        .env: [api:dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
@@ -1573,7 +1573,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "test"
   cloudflare: {}
   convex:
@@ -1582,7 +1582,7 @@ secrets:
   G:
     A:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
         cloudflare: [web:dev]
         convex: [dev]
 "#;
@@ -1683,8 +1683,8 @@ remotes:
         let dir = tempfile::tempdir().unwrap();
         let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
         let config = Config::load(&path).unwrap();
-        let target = config.parse_target("env", "web:dev").unwrap();
-        assert_eq!(target.service, "env");
+        let target = config.parse_target(".env", "web:dev").unwrap();
+        assert_eq!(target.service, ".env");
         assert_eq!(target.app, Some("web".to_string()));
         assert_eq!(target.environment, "dev");
     }
@@ -1705,7 +1705,7 @@ remotes:
         let dir = tempfile::tempdir().unwrap();
         let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
         let config = Config::load(&path).unwrap();
-        let target = config.parse_target("env", "a:b:c").unwrap();
+        let target = config.parse_target(".env", "a:b:c").unwrap();
         assert_eq!(target.app, Some("a".to_string()));
         assert_eq!(target.environment, "b:c"); // split_once on first colon
     }
@@ -1720,16 +1720,16 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "test"
 secrets:
   Stripe:
     KEY_A:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     KEY_B:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
@@ -1760,17 +1760,17 @@ apps:
   web:
     path: w
 targets:
-  env:
+  .env:
     pattern: "t"
 secrets:
   Stripe:
     SK:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
   Convex:
     URL:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
@@ -1787,7 +1787,7 @@ secrets:
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "t"
 apps:
   web:
@@ -1797,7 +1797,7 @@ secrets:
     API_KEY:
       description: test
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
@@ -1821,7 +1821,7 @@ secrets:
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "t"
 apps:
   web:
@@ -1830,7 +1830,7 @@ secrets:
   G:
     INVALID-KEY:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
@@ -1848,17 +1848,17 @@ apps:
   web:
     path: w
 targets:
-  env:
+  .env:
     pattern: "t"
 secrets:
   Alpha:
     DUP:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
   Beta:
     DUP:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
         let path = write_yaml(dir.path(), yaml);
         let err = Config::load(&path).unwrap_err();
@@ -1867,7 +1867,7 @@ secrets:
     }
 
     #[test]
-    fn resolve_env_path_with_suffix() {
+    fn resolve_dotenv_path_with_suffix() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -1876,7 +1876,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -1884,12 +1884,12 @@ targets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let env_path = config.resolve_env_path("web", "prod").unwrap();
+        let env_path = config.resolve_dotenv_path("web", "prod").unwrap();
         assert_eq!(env_path, dir.path().join("apps/web/.env.production.local"));
     }
 
     #[test]
-    fn resolve_env_path_empty_suffix() {
+    fn resolve_dotenv_path_empty_suffix() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -1898,37 +1898,37 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let env_path = config.resolve_env_path("web", "dev").unwrap();
+        let env_path = config.resolve_dotenv_path("web", "dev").unwrap();
         assert_eq!(env_path, dir.path().join("apps/web/.env.local"));
     }
 
     #[test]
-    fn resolve_env_path_no_env_adapter() {
+    fn resolve_dotenv_path_no_env_adapter() {
         let dir = tempfile::tempdir().unwrap();
         let path = write_yaml(dir.path(), "project: x\nenvironments: [dev]");
         let config = Config::load(&path).unwrap();
-        let err = config.resolve_env_path("web", "dev").unwrap_err();
-        assert!(err.to_string().contains("env target not configured"));
+        let err = config.resolve_dotenv_path("web", "dev").unwrap_err();
+        assert!(err.to_string().contains(".env target not configured"));
     }
 
     #[test]
-    fn resolve_env_path_unknown_app() {
+    fn resolve_dotenv_path_unknown_app() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "test"
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let err = config.resolve_env_path("nope", "dev").unwrap_err();
+        let err = config.resolve_dotenv_path("nope", "dev").unwrap_err();
         assert!(err.to_string().contains("unknown app 'nope'"));
     }
 
@@ -1939,14 +1939,14 @@ targets:
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "test"
   cloudflare: {}
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let names = config.target_names();
-        assert!(names.contains(&"env"));
+        assert!(names.contains(&".env"));
         assert!(names.contains(&"cloudflare"));
         assert!(!names.contains(&"convex"));
     }
@@ -1954,11 +1954,11 @@ targets:
     #[test]
     fn resolved_target_display_with_app() {
         let t = ResolvedTarget {
-            service: "env".to_string(),
+            service: ".env".to_string(),
             app: Some("web".to_string()),
             environment: "dev".to_string(),
         };
-        assert_eq!(t.to_string(), "env:web:dev");
+        assert_eq!(t.to_string(), ".env:web:dev");
     }
 
     #[test]
@@ -1978,7 +1978,7 @@ targets:
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "../../../etc/{env_suffix}"
 "#;
         let path = write_yaml(dir.path(), yaml);
@@ -1993,7 +1993,7 @@ targets:
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
       dev: "../../etc/passwd"
@@ -2010,7 +2010,7 @@ targets:
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
       dev: "/etc/passwd"
@@ -2027,7 +2027,7 @@ targets:
 project: x
 environments: [dev, prod]
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
       dev: ""
@@ -2038,7 +2038,7 @@ targets:
     }
 
     #[test]
-    fn resolve_env_path_rejects_traversal_via_app_path() {
+    fn resolve_dotenv_path_rejects_traversal_via_app_path() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -2047,19 +2047,19 @@ apps:
   web:
     path: "../../../etc"
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
       dev: ""
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let err = config.resolve_env_path("web", "dev").unwrap_err();
+        let err = config.resolve_dotenv_path("web", "dev").unwrap_err();
         assert!(err.to_string().contains("resolves outside project root"));
     }
 
     #[test]
-    fn resolve_env_path_allows_normal_paths() {
+    fn resolve_dotenv_path_allows_normal_paths() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: x
@@ -2068,20 +2068,20 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
       dev: ".local"
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let result = config.resolve_env_path("web", "dev");
+        let result = config.resolve_dotenv_path("web", "dev");
         assert!(result.is_ok());
     }
 
     #[test]
     #[cfg(unix)]
-    fn resolve_env_path_rejects_symlink_escape() {
+    fn resolve_dotenv_path_rejects_symlink_escape() {
         use std::os::unix::fs::symlink;
 
         let dir = tempfile::tempdir().unwrap();
@@ -2095,14 +2095,14 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}"
     env_suffix:
       dev: ""
 "#;
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
-        let err = config.resolve_env_path("web", "dev").unwrap_err();
+        let err = config.resolve_dotenv_path("web", "dev").unwrap_err();
         assert!(err
             .to_string()
             .contains("escapes project root via symlinked components"));
@@ -2567,8 +2567,8 @@ secrets:
         let config = Config::load(&path).unwrap();
         let resolved = config.resolve_secrets().unwrap();
         let secrets = BTreeMap::new();
-        // Filter to env target only — none of these secrets target "env"
-        let missing = config.check_requirements(&resolved, &secrets, None, Some(&["env"]));
+        // Filter to .env target only — none of these secrets target ".env"
+        let missing = config.check_requirements(&resolved, &secrets, None, Some(&[".env"]));
         assert!(missing.is_empty(), "expected no missing for env target");
         // Filter to netlify — should see NET_ONLY and BOTH, but not RAIL_ONLY
         let missing = config.check_requirements(&resolved, &secrets, None, Some(&["netlify"]));
@@ -2887,7 +2887,7 @@ targets:
 project: x
 environments: [dev]
 targets:
-  env:
+  .env:
     pattern: "test"
   custom:
     my-api:
@@ -2898,7 +2898,7 @@ targets:
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let names = config.target_names();
-        assert!(names.contains(&"env"));
+        assert!(names.contains(&".env"));
         assert!(names.contains(&"my-api"));
     }
 

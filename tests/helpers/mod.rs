@@ -68,7 +68,7 @@ apps:
     path: apps/api
 
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -92,20 +92,20 @@ secrets:
     STRIPE_KEY:
       description: Stripe API key
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         cloudflare: [web:prod]
     STRIPE_WEBHOOK:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
   Convex:
     CONVEX_URL:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         convex: [dev, prod]
   General:
     API_SECRET:
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
 "#;
 
 /// Config with only env target.
@@ -118,7 +118,7 @@ apps:
     path: apps/web
 
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -128,10 +128,10 @@ secrets:
   General:
     MY_SECRET:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     OTHER_SECRET:
       targets:
-        env: [web:dev]
+        .env: [web:dev]
 "#;
 
 /// Cloudflare target config for integration testing.
@@ -447,7 +447,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix: { dev: "", prod: ".production" }
 secrets:
@@ -456,23 +456,23 @@ secrets:
       validate:
         format: url
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     PORT:
       validate:
         format: integer
         range: [1, 65535]
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     NODE_ENV:
       validate:
         enum: [development, staging, production]
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     ENABLE_CACHE:
       validate:
         format: boolean
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
 "#;
 
 /// Config with required-variable auditing for testing.
@@ -483,22 +483,22 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix: { dev: "", prod: ".production" }
 secrets:
   General:
     DB_URL:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     ANALYTICS:
       required: false
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     SENTRY_DSN:
       required: [prod]
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
 "#;
 
 /// Config with allow_empty for testing empty value detection.
@@ -509,18 +509,18 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix: { dev: "", prod: ".production" }
 secrets:
   General:
     NORMAL_KEY:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     ALLOWED_EMPTY:
       allow_empty: true
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
 "#;
 
 /// Config with cross-field validation rules for testing.
@@ -531,7 +531,7 @@ apps:
   web:
     path: apps/web
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix: { dev: "", prod: ".production" }
 secrets:
@@ -540,43 +540,43 @@ secrets:
       validate:
         format: boolean
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     AUTH_SECRET:
       validate:
         required_if:
           AUTH_ENABLED: "true"
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
   OAuth:
     OAUTH_CLIENT_ID:
       validate:
         required_with: [OAUTH_CLIENT_SECRET]
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     OAUTH_CLIENT_SECRET:
       validate:
         required_with: [OAUTH_CLIENT_ID]
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
   Database:
     DB_URL:
       validate:
         format: url
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     DB_HOST:
       validate:
         required_unless: [DB_URL]
         required_if:
           DB_PORT: "*"
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
     DB_PORT:
       validate:
         format: integer
         required_unless: [DB_URL]
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
 "#;
 
 /// Config with generate section for testing multi-output generation.
