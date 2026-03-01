@@ -34,6 +34,12 @@ src/
 │   ├── railway.rs       # railway variables --set/delete (individual deploy)
 │   ├── gitlab.rs        # glab variable set/delete (individual deploy, stdin)
 │   ├── aws_ssm.rs       # aws ssm put-parameter/delete-parameter (individual deploy, stdin)
+│   ├── aws_lambda.rs    # aws lambda update-function-configuration (batch deploy)
+│   ├── azure_app_service.rs  # az webapp config appsettings set/delete (individual deploy)
+│   ├── circleci.rs      # circleci context store-secret/remove-secret (individual deploy, stdin)
+│   ├── custom.rs        # User-defined deploy/delete commands with template variables (individual deploy)
+│   ├── gcp_cloud_run.rs # gcloud run services update --update-env-vars/--remove-env-vars (individual deploy)
+│   ├── render.rs        # Render REST API via curl (individual deploy, stdin)
 │   └── kubernetes.rs    # kubectl apply Secret manifest (batch deploy)
 ├── remotes/
 │   ├── mod.rs           # SyncRemote trait, build_remotes()
@@ -46,6 +52,7 @@ src/
 │   ├── gcp_secret_manager.rs   # GCP Secret Manager
 │   ├── azure_key_vault.rs      # Azure Key Vault
 │   ├── doppler.rs       # Doppler secrets management
+│   ├── infisical.rs     # Infisical secrets management (infisical CLI)
 │   └── sops.rs          # Mozilla SOPS encrypted files
 ├── bin/
 │   └── esk-mcp.rs       # MCP server binary (requires "mcp" feature)
@@ -70,7 +77,7 @@ tests/
 ├── store_integration.rs    # Store lifecycle tests (8)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── dotenv_integration.rs    # Dotenv file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (174)
+└── cli_integration.rs      # CLI command tests (197)
 ```
 
 ## Core design
@@ -98,13 +105,13 @@ Project-level config defines everything: environments, apps, target settings, re
 ### Deploy target trait
 
 ```rust
-pub trait DeployTarget {
+pub trait DeployTarget: Send + Sync {
     fn name(&self) -> &str;
     fn deploy_mode(&self) -> DeployMode;  // Batch or Individual
-    fn preflight(&self) -> Result<()>;  // Validate external deps (default: Ok)
+    fn preflight(&self) -> Result<()>;  // Default: Ok(())
     fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
-    fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()>;  // Default: no-op
-    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;
+    fn delete_secret(&self, _key: &str, _target: &ResolvedTarget) -> Result<()>;  // Default: Ok(())
+    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;  // Default: calls deploy_secret per item
 }
 ```
 
@@ -115,9 +122,9 @@ Batch targets handle deletion by regenerating the full output without the delete
 ### Sync remote trait
 
 ```rust
-pub trait SyncRemote {
+pub trait SyncRemote: Send + Sync {
     fn name(&self) -> &str;
-    fn preflight(&self) -> Result<()>;  // Validate external deps (default: Ok)
+    fn preflight(&self) -> Result<()>;  // Default: Ok(())
     fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()>;
     fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>>;
 }
@@ -143,7 +150,7 @@ Atomic writes via temp file + rename.
 
 ### Sync tracking (`.esk/sync-index.json`)
 
-Tracks push state per (remote, environment) pair. Records pushed version, timestamp, push status (success/failed), and optional error. Used by `status` to show remote push drift. Atomic writes via temp file + rename.
+Tracks push state per (remote, environment) pair. Records include remote, env, pushed version, timestamp, push status (success/failed), and optional error. Used by `status` to show remote push drift. Atomic writes via temp file + rename.
 
 ### Reconciliation
 
@@ -186,6 +193,8 @@ Secrets can declare a `validate:` block (`Validation` struct) and a `required:` 
 | `thiserror`                         | Typed errors at API boundaries        |
 | `regex-lite`                        | Lightweight regex for pattern validation |
 | `zeroize`                           | Zeroing secret key bytes on drop      |
+| `hkdf`                              | HKDF-SHA256 key derivation            |
+| `keyring`                           | OS keychain for store key (optional, `keychain` feature) |
 | `rmcp`                              | MCP server framework (optional, `mcp` feature) |
 | `tokio`                             | Async runtime for MCP server (optional) |
 | `schemars`                          | JSON schema generation for MCP (optional) |
@@ -231,7 +240,7 @@ cargo test --test cli_integration  # Run CLI integration tests only
 ### Test infrastructure
 
 - **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `sync_index_path()`.
-- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `REMOTE_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_REMOTE_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG`, `VALIDATION_CONFIG`, `REQUIRED_CONFIG`, `ALLOW_EMPTY_CONFIG`, `CROSS_FIELD_CONFIG`, `GENERATE_CONFIG` — reusable YAML for tests.
+- **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `REMOTE_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_REMOTE_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG`, `AWS_LAMBDA_CONFIG`, `AZURE_APP_SERVICE_CONFIG`, `CIRCLECI_CONFIG`, `GCP_CLOUD_RUN_CONFIG`, `RENDER_CONFIG`, `CUSTOM_CONFIG`, `VALIDATION_CONFIG`, `REQUIRED_CONFIG`, `ALLOW_EMPTY_CONFIG`, `CROSS_FIELD_CONFIG`, `GENERATE_CONFIG` — reusable YAML for tests.
 - **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.
