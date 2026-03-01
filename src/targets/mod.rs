@@ -546,10 +546,7 @@ pub fn build_targets<'a>(
         // Animated render loop (TTY only)
         if is_tty {
             let term = console::Term::stderr();
-            let frames = [
-                '\u{280B}', '\u{2819}', '\u{2839}', '\u{2838}', '\u{283C}', '\u{2834}', '\u{2826}',
-                '\u{2827}', '\u{2807}', '\u{280F}',
-            ];
+            let frames = crate::ui::SPINNER_FRAMES;
             let bar = style("\u{2502}").dim();
 
             // Print header + initial spinner lines
@@ -564,7 +561,7 @@ pub fn build_targets<'a>(
 
             let mut frame = 0usize;
             loop {
-                std::thread::sleep(std::time::Duration::from_millis(80));
+                std::thread::sleep(crate::ui::SPINNER_INTERVAL);
                 frame = (frame + 1) % frames.len();
 
                 let state = results.lock().unwrap();
