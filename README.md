@@ -213,7 +213,7 @@ The encryption key can be stored in two ways:
 | File (default) | `.esk/store.key`, gitignored | Works everywhere, including CI and headless |
 | OS keychain | macOS Keychain, Windows Credential Manager, Linux Secret Service | Interactive workstations; hardware-backed on macOS/Windows |
 
-Initialize with `esk init` (file) or `esk init --keychain` (keychain). The `keychain` feature must be enabled at build time.
+Initialize with `esk init` (file) or `esk init --keychain` (keychain). On supported platforms (macOS, Windows, Linux with Secret Service), `esk init` will prompt to choose.
 
 **Why not 1Password, Bitwarden, or other password managers?** The encryption key is read on every `esk` command. It must be local, instant, and available offline. Password managers require network access and interactive auth, making them unsuitable as a key provider. They also create a circular dependency: esk uses these services as sync remotes for the encrypted store, so the key that decrypts the store cannot itself depend on reaching those services.
 

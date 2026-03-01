@@ -12,7 +12,7 @@ esk init [--keychain]
 
 | Argument     | Required | Description                                                                 |
 | ------------ | -------- | --------------------------------------------------------------------------- |
-| `--keychain` | No       | Store encryption key in OS keychain instead of file (requires `keychain` feature) |
+| `--keychain` | No       | Store encryption key in OS keychain instead of file |
 
 Creates:
 

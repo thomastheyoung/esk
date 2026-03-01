@@ -39,12 +39,10 @@ rmcp = { version = "0.16", features = ["server", "transport-io", "macros", "sche
 tokio = { version = "1", features = ["rt", "macros", "io-std"], optional = true }
 schemars = { version = "1", optional = true }
 
-# Optional keychain support
-keyring = { version = "3", optional = true }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
 
 [features]
 mcp = ["dep:rmcp", "dep:tokio", "dep:schemars"]
-keychain = ["dep:keyring"]
 
 [[bin]]
 name = "esk"

@@ -72,7 +72,6 @@ pub enum Commands {
     Init {
         /// Store encryption key in OS keychain instead of file
         #[arg(long)]
-        #[cfg_attr(not(feature = "keychain"), arg(hide = true))]
         keychain: bool,
     },
     /// Set a secret value

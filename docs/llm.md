@@ -10,7 +10,7 @@ Initialize a new esk project in the current directory. Creates `esk.yaml`, `.esk
 
 | Flag | Description |
 |------|-------------|
-| `--keychain` | Store encryption key in OS keychain instead of file (requires `keychain` feature) |
+| `--keychain` | Store encryption key in OS keychain instead of file |
 
 ### `esk set <KEY> --env <ENV>`
 

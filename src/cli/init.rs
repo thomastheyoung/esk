@@ -1,8 +1,5 @@
-#[cfg(not(feature = "keychain"))]
-use anyhow::bail;
 use anyhow::{Context, Result};
 use console::style;
-#[cfg(feature = "keychain")]
 use std::io::IsTerminal;
 use std::path::Path;
 
@@ -17,7 +14,6 @@ enum FileStatus {
 
 enum KeyStatus {
     File(FileStatus),
-    #[cfg(feature = "keychain")]
     Keychain(FileStatus),
 }
 
@@ -44,7 +40,6 @@ impl InitReport {
             KeyStatus::File(status) => {
                 Self::render_file(status, &esk_dir.join("store.key"))?;
             }
-            #[cfg(feature = "keychain")]
             KeyStatus::Keychain(status) => match status {
                 FileStatus::Created => {
                     cliclack::log::success(format!(
@@ -109,8 +104,8 @@ pub fn run(cwd: &Path, keychain: bool) -> Result<()> {
 /// Priority:
 /// 1. `--keychain` flag → keychain (skip prompt)
 /// 2. Existing `store.enc` (re-init) → preserve current provider from marker
-/// 3. `keychain` feature + TTY + fresh project → interactive prompt
-/// 4. Default (CI, no feature, non-TTY) → file
+/// 3. TTY + keychain available at runtime → interactive prompt
+/// 4. Default (CI, headless, non-TTY) → file
 fn resolve_key_provider(cwd: &Path, keychain_flag: bool) -> Result<bool> {
     if keychain_flag {
         return Ok(true);
@@ -130,16 +125,25 @@ fn resolve_key_provider(cwd: &Path, keychain_flag: bool) -> Result<bool> {
         return Ok(is_keychain);
     }
 
-    // Fresh project: prompt if keychain feature available and TTY
-    #[cfg(feature = "keychain")]
-    if std::io::stdin().is_terminal() {
+    // Fresh project: prompt if keychain available and TTY
+    if std::io::stdin().is_terminal() && keychain_available() {
         return prompt_key_storage();
     }
 
     Ok(false)
 }
 
-#[cfg(feature = "keychain")]
+/// Probes whether the OS keychain is functional at runtime.
+fn keychain_available() -> bool {
+    let Ok(entry) = keyring::Entry::new("esk", "probe") else {
+        return false;
+    };
+    match entry.get_secret() {
+        Ok(_) | Err(keyring::Error::NoEntry) => true,
+        Err(_) => false,
+    }
+}
+
 fn prompt_key_storage() -> Result<bool> {
     let use_keychain: bool = cliclack::select("Where should esk store the encryption key?")
         .items(&[
@@ -190,14 +194,7 @@ fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
 
     // Determine key provider and create store
     let (key_status, store_status) = if keychain {
-        #[cfg(not(feature = "keychain"))]
-        {
-            bail!("keychain support requires the 'keychain' feature. Rebuild with: cargo install esk --features keychain");
-        }
-        #[cfg(feature = "keychain")]
-        {
-            ensure_keychain_store(cwd, &esk_dir, &store_path)?
-        }
+        ensure_keychain_store(cwd, &esk_dir, &store_path)?
     } else {
         let key_path = esk_dir.join("store.key");
         if key_path.is_file() && store_path.is_file() {
@@ -238,7 +235,6 @@ fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
     })
 }
 
-#[cfg(feature = "keychain")]
 fn ensure_keychain_store(
     cwd: &Path,
     esk_dir: &Path,

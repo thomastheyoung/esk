@@ -147,7 +147,6 @@ pub(crate) enum KeyProvider {
     File {
         path: PathBuf,
     },
-    #[cfg(feature = "keychain")]
     Keychain {
         service: String,
         account: String,
@@ -169,7 +168,6 @@ impl KeyProvider {
             "file" => Ok(Self::File {
                 path: esk_dir.join("store.key"),
             }),
-            #[cfg(feature = "keychain")]
             "keychain" => {
                 let root = esk_dir
                     .parent()
@@ -181,10 +179,6 @@ impl KeyProvider {
                     account: canonical.to_string_lossy().into_owned(),
                 })
             }
-            #[cfg(not(feature = "keychain"))]
-            "keychain" => bail!(
-                "keychain support requires the 'keychain' feature. Rebuild with: cargo install esk --features keychain"
-            ),
             other => bail!("unknown key provider in .esk/key-provider: {other}"),
         }
     }
@@ -192,7 +186,6 @@ impl KeyProvider {
     fn exists(&self) -> bool {
         match self {
             Self::File { path } => path.is_file(),
-            #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
                 let entry = keyring::Entry::new(service, account);
                 match entry {
@@ -206,7 +199,6 @@ impl KeyProvider {
     fn load(&self) -> Result<Vec<u8>> {
         match self {
             Self::File { path } => Self::read_key_file(path),
-            #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
                 let entry = keyring::Entry::new(service, account)
                     .map_err(|e| anyhow::anyhow!("failed to access OS keychain: {e}"))?;
@@ -242,7 +234,6 @@ impl KeyProvider {
     pub(crate) fn store(&self, key: &[u8]) -> Result<()> {
         match self {
             Self::File { path } => Self::write_key_file(path, key),
-            #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
                 let entry = keyring::Entry::new(service, account)
                     .map_err(|e| anyhow::anyhow!("failed to access OS keychain: {e}"))?;
