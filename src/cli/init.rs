@@ -154,8 +154,16 @@ fn keychain_available() -> bool {
 fn prompt_key_storage(default_keychain: bool) -> Result<bool> {
     let use_keychain: bool = cliclack::select("Where should esk store the encryption key?")
         .items(&[
-            (true, "OS keychain (recommended)", "key never stored on disk"),
-            (false, "File on disk", "saved to .esk/store.key (gitignored)"),
+            (
+                true,
+                "OS keychain (recommended)",
+                "key never stored on disk",
+            ),
+            (
+                false,
+                "File on disk",
+                "saved to .esk/store.key (gitignored)",
+            ),
         ])
         .initial_value(default_keychain)
         .interact()?;

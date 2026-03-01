@@ -1064,7 +1064,11 @@ impl Config {
             .get(app)
             .with_context(|| format!("unknown app '{app}'"))?;
 
-        let suffix = dotenv_config.env_suffix.get(env).cloned().unwrap_or_default();
+        let suffix = dotenv_config
+            .env_suffix
+            .get(env)
+            .cloned()
+            .unwrap_or_default();
 
         let path = dotenv_config
             .pattern

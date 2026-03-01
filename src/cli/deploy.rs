@@ -170,13 +170,8 @@ impl DeployReport {
 
             for (env_name, mut lines) in env_map {
                 let es = env_status.get(&env_name).unwrap();
-                let status_summary = ui::format_deploy_summary(
-                    es.keys,
-                    es.deployed,
-                    es.failed,
-                    es.unset,
-                    es.pruned,
-                );
+                let status_summary =
+                    ui::format_deploy_summary(es.keys, es.deployed, es.failed, es.unset, es.pruned);
 
                 lines.push(String::new());
                 let status_icon = if es.failed > 0 {
@@ -877,7 +872,9 @@ pub fn run_with_runner(
                 }
             }
         }
-        let plan = env_plans.entry(target_env.clone()).or_insert_with(new_env_work_plan);
+        let plan = env_plans
+            .entry(target_env.clone())
+            .or_insert_with(new_env_work_plan);
         plan.batch_groups.push(BatchGroup {
             target_name: target_name.clone(),
             app: app.clone(),
@@ -889,25 +886,34 @@ pub fn run_with_runner(
 
     // Insert individual work
     for (key, value, target) in &individual_work {
-        let plan = env_plans.entry(target.environment.clone()).or_insert_with(new_env_work_plan);
-        plan.individual.push((key.clone(), value.clone(), target.clone()));
+        let plan = env_plans
+            .entry(target.environment.clone())
+            .or_insert_with(new_env_work_plan);
+        plan.individual
+            .push((key.clone(), value.clone(), target.clone()));
     }
 
     // Insert tombstone work
     for (key, target) in &tombstone_work {
-        let plan = env_plans.entry(target.environment.clone()).or_insert_with(new_env_work_plan);
+        let plan = env_plans
+            .entry(target.environment.clone())
+            .or_insert_with(new_env_work_plan);
         plan.tombstones.push((key.clone(), target.clone()));
     }
 
     // Insert prune work
     for orphan in &prune_individual {
-        let plan = env_plans.entry(orphan.env.clone()).or_insert_with(new_env_work_plan);
+        let plan = env_plans
+            .entry(orphan.env.clone())
+            .or_insert_with(new_env_work_plan);
         plan.prune_individual.push(orphan.clone());
     }
 
     // Insert batch prune work
     for ((target_name, app, target_env), orphan_list) in &batch_prune_keys {
-        let plan = env_plans.entry(target_env.clone()).or_insert_with(new_env_work_plan);
+        let plan = env_plans
+            .entry(target_env.clone())
+            .or_insert_with(new_env_work_plan);
         plan.batch_prune
             .entry((target_name.clone(), app.clone()))
             .or_default()
@@ -916,7 +922,9 @@ pub fn run_with_runner(
 
     // Also collect environments that only have unset or skipped secrets
     for entry in &unset {
-        env_plans.entry(entry.env.clone()).or_insert_with(new_env_work_plan);
+        env_plans
+            .entry(entry.env.clone())
+            .or_insert_with(new_env_work_plan);
     }
 
     // Count skipped batch secrets (those in non-dirty batch target groups)
@@ -967,7 +975,10 @@ pub fn run_with_runner(
         let env_unset: Vec<&DeployEntry> = unset.iter().filter(|e| e.env == *env_name).collect();
 
         let key_lines = build_key_lines(plan, &env_unset);
-        let has_work = plan.batch_groups.iter().any(|bg| !bg.secrets.is_empty() || !bg.tombstoned_keys.is_empty())
+        let has_work = plan
+            .batch_groups
+            .iter()
+            .any(|bg| !bg.secrets.is_empty() || !bg.tombstoned_keys.is_empty())
             || !plan.individual.is_empty()
             || !plan.tombstones.is_empty()
             || !plan.prune_individual.is_empty()
@@ -993,11 +1004,14 @@ pub fn run_with_runner(
             {
                 let mut r = results.lock().unwrap();
                 for kl in &key_lines {
-                    r.insert(kl.key.clone(), KeyResult {
-                        completed_ops: 0,
-                        total_ops: kl.total_ops,
-                        failed: Vec::new(),
-                    });
+                    r.insert(
+                        kl.key.clone(),
+                        KeyResult {
+                            completed_ops: 0,
+                            total_ops: kl.total_ops,
+                            failed: Vec::new(),
+                        },
+                    );
                 }
             }
 
@@ -1078,11 +1092,7 @@ pub fn run_with_runner(
                                 let value_hash = DeployIndex::hash_value(value);
 
                                 if result.outcome.is_success() {
-                                    idx.record_success(
-                                        tracker_key,
-                                        target.to_string(),
-                                        value_hash,
-                                    );
+                                    idx.record_success(tracker_key, target.to_string(), value_hash);
                                     if let Some(kr) = res.get_mut(&result.key) {
                                         kr.completed_ops += 1;
                                     }
@@ -1100,8 +1110,7 @@ pub fn run_with_runner(
                                     );
                                     if let Some(kr) = res.get_mut(&result.key) {
                                         kr.completed_ops += 1;
-                                        kr.failed
-                                            .push((target_display.clone(), error));
+                                        kr.failed.push((target_display.clone(), error));
                                     }
                                 }
                             }
@@ -1133,11 +1142,7 @@ pub fn run_with_runner(
 
                         match result {
                             Ok(()) => {
-                                idx.record_success(
-                                    tracker_key,
-                                    target.to_string(),
-                                    value_hash,
-                                );
+                                idx.record_success(tracker_key, target.to_string(), value_hash);
                                 if let Some(kr) = res.get_mut(key.as_str()) {
                                     kr.completed_ops += 1;
                                 }
@@ -1249,8 +1254,7 @@ pub fn run_with_runner(
                                 Err(e) => {
                                     if let Some(kr) = res.get_mut(&orphan.key) {
                                         kr.completed_ops += 1;
-                                        kr.failed
-                                            .push((orphan.target_display(), e.to_string()));
+                                        kr.failed.push((orphan.target_display(), e.to_string()));
                                     }
                                 }
                             }
@@ -1302,16 +1306,15 @@ pub fn run_with_runner(
                     frame = (frame + 1) % frames.len();
 
                     let state = results.lock().unwrap();
-                    let all_done = key_lines
-                        .iter()
-                        .all(|kl| kl.total_ops == 0 || state.get(&kl.key).is_none_or(KeyResult::is_done));
+                    let all_done = key_lines.iter().all(|kl| {
+                        kl.total_ops == 0 || state.get(&kl.key).is_none_or(KeyResult::is_done)
+                    });
 
                     let _ = term.move_cursor_up(n);
                     for kl in &key_lines {
                         let _ = term.clear_line();
                         if kl.total_ops == 0 {
-                            let label =
-                                format!("{} {}", ui::Icon::Unset, style(&kl.key).dim());
+                            let label = format!("{} {}", ui::Icon::Unset, style(&kl.key).dim());
                             let _ = term.write_line(&format!(
                                 "{bar}    {}",
                                 ui::format_aligned_line(&label, "", label_col)
@@ -1441,10 +1444,7 @@ pub fn run_with_runner(
             let _ = term.move_cursor_down(n);
 
             // Print summary line
-            let env_keys = key_lines
-                .iter()
-                .filter(|kl| kl.total_ops > 0)
-                .count();
+            let env_keys = key_lines.iter().filter(|kl| kl.total_ops > 0).count();
             let summary = ui::format_deploy_summary(
                 env_keys,
                 env_deployed,

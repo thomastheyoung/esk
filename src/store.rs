@@ -144,13 +144,8 @@ impl std::fmt::Debug for StorePayload {
 }
 
 pub(crate) enum KeyProvider {
-    File {
-        path: PathBuf,
-    },
-    Keychain {
-        service: String,
-        account: String,
-    },
+    File { path: PathBuf },
+    Keychain { service: String, account: String },
 }
 
 impl KeyProvider {
@@ -169,9 +164,7 @@ impl KeyProvider {
                 path: esk_dir.join("store.key"),
             }),
             "keychain" => {
-                let root = esk_dir
-                    .parent()
-                    .context("esk dir has no parent")?;
+                let root = esk_dir.parent().context("esk dir has no parent")?;
                 let canonical = std::fs::canonicalize(root)
                     .with_context(|| format!("failed to canonicalize {}", root.display()))?;
                 Ok(Self::Keychain {

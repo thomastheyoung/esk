@@ -183,10 +183,7 @@ impl DeployIndex {
         let legacy_keys: Vec<String> = self
             .records
             .keys()
-            .filter(|k| {
-                Self::parse_tracker_key(k)
-                    .is_some_and(|parts| parts.service == "env")
-            })
+            .filter(|k| Self::parse_tracker_key(k).is_some_and(|parts| parts.service == "env"))
             .cloned()
             .collect();
 
