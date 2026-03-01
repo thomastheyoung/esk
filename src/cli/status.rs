@@ -656,9 +656,9 @@ impl Dashboard {
                 .iter()
                 .map(|h| {
                     let icon = if h.status.is_ok() {
-                        ui::icon_success()
+                        ui::Icon::Success
                     } else {
-                        ui::icon_failure()
+                        ui::Icon::Failure
                     };
                     format!(
                         "  {} {:<14} {}",
@@ -693,7 +693,7 @@ impl Dashboard {
 
             if !self.failed.is_empty() {
                 deploy_lines.push(ui::section_header(
-                    ui::icon_failure(),
+                    ui::Icon::Failure,
                     &format!("{} failed", self.failed.len()),
                     ui::SectionColor::Red,
                 ));
@@ -718,7 +718,7 @@ impl Dashboard {
 
             if !self.pending.is_empty() {
                 deploy_lines.push(ui::section_header(
-                    ui::icon_pending(),
+                    ui::Icon::Pending,
                     &format!("{} pending", self.pending.len()),
                     ui::SectionColor::Yellow,
                 ));
@@ -750,7 +750,7 @@ impl Dashboard {
 
             if !self.unset.is_empty() {
                 deploy_lines.push(ui::section_header(
-                    ui::icon_unset(),
+                    ui::Icon::Unset,
                     &format!("{} unset", self.unset.len()),
                     ui::SectionColor::Dim,
                 ));
@@ -776,7 +776,7 @@ impl Dashboard {
             if !self.deployed.is_empty() {
                 if all {
                     deploy_lines.push(ui::section_header(
-                        ui::icon_success(),
+                        ui::Icon::Success,
                         &format!("{} deployed", self.deployed.len()),
                         ui::SectionColor::Green,
                     ));
@@ -796,7 +796,7 @@ impl Dashboard {
                 } else {
                     deploy_lines.push(format!(
                         "  {} {}  {}",
-                        ui::icon_success(),
+                        ui::Icon::Success,
                         style(format!("{} deployed", self.deployed.len())).green(),
                         style("(--all to show)").dim()
                     ));
@@ -815,7 +815,7 @@ impl Dashboard {
             let mut val_lines = Vec::new();
             if !self.validation_warnings.is_empty() {
                 val_lines.push(ui::section_header(
-                    ui::icon_alert_yellow(),
+                    ui::Icon::Warning,
                     &format!("{} invalid", self.validation_warnings.len()),
                     ui::SectionColor::Yellow,
                 ));
@@ -828,7 +828,7 @@ impl Dashboard {
             }
             if !self.cross_field_violations.is_empty() {
                 val_lines.push(ui::section_header(
-                    ui::icon_alert_yellow(),
+                    ui::Icon::Warning,
                     &format!("{} cross-field", self.cross_field_violations.len()),
                     ui::SectionColor::Yellow,
                 ));
@@ -846,7 +846,7 @@ impl Dashboard {
         if !self.empty_values.is_empty() {
             let mut empty_lines = Vec::new();
             empty_lines.push(ui::section_header(
-                ui::icon_alert_yellow(),
+                ui::Icon::Warning,
                 &format!("{} empty", self.empty_values.len()),
                 ui::SectionColor::Yellow,
             ));
@@ -863,7 +863,7 @@ impl Dashboard {
         if !self.missing_required.is_empty() {
             let mut req_lines = Vec::new();
             req_lines.push(ui::section_header(
-                ui::icon_alert_red(),
+                ui::Icon::Warning.color(ui::SectionColor::Red),
                 &format!("{} required missing", self.missing_required.len()),
                 ui::SectionColor::Red,
             ));
@@ -930,7 +930,7 @@ impl Dashboard {
 
             if !coverage_gap_lines.is_empty() {
                 cov_lines.push(ui::section_header(
-                    ui::icon_unset(),
+                    ui::Icon::Unset,
                     &format!("{coverage_gap_count} declared but never set"),
                     ui::SectionColor::Dim,
                 ));
@@ -947,7 +947,7 @@ impl Dashboard {
 
             if !self.orphans.is_empty() {
                 cov_lines.push(ui::section_header(
-                    ui::icon_warning(),
+                    ui::Icon::Warning,
                     &format!("{} in store, not in config", self.orphans.len()),
                     ui::SectionColor::Yellow,
                 ));
@@ -961,7 +961,7 @@ impl Dashboard {
 
             if !self.target_orphans.is_empty() {
                 cov_lines.push(ui::section_header(
-                    ui::icon_warning(),
+                    ui::Icon::Warning,
                     &format!(
                         "{} deployed but no longer in config",
                         self.target_orphans.len()
@@ -1004,21 +1004,21 @@ impl Dashboard {
                     match &ps.status {
                         RemoteStatus::Current { version } => format!(
                             "  {} {}{}  {}",
-                            ui::icon_success(),
+                            ui::Icon::Success,
                             style(&label),
                             " ".repeat(pad),
                             style(format!("v{version}")).dim()
                         ),
                         RemoteStatus::Stale { pushed, local } => format!(
                             "  {} {}{}  {}",
-                            ui::icon_pending(),
+                            ui::Icon::Pending,
                             style(&label),
                             " ".repeat(pad),
                             style(format!("v{pushed} → local v{local}")).dim()
                         ),
                         RemoteStatus::Failed { version, error } => format!(
                             "  {} {}{}  {} {}",
-                            ui::icon_failure(),
+                            ui::Icon::Failure,
                             style(&label),
                             " ".repeat(pad),
                             style(format!("v{version}")).dim(),
@@ -1026,7 +1026,7 @@ impl Dashboard {
                         ),
                         RemoteStatus::NeverSynced => format!(
                             "  {} {}{}  {}",
-                            ui::icon_unset(),
+                            ui::Icon::Unset,
                             style(&label),
                             " ".repeat(pad),
                             style("never synced").dim()

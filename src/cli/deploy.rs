@@ -105,7 +105,7 @@ impl DeployReport {
             // Render deployed entries (grouped by key, targets on one line)
             for ((env, key), (targets, _)) in group_entries(&self.deployed) {
                 env_status.entry(env.clone()).or_default().keys += 1;
-                let label = format!("{} {}", ui::icon_success(), style(&key).dim());
+                let label = format!("{} {}", ui::Icon::Success, style(&key).dim());
                 env_map
                     .entry(env)
                     .or_default()
@@ -118,7 +118,7 @@ impl DeployReport {
 
             // Render failed entries (grouped by key, with errors)
             for ((env, key), (targets, errors)) in group_entries(&self.failed) {
-                let label = format!("{} {}", ui::icon_failure(), style(&key).dim());
+                let label = format!("{} {}", ui::Icon::Failure, style(&key).dim());
                 let lines = env_map.entry(env).or_default();
                 lines.push(ui::format_aligned_line(
                     &label,
@@ -144,7 +144,7 @@ impl DeployReport {
 
             // Render unset entries (grouped by key)
             for ((env, key), (targets, _)) in group_entries(&self.unset) {
-                let label = format!("{} {}", ui::icon_unset(), style(&key).dim());
+                let label = format!("{} {}", ui::Icon::Unset, style(&key).dim());
                 env_map
                     .entry(env)
                     .or_default()
@@ -157,7 +157,7 @@ impl DeployReport {
 
             // Render pruned entries (grouped by key)
             for ((env, key), (targets, _)) in group_entries(&self.pruned) {
-                let label = format!("{} {}", ui::icon_pruned(), style(&key).dim());
+                let label = format!("{} {}", ui::Icon::Pruned, style(&key).dim());
                 env_map
                     .entry(env)
                     .or_default()
@@ -180,9 +180,9 @@ impl DeployReport {
 
                 lines.push(String::new());
                 let status_icon = if es.failed > 0 {
-                    ui::icon_failure()
+                    ui::Icon::Failure.to_string()
                 } else {
-                    ui::icon_summary()
+                    ui::Icon::Pending.color(ui::SectionColor::Green)
                 };
                 lines.push(format!("{status_icon} {status_summary}"));
 
@@ -1010,7 +1010,7 @@ pub fn run_with_runner(
             for kl in &key_lines {
                 if kl.total_ops == 0 {
                     // Unset key — show immediately
-                    let label = format!("{} {}", ui::icon_unset(), style(&kl.key).dim());
+                    let label = format!("{} {}", ui::Icon::Unset, style(&kl.key).dim());
                     let _ = term.write_line(&format!(
                         "{bar}    {}",
                         ui::format_aligned_line(&label, "", label_col)
@@ -1311,7 +1311,7 @@ pub fn run_with_runner(
                         let _ = term.clear_line();
                         if kl.total_ops == 0 {
                             let label =
-                                format!("{} {}", ui::icon_unset(), style(&kl.key).dim());
+                                format!("{} {}", ui::Icon::Unset, style(&kl.key).dim());
                             let _ = term.write_line(&format!(
                                 "{bar}    {}",
                                 ui::format_aligned_line(&label, "", label_col)
@@ -1320,9 +1320,9 @@ pub fn run_with_runner(
                             let targets_str = kl.targets.join(", ");
                             if kr.is_done() {
                                 let icon = if kr.has_failure() {
-                                    ui::icon_failure()
+                                    ui::Icon::Failure
                                 } else {
-                                    ui::icon_success()
+                                    ui::Icon::Success
                                 };
                                 let label = format!("{} {}", icon, style(&kl.key).dim());
                                 let _ = term.write_line(&format!(
@@ -1453,9 +1453,9 @@ pub fn run_with_runner(
                 env_pruned,
             );
             let summary_icon = if env_failed > 0 {
-                ui::icon_failure()
+                ui::Icon::Failure.to_string()
             } else {
-                ui::icon_summary()
+                ui::Icon::Pending.color(ui::SectionColor::Green)
             };
             let _ = term.write_line(&format!(
                 "{}    {} {}",

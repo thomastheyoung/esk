@@ -236,10 +236,10 @@ fn render_table(
             let pad_right = *w - pad_left - 1;
             let indicator = match cell_status(key, e) {
                 CellStatus::NotTargeted => " ".to_string(),
-                CellStatus::Unset => ui::icon_unset().to_string(),
-                CellStatus::Deployed => ui::icon_success().to_string(),
-                CellStatus::Pending => ui::icon_pending().to_string(),
-                CellStatus::Failed => ui::icon_failure().to_string(),
+                CellStatus::Unset => ui::Icon::Unset.to_string(),
+                CellStatus::Deployed => ui::Icon::Success.to_string(),
+                CellStatus::Pending => ui::Icon::Pending.to_string(),
+                CellStatus::Failed => ui::Icon::Failure.to_string(),
             };
             let _ = write!(
                 row,

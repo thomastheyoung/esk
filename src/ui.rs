@@ -1,41 +1,57 @@
 use std::fmt;
 
 use chrono::{DateTime, Utc};
-use console::{style, StyledObject};
+use console::style;
 
 // ---------------------------------------------------------------------------
 // Icon vocabulary
 // ---------------------------------------------------------------------------
 
-pub fn icon_success() -> StyledObject<&'static str> {
-    style("✔").green()
+/// Semantic icon vocabulary. Each variant carries a default color via [`fmt::Display`],
+/// but any icon can be recolored with [`Icon::color`] for composed combinations.
+#[derive(Clone, Copy)]
+pub enum Icon {
+    Success, // ✔
+    Failure, // ✗
+    Pending, // ●
+    Unset,   // ○
+    Pruned,  // ✂
+    Warning, // !
+    Merge,   // ↻
 }
-pub fn icon_failure() -> StyledObject<&'static str> {
-    style("✗").red()
+
+impl Icon {
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Self::Success => "✔",
+            Self::Failure => "✗",
+            Self::Pending => "●",
+            Self::Unset => "○",
+            Self::Pruned => "✂",
+            Self::Warning => "!",
+            Self::Merge => "↻",
+        }
+    }
+
+    fn default_color(self) -> SectionColor {
+        match self {
+            Self::Success => SectionColor::Green,
+            Self::Failure => SectionColor::Red,
+            Self::Pending | Self::Pruned | Self::Warning | Self::Merge => SectionColor::Yellow,
+            Self::Unset => SectionColor::Dim,
+        }
+    }
+
+    /// Render this icon in a specific color, overriding the default.
+    pub fn color(self, color: SectionColor) -> String {
+        apply_color(self.glyph(), color)
+    }
 }
-pub fn icon_pending() -> StyledObject<&'static str> {
-    style("●").yellow()
-}
-pub fn icon_unset() -> StyledObject<&'static str> {
-    style("○").dim()
-}
-pub fn icon_pruned() -> StyledObject<&'static str> {
-    style("✂").yellow()
-}
-pub fn icon_warning() -> StyledObject<&'static str> {
-    style("⚠").yellow()
-}
-pub fn icon_alert_yellow() -> StyledObject<&'static str> {
-    style("!").yellow()
-}
-pub fn icon_alert_red() -> StyledObject<&'static str> {
-    style("!").red()
-}
-pub fn icon_merge() -> StyledObject<&'static str> {
-    style("↻").yellow()
-}
-pub fn icon_summary() -> StyledObject<&'static str> {
-    style("●").green()
+
+impl fmt::Display for Icon {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.color(self.default_color()))
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -108,6 +124,16 @@ pub enum SectionColor {
     Yellow,
     Green,
     Dim,
+}
+
+/// Apply a [`SectionColor`] to a string, returning the styled result.
+fn apply_color(text: &str, color: SectionColor) -> String {
+    match color {
+        SectionColor::Red => style(text).red().to_string(),
+        SectionColor::Yellow => style(text).yellow().to_string(),
+        SectionColor::Green => style(text).green().to_string(),
+        SectionColor::Dim => style(text).dim().to_string(),
+    }
 }
 
 /// Renders a section header like `"  ✗ 3 failed"`.

@@ -342,22 +342,22 @@ pub fn run_with_runner(
             reconcile_status = if result.has_drift {
                 format!(
                     "{} Current ({}), would repair drift",
-                    ui::icon_merge(),
+                    ui::Icon::Merge,
                     label
                 )
             } else {
-                format!("{} Would merge \u{2192} {}", ui::icon_merge(), label)
+                format!("{} Would merge \u{2192} {}", ui::Icon::Merge, label)
             };
         } else {
             let label = env_version_label(&payload, env);
             reconcile_status = if result.has_drift {
                 format!(
                     "{} Current ({}), would repair drift",
-                    ui::icon_merge(),
+                    ui::Icon::Merge,
                     label
                 )
             } else {
-                format!("{} Up to date \u{2192} {}", ui::icon_success(), label)
+                format!("{} Up to date \u{2192} {}", ui::Icon::Success, label)
             };
         }
         cliclack::log::info(reconcile_status)?;
@@ -420,13 +420,13 @@ pub fn run_with_runner(
 
             store.set_payload(&result.merged_payload)?;
             let label = env_version_label(&result.merged_payload, env);
-            reconcile_status = format!("{} Merged \u{2192} {}", ui::icon_merge(), label);
+            reconcile_status = format!("{} Merged \u{2192} {}", ui::Icon::Merge, label);
         } else {
             let label = env_version_label(&payload, env);
             reconcile_status = if result.has_drift {
-                format!("{} Stale remotes (repairing...)", ui::icon_merge())
+                format!("{} Stale remotes (repairing...)", ui::Icon::Merge)
             } else {
-                format!("{} Up to date \u{2192} {}", ui::icon_success(), label)
+                format!("{} Up to date \u{2192} {}", ui::Icon::Success, label)
             };
         }
         cliclack::log::info(reconcile_status)?;
