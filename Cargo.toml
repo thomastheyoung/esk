@@ -39,9 +39,11 @@ rmcp = { version = "0.16", features = ["server", "transport-io", "macros", "sche
 tokio = { version = "1", features = ["rt", "macros", "io-std"], optional = true }
 schemars = { version = "1", optional = true }
 
-keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"] }
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
 
 [features]
+default = ["keychain"]
+keychain = ["dep:keyring"]
 mcp = ["dep:rmcp", "dep:tokio", "dep:schemars"]
 
 [[bin]]

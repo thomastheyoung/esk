@@ -142,12 +142,19 @@ fn resolve_key_provider(cwd: &Path, keychain_flag: bool) -> Result<bool> {
 
 /// Probes whether the OS keychain is functional at runtime.
 fn keychain_available() -> bool {
-    let Ok(entry) = keyring::Entry::new("esk", "probe") else {
-        return false;
-    };
-    match entry.get_secret() {
-        Ok(_) | Err(keyring::Error::NoEntry) => true,
-        Err(_) => false,
+    #[cfg(feature = "keychain")]
+    {
+        let Ok(entry) = keyring::Entry::new("esk", "probe") else {
+            return false;
+        };
+        match entry.get_secret() {
+            Ok(_) | Err(keyring::Error::NoEntry) => true,
+            Err(_) => false,
+        }
+    }
+    #[cfg(not(feature = "keychain"))]
+    {
+        false
     }
 }
 

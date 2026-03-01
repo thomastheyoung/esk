@@ -145,6 +145,7 @@ impl std::fmt::Debug for StorePayload {
 
 pub(crate) enum KeyProvider {
     File { path: PathBuf },
+    #[cfg_attr(not(feature = "keychain"), allow(dead_code))]
     Keychain { service: String, account: String },
 }
 
@@ -179,6 +180,7 @@ impl KeyProvider {
     fn exists(&self) -> bool {
         match self {
             Self::File { path } => path.is_file(),
+            #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
                 let entry = keyring::Entry::new(service, account);
                 match entry {
@@ -186,12 +188,15 @@ impl KeyProvider {
                     Err(_) => false,
                 }
             }
+            #[cfg(not(feature = "keychain"))]
+            Self::Keychain { .. } => false,
         }
     }
 
     pub(crate) fn load(&self) -> Result<Vec<u8>> {
         match self {
             Self::File { path } => Self::read_key_file(path),
+            #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
                 let entry = keyring::Entry::new(service, account)
                     .map_err(|e| anyhow::anyhow!("failed to access OS keychain: {e}"))?;
@@ -215,6 +220,10 @@ impl KeyProvider {
                 }
                 Ok(key)
             }
+            #[cfg(not(feature = "keychain"))]
+            Self::Keychain { .. } => {
+                bail!("keychain support is not available in this build. Use file-based key storage instead.")
+            }
         }
     }
 
@@ -227,6 +236,7 @@ impl KeyProvider {
     pub(crate) fn store(&self, key: &[u8]) -> Result<()> {
         match self {
             Self::File { path } => Self::write_key_file(path, key),
+            #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
                 let entry = keyring::Entry::new(service, account)
                     .map_err(|e| anyhow::anyhow!("failed to access OS keychain: {e}"))?;
@@ -239,6 +249,10 @@ impl KeyProvider {
                     _ => anyhow::anyhow!("failed to store key in OS keychain: {e}"),
                 })?;
                 Ok(())
+            }
+            #[cfg(not(feature = "keychain"))]
+            Self::Keychain { .. } => {
+                bail!("keychain support is not available in this build. Use file-based key storage instead.")
             }
         }
     }
