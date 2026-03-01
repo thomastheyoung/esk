@@ -144,9 +144,14 @@ impl std::fmt::Debug for StorePayload {
 }
 
 pub(crate) enum KeyProvider {
-    File { path: PathBuf },
+    File {
+        path: PathBuf,
+    },
     #[cfg_attr(not(feature = "keychain"), allow(dead_code))]
-    Keychain { service: String, account: String },
+    Keychain {
+        service: String,
+        account: String,
+    },
 }
 
 impl KeyProvider {
