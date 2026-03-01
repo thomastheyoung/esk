@@ -122,7 +122,7 @@ apps:
     path: .
 
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -133,7 +133,7 @@ secrets:
     API_KEY:
       description: Example API key
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
 ```
 
 When you need cloud deploy targets or shared sync, add target/remote blocks. See [TARGETS.md](TARGETS.md) and [REMOTES.md](REMOTES.md), or browse the [full example config](docs/esk.example.yaml) showcasing every available option.

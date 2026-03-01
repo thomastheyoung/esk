@@ -110,7 +110,7 @@ pub trait DeployTarget {
 
 Batch targets handle deletion by regenerating the full output without the deleted key. Individual targets override `delete_secret` to call the external CLI's delete/unset command.
 
-`DeployMode::Batch` targets (env, kubernetes) regenerate the full output when any secret changes. `DeployMode::Individual` targets deploy one secret at a time. The `build_targets()` factory constructs all configured targets from config, running preflight checks and filtering out targets that fail.
+`DeployMode::Batch` targets (.env, kubernetes) regenerate the full output when any secret changes. `DeployMode::Individual` targets deploy one secret at a time. The `build_targets()` factory constructs all configured targets from config, running preflight checks and filtering out targets that fail.
 
 ### Sync remote trait
 

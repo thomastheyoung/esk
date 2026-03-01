@@ -18,7 +18,7 @@ apps:
     path: apps/api
 
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -47,31 +47,31 @@ secrets:
     AUTH_SECRET:
       description: NextAuth secret key
       targets:
-        env: [web:dev, web:staging, web:prod]
+        .env: [web:dev, web:staging, web:prod]
         cloudflare: [web:prod]
     SESSION_KEY:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
   Stripe:
     STRIPE_KEY:
       description: Stripe API key
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         cloudflare: [web:prod]
         fly: [web:prod]
     STRIPE_WEBHOOK:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
   Convex:
     CONVEX_URL:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         convex: [dev, prod]
   Database:
     DATABASE_URL:
       description: PostgreSQL connection string
       targets:
-        env: [api:dev, api:staging, api:prod]
+        .env: [api:dev, api:staging, api:prod]
         fly: [api:prod]
 "#;
 

@@ -275,12 +275,12 @@ When the same structural pattern repeats N times with only data changing:
 
 ```rust
 // Wrong: 14 identical if-blocks
-if self.targets.env.is_some() { names.push("env"); }
+if self.targets.dotenv.is_some() { names.push(".env"); }
 if self.targets.cloudflare.is_some() { names.push("cloudflare"); }
 
 // Right: declarative, scannable, hard to get wrong
 [
-    ("env", self.targets.env.is_some()),
+    (".env", self.targets.dotenv.is_some()),
     ("cloudflare", self.targets.cloudflare.is_some()),
     // ...
 ]

@@ -97,7 +97,7 @@ Before deploying, esk runs three checks on the secrets in scope (unless bypassed
 
 **Target behavior:**
 
-- **Batch targets** (`env`, `kubernetes`): Regenerate the entire output atomically when any secret in a target group changes.
+- **Batch targets** (`.env`, `kubernetes`): Regenerate the entire output atomically when any secret in a target group changes.
 - **Individual targets** (for example `cloudflare`, `convex`): Deploy one secret at a time via external CLI calls.
 
 Targets that fail preflight checks are skipped with warnings (or all deploy work is skipped if no targets remain available).
@@ -115,7 +115,7 @@ With `--prune`, esk detects secrets that were previously deployed to targets but
 ```
   ✔ 2 deployed
     STRIPE_SECRET_KEY:prod  → cloudflare:web
-    STRIPE_WEBHOOK_SECRET:dev  → env:web
+    STRIPE_WEBHOOK_SECRET:dev  → .env:web
 
   3 targets up to date  (use --verbose to show)
 ```
@@ -264,15 +264,15 @@ The dashboard closes with the current store version.
   myapp · v5 · 6 targets (3 deployed, 2 pending, 1 unset)
 
   Targets
-    ✓ env            writable
+    ✓ .env           writable
     ✓ cloudflare     wrangler authenticated
 
   Deploy (targets)
     ● 2 pending
        STRIPE_SECRET_KEY:prod  → cloudflare:web  last deployed 3h ago
-       API_KEY:dev  → env:web  never deployed
+       API_KEY:dev  → .env:web  never deployed
     ○ 1 unset
-       DATABASE_URL:dev  → env:web:dev
+       DATABASE_URL:dev  → .env:web:dev
     ✓ 3 deployed  (--all to show)
 
   Next steps
@@ -409,7 +409,7 @@ secrets:
       description: Stripe API key
       targets:
         cloudflare: [web:prod]
-        env: [web:dev]
+        .env: [web:dev]
       validate:
         format: string
         min_length: 7

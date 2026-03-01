@@ -8,7 +8,7 @@ For sync remotes (1Password, cloud files), see [REMOTES.md](REMOTES.md).
 
 | Target                                    | Config key   | External CLI | Deploy mode | Requires app?             |
 | ----------------------------------------- | ------------ | ------------ | ----------- | ------------------------- |
-| [Env file](#env-file)                         | `env`               | None         | Batch       | Yes                       |
+| [.env file](#env-file)                        | `.env`              | None         | Batch       | Yes                       |
 | [AWS Lambda](#aws-lambda)                     | `aws_lambda`        | `aws`        | Batch       | No                        |
 | [AWS SSM](#aws-ssm)                           | `aws_ssm`           | `aws`        | Individual  | No                        |
 | [Azure App Service](#azure-app-service)       | `azure_app_service` | `az`         | Individual  | Yes                       |
@@ -31,12 +31,12 @@ For sync remotes (1Password, cloud files), see [REMOTES.md](REMOTES.md).
 
 **Deploy modes:**
 
-- **Batch** — When any secret changes for a target group, the entire output is regenerated. Used by env file and Kubernetes targets.
+- **Batch** — When any secret changes for a target group, the entire output is regenerated. Used by .env file and Kubernetes targets.
 - **Individual** — Each changed secret is deployed independently. Used by all other targets.
 
 ---
 
-## Env file
+## .env file
 
 Generates `.env` files from the encrypted store. The output path is computed from a configurable pattern using the app path and environment.
 
@@ -53,7 +53,7 @@ Generates `.env` files from the encrypted store. The output path is computed fro
 
 ```yaml
 targets:
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -93,7 +93,7 @@ secrets:
   Stripe:
     STRIPE_KEY:
       targets:
-        env: [web:dev, web:prod, api:dev]
+        .env: [web:dev, web:prod, api:dev]
 ```
 
 ### Generated output
@@ -1195,7 +1195,7 @@ Variables are substituted in `args` and `stdin` at deploy time:
 ### Naming rules
 
 - Names must contain only `a-z`, `A-Z`, `0-9`, `_`, `-`.
-- Names cannot collide with built-in target names (`env`, `cloudflare`, `convex`, `fly` etc, see the full list at the top of this doc).
+- Names cannot collide with built-in target names (`.env`, `cloudflare`, `convex`, `fly` etc, see the full list at the top of this doc).
 
 ### Target format
 

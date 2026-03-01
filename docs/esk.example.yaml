@@ -18,7 +18,7 @@ environments:
   - prod
 
 # ---------------------------------------------------------------------------
-# Apps — optional, used by targets that deploy per-app (env, fly, heroku)
+# Apps — optional, used by targets that deploy per-app (.env, fly, heroku)
 # ---------------------------------------------------------------------------
 apps:
   web:
@@ -32,7 +32,7 @@ apps:
 targets:
 
   # .env file generation (batch deploy — regenerates full file on any change)
-  env:
+  .env:
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -290,7 +290,7 @@ secrets:
     DATABASE_URL:
       description: PostgreSQL connection string
       targets:
-        env: [web:dev, web:prod, api:dev, api:prod]
+        .env: [web:dev, web:prod, api:dev, api:prod]
         fly: [api:prod]
         heroku: [api:prod]
       validate:
@@ -300,7 +300,7 @@ secrets:
     DATABASE_POOL_SIZE:
       description: Max database connections
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
       validate:
         format: integer
         range: [1, 100]
@@ -308,14 +308,14 @@ secrets:
     DB_HOST:
       description: Database host (used when DATABASE_URL is not set)
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
       validate:
         required_unless: [DATABASE_URL]         # not required if DATABASE_URL is set
 
     DB_PORT:
       description: Database port
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
       validate:
         format: integer
         range: [1, 65535]
@@ -328,14 +328,14 @@ secrets:
     AUTH_ENABLED:
       description: Enable authentication
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
       validate:
         format: boolean
 
     AUTH_SECRET:
       description: JWT signing key
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         cloudflare: [dev, prod]
       validate:
         min_length: 32
@@ -348,7 +348,7 @@ secrets:
         JWT issuer URL.
         Must be a valid HTTPS endpoint.
       targets:
-        env: [web:prod]
+        .env: [web:prod]
       validate:
         format: url
       required: [prod]                          # required only in prod
@@ -358,14 +358,14 @@ secrets:
 
     OAUTH_CLIENT_ID:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         vercel: [dev, staging, prod]
       validate:
         required_with: [OAUTH_CLIENT_SECRET]    # required when its pair exists
 
     OAUTH_CLIENT_SECRET:
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         vercel: [dev, staging, prod]
       validate:
         pattern: "^[A-Za-z0-9_-]{20,}$"        # regex pattern validation
@@ -377,7 +377,7 @@ secrets:
     STRIPE_SECRET_KEY:
       description: Stripe API secret key
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
         fly: [api:prod]
         github: [prod]
       validate:
@@ -386,14 +386,14 @@ secrets:
     STRIPE_WEBHOOK_SECRET:
       description: Stripe webhook signing secret
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
       validate:
         pattern: "^whsec_"
 
     SENDGRID_API_KEY:
       description: SendGrid email API key
       targets:
-        env: [api:prod]
+        .env: [api:prod]
         aws_ssm: [prod]
         internal-api: [prod]                    # deployed via custom target
       required: [prod]                          # only required in prod
@@ -401,7 +401,7 @@ secrets:
     ANALYTICS_TOKEN:
       description: Optional analytics tracking token
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
         netlify: [prod]
       required: false                           # never required
 
@@ -411,14 +411,14 @@ secrets:
     NODE_ENV:
       description: Runtime environment
       targets:
-        env: [web:dev, web:prod, api:dev, api:prod]
+        .env: [web:dev, web:prod, api:dev, api:prod]
       validate:
         enum: [development, staging, production]
 
     LOG_LEVEL:
       description: Application log level
       targets:
-        env: [web:dev, web:prod, api:dev, api:prod]
+        .env: [web:dev, web:prod, api:dev, api:prod]
         railway: [dev, prod]
       validate:
         enum: [trace, debug, info, warn, error]
@@ -426,7 +426,7 @@ secrets:
     PORT:
       description: Server listen port
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
       validate:
         format: integer
         range: [1, 65535]
@@ -434,7 +434,7 @@ secrets:
     FEATURE_FLAGS:
       description: JSON feature flag configuration
       targets:
-        env: [web:dev, web:prod]
+        .env: [web:dev, web:prod]
       validate:
         format: json
         optional: true                          # empty values pass validation
@@ -442,7 +442,7 @@ secrets:
     ADMIN_EMAIL:
       description: Admin notification email
       targets:
-        env: [api:prod]
+        .env: [api:prod]
       validate:
         format: email
       required: [prod]
@@ -450,7 +450,7 @@ secrets:
     ENCRYPTION_KEY:
       description: Base64-encoded encryption key
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
         kubernetes: [prod]
       validate:
         format: base64
@@ -459,5 +459,5 @@ secrets:
     ALLOWED_ORIGINS:
       description: CORS allowed origins (whitespace-only values are rejected)
       targets:
-        env: [api:dev, api:prod]
+        .env: [api:dev, api:prod]
       allow_empty: false                        # reject whitespace-only values (default)

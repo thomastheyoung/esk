@@ -115,7 +115,7 @@ apps:                              # Optional, for per-app target deploy
     path: apps/api
 
 targets:                           # Deploy targets (esk deploy)
-  env:                             # .env file generation (batch)
+  .env:                            # .env file generation (batch)
     pattern: "{app_path}/.env{env_suffix}.local"
     env_suffix:
       dev: ""
@@ -265,7 +265,7 @@ secrets:                           # Secrets grouped by category
     SECRET_KEY:
       description: Human-readable description
       targets:                     # Which targets to deploy to
-        env: [web:dev, web:prod]   # app:env format
+        .env: [web:dev, web:prod]   # app:env format
         cloudflare: [dev, prod]    # env-only when no apps needed
       validate:                    # Value validation (checked at set + deploy)
         format: url                # string, url, integer, number, boolean, email, json, base64
@@ -352,5 +352,5 @@ esk generate                                # Run all configured outputs
 - Secrets are encrypted at rest in `.esk/store.enc` (safe to commit). The key `.esk/store.key` must be gitignored.
 - The store tracks tombstones and per-environment versions for correct merge behavior.
 - Use `esk deploy --dry-run` before deploying to review what will change.
-- Batch targets (env, kubernetes) regenerate their full output on any change. Individual targets (cloudflare, vercel, fly, etc.) deploy one secret at a time.
+- Batch targets (.env, kubernetes) regenerate their full output on any change. Individual targets (cloudflare, vercel, fly, etc.) deploy one secret at a time.
 - Cross-field validation rules (`required_if`, `required_with`, `required_unless`) are evaluated at deploy time, not at set time.
