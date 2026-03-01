@@ -350,7 +350,7 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
 fn do_status(params: &StatusParams) -> anyhow::Result<StatusResponse> {
     let config = Config::find_and_load()?;
     let runner = RealCommandRunner;
-    let dashboard = Dashboard::build(&config, params.env.as_deref(), &runner)?;
+    let dashboard = Dashboard::build(&config, params.env.as_deref())?;
 
     Ok(StatusResponse {
         project: dashboard.project,

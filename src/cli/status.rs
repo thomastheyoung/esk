@@ -24,8 +24,8 @@ pub fn run_with_runner(
     all: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
-    let dashboard = Dashboard::build(config, env, runner)?;
-    dashboard.render(all)
+    let dashboard = Dashboard::build(config, env)?;
+    dashboard.render(config, runner, all)
 }
 
 // ---------------------------------------------------------------------------
@@ -178,11 +178,7 @@ fn group_entries(entries: &[DeployEntry], pick: TimestampPick) -> Vec<GroupedEnt
 }
 
 impl Dashboard {
-    pub(crate) fn build(
-        config: &Config,
-        env: Option<&str>,
-        runner: &dyn CommandRunner,
-    ) -> Result<Self> {
+    pub(crate) fn build(config: &Config, env: Option<&str>) -> Result<Self> {
         let store = SecretStore::open(&config.root)?;
         let payload = store.payload()?;
         let all_secrets = &payload.secrets;
@@ -203,10 +199,7 @@ impl Dashboard {
                 .collect(),
         };
 
-        // 1. Health checks (parallel, animated)
-        render_target_health(config, runner, "Targets");
-
-        // 2. Deploy entries
+        // Deploy entries
         let mut failed = Vec::new();
         let mut pending = Vec::new();
         let mut deployed = Vec::new();
@@ -577,7 +570,7 @@ impl Dashboard {
         })
     }
 
-    fn render(&self, all: bool) -> Result<()> {
+    fn render(&self, config: &Config, runner: &dyn CommandRunner, all: bool) -> Result<()> {
         // When filtering a single env, show that env's version; otherwise global
         let display_version = match &self.filtered_env {
             Some(env) => self
@@ -641,6 +634,9 @@ impl Dashboard {
         };
 
         cliclack::intro(style(summary).to_string())?;
+
+        // Target health checks (parallel, animated)
+        render_target_health(config, runner, "Targets");
 
         // Deploy section
         let has_problems =
@@ -1135,7 +1131,7 @@ remotes:
         index.record_success("1password", "dev", 0);
         index.save().unwrap();
 
-        let dashboard = Dashboard::build(&config, Some("dev"), &OkRunner).unwrap();
+        let dashboard = Dashboard::build(&config, Some("dev")).unwrap();
         let dev = dashboard
             .remote_states
             .iter()
@@ -1317,7 +1313,7 @@ remotes:
         index.record_success("1password", "prod", 0);
         index.save().unwrap();
 
-        let dashboard = Dashboard::build(&config, None, &OkRunner).unwrap();
+        let dashboard = Dashboard::build(&config, None).unwrap();
         let prod = dashboard
             .remote_states
             .iter()

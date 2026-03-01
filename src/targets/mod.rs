@@ -523,7 +523,8 @@ pub(crate) fn run_preflight_section(
         .iter()
         .map(|c| c.target.name().len())
         .max()
-        .unwrap_or(0);
+        .unwrap_or(0)
+        + 4;
     let is_tty = std::io::stderr().is_terminal();
 
     // Shared preflight results: None = in progress
@@ -575,16 +576,18 @@ pub(crate) fn run_preflight_section(
                     match &state[i] {
                         Some((true, msg)) => {
                             let _ = term.write_line(&format!(
-                                "{bar}    {} {:<name_width$}  {msg}",
+                                "{bar}    {} {:<name_width$}{}",
                                 style("\u{2714}").green(),
                                 name,
+                                style(msg).dim(),
                             ));
                         }
                         Some((false, msg)) => {
                             let _ = term.write_line(&format!(
-                                "{bar}    {} {:<name_width$}  {msg}",
+                                "{bar}    {} {:<name_width$}{}",
                                 style("\u{2718}").red(),
                                 name,
+                                style(msg).dim(),
                             ));
                         }
                         None => {
@@ -635,7 +638,7 @@ pub(crate) fn run_preflight_section(
                 let name = c.target.name();
                 let (ok, msg) = state[i].as_ref().unwrap();
                 let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
-                format!("  {mark} {name:<name_width$}  {msg}")
+                format!("  {mark} {name:<name_width$}{}", style(msg).dim())
             })
             .collect();
         let _ = cliclack::log::step(format!("{section_name}\n{}", lines.join("\n")));
