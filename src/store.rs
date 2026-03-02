@@ -9,7 +9,7 @@ use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
-use zeroize::{Zeroize, Zeroizing};
+use zeroize::Zeroizing;
 
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.
@@ -198,7 +198,7 @@ impl KeyProvider {
         }
     }
 
-    pub(crate) fn load(&self) -> Result<Vec<u8>> {
+    pub(crate) fn load(&self) -> Result<Zeroizing<Vec<u8>>> {
         match self {
             Self::File { path } => Self::read_key_file(path),
             #[cfg(feature = "keychain")]
@@ -216,7 +216,9 @@ impl KeyProvider {
                     }
                     _ => anyhow::anyhow!("failed to read key from OS keychain: {e}"),
                 })?;
-                let key = hex::decode(hex_str.trim()).context("invalid key hex from keychain")?;
+                let key = Zeroizing::new(
+                    hex::decode(hex_str.trim()).context("invalid key hex from keychain")?,
+                );
                 if key.len() != 32 {
                     bail!(
                         "invalid key length from keychain: expected 32 bytes, got {}",
@@ -232,7 +234,7 @@ impl KeyProvider {
         }
     }
 
-    fn create(&self) -> Result<Vec<u8>> {
+    fn create(&self) -> Result<Zeroizing<Vec<u8>>> {
         let key = Self::generate_key();
         self.store(&key)?;
         Ok(key)
@@ -262,16 +264,16 @@ impl KeyProvider {
         }
     }
 
-    fn generate_key() -> Vec<u8> {
-        let mut key = vec![0u8; 32];
+    fn generate_key() -> Zeroizing<Vec<u8>> {
+        let mut key = Zeroizing::new(vec![0u8; 32]);
         rand::rng().fill_bytes(&mut key);
         key
     }
 
-    fn read_key_file(path: &Path) -> Result<Vec<u8>> {
+    fn read_key_file(path: &Path) -> Result<Zeroizing<Vec<u8>>> {
         let hex_str = std::fs::read_to_string(path)
             .with_context(|| format!("failed to read key from {}", path.display()))?;
-        let key = hex::decode(hex_str.trim()).context("invalid key hex")?;
+        let key = Zeroizing::new(hex::decode(hex_str.trim()).context("invalid key hex")?);
         if key.len() != 32 {
             bail!("invalid key length: expected 32 bytes, got {}", key.len());
         }
@@ -301,7 +303,7 @@ impl KeyProvider {
 }
 
 pub struct SecretStore {
-    key: Vec<u8>,
+    key: Zeroizing<Vec<u8>>,
     store_path: PathBuf,
 }
 
@@ -310,12 +312,6 @@ impl std::fmt::Debug for SecretStore {
         f.debug_struct("SecretStore")
             .field("store_path", &self.store_path)
             .finish_non_exhaustive()
-    }
-}
-
-impl Drop for SecretStore {
-    fn drop(&mut self) {
-        self.key.zeroize();
     }
 }
 

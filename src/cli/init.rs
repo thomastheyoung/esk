@@ -312,7 +312,9 @@ fn ensure_keychain_store(
         // Migration: read existing file key, store in keychain, keep file as backup
         let hex_str = std::fs::read_to_string(&file_key_path)
             .context("failed to read existing key file for migration")?;
-        let key = hex::decode(hex_str.trim()).context("invalid key hex in existing key file")?;
+        let key = zeroize::Zeroizing::new(
+            hex::decode(hex_str.trim()).context("invalid key hex in existing key file")?,
+        );
 
         // Write marker first, then create provider from it to store the key
         crate::store::KeyProvider::write_marker(esk_dir, "keychain")?;
