@@ -271,8 +271,10 @@ impl KeyProvider {
     }
 
     fn read_key_file(path: &Path) -> Result<Zeroizing<Vec<u8>>> {
-        let hex_str = std::fs::read_to_string(path)
-            .with_context(|| format!("failed to read key from {}", path.display()))?;
+        let hex_str = Zeroizing::new(
+            std::fs::read_to_string(path)
+                .with_context(|| format!("failed to read key from {}", path.display()))?,
+        );
         let key = Zeroizing::new(hex::decode(hex_str.trim()).context("invalid key hex")?);
         if key.len() != 32 {
             bail!("invalid key length: expected 32 bytes, got {}", key.len());
@@ -283,7 +285,8 @@ impl KeyProvider {
     fn write_key_file(path: &Path, key: &[u8]) -> Result<()> {
         let dir = path.parent().context("key path has no parent")?;
         let tmp = NamedTempFile::new_in(dir)?;
-        std::fs::write(tmp.path(), hex::encode(key))?;
+        let hex_key = Zeroizing::new(hex::encode(key));
+        std::fs::write(tmp.path(), hex_key.as_bytes())?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
@@ -495,7 +498,7 @@ impl SecretStore {
 
     /// Write a payload to the store, encrypting it.
     pub(crate) fn write_payload(&self, payload: &StorePayload) -> Result<()> {
-        let json = serde_json::to_string(payload)?;
+        let json = Zeroizing::new(serde_json::to_string(payload)?);
         let encrypted = self.encrypt(&json)?;
 
         let dir = self
@@ -527,7 +530,7 @@ impl SecretStore {
 
     /// Decrypt ciphertext (nonce:ciphertext:tag hex format) into a StorePayload.
     pub(crate) fn decrypt(&self, encoded: &str) -> Result<StorePayload> {
-        let json = decrypt_with_key(&self.key, encoded)?;
+        let json = Zeroizing::new(decrypt_with_key(&self.key, encoded)?);
         serde_json::from_str(&json).context("decrypted payload is not valid JSON")
     }
 }
@@ -593,6 +596,11 @@ pub(crate) fn decrypt_with_key(key: &[u8], encoded: &str) -> Result<String> {
 }
 
 /// Derive a 32-byte domain-specific key from the master key via HKDF-SHA256.
+///
+/// Uses `None` for salt per RFC 5869 §3.1: when IKM is already uniformly random
+/// (32 bytes from CSPRNG), a salt is not required. Domain separation is handled
+/// by the `info` parameter. A fixed app salt would be a breaking change for
+/// existing encrypted remotes with no meaningful security gain.
 pub(crate) fn derive_key(master: &[u8], domain: &[u8]) -> Zeroizing<Vec<u8>> {
     let hk = Hkdf::<Sha256>::new(None, master);
     let mut out = Zeroizing::new(vec![0u8; 32]);
