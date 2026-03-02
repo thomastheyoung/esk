@@ -393,25 +393,21 @@ pub(crate) fn target_candidates<'a>(
                         runner,
                     })
                 }
-                TypedTargetConfig::GcpCloudRun(cfg) => {
-                    Box::new(gcp_cloud_run::GcpCloudRunTarget {
-                        config,
-                        target_config: cfg,
-                        runner,
-                    })
-                }
+                TypedTargetConfig::GcpCloudRun(cfg) => Box::new(gcp_cloud_run::GcpCloudRunTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
                 TypedTargetConfig::Render(cfg) => Box::new(render::RenderTarget {
                     config,
                     target_config: cfg,
                     runner,
                 }),
-                TypedTargetConfig::Custom { name, config: cfg } => {
-                    Box::new(custom::CustomTarget {
-                        target_name: name.clone(),
-                        target_config: cfg,
-                        runner,
-                    })
-                }
+                TypedTargetConfig::Custom { name, config: cfg } => Box::new(custom::CustomTarget {
+                    target_name: name.clone(),
+                    target_config: cfg,
+                    runner,
+                }),
             };
             TargetCandidate { target, ok_message }
         })
@@ -606,7 +602,10 @@ pub(crate) fn run_preflight_section(
 
     // Unwrap results — all slots are filled after thread::scope completes
     let state = results.lock().expect("preflight results mutex poisoned");
-    state.iter().map(|r| r.clone().expect("preflight result missing")).collect()
+    state
+        .iter()
+        .map(|r| r.clone().expect("preflight result missing"))
+        .collect()
 }
 
 /// Render target health with animated spinners, returning health results.
@@ -949,5 +948,4 @@ targets:
         assert_eq!(cmd_err.full_stderr(), "line1\nline2\nline3");
         assert!(cmd_err.to_string().contains("2 more lines"));
     }
-
 }

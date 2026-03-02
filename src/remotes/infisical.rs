@@ -187,8 +187,6 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-
-
     fn make_remote(runner: &dyn CommandRunner) -> InfisicalRemote<'_> {
         InfisicalRemote::new(
             InfisicalRemoteConfig {

@@ -128,13 +128,9 @@ fn remote_candidates<'a>(
         .map(|typed| {
             let ok_message = typed.ok_message();
             let remote: Box<dyn SyncRemote + 'a> = match typed {
-                TypedRemoteConfig::OnePassword(cfg) => {
-                    Box::new(onepassword::OnePasswordRemote::new(
-                        config,
-                        cfg.clone(),
-                        runner,
-                    ))
-                }
+                TypedRemoteConfig::OnePassword(cfg) => Box::new(
+                    onepassword::OnePasswordRemote::new(config, cfg.clone(), runner),
+                ),
                 TypedRemoteConfig::CloudFile { name, config: cfg } => {
                     Box::new(cloud_file::CloudFileRemote::new(
                         name.clone(),
@@ -142,40 +138,24 @@ fn remote_candidates<'a>(
                         cfg.clone(),
                     ))
                 }
-                TypedRemoteConfig::AwsSecretsManager(cfg) => {
-                    Box::new(aws_secrets_manager::AwsSecretsManagerRemote::new(
-                        config,
-                        cfg.clone(),
-                        runner,
-                    ))
-                }
+                TypedRemoteConfig::AwsSecretsManager(cfg) => Box::new(
+                    aws_secrets_manager::AwsSecretsManagerRemote::new(config, cfg.clone(), runner),
+                ),
                 TypedRemoteConfig::Bitwarden(cfg) => {
                     Box::new(bitwarden::BitwardenRemote::new(config, cfg.clone(), runner))
                 }
-                TypedRemoteConfig::Vault(cfg) => {
-                    Box::new(hashicorp_vault::HashicorpVaultRemote::new(
-                        config,
-                        cfg.clone(),
-                        runner,
-                    ))
-                }
+                TypedRemoteConfig::Vault(cfg) => Box::new(
+                    hashicorp_vault::HashicorpVaultRemote::new(config, cfg.clone(), runner),
+                ),
                 TypedRemoteConfig::S3(cfg) => {
                     Box::new(s3::S3Remote::new(config, cfg.clone(), runner))
                 }
-                TypedRemoteConfig::Gcp(cfg) => {
-                    Box::new(gcp_secret_manager::GcpSecretManagerRemote::new(
-                        config,
-                        cfg.clone(),
-                        runner,
-                    ))
-                }
-                TypedRemoteConfig::Azure(cfg) => {
-                    Box::new(azure_key_vault::AzureKeyVaultRemote::new(
-                        config,
-                        cfg.clone(),
-                        runner,
-                    ))
-                }
+                TypedRemoteConfig::Gcp(cfg) => Box::new(
+                    gcp_secret_manager::GcpSecretManagerRemote::new(config, cfg.clone(), runner),
+                ),
+                TypedRemoteConfig::Azure(cfg) => Box::new(
+                    azure_key_vault::AzureKeyVaultRemote::new(config, cfg.clone(), runner),
+                ),
                 TypedRemoteConfig::Doppler(cfg) => {
                     Box::new(doppler::DopplerRemote::new(cfg.clone(), runner))
                 }

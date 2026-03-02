@@ -315,10 +315,9 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
                             break;
                         }
                         Some(rec) => {
-                            let current_hash =
-                                DeployIndex::hash_value(
-                                    payload.secrets.get(&composite).unwrap_or(&String::new()),
-                                );
+                            let current_hash = DeployIndex::hash_value(
+                                payload.secrets.get(&composite).unwrap_or(&String::new()),
+                            );
                             if current_hash != rec.value_hash {
                                 worst = "pending";
                             }

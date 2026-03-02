@@ -214,8 +214,6 @@ mod tests {
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
-
-
     #[test]
     fn secret_name_substitution() {
         struct DummyRunner;
@@ -640,7 +638,8 @@ remotes:
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 1);
-        let pushed: StorePayload = serde_json::from_slice(calls[0].stdin.as_ref().unwrap()).unwrap();
+        let pushed: StorePayload =
+            serde_json::from_slice(calls[0].stdin.as_ref().unwrap()).unwrap();
         assert_eq!(pushed.version, 10);
         assert!(pushed.secrets.contains_key("KEY"));
         assert!(!pushed.secrets.contains_key("KEY:dev"));

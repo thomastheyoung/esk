@@ -95,12 +95,7 @@ impl<'a> OnePasswordRemote<'a> {
     // positional args (e.g. `section.key[concealed]=value`). There is no stdin/file support for
     // field values. Secret values are exposed in process arguments (visible via `ps aux`).
     // No workaround available.
-    fn push_item(
-        &self,
-        env: &str,
-        secrets: &BTreeMap<String, String>,
-        version: u64,
-    ) -> Result<()> {
+    fn push_item(&self, env: &str, secrets: &BTreeMap<String, String>, version: u64) -> Result<()> {
         let item_name = self.item_name(env);
         let vault = &self.remote_config.vault;
 
@@ -316,8 +311,6 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
-
-
 
     #[test]
     fn op_item_from_json_parses_secrets() {

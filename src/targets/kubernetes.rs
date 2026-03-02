@@ -124,9 +124,7 @@ impl DeployTarget for KubernetesTarget<'_> {
             .run("kubectl", &["cluster-info"], CommandOpts::default())
             .context("failed to run kubectl cluster-info")?;
         if !output.success {
-            anyhow::bail!(
-                "kubectl cannot connect to a cluster. Run: kubectl config get-contexts"
-            );
+            anyhow::bail!("kubectl cannot connect to a cluster. Run: kubectl config get-contexts");
         }
         Ok(())
     }
@@ -205,8 +203,6 @@ mod tests {
     use super::*;
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
-
-
 
     fn make_config() -> ConfigFixture {
         let yaml = r#"

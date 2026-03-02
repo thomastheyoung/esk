@@ -188,9 +188,6 @@ mod tests {
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
-
-
-
     fn ok_output(stdout: &[u8]) -> CommandOutput {
         CommandOutput {
             success: true,

@@ -187,9 +187,6 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-
-
-
     fn azure_yaml() -> &'static str {
         r#"
 project: myapp
@@ -235,7 +232,8 @@ remotes:
     vault_name: v
     secret_name: "{project}_{environment}"
 "#,
-        ).expect("fixture");
+        )
+        .expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);

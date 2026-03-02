@@ -137,8 +137,6 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
-
-
     fn make_config(dir: &std::path::Path, deployment_source: Option<&str>) -> Config {
         let mut yaml = String::from(
             r"

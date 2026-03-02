@@ -68,7 +68,9 @@ impl DeployTarget for GcpCloudRunTarget<'_> {
             .context("failed to run gcloud auth print-access-token")?;
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("GCP project '{project}' not accessible. Run: gcloud auth login\n{stderr}");
+            anyhow::bail!(
+                "GCP project '{project}' not accessible. Run: gcloud auth login\n{stderr}"
+            );
         }
         Ok(())
     }
@@ -140,8 +142,6 @@ mod tests {
     use super::*;
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
-
-
 
     fn make_config() -> ConfigFixture {
         let yaml = r#"

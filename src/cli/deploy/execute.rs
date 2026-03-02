@@ -279,11 +279,10 @@ fn execute_animated<'a>(
                 // BUG FIX (esk-0vf): Record batch failures so prune workers
                 // can skip pruning for failed batch groups.
                 if batch_had_failure {
-                    failed_batch_groups.lock().expect("failed batch groups mutex poisoned").insert((
-                        bg.target_name.clone(),
-                        bg.app.clone(),
-                        env_name.to_string(),
-                    ));
+                    failed_batch_groups
+                        .lock()
+                        .expect("failed batch groups mutex poisoned")
+                        .insert((bg.target_name.clone(), bg.app.clone(), env_name.to_string()));
                 }
 
                 let _ = idx.save();
@@ -390,7 +389,11 @@ fn execute_animated<'a>(
                 let mut idx = index.lock().expect("deploy index mutex poisoned");
                 let mut res = results.lock().expect("results mutex poisoned");
 
-                if failed_batch_groups.lock().expect("failed batch groups mutex poisoned").contains(&group_key) {
+                if failed_batch_groups
+                    .lock()
+                    .expect("failed batch groups mutex poisoned")
+                    .contains(&group_key)
+                {
                     for orphan in orphan_list {
                         if let Some(kr) = res.get_mut(&orphan.key) {
                             kr.completed_ops += 1;
@@ -746,11 +749,10 @@ fn execute_sequential<'a>(
                     target: target_display.clone(),
                     error: Some(error),
                 });
-                failed_batch_groups.lock().expect("failed batch groups mutex poisoned").insert((
-                    bg.target_name.clone(),
-                    bg.app.clone(),
-                    env_name.to_string(),
-                ));
+                failed_batch_groups
+                    .lock()
+                    .expect("failed batch groups mutex poisoned")
+                    .insert((bg.target_name.clone(), bg.app.clone(), env_name.to_string()));
             }
         }
         idx.save()?;
@@ -759,7 +761,11 @@ fn execute_sequential<'a>(
     // Batch prune
     for ((target_name, app), orphan_list) in &plan.batch_prune {
         let group_key = (target_name.clone(), app.clone(), env_name.to_string());
-        if failed_batch_groups.lock().expect("failed batch groups mutex poisoned").contains(&group_key) {
+        if failed_batch_groups
+            .lock()
+            .expect("failed batch groups mutex poisoned")
+            .contains(&group_key)
+        {
             for orphan in orphan_list {
                 failed.push(DeployEntry {
                     key: orphan.key.clone(),

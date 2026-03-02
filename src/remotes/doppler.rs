@@ -162,9 +162,6 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-
-
-
     fn doppler_yaml() -> &'static str {
         r"
 project: myapp

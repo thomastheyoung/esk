@@ -206,9 +206,6 @@ mod tests {
 
     type StdinCall = (String, Vec<String>, Option<Vec<u8>>);
 
-
-
-
     fn gcp_yaml() -> &'static str {
         r#"
 project: myapp
@@ -424,11 +421,14 @@ remotes:
                 args: &[&str],
                 opts: CommandOpts,
             ) -> Result<CommandOutput> {
-                self.calls.lock().expect("stdin capture mutex poisoned").push((
-                    program.to_string(),
-                    args.iter().map(|s| (*s).to_string()).collect(),
-                    opts.stdin,
-                ));
+                self.calls
+                    .lock()
+                    .expect("stdin capture mutex poisoned")
+                    .push((
+                        program.to_string(),
+                        args.iter().map(|s| (*s).to_string()).collect(),
+                        opts.stdin,
+                    ));
                 Ok(CommandOutput {
                     success: true,
                     stdout: Vec::new(),

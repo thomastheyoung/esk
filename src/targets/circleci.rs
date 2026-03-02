@@ -82,8 +82,6 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-
-
     fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: x
