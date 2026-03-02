@@ -296,4 +296,4 @@ cargo xtask release --dry-run
 
 ## License
 
-MIT
+[PolyForm Shield 1.0.0](LICENSE)
