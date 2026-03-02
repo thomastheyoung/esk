@@ -6,7 +6,7 @@ use crate::remotes::render_remote_health;
 use crate::targets::{render_target_health, CommandRunner, HealthStatus};
 use crate::ui;
 
-use super::types::{CheckStatus, Report, Section};
+use super::types::{Check, CheckStatus, Report, Section};
 
 impl Report {
     pub(crate) fn render(&self, runner: &dyn CommandRunner) -> Result<()> {
@@ -17,9 +17,11 @@ impl Report {
 
         cliclack::intro(style(format!("esk doctor · {project_label}")).bold().to_string())?;
 
+        let term = console::Term::stderr();
+        let bar = style("\u{2502}").dim();
+
         // --- Project structure ---
-        let structure_lines = render_checks(&self.structure);
-        cliclack::log::step(format!("Project structure\n{}", structure_lines.join("\n")))?;
+        render_checked_section(&term, &bar, "Project structure", &self.structure)?;
 
         // Load config for target/remote health rendering (if available)
         let config = self.project.as_ref().and_then(|_| {
@@ -28,19 +30,7 @@ impl Report {
         });
 
         // --- Config ---
-        match &self.config {
-            Section::Checked(checks) => {
-                let lines = render_checks(checks);
-                cliclack::log::step(format!("Config\n{}", lines.join("\n")))?;
-            }
-            Section::Skipped(reason) => {
-                cliclack::log::step(format!(
-                    "Config\n  {} {}",
-                    style("—").dim(),
-                    style(format!("skipped: {reason}")).dim()
-                ))?;
-            }
-        }
+        render_section(&term, &bar, "Config", &self.config)?;
 
         // --- Target & Remote health (live animated) ---
         let mut target_ok = 0usize;
@@ -72,34 +62,10 @@ impl Report {
         }
 
         // --- Store consistency ---
-        match &self.store_consistency {
-            Section::Checked(checks) => {
-                let lines = render_checks(checks);
-                cliclack::log::step(format!("Store consistency\n{}", lines.join("\n")))?;
-            }
-            Section::Skipped(reason) => {
-                cliclack::log::step(format!(
-                    "Store consistency\n  {} {}",
-                    style("—").dim(),
-                    style(format!("skipped: {reason}")).dim()
-                ))?;
-            }
-        }
+        render_section(&term, &bar, "Store consistency", &self.store_consistency)?;
 
         // --- Secrets health ---
-        match &self.secrets_health {
-            Section::Checked(checks) => {
-                let lines = render_checks(checks);
-                cliclack::log::step(format!("Secrets\n{}", lines.join("\n")))?;
-            }
-            Section::Skipped(reason) => {
-                cliclack::log::step(format!(
-                    "Secrets\n  {} {}",
-                    style("—").dim(),
-                    style(format!("skipped: {reason}")).dim()
-                ))?;
-            }
-        }
+        render_section(&term, &bar, "Secrets", &self.secrets_health)?;
 
         // --- Suggestions ---
         if !self.suggestions.is_empty() {
@@ -110,18 +76,15 @@ impl Report {
                 .max()
                 .unwrap_or(0);
 
-            let lines: Vec<String> = self
-                .suggestions
-                .iter()
-                .map(|s| {
-                    format!(
-                        "  {}  {}",
-                        style(format!("{:<width$}", s.command, width = cmd_width)).cyan(),
-                        style(&s.reason).dim()
-                    )
-                })
-                .collect();
-            cliclack::log::step(format!("Suggestions\n{}", lines.join("\n")))?;
+            term.write_line(&format!("{}  Suggestions", style("\u{25C7}").dim()))?;
+            for s in &self.suggestions {
+                term.write_line(&format!(
+                    "{bar}    {}  {}",
+                    style(format!("{:<width$}", s.command, width = cmd_width)).cyan(),
+                    style(&s.reason).dim()
+                ))?;
+            }
+            term.write_line(&format!("{bar}"))?;
         }
 
         // --- Summary ---
@@ -152,18 +115,73 @@ impl Report {
     }
 }
 
-fn render_checks(checks: &[super::types::Check]) -> Vec<String> {
-    checks
-        .iter()
-        .map(|c| {
-            let icon = match c.status {
-                CheckStatus::Pass => ui::Icon::Success,
-                CheckStatus::Warn => ui::Icon::Warning,
-                CheckStatus::Fail => ui::Icon::Failure,
-            };
-            format!("  {} {}  {}", icon, c.label, style(&c.detail).dim())
-        })
-        .collect()
+/// Renders a checked section with a colored filled diamond header and aligned check items.
+fn render_checked_section(
+    term: &console::Term,
+    bar: &console::StyledObject<&str>,
+    title: &str,
+    checks: &[Check],
+) -> std::io::Result<()> {
+    let header_icon = section_icon(checks);
+    let label_width = checks.iter().map(|c| c.label.len()).max().unwrap_or(0) + 2;
+
+    term.write_line(&format!("{header_icon}  {title}"))?;
+    for c in checks {
+        let icon = check_icon(c.status);
+        term.write_line(&format!(
+            "{bar}    {} {:<label_width$}{}",
+            icon,
+            c.label,
+            style(&c.detail).dim(),
+        ))?;
+    }
+    term.write_line(&format!("{bar}"))?;
+
+    Ok(())
+}
+
+/// Renders a section that may be checked or skipped.
+fn render_section(
+    term: &console::Term,
+    bar: &console::StyledObject<&str>,
+    title: &str,
+    section: &Section,
+) -> std::io::Result<()> {
+    match section {
+        Section::Checked(checks) => render_checked_section(term, bar, title, checks),
+        Section::Skipped(reason) => {
+            term.write_line(&format!("{}  {title}", style("\u{25C7}").dim()))?;
+            term.write_line(&format!(
+                "{bar}    {} {}",
+                style("\u{2014}").dim(),
+                style(format!("skipped: {reason}")).dim()
+            ))?;
+            term.write_line(&format!("{bar}"))?;
+            Ok(())
+        }
+    }
+}
+
+/// Returns a colored filled diamond based on the worst status in the checks.
+fn section_icon(checks: &[Check]) -> console::StyledObject<&'static str> {
+    let all_pass = checks.is_empty() || checks.iter().all(|c| c.status == CheckStatus::Pass);
+    let all_fail = !checks.is_empty() && checks.iter().all(|c| c.status == CheckStatus::Fail);
+
+    if all_pass {
+        style("\u{25C6}").green()
+    } else if all_fail {
+        style("\u{25C6}").red()
+    } else {
+        style("\u{25C6}").yellow()
+    }
+}
+
+fn check_icon(status: CheckStatus) -> ui::Icon {
+    match status {
+        CheckStatus::Pass => ui::Icon::Success,
+        CheckStatus::Warn => ui::Icon::Warning,
+        CheckStatus::Fail => ui::Icon::Failure,
+    }
 }
 
 fn count_checks(checks: &[super::types::Check]) -> (usize, usize, usize) {
