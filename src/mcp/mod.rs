@@ -8,7 +8,7 @@ use rmcp::{tool, tool_handler, tool_router, ErrorData, ServerHandler};
 use serde::Deserialize;
 
 use crate::cli::deploy::DeployOptions;
-use crate::cli::status::Dashboard;
+use crate::cli::status::types::Dashboard;
 use crate::config::Config;
 use crate::store::SecretStore;
 use crate::targets::RealCommandRunner;
