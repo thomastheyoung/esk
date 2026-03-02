@@ -149,20 +149,24 @@ pub struct DotenvTargetConfig {
     pub env_suffix: BTreeMap<String, String>,
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum CloudflareMode {
+    #[default]
+    Workers,
+    Pages,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CloudflareTargetConfig {
-    /// Mode: "workers" (default) or "pages".
-    #[serde(default = "default_cloudflare_mode")]
-    pub mode: String,
+    /// Mode: workers (default) or pages.
+    #[serde(default)]
+    pub mode: CloudflareMode,
     /// Pages project name (required when mode is "pages").
     #[serde(default)]
     pub pages_project: Option<String>,
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
-}
-
-fn default_cloudflare_mode() -> String {
-    "workers".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

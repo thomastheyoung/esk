@@ -6,7 +6,7 @@
 //! Operates in **batch mode**: the entire file is regenerated atomically on
 //! every deploy via temp-file-then-rename. Deletions are handled implicitly
 //! by omitting the key from the next write. Values containing newlines are
-//! rejected since the dotenv format has no reliable multiline escaping.
+//! rejected by `validate_dotenv_value` before formatting.
 
 use std::collections::BTreeMap;
 use std::fmt::Write;
@@ -19,13 +19,12 @@ use crate::targets::{DeployMode, DeployOutcome, DeployResult, DeployTarget, Secr
 
 /// Format a value for safe inclusion in a .env file.
 ///
-/// If the value contains characters that could cause parsing issues (newlines,
-/// double quotes, backslashes, spaces, `#`, or starts with `=`), wraps it in
-/// double quotes with proper escaping.
+/// If the value contains characters that could cause parsing issues (double
+/// quotes, backslashes, spaces, `#`, or starts with `=`), wraps it in double
+/// quotes with proper escaping. Newlines are rejected earlier by
+/// `validate_dotenv_value` and never reach this function.
 fn format_env_value(value: &str) -> String {
-    let needs_quoting = value.contains('\n')
-        || value.contains('\r')
-        || value.contains('"')
+    let needs_quoting = value.contains('"')
         || value.contains('\\')
         || value.contains(' ')
         || value.contains('#')
@@ -35,11 +34,7 @@ fn format_env_value(value: &str) -> String {
         return value.to_string();
     }
 
-    let escaped = value
-        .replace('\\', "\\\\")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('"', "\\\"");
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
     format!("\"{escaped}\"")
 }
 
@@ -315,11 +310,6 @@ targets:
     #[test]
     fn format_env_value_plain() {
         assert_eq!(format_env_value("simple_value"), "simple_value");
-    }
-
-    #[test]
-    fn format_env_value_with_newline() {
-        assert_eq!(format_env_value("line1\nline2"), "\"line1\\nline2\"");
     }
 
     #[test]

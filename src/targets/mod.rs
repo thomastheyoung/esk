@@ -85,12 +85,49 @@ pub struct CommandOutput {
     pub stderr: Vec<u8>,
 }
 
+#[derive(Debug, thiserror::Error)]
+#[error("{summary}")]
+pub struct CommandError {
+    summary: String,
+    full_stderr: String,
+}
+
+impl CommandError {
+    pub fn full_stderr(&self) -> &str {
+        &self.full_stderr
+    }
+}
+
+fn first_line_summary(stderr: &str) -> String {
+    let mut lines = stderr.lines().filter(|l| !l.trim().is_empty());
+    let Some(first) = lines.next() else {
+        return stderr.trim().to_string();
+    };
+    let rest = lines.count();
+    if rest == 0 {
+        first.trim().to_string()
+    } else {
+        format!(
+            "{} ({rest} more line{})",
+            first.trim(),
+            if rest == 1 { "" } else { "s" }
+        )
+    }
+}
+
 impl CommandOutput {
-    /// Check that the command succeeded, returning an error with stderr if it failed.
+    /// Check that the command succeeded, returning an error with a truncated
+    /// summary of stderr. Use `CommandError::full_stderr()` to access the
+    /// complete output when needed.
     pub fn check(&self, command: &str, key: &str) -> Result<()> {
         if !self.success {
             let stderr = String::from_utf8_lossy(&self.stderr);
-            anyhow::bail!("{command} failed for {key}: {stderr}");
+            let summary = first_line_summary(&stderr);
+            return Err(CommandError {
+                summary: format!("{command} failed for {key}: {summary}"),
+                full_stderr: stderr.into_owned(),
+            }
+            .into());
         }
         Ok(())
     }
@@ -961,5 +998,42 @@ targets:
 
         let health = check_target_health(&config, &OkRunner);
         assert!(health.is_empty());
+    }
+
+    #[test]
+    fn first_line_summary_empty() {
+        assert_eq!(first_line_summary(""), "");
+        assert_eq!(first_line_summary("  \n  \n  "), "");
+    }
+
+    #[test]
+    fn first_line_summary_single_line() {
+        assert_eq!(first_line_summary("auth error"), "auth error");
+        assert_eq!(first_line_summary("  auth error  \n"), "auth error");
+    }
+
+    #[test]
+    fn first_line_summary_multi_line() {
+        assert_eq!(
+            first_line_summary("auth error\ndetail 1\ndetail 2"),
+            "auth error (2 more lines)"
+        );
+        assert_eq!(
+            first_line_summary("auth error\ndetail 1"),
+            "auth error (1 more line)"
+        );
+    }
+
+    #[test]
+    fn command_error_preserves_full_stderr() {
+        let output = CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"line1\nline2\nline3".to_vec(),
+        };
+        let err = output.check("cmd", "KEY").unwrap_err();
+        let cmd_err = err.downcast_ref::<CommandError>().unwrap();
+        assert_eq!(cmd_err.full_stderr(), "line1\nline2\nline3");
+        assert!(cmd_err.to_string().contains("2 more lines"));
     }
 }

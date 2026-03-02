@@ -12,7 +12,7 @@
 
 use anyhow::{Context, Result};
 
-use crate::config::{CloudflareTargetConfig, Config, ResolvedTarget};
+use crate::config::{CloudflareMode, CloudflareTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
@@ -100,7 +100,7 @@ impl DeployTarget for CloudflareTarget<'_> {
     }
 
     fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()> {
-        if self.target_config.mode == "pages" {
+        if self.target_config.mode == CloudflareMode::Pages {
             return self.deploy_pages_secret(key, value, target);
         }
 
@@ -134,7 +134,7 @@ impl DeployTarget for CloudflareTarget<'_> {
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
-        if self.target_config.mode == "pages" {
+        if self.target_config.mode == CloudflareMode::Pages {
             return self.delete_pages_secret(key, target);
         }
 
