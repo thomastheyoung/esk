@@ -209,9 +209,6 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-
-
-
     fn ok_output(stdout: &[u8]) -> CommandOutput {
         CommandOutput {
             success: true,

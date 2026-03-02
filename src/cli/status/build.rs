@@ -6,7 +6,10 @@ use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
 
-use super::types::*;
+use super::types::{
+    CoverageGap, Dashboard, DeployEntry, EmptyValueWarning, NextStep, Orphan, RemoteState,
+    RemoteStatus, ValidationWarning,
+};
 
 impl Dashboard {
     pub(crate) fn build(config: &Config, env: Option<&str>) -> Result<Self> {
@@ -124,8 +127,11 @@ impl Dashboard {
         }
         if !cross_field_specs.is_empty() {
             for &env_name in &envs {
-                let violations =
-                    crate::validate::validate_cross_field(&cross_field_specs, all_secrets, env_name);
+                let violations = crate::validate::validate_cross_field(
+                    &cross_field_specs,
+                    all_secrets,
+                    env_name,
+                );
                 cross_field_violations.extend(violations);
             }
         }

@@ -146,6 +146,7 @@ impl StorePayload {
     /// Build a per-env StorePayload with bare keys for syncing to remotes.
     /// Strips the `:{env}` suffix from secret keys and includes env-specific
     /// version and timestamp. Returns a payload with empty tombstones and env_versions.
+    #[must_use]
     pub fn for_env(&self, env: &str) -> StorePayload {
         let suffix = format!(":{env}");
         let bare: BTreeMap<String, String> = self

@@ -6,7 +6,7 @@ use crate::config::Config;
 use crate::targets::{render_target_health, CommandRunner};
 use crate::ui;
 
-use super::types::*;
+use super::types::{group_entries, Dashboard, GroupedFreshness, RemoteStatus, TimestampPick};
 
 impl Dashboard {
     pub(crate) fn render(

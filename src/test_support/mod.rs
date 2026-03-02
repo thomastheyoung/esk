@@ -156,4 +156,16 @@ impl ConfigFixture {
     pub fn config(&self) -> &Config {
         &self.config
     }
+
+    /// Create a subdirectory tree under the fixture root.
+    pub fn create_dir_all(&self, relative: &str) -> Result<()> {
+        let p = self.dir.path().join(relative);
+        std::fs::create_dir_all(&p)?;
+        Ok(())
+    }
+
+    /// Return the absolute path for a relative path under the fixture root.
+    pub fn path(&self, relative: &str) -> PathBuf {
+        self.dir.path().join(relative)
+    }
 }

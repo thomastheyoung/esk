@@ -512,15 +512,14 @@ impl TypedRemoteConfig {
         match self {
             Self::OnePassword(_) => "vault accessible",
             Self::CloudFile { .. } => "directory writable",
-            Self::AwsSecretsManager(_) => "CLI available",
-            Self::Bitwarden(_) => "authenticated",
-            Self::Vault(_) => "authenticated",
-            Self::S3(_) => "CLI available",
-            Self::Gcp(_) => "authenticated",
-            Self::Azure(_) => "authenticated",
-            Self::Doppler(_) => "authenticated",
-            Self::Infisical(_) => "CLI available",
-            Self::Sops(_) => "CLI available",
+            Self::AwsSecretsManager(_) | Self::S3(_) | Self::Infisical(_) | Self::Sops(_) => {
+                "CLI available"
+            }
+            Self::Bitwarden(_)
+            | Self::Vault(_)
+            | Self::Gcp(_)
+            | Self::Azure(_)
+            | Self::Doppler(_) => "authenticated",
         }
     }
 }
@@ -617,8 +616,7 @@ impl TypedTargetConfig {
             Self::Supabase(_) => "supabase available",
             Self::Railway(_) => "railway authenticated",
             Self::Gitlab(_) => "glab authenticated",
-            Self::AwsSsm(_) => "aws authenticated",
-            Self::AwsLambda(_) => "aws authenticated",
+            Self::AwsSsm(_) | Self::AwsLambda(_) => "aws authenticated",
             Self::Kubernetes(_) => "kubectl available",
             Self::Docker(_) => "swarm active",
             Self::Circleci(_) => "circleci available",
@@ -1092,62 +1090,79 @@ impl Config {
 
     fn populate_typed_targets(&mut self) {
         if let Some(cfg) = &self.targets.dotenv {
-            self.typed_targets.push(TypedTargetConfig::Dotenv(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Dotenv(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.cloudflare {
-            self.typed_targets.push(TypedTargetConfig::Cloudflare(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Cloudflare(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.convex {
-            self.typed_targets.push(TypedTargetConfig::Convex(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Convex(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.fly {
             self.typed_targets.push(TypedTargetConfig::Fly(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.netlify {
-            self.typed_targets.push(TypedTargetConfig::Netlify(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Netlify(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.vercel {
-            self.typed_targets.push(TypedTargetConfig::Vercel(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Vercel(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.github {
-            self.typed_targets.push(TypedTargetConfig::Github(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Github(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.heroku {
-            self.typed_targets.push(TypedTargetConfig::Heroku(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Heroku(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.supabase {
-            self.typed_targets.push(TypedTargetConfig::Supabase(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Supabase(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.railway {
-            self.typed_targets.push(TypedTargetConfig::Railway(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Railway(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.gitlab {
-            self.typed_targets.push(TypedTargetConfig::Gitlab(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Gitlab(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.aws_ssm {
-            self.typed_targets.push(TypedTargetConfig::AwsSsm(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::AwsSsm(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.aws_lambda {
-            self.typed_targets.push(TypedTargetConfig::AwsLambda(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::AwsLambda(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.kubernetes {
-            self.typed_targets.push(TypedTargetConfig::Kubernetes(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Kubernetes(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.docker {
-            self.typed_targets.push(TypedTargetConfig::Docker(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Docker(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.circleci {
-            self.typed_targets.push(TypedTargetConfig::Circleci(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Circleci(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.azure_app_service {
             self.typed_targets
                 .push(TypedTargetConfig::AzureAppService(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.gcp_cloud_run {
-            self.typed_targets.push(TypedTargetConfig::GcpCloudRun(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::GcpCloudRun(cfg.clone()));
         }
         if let Some(cfg) = &self.targets.render {
-            self.typed_targets.push(TypedTargetConfig::Render(cfg.clone()));
+            self.typed_targets
+                .push(TypedTargetConfig::Render(cfg.clone()));
         }
         for (name, cfg) in &self.targets.custom {
             self.typed_targets.push(TypedTargetConfig::Custom {
@@ -1339,7 +1354,10 @@ impl Config {
 
     /// Get the set of configured target names.
     pub fn target_names(&self) -> Vec<&str> {
-        self.typed_targets.iter().map(|t| t.name()).collect()
+        self.typed_targets
+            .iter()
+            .map(TypedTargetConfig::name)
+            .collect()
     }
 
     /// Return the sorted list of group names from config secrets.
