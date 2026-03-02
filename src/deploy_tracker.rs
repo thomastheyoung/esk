@@ -83,6 +83,11 @@ impl DeployIndex {
             .context("deploy index path has no parent")?;
         let tmp = NamedTempFile::new_in(dir)?;
         std::fs::write(tmp.path(), json)?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
+        }
         tmp.persist(&self.path).with_context(|| {
             format!("failed to persist deploy index to {}", self.path.display())
         })?;

@@ -213,6 +213,30 @@ fn needs_cli_secret_arg_warning(name: &str) -> bool {
     matches!(name, "1password" | "bitwarden")
 }
 
+fn uses_cleartext_format(config: &Config, name: &str) -> bool {
+    use crate::config::CloudFileFormat;
+
+    // Check cloud_file remotes
+    for (cf_name, cf_config) in config.cloud_file_remote_configs() {
+        if cf_name == name && matches!(cf_config.format, CloudFileFormat::Cleartext) {
+            return true;
+        }
+    }
+
+    // Check S3 remote
+    if name == "s3" {
+        if let Some(s3_config) =
+            config.remote_config::<crate::config::S3RemoteConfig>("s3")
+        {
+            if matches!(s3_config.format, CloudFileFormat::Cleartext) {
+                return true;
+            }
+        }
+    }
+
+    false
+}
+
 /// Check the health of all configured remotes without filtering.
 /// Returns one entry per configured remote with preflight pass/fail.
 pub fn check_remote_health(config: &Config, runner: &dyn CommandRunner) -> Vec<RemoteHealth> {
@@ -256,6 +280,12 @@ pub fn build_remotes<'a>(
                             remote.name()
                         ));
                     });
+                }
+                if uses_cleartext_format(config, remote.name()) {
+                    let _ = cliclack::log::warning(format!(
+                        "{}: secrets are stored in cleartext — set `format: encrypted` to protect them at rest",
+                        remote.name()
+                    ));
                 }
                 remotes.push(remote);
             }
