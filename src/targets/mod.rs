@@ -512,7 +512,8 @@ pub(crate) fn target_candidates<'a>(
 /// Check the health of all configured targets without filtering.
 /// Returns one entry per configured target with preflight pass/fail.
 /// Runs all preflight checks in parallel.
-pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<TargetHealth> {
+#[cfg(test)]
+fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<TargetHealth> {
     let candidates = target_candidates(config, runner);
     if candidates.is_empty() {
         return Vec::new();
@@ -1038,5 +1039,109 @@ targets:
         let cmd_err = err.downcast_ref::<CommandError>().unwrap();
         assert_eq!(cmd_err.full_stderr(), "line1\nline2\nline3");
         assert!(cmd_err.to_string().contains("2 more lines"));
+    }
+
+    /// Verify that every name in `builtin_entries` appears in `target_candidates`
+    /// when the corresponding config field is set. Catches drift between the two
+    /// registration points.
+    #[test]
+    fn builtin_entries_matches_target_candidates() {
+        use std::collections::BTreeSet;
+
+        // Config with all 19 built-in targets enabled
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+targets:
+  .env:
+    pattern: "{app_path}/.env"
+  cloudflare:
+    env_flags: {}
+  convex:
+    path: apps/api
+  fly:
+    app_names:
+      web: my-fly-app
+  netlify:
+    env_flags: {}
+  vercel:
+    env_names:
+      dev: development
+  github:
+    env_flags: {}
+  heroku:
+    app_names:
+      web: my-heroku-app
+  supabase:
+    project_ref: abcdef123456
+  railway:
+    env_flags: {}
+  gitlab:
+    env_flags: {}
+  aws_ssm:
+    path_prefix: "/esk/{environment}/"
+  aws_lambda:
+    function_name:
+      dev: my-lambda-fn
+  kubernetes:
+    secret_name: my-secret
+    namespace:
+      dev: default
+  docker:
+    env_flags: {}
+  circleci:
+    org_id: org-xxx
+    context_name: my-ctx
+  azure_app_service:
+    app_names:
+      web: my-azure-app
+    resource_group: rg
+  gcp_cloud_run:
+    service_names:
+      web: my-svc
+    project: my-gcp-project
+    region: us-central1
+  render:
+    service_ids:
+      web: srv-xxx
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = crate::config::Config::load(&path).unwrap();
+
+        struct OkRunner;
+        impl CommandRunner for OkRunner {
+            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+
+        let candidates = target_candidates(&config, &OkRunner);
+        let candidate_names: BTreeSet<&str> =
+            candidates.iter().map(|c| c.target.name()).collect();
+
+        let entry_names: BTreeSet<&str> = config
+            .targets
+            .builtin_entries()
+            .iter()
+            .map(|(name, _)| *name)
+            .collect();
+
+        assert_eq!(
+            entry_names, candidate_names,
+            "builtin_entries() and target_candidates() have drifted: \
+             in entries but not candidates: {:?}, \
+             in candidates but not entries: {:?}",
+            entry_names.difference(&candidate_names).collect::<Vec<_>>(),
+            candidate_names.difference(&entry_names).collect::<Vec<_>>(),
+        );
     }
 }

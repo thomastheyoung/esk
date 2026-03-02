@@ -102,9 +102,8 @@ impl SyncRemote for InfisicalRemote<'_> {
 
         // Delete orphaned keys: export current remote state, diff, delete absent keys.
         // If the export fails (empty project, etc.), skip deletion and proceed with set.
-        let base_str: Vec<&str> = base.iter().map(String::as_str).collect();
         let mut export_args = vec!["export", "--format", "json"];
-        export_args.extend_from_slice(&base_str);
+        export_args.extend(base.iter().map(String::as_str));
 
         if let Ok(output) = self
             .runner
@@ -121,7 +120,7 @@ impl SyncRemote for InfisicalRemote<'_> {
                     if !orphans.is_empty() {
                         let mut delete_args = vec!["secrets", "delete"];
                         delete_args.extend(orphans);
-                        delete_args.extend_from_slice(&base_str);
+                        delete_args.extend(base.iter().map(String::as_str));
 
                         let del_output = self
                             .runner
@@ -147,7 +146,7 @@ impl SyncRemote for InfisicalRemote<'_> {
         let tmppath = tmpfile.path().to_string_lossy().to_string();
         let file_arg = format!("--file={tmppath}");
         let mut set_args = vec!["secrets", "set", &file_arg, "--silent"];
-        set_args.extend_from_slice(&base_str);
+        set_args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -164,10 +163,9 @@ impl SyncRemote for InfisicalRemote<'_> {
     fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let slug = self.env_slug(env);
         let base = self.base_args(&slug);
-        let base_str: Vec<&str> = base.iter().map(String::as_str).collect();
 
         let mut args = vec!["export", "--format", "json"];
-        args.extend_from_slice(&base_str);
+        args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
@@ -215,9 +213,7 @@ mod tests {
         StorePayload {
             secrets: map,
             version,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         }
     }
 

@@ -505,9 +505,7 @@ mod tests {
         StorePayload {
             secrets: map,
             version,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         }
     }
 
@@ -701,8 +699,7 @@ mod tests {
             secrets: map,
             version,
             tombstones: tomb_map,
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         }
     }
 

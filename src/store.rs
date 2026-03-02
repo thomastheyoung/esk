@@ -35,7 +35,7 @@ pub fn validate_key(key: &str) -> Result<()> {
 /// Must match `[a-zA-Z][a-zA-Z0-9_-]*`, max 64 chars. Blocks path separators,
 /// spaces, colons, newlines, and other characters that could cause injection
 /// when interpolated into file paths, YAML, or CLI arguments.
-pub fn validate_identifier(name: &str, label: &str) -> Result<()> {
+pub(crate) fn validate_identifier(name: &str, label: &str) -> Result<()> {
     if name.is_empty() {
         bail!("invalid {label} '': must not be empty");
     }
@@ -75,7 +75,7 @@ pub fn validate_app(name: &str) -> Result<()> {
     validate_identifier(name, "app")
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Default, Serialize, Deserialize)]
 pub struct StorePayload {
     pub secrets: BTreeMap<String, String>,
     /// Monotonic high-water mark incremented on every set/delete across all environments.
@@ -157,9 +157,8 @@ impl StorePayload {
         StorePayload {
             secrets: bare,
             version,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
             env_last_changed_at,
+            ..Default::default()
         }
     }
 
@@ -451,14 +450,7 @@ impl SecretStore {
 
         // Create empty store file if it doesn't exist
         if !store.store_path.is_file() {
-            let payload = StorePayload {
-                secrets: BTreeMap::new(),
-                version: 0,
-                tombstones: BTreeMap::new(),
-                env_versions: BTreeMap::new(),
-                env_last_changed_at: BTreeMap::new(),
-            };
-            store.write_payload(&payload)?;
+            store.write_payload(&StorePayload::default())?;
         }
 
         Ok(store)
@@ -518,13 +510,7 @@ impl SecretStore {
             .with_context(|| format!("failed to read {}", self.store_path.display()))?;
         let ciphertext = ciphertext.trim();
         if ciphertext.is_empty() {
-            return Ok(StorePayload {
-                secrets: BTreeMap::new(),
-                version: 0,
-                tombstones: BTreeMap::new(),
-                env_versions: BTreeMap::new(),
-                env_last_changed_at: BTreeMap::new(),
-            });
+            return Ok(StorePayload::default());
         }
         self.decrypt(ciphertext)
     }
@@ -1299,9 +1285,7 @@ mod tests {
         let payload = StorePayload {
             secrets,
             version: 1,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         let debug = format!("{payload:?}");
         assert!(!debug.contains("super_secret_value"));
@@ -1404,11 +1388,8 @@ mod tests {
     #[test]
     fn env_version_returns_per_env_version() {
         let mut payload = StorePayload {
-            secrets: BTreeMap::new(),
             version: 10,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         payload.env_versions.insert("dev".to_string(), 3);
         assert_eq!(payload.env_version("dev"), 3);
@@ -1417,11 +1398,8 @@ mod tests {
     #[test]
     fn env_version_falls_back_to_global_when_no_env_versions() {
         let payload = StorePayload {
-            secrets: BTreeMap::new(),
             version: 7,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         assert_eq!(payload.env_version("dev"), 7);
     }
@@ -1429,11 +1407,8 @@ mod tests {
     #[test]
     fn env_version_returns_zero_for_unknown_env() {
         let mut payload = StorePayload {
-            secrets: BTreeMap::new(),
             version: 10,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         payload.env_versions.insert("dev".to_string(), 3);
         assert_eq!(payload.env_version("prod"), 0);
@@ -1444,14 +1419,12 @@ mod tests {
         use crate::sync_tracker::SyncIndex;
 
         let mut payload = StorePayload {
-            secrets: BTreeMap::new(),
             version: 5,
             tombstones: BTreeMap::from([
                 ("KEY_A:dev".to_string(), 2),
                 ("KEY_B:dev".to_string(), 3),
             ]),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
         index.record_success("remote_a", "dev", 5);
@@ -1467,14 +1440,12 @@ mod tests {
         use crate::sync_tracker::SyncIndex;
 
         let mut payload = StorePayload {
-            secrets: BTreeMap::new(),
             version: 5,
             tombstones: BTreeMap::from([
                 ("KEY_A:dev".to_string(), 2),
                 ("KEY_B:dev".to_string(), 4),
             ]),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
         index.record_success("remote_a", "dev", 3);
@@ -1488,11 +1459,9 @@ mod tests {
     #[test]
     fn prune_tombstones_no_remotes() {
         let mut payload = StorePayload {
-            secrets: BTreeMap::new(),
             version: 5,
             tombstones: BTreeMap::from([("KEY_A:dev".to_string(), 2)]),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         let index = crate::sync_tracker::SyncIndex::new(Path::new("/tmp/test.json"));
 
@@ -1506,14 +1475,12 @@ mod tests {
         use crate::sync_tracker::SyncIndex;
 
         let mut payload = StorePayload {
-            secrets: BTreeMap::new(),
             version: 5,
             tombstones: BTreeMap::from([
                 ("KEY_A:dev".to_string(), 2),
                 ("KEY_B:prod".to_string(), 3),
             ]),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
         index.record_success("remote_a", "dev", 5);
@@ -1528,11 +1495,8 @@ mod tests {
     #[test]
     fn prune_tombstones_empty_tombstones() {
         let mut payload = StorePayload {
-            secrets: BTreeMap::new(),
             version: 5,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         let mut index = crate::sync_tracker::SyncIndex::new(Path::new("/tmp/test.json"));
         index.record_success("remote_a", "dev", 5);

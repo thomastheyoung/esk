@@ -43,7 +43,7 @@ impl<'a> AwsSecretsManagerRemote<'a> {
     }
 
     /// Resolve the secret name for an environment by replacing placeholders.
-    pub fn secret_name(&self, env: &str) -> String {
+    fn secret_name(&self, env: &str) -> String {
         self.remote_config
             .secret_name
             .replace("{project}", &self.config.project)
@@ -77,13 +77,13 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
             )
         })?;
 
-        let mut args: Vec<String> = vec!["sts".to_string(), "get-caller-identity".to_string()];
-        args.extend(self.base_args());
-        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
+        let base = self.base_args();
+        let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
+        args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
-            .run("aws", &args_ref, CommandOpts::default())
+            .run("aws", &args, CommandOpts::default())
             .context("failed to run aws sts get-caller-identity")?;
 
         if !output.success {
@@ -105,24 +105,24 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
             serde_json::to_string(&env_payload).context("failed to serialize store payload")?;
 
         let secret_name = self.secret_name(env);
+        let base = self.base_args();
 
         // Try put-secret-value first (update existing)
-        let mut args: Vec<String> = vec![
-            "secretsmanager".to_string(),
-            "put-secret-value".to_string(),
-            "--secret-id".to_string(),
-            secret_name.clone(),
-            "--secret-string".to_string(),
-            "file:///dev/stdin".to_string(),
+        let mut args: Vec<&str> = vec![
+            "secretsmanager",
+            "put-secret-value",
+            "--secret-id",
+            &secret_name,
+            "--secret-string",
+            "file:///dev/stdin",
         ];
-        args.extend(self.base_args());
-        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
+        args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
             .run(
                 "aws",
-                &args_ref,
+                &args,
                 CommandOpts {
                     stdin: Some(json.as_bytes().to_vec()),
                     ..Default::default()
@@ -135,25 +135,21 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
 
             if stderr.contains("ResourceNotFoundException") {
                 // Secret doesn't exist yet — create it
-                let mut create_args: Vec<String> = vec![
-                    "secretsmanager".to_string(),
-                    "create-secret".to_string(),
-                    "--name".to_string(),
-                    secret_name,
-                    "--secret-string".to_string(),
-                    "file:///dev/stdin".to_string(),
+                let mut create_args: Vec<&str> = vec![
+                    "secretsmanager",
+                    "create-secret",
+                    "--name",
+                    &secret_name,
+                    "--secret-string",
+                    "file:///dev/stdin",
                 ];
-                create_args.extend(self.base_args());
-                let create_ref: Vec<&str> = create_args
-                    .iter()
-                    .map(std::string::String::as_str)
-                    .collect();
+                create_args.extend(base.iter().map(String::as_str));
 
                 let create_output = self
                     .runner
                     .run(
                         "aws",
-                        &create_ref,
+                        &create_args,
                         CommandOpts {
                             stdin: Some(json.as_bytes().to_vec()),
                             ..Default::default()
@@ -176,20 +172,20 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
     fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let secret_name = self.secret_name(env);
 
-        let mut args: Vec<String> = vec![
-            "secretsmanager".to_string(),
-            "get-secret-value".to_string(),
-            "--secret-id".to_string(),
-            secret_name,
-            "--output".to_string(),
-            "json".to_string(),
+        let base = self.base_args();
+        let mut args: Vec<&str> = vec![
+            "secretsmanager",
+            "get-secret-value",
+            "--secret-id",
+            &secret_name,
+            "--output",
+            "json",
         ];
-        args.extend(self.base_args());
-        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
+        args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
-            .run("aws", &args_ref, CommandOpts::default())
+            .run("aws", &args, CommandOpts::default())
             .context("failed to run aws secretsmanager get-secret-value")?;
 
         if !output.success {
@@ -455,9 +451,7 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 3,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, &config, "dev").unwrap();
@@ -500,9 +494,7 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 5,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, &config, "dev").unwrap();
@@ -537,9 +529,7 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 1,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, &config, "dev").unwrap();
@@ -570,9 +560,7 @@ remotes:
                 m
             },
             version: 7,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         let secret_string = serde_json::to_string(&remote_payload).unwrap();
         let aws_response = json!({
@@ -650,9 +638,8 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 5,
-            tombstones: BTreeMap::new(),
             env_versions,
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, &config, "dev").unwrap();

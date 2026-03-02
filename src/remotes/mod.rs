@@ -91,9 +91,10 @@ pub trait SyncRemote: Send + Sync {
 }
 
 /// Health status of a configured remote.
-pub struct RemoteHealth {
-    pub name: String,
-    pub status: crate::targets::HealthStatus,
+#[cfg(test)]
+struct RemoteHealth {
+    name: String,
+    status: crate::targets::HealthStatus,
 }
 
 pub(crate) struct RemoteCandidate<'a> {
@@ -200,7 +201,8 @@ fn remote_candidates<'a>(
 /// Check the health of all configured remotes without filtering.
 /// Returns one entry per configured remote with preflight pass/fail.
 /// Runs all preflight checks in parallel.
-pub fn check_remote_health(config: &Config, runner: &dyn CommandRunner) -> Vec<RemoteHealth> {
+#[cfg(test)]
+fn check_remote_health(config: &Config, runner: &dyn CommandRunner) -> Vec<RemoteHealth> {
     let candidates = remote_candidates(config, runner);
     if candidates.is_empty() {
         return Vec::new();

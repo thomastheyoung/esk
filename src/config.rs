@@ -8,30 +8,6 @@ use serde::{Deserialize, Serialize};
 use crate::store::{validate_app, validate_environment, validate_key, validate_project};
 use crate::suggest;
 
-/// Built-in target names that custom targets cannot shadow.
-const BUILTIN_TARGET_NAMES: &[&str] = &[
-    ".env",
-    "cloudflare",
-    "convex",
-    "fly",
-    "netlify",
-    "vercel",
-    "github",
-    "heroku",
-    "supabase",
-    "railway",
-    "gitlab",
-    "aws_ssm",
-    "aws_lambda",
-    "kubernetes",
-    "docker",
-    "circleci",
-    "azure_app_service",
-    "gcp_cloud_run",
-    "render",
-    "custom",
-];
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum GenerateFormat {
@@ -140,6 +116,36 @@ pub struct TargetsConfig {
     pub render: Option<RenderTargetConfig>,
     #[serde(default)]
     pub custom: BTreeMap<String, CustomTargetConfig>,
+}
+
+impl TargetsConfig {
+    /// Single source of truth for built-in target name ↔ config field mapping.
+    ///
+    /// Returns `(name, is_configured)` for each built-in target. Adding a new
+    /// target requires adding an entry here and in `target_candidates()`.
+    pub fn builtin_entries(&self) -> [(&'static str, bool); 19] {
+        [
+            (".env", self.dotenv.is_some()),
+            ("cloudflare", self.cloudflare.is_some()),
+            ("convex", self.convex.is_some()),
+            ("fly", self.fly.is_some()),
+            ("netlify", self.netlify.is_some()),
+            ("vercel", self.vercel.is_some()),
+            ("github", self.github.is_some()),
+            ("heroku", self.heroku.is_some()),
+            ("supabase", self.supabase.is_some()),
+            ("railway", self.railway.is_some()),
+            ("gitlab", self.gitlab.is_some()),
+            ("aws_ssm", self.aws_ssm.is_some()),
+            ("aws_lambda", self.aws_lambda.is_some()),
+            ("kubernetes", self.kubernetes.is_some()),
+            ("docker", self.docker.is_some()),
+            ("circleci", self.circleci.is_some()),
+            ("azure_app_service", self.azure_app_service.is_some()),
+            ("gcp_cloud_run", self.gcp_cloud_run.is_some()),
+            ("render", self.render.is_some()),
+        ]
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -726,7 +732,9 @@ impl Config {
         }
         // Validate custom targets
         for (name, custom) in &self.targets.custom {
-            if BUILTIN_TARGET_NAMES.contains(&name.as_str()) {
+            if self.targets.builtin_entries().iter().any(|(n, _)| *n == name.as_str())
+                || name == "custom"
+            {
                 bail!("custom target '{name}' conflicts with built-in target name");
             }
             if !name
@@ -1150,34 +1158,13 @@ impl Config {
 
     /// Get the set of configured target names.
     pub fn target_names(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = [
-            (".env", self.targets.dotenv.is_some()),
-            ("cloudflare", self.targets.cloudflare.is_some()),
-            ("convex", self.targets.convex.is_some()),
-            ("fly", self.targets.fly.is_some()),
-            ("netlify", self.targets.netlify.is_some()),
-            ("vercel", self.targets.vercel.is_some()),
-            ("github", self.targets.github.is_some()),
-            ("heroku", self.targets.heroku.is_some()),
-            ("supabase", self.targets.supabase.is_some()),
-            ("railway", self.targets.railway.is_some()),
-            ("gitlab", self.targets.gitlab.is_some()),
-            ("aws_ssm", self.targets.aws_ssm.is_some()),
-            ("aws_lambda", self.targets.aws_lambda.is_some()),
-            ("kubernetes", self.targets.kubernetes.is_some()),
-            ("docker", self.targets.docker.is_some()),
-            ("circleci", self.targets.circleci.is_some()),
-            (
-                "azure_app_service",
-                self.targets.azure_app_service.is_some(),
-            ),
-            ("gcp_cloud_run", self.targets.gcp_cloud_run.is_some()),
-            ("render", self.targets.render.is_some()),
-        ]
-        .into_iter()
-        .filter(|(_, present)| *present)
-        .map(|(name, _)| name)
-        .collect();
+        let mut names: Vec<&str> = self
+            .targets
+            .builtin_entries()
+            .into_iter()
+            .filter(|(_, present)| *present)
+            .map(|(name, _)| name)
+            .collect();
         names.extend(self.targets.custom.keys().map(String::as_str));
         names
     }

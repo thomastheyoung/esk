@@ -292,9 +292,7 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 5,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
@@ -329,9 +327,8 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 5,
-            tombstones: BTreeMap::new(),
             env_versions,
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
@@ -361,9 +358,7 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 1,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();

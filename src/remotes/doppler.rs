@@ -186,9 +186,7 @@ remotes:
         StorePayload {
             secrets: map,
             version,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         }
     }
 

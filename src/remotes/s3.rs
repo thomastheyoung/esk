@@ -98,13 +98,13 @@ impl SyncRemote for S3Remote<'_> {
             )
         })?;
 
-        let mut args: Vec<String> = vec!["sts".to_string(), "get-caller-identity".to_string()];
-        args.extend(self.base_args());
-        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
+        let base = self.base_args();
+        let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
+        args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
-            .run("aws", &args_ref, CommandOpts::default())
+            .run("aws", &args, CommandOpts::default())
             .context("failed to run aws sts get-caller-identity")?;
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -122,7 +122,7 @@ impl SyncRemote for S3Remote<'_> {
         }
 
         let s3_uri = self.s3_uri(env);
-        let base_args = self.base_args();
+        let base = self.base_args();
 
         let content = match self.remote_config.format {
             CloudFileFormat::Encrypted => {
@@ -136,20 +136,14 @@ impl SyncRemote for S3Remote<'_> {
                 .context("failed to serialize env payload")?,
         };
 
-        let mut args = vec![
-            "s3".to_string(),
-            "cp".to_string(),
-            "-".to_string(),
-            s3_uri.clone(),
-        ];
-        args.extend(base_args);
-        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
+        let mut args: Vec<&str> = vec!["s3", "cp", "-", &s3_uri];
+        args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
             .run(
                 "aws",
-                &args_ref,
+                &args,
                 CommandOpts {
                     stdin: Some(content.into_bytes()),
                     ..Default::default()
@@ -167,20 +161,14 @@ impl SyncRemote for S3Remote<'_> {
 
     fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let s3_uri = self.s3_uri(env);
-        let base_args = self.base_args();
+        let base = self.base_args();
 
-        let mut args = vec![
-            "s3".to_string(),
-            "cp".to_string(),
-            s3_uri.clone(),
-            "-".to_string(),
-        ];
-        args.extend(base_args);
-        let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
+        let mut args: Vec<&str> = vec!["s3", "cp", &s3_uri, "-"];
+        args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
-            .run("aws", &args_ref, CommandOpts::default())
+            .run("aws", &args, CommandOpts::default())
             .context("failed to run aws s3 cp")?;
 
         if !output.success {
@@ -446,9 +434,7 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 3,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
@@ -481,9 +467,7 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 1,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
@@ -511,9 +495,7 @@ remotes:
                 m
             },
             version: 7,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
         let json = serde_json::to_string(&payload).unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(json.as_bytes())]);
@@ -587,9 +569,7 @@ remotes:
         let payload = StorePayload {
             secrets,
             version: 1,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at: BTreeMap::new(),
+            ..Default::default()
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();

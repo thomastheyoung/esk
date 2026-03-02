@@ -42,7 +42,7 @@ impl<'a> OnePasswordRemote<'a> {
     }
 
     /// Resolve the 1Password item name for an environment.
-    pub fn item_name(&self, env: &str) -> String {
+    fn item_name(&self, env: &str) -> String {
         // Capitalize first letter of env for {Environment} pattern
         let env_capitalized = {
             let mut chars = env.chars();
@@ -60,7 +60,7 @@ impl<'a> OnePasswordRemote<'a> {
     }
 
     /// Get a 1Password item, returning None if it doesn't exist.
-    pub fn get_item(&self, env: &str) -> Result<Option<OpItem>> {
+    fn get_item(&self, env: &str) -> Result<Option<OpItem>> {
         let item_name = self.item_name(env);
         let vault = &self.remote_config.vault;
 
@@ -95,7 +95,7 @@ impl<'a> OnePasswordRemote<'a> {
     // positional args (e.g. `section.key[concealed]=value`). There is no stdin/file support for
     // field values. Secret values are exposed in process arguments (visible via `ps aux`).
     // No workaround available.
-    pub fn push_item(
+    fn push_item(
         &self,
         env: &str,
         secrets: &BTreeMap<String, String>,
@@ -195,7 +195,7 @@ impl<'a> OnePasswordRemote<'a> {
     }
 
     /// Pull secrets from a 1Password item.
-    pub fn pull_item(&self, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull_item(&self, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
         let Some(item) = self.get_item(env)? else {
             return Ok(None);
         };
@@ -270,16 +270,16 @@ impl SyncRemote for OnePasswordRemote<'_> {
 }
 
 #[derive(Debug)]
-pub struct OpItem {
-    pub secrets: BTreeMap<String, String>,
+struct OpItem {
+    secrets: BTreeMap<String, String>,
     /// Tracks which section each secret key came from (key -> section label).
-    pub sections: BTreeMap<String, String>,
-    pub version: u64,
+    sections: BTreeMap<String, String>,
+    version: u64,
 }
 
 impl OpItem {
     /// Parse a 1Password item from JSON.
-    pub fn from_json(json: &Value) -> Result<Self> {
+    fn from_json(json: &Value) -> Result<Self> {
         let mut secrets = BTreeMap::new();
         let mut sections = BTreeMap::new();
         let mut version = 0u64;
