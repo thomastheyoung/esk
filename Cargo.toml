@@ -10,8 +10,24 @@ authors = ["Thomas LE JEUNE"]
 license-file = "LICENSE"
 repository = "https://github.com/thomastheyoung/esk"
 homepage = "https://github.com/thomastheyoung/esk"
-keywords = ["secrets", "api", "keys", "encryption", "cli", "sync", "dotenv", "1password", "dropbox"]
+keywords = ["secrets", "encryption", "cli", "deploy", "dotenv"]
 categories = ["command-line-utilities", "cryptography"]
+exclude = [
+    ".beads/",
+    ".cargo/",
+    ".claude/",
+    ".github/",
+    ".gitattributes",
+    "AGENTS.md",
+    "API.md",
+    "CLAUDE.md",
+    "REMOTES.md",
+    "TARGETS.md",
+    "docs/*",
+    "!docs/llm.md",
+    "install.sh",
+    "xtask/",
+]
 
 [dependencies]
 aes-gcm = "0.10"
