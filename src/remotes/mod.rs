@@ -15,7 +15,7 @@ use std::collections::BTreeMap;
 
 use crate::config::Config;
 use crate::store::{validate_key, StorePayload};
-use crate::targets::CommandRunner;
+use crate::targets::{CommandRunner, PreflightItem};
 
 /// The key used to store version metadata in remote payloads.
 pub const ESK_VERSION_KEY: &str = "_esk_version";
@@ -78,6 +78,16 @@ pub trait SyncRemote: Send + Sync {
     /// Pull store state from this remote for a given environment.
     /// Returns (composite_key_secrets, version), or None if nothing stored.
     fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>>;
+
+    /// Whether this remote passes secret values as CLI arguments (visible in `ps`).
+    fn passes_value_as_cli_arg(&self) -> bool {
+        false
+    }
+
+    /// Whether this remote stores secrets in cleartext format.
+    fn uses_cleartext_format(&self) -> bool {
+        false
+    }
 }
 
 /// Health status of a configured remote.
@@ -86,216 +96,180 @@ pub struct RemoteHealth {
     pub status: crate::targets::HealthStatus,
 }
 
-struct RemoteCandidate<'a> {
-    remote: Box<dyn SyncRemote + 'a>,
-    ok_message: &'static str,
+pub(crate) struct RemoteCandidate<'a> {
+    pub(crate) remote: Box<dyn SyncRemote + 'a>,
+    pub(crate) ok_message: &'static str,
+}
+
+impl PreflightItem for RemoteCandidate<'_> {
+    fn preflight_name(&self) -> &str {
+        self.remote.name()
+    }
+
+    fn preflight(&self) -> Result<()> {
+        self.remote.preflight()
+    }
+
+    fn ok_message(&self) -> &str {
+        self.ok_message
+    }
 }
 
 fn remote_candidates<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
 ) -> Vec<RemoteCandidate<'a>> {
-    let mut candidates: Vec<RemoteCandidate<'a>> = Vec::new();
+    use crate::config::TypedRemoteConfig;
 
-    if let Some(op_config) = config.onepassword_remote_config() {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(onepassword::OnePasswordRemote::new(
-                config, op_config, runner,
-            )),
-            ok_message: "vault accessible",
-        });
-    }
-
-    for (name, cf_config) in config.cloud_file_remote_configs() {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(cloud_file::CloudFileRemote::new(
-                name,
-                config.project.clone(),
-                cf_config,
-            )),
-            ok_message: "directory writable",
-        });
-    }
-
-    if let Some(vault_config) =
-        config.remote_config::<crate::config::HashicorpVaultRemoteConfig>("vault")
-    {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(hashicorp_vault::HashicorpVaultRemote::new(
-                config,
-                vault_config,
-                runner,
-            )),
-            ok_message: "authenticated",
-        });
-    }
-
-    if let Some(bw_config) =
-        config.remote_config::<crate::config::BitwardenRemoteConfig>("bitwarden")
-    {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(bitwarden::BitwardenRemote::new(config, bw_config, runner)),
-            ok_message: "authenticated",
-        });
-    }
-
-    if let Some(s3_config) = config.remote_config::<crate::config::S3RemoteConfig>("s3") {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(s3::S3Remote::new(config, s3_config, runner)),
-            ok_message: "CLI available",
-        });
-    }
-
-    if let Some(gcp_config) =
-        config.remote_config::<crate::config::GcpSecretManagerRemoteConfig>("gcp")
-    {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(gcp_secret_manager::GcpSecretManagerRemote::new(
-                config, gcp_config, runner,
-            )),
-            ok_message: "authenticated",
-        });
-    }
-
-    if let Some(azure_config) =
-        config.remote_config::<crate::config::AzureKeyVaultRemoteConfig>("azure")
-    {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(azure_key_vault::AzureKeyVaultRemote::new(
-                config,
-                azure_config,
-                runner,
-            )),
-            ok_message: "authenticated",
-        });
-    }
-
-    if let Some(doppler_config) =
-        config.remote_config::<crate::config::DopplerRemoteConfig>("doppler")
-    {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(doppler::DopplerRemote::new(doppler_config, runner)),
-            ok_message: "authenticated",
-        });
-    }
-
-    if let Some(infisical_config) =
-        config.remote_config::<crate::config::InfisicalRemoteConfig>("infisical")
-    {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(infisical::InfisicalRemote::new(infisical_config, runner)),
-            ok_message: "CLI available",
-        });
-    }
-
-    if let Some(sops_config) = config.remote_config::<crate::config::SopsRemoteConfig>("sops") {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(sops::SopsRemote::new(config, sops_config, runner)),
-            ok_message: "CLI available",
-        });
-    }
-
-    if let Some(asm_config) =
-        config.remote_config::<crate::config::AwsSecretsManagerRemoteConfig>("aws_secrets_manager")
-    {
-        candidates.push(RemoteCandidate {
-            remote: Box::new(aws_secrets_manager::AwsSecretsManagerRemote::new(
-                config, asm_config, runner,
-            )),
-            ok_message: "CLI available",
-        });
-    }
-
-    candidates
-}
-
-fn needs_cli_secret_arg_warning(name: &str) -> bool {
-    matches!(name, "1password" | "bitwarden")
-}
-
-fn uses_cleartext_format(config: &Config, name: &str) -> bool {
-    use crate::config::CloudFileFormat;
-
-    // Check cloud_file remotes
-    for (cf_name, cf_config) in config.cloud_file_remote_configs() {
-        if cf_name == name && matches!(cf_config.format, CloudFileFormat::Cleartext) {
-            return true;
-        }
-    }
-
-    // Check S3 remote
-    if name == "s3" {
-        if let Some(s3_config) =
-            config.remote_config::<crate::config::S3RemoteConfig>("s3")
-        {
-            if matches!(s3_config.format, CloudFileFormat::Cleartext) {
-                return true;
-            }
-        }
-    }
-
-    false
+    config
+        .typed_remotes
+        .iter()
+        .map(|typed| match typed {
+            TypedRemoteConfig::OnePassword(cfg) => RemoteCandidate {
+                remote: Box::new(onepassword::OnePasswordRemote::new(
+                    config,
+                    cfg.clone(),
+                    runner,
+                )),
+                ok_message: "vault accessible",
+            },
+            TypedRemoteConfig::CloudFile { name, config: cfg } => RemoteCandidate {
+                remote: Box::new(cloud_file::CloudFileRemote::new(
+                    name.clone(),
+                    config.project.clone(),
+                    cfg.clone(),
+                )),
+                ok_message: "directory writable",
+            },
+            TypedRemoteConfig::AwsSecretsManager(cfg) => RemoteCandidate {
+                remote: Box::new(aws_secrets_manager::AwsSecretsManagerRemote::new(
+                    config,
+                    cfg.clone(),
+                    runner,
+                )),
+                ok_message: "CLI available",
+            },
+            TypedRemoteConfig::Bitwarden(cfg) => RemoteCandidate {
+                remote: Box::new(bitwarden::BitwardenRemote::new(
+                    config,
+                    cfg.clone(),
+                    runner,
+                )),
+                ok_message: "authenticated",
+            },
+            TypedRemoteConfig::Vault(cfg) => RemoteCandidate {
+                remote: Box::new(hashicorp_vault::HashicorpVaultRemote::new(
+                    config,
+                    cfg.clone(),
+                    runner,
+                )),
+                ok_message: "authenticated",
+            },
+            TypedRemoteConfig::S3(cfg) => RemoteCandidate {
+                remote: Box::new(s3::S3Remote::new(config, cfg.clone(), runner)),
+                ok_message: "CLI available",
+            },
+            TypedRemoteConfig::Gcp(cfg) => RemoteCandidate {
+                remote: Box::new(gcp_secret_manager::GcpSecretManagerRemote::new(
+                    config,
+                    cfg.clone(),
+                    runner,
+                )),
+                ok_message: "authenticated",
+            },
+            TypedRemoteConfig::Azure(cfg) => RemoteCandidate {
+                remote: Box::new(azure_key_vault::AzureKeyVaultRemote::new(
+                    config,
+                    cfg.clone(),
+                    runner,
+                )),
+                ok_message: "authenticated",
+            },
+            TypedRemoteConfig::Doppler(cfg) => RemoteCandidate {
+                remote: Box::new(doppler::DopplerRemote::new(cfg.clone(), runner)),
+                ok_message: "authenticated",
+            },
+            TypedRemoteConfig::Infisical(cfg) => RemoteCandidate {
+                remote: Box::new(infisical::InfisicalRemote::new(cfg.clone(), runner)),
+                ok_message: "CLI available",
+            },
+            TypedRemoteConfig::Sops(cfg) => RemoteCandidate {
+                remote: Box::new(sops::SopsRemote::new(config, cfg.clone(), runner)),
+                ok_message: "CLI available",
+            },
+        })
+        .collect()
 }
 
 /// Check the health of all configured remotes without filtering.
 /// Returns one entry per configured remote with preflight pass/fail.
+/// Runs all preflight checks in parallel.
 pub fn check_remote_health(config: &Config, runner: &dyn CommandRunner) -> Vec<RemoteHealth> {
-    let mut health = Vec::new();
-    for candidate in remote_candidates(config, runner) {
-        let name = candidate.remote.name().to_string();
-        match candidate.remote.preflight() {
-            Ok(()) => health.push(RemoteHealth {
-                name,
-                status: crate::targets::HealthStatus::Ok(candidate.ok_message.to_string()),
-            }),
-            Err(e) => health.push(RemoteHealth {
-                name,
-                status: crate::targets::HealthStatus::Failed(e.to_string()),
-            }),
-        }
+    let candidates = remote_candidates(config, runner);
+    if candidates.is_empty() {
+        return Vec::new();
     }
-    health
+
+    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let results = crate::targets::run_preflight_section(&items, "Remotes");
+    candidates
+        .iter()
+        .zip(results)
+        .map(|(c, (ok, msg))| RemoteHealth {
+            name: c.remote.name().to_string(),
+            status: if ok {
+                crate::targets::HealthStatus::Ok(msg)
+            } else {
+                crate::targets::HealthStatus::Failed(msg)
+            },
+        })
+        .collect()
 }
 
-use std::sync::Once;
-
-static OP_WARNING: Once = Once::new();
-
 /// Build all configured remotes from the config.
-/// Runs preflight checks and filters out remotes that fail, printing warnings.
+/// Runs preflight checks in parallel and filters out remotes that fail, printing warnings.
 pub fn build_remotes<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
 ) -> Vec<Box<dyn SyncRemote + 'a>> {
-    let mut remotes: Vec<Box<dyn SyncRemote + 'a>> = Vec::new();
+    let candidates = remote_candidates(config, runner);
+    if candidates.is_empty() {
+        return Vec::new();
+    }
 
-    for candidate in remote_candidates(config, runner) {
-        let remote = candidate.remote;
-        match remote.preflight() {
-            Ok(()) => {
-                if needs_cli_secret_arg_warning(remote.name()) {
-                    OP_WARNING.call_once(|| {
-                        let _ = cliclack::log::warning(format!(
-                            "{}: security note: secret values are passed as CLI args and may be visible in local process listings\n",
-                            remote.name()
-                        ));
-                    });
-                }
-                if uses_cleartext_format(config, remote.name()) {
-                    let _ = cliclack::log::warning(format!(
-                        "{}: secrets are stored in cleartext — set `format: encrypted` to protect them at rest",
-                        remote.name()
-                    ));
-                }
-                remotes.push(remote);
+    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let results = crate::targets::run_preflight_section(&items, "Remotes");
+
+    // Emit security warnings for passing remotes
+    let mut security_warnings: Vec<String> = Vec::new();
+    for (i, (ok, _)) in results.iter().enumerate() {
+        if *ok {
+            let remote = &candidates[i].remote;
+            if remote.passes_value_as_cli_arg() {
+                security_warnings.push(format!(
+                    "{}: secret values are passed as CLI args and may be visible in local process listings",
+                    remote.name()
+                ));
             }
-            Err(e) => {
-                let _ = cliclack::log::warning(format!("Skipping {} remote: {}", remote.name(), e));
+            if remote.uses_cleartext_format() {
+                security_warnings.push(format!(
+                    "{}: secrets are stored in cleartext — set `format: encrypted` to protect them at rest",
+                    remote.name()
+                ));
             }
         }
     }
 
-    remotes
+    for warning in &security_warnings {
+        let _ = cliclack::log::warning(warning);
+    }
+
+    // Filter to passing remotes
+    candidates
+        .into_iter()
+        .zip(results)
+        .filter_map(|(c, (ok, _))| if ok { Some(c.remote) } else { None })
+        .collect()
 }
 
 #[cfg(test)]

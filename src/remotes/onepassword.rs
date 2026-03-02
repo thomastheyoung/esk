@@ -208,6 +208,10 @@ impl SyncRemote for OnePasswordRemote<'_> {
         "1password"
     }
 
+    fn passes_value_as_cli_arg(&self) -> bool {
+        true
+    }
+
     fn preflight(&self) -> Result<()> {
         crate::targets::check_command(self.runner, "op").map_err(|_| {
             anyhow::anyhow!(

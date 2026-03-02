@@ -29,6 +29,10 @@ impl DeployTarget for NetlifyTarget<'_> {
         "netlify"
     }
 
+    fn passes_value_as_cli_arg(&self) -> bool {
+        true
+    }
+
     fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }

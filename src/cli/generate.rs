@@ -472,6 +472,7 @@ mod tests {
             secrets,
             generate: Vec::new(),
             root: std::path::PathBuf::from("/tmp"),
+            typed_remotes: Vec::new(),
         }
     }
 

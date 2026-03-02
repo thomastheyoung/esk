@@ -118,6 +118,13 @@ impl SyncRemote for S3Remote<'_> {
         "s3"
     }
 
+    fn uses_cleartext_format(&self) -> bool {
+        matches!(
+            self.remote_config.format,
+            crate::config::CloudFileFormat::Cleartext
+        )
+    }
+
     fn preflight(&self) -> Result<()> {
         crate::targets::check_command(self.runner, "aws").map_err(|_| {
             anyhow::anyhow!(

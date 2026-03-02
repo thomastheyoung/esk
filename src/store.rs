@@ -131,12 +131,61 @@ impl StorePayload {
     }
 }
 
+impl StorePayload {
+    /// Prune tombstones that all configured remotes have acknowledged.
+    ///
+    /// For each tombstone, extracts the env from the composite key (`KEY:env`),
+    /// looks up the minimum successfully-pushed version across all remotes for
+    /// that env, and removes the tombstone if its version <= that minimum.
+    ///
+    /// Returns the number of pruned entries.
+    pub fn prune_tombstones(
+        &mut self,
+        sync_index: &crate::sync_tracker::SyncIndex,
+        remote_names: &[&str],
+    ) -> usize {
+        if self.tombstones.is_empty() || remote_names.is_empty() {
+            return 0;
+        }
+
+        // Pre-compute min push version per env to avoid borrow conflict with retain
+        let envs: std::collections::BTreeSet<&str> = self
+            .tombstones
+            .keys()
+            .filter_map(|k| k.rsplit_once(':').map(|(_, env)| env))
+            .collect();
+
+        let min_versions: BTreeMap<String, Option<u64>> = envs
+            .into_iter()
+            .map(|env| {
+                (
+                    env.to_string(),
+                    sync_index.min_successful_push_version(env, remote_names),
+                )
+            })
+            .collect();
+
+        let before = self.tombstones.len();
+        self.tombstones.retain(|key, tomb_version| {
+            let env = key.rsplit_once(':').map_or("", |(_, e)| e);
+            match min_versions.get(env).copied().flatten() {
+                Some(min_v) => *tomb_version > min_v, // keep if not yet acknowledged
+                None => true,                         // keep if we can't confirm all remotes
+            }
+        });
+        before - self.tombstones.len()
+    }
+}
+
 impl std::fmt::Debug for StorePayload {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("StorePayload")
             .field("secrets", &format_args!("<{} entries>", self.secrets.len()))
             .field("version", &self.version)
-            .field("tombstones", &self.tombstones)
+            .field(
+                "tombstones",
+                &format_args!("<{} entries>", self.tombstones.len()),
+            )
             .field("env_versions", &self.env_versions)
             .field("env_last_changed_at", &self.env_last_changed_at)
             .finish()
@@ -1344,5 +1393,107 @@ mod tests {
         };
         payload.env_versions.insert("dev".to_string(), 3);
         assert_eq!(payload.env_version("prod"), 0);
+    }
+
+    #[test]
+    fn prune_tombstones_all_acknowledged() {
+        use crate::sync_tracker::SyncIndex;
+
+        let mut payload = StorePayload {
+            secrets: BTreeMap::new(),
+            version: 5,
+            tombstones: BTreeMap::from([
+                ("KEY_A:dev".to_string(), 2),
+                ("KEY_B:dev".to_string(), 3),
+            ]),
+            env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
+        };
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("remote_a", "dev", 5);
+        index.record_success("remote_b", "dev", 4);
+
+        let pruned = payload.prune_tombstones(&index, &["remote_a", "remote_b"]);
+        assert_eq!(pruned, 2);
+        assert!(payload.tombstones.is_empty());
+    }
+
+    #[test]
+    fn prune_tombstones_partially_acknowledged() {
+        use crate::sync_tracker::SyncIndex;
+
+        let mut payload = StorePayload {
+            secrets: BTreeMap::new(),
+            version: 5,
+            tombstones: BTreeMap::from([
+                ("KEY_A:dev".to_string(), 2),
+                ("KEY_B:dev".to_string(), 4),
+            ]),
+            env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
+        };
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("remote_a", "dev", 3);
+
+        let pruned = payload.prune_tombstones(&index, &["remote_a"]);
+        assert_eq!(pruned, 1);
+        assert_eq!(payload.tombstones.len(), 1);
+        assert!(payload.tombstones.contains_key("KEY_B:dev"));
+    }
+
+    #[test]
+    fn prune_tombstones_no_remotes() {
+        let mut payload = StorePayload {
+            secrets: BTreeMap::new(),
+            version: 5,
+            tombstones: BTreeMap::from([("KEY_A:dev".to_string(), 2)]),
+            env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
+        };
+        let index = crate::sync_tracker::SyncIndex::new(Path::new("/tmp/test.json"));
+
+        let pruned = payload.prune_tombstones(&index, &[]);
+        assert_eq!(pruned, 0);
+        assert_eq!(payload.tombstones.len(), 1);
+    }
+
+    #[test]
+    fn prune_tombstones_mixed_envs() {
+        use crate::sync_tracker::SyncIndex;
+
+        let mut payload = StorePayload {
+            secrets: BTreeMap::new(),
+            version: 5,
+            tombstones: BTreeMap::from([
+                ("KEY_A:dev".to_string(), 2),
+                ("KEY_B:prod".to_string(), 3),
+            ]),
+            env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
+        };
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("remote_a", "dev", 5);
+        // No record for prod
+
+        let pruned = payload.prune_tombstones(&index, &["remote_a"]);
+        assert_eq!(pruned, 1);
+        assert!(!payload.tombstones.contains_key("KEY_A:dev"));
+        assert!(payload.tombstones.contains_key("KEY_B:prod"));
+    }
+
+    #[test]
+    fn prune_tombstones_empty_tombstones() {
+        let mut payload = StorePayload {
+            secrets: BTreeMap::new(),
+            version: 5,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
+            env_last_changed_at: BTreeMap::new(),
+        };
+        let mut index = crate::sync_tracker::SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("remote_a", "dev", 5);
+
+        let pruned = payload.prune_tombstones(&index, &["remote_a"]);
+        assert_eq!(pruned, 0);
     }
 }

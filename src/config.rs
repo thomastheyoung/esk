@@ -86,6 +86,9 @@ pub struct Config {
     /// Root directory containing esk.yaml
     #[serde(skip)]
     pub root: PathBuf,
+    /// Typed remote configs, populated during validation.
+    #[serde(skip)]
+    pub(crate) typed_remotes: Vec<TypedRemoteConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -484,6 +487,26 @@ pub struct SopsRemoteConfig {
     pub path: String,
 }
 
+/// Typed remote configuration, populated during validation.
+/// Eliminates the silent `.ok()` footgun from `remote_config<T>()`.
+#[derive(Debug, Clone)]
+pub(crate) enum TypedRemoteConfig {
+    OnePassword(OnePasswordRemoteConfig),
+    CloudFile {
+        name: String,
+        config: CloudFileRemoteConfig,
+    },
+    AwsSecretsManager(AwsSecretsManagerRemoteConfig),
+    Bitwarden(BitwardenRemoteConfig),
+    Vault(HashicorpVaultRemoteConfig),
+    S3(S3RemoteConfig),
+    Gcp(GcpSecretManagerRemoteConfig),
+    Azure(AzureKeyVaultRemoteConfig),
+    Doppler(DopplerRemoteConfig),
+    Infisical(InfisicalRemoteConfig),
+    Sops(SopsRemoteConfig),
+}
+
 /// Whether a secret is required to have a value before deploy.
 ///
 /// YAML forms: `required: true`, `required: false`, `required: [prod, staging]`.
@@ -671,7 +694,7 @@ impl Config {
         Ok(config)
     }
 
-    fn validate(&self) -> Result<()> {
+    fn validate(&mut self) -> Result<()> {
         if self.environments.is_empty() {
             bail!("at least one environment must be defined");
         }
@@ -859,48 +882,62 @@ impl Config {
         }
     }
 
-    fn validate_remotes(&self) -> Result<()> {
+    fn validate_remotes(&mut self) -> Result<()> {
         for (name, value) in &self.remotes {
             match name.as_str() {
                 "1password" => {
-                    let _: OnePasswordRemoteConfig = serde_json::from_value(value.clone())
+                    let cfg: OnePasswordRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid 1password remote config")?;
+                    self.typed_remotes.push(TypedRemoteConfig::OnePassword(cfg));
                 }
                 "aws_secrets_manager" => {
-                    let _: AwsSecretsManagerRemoteConfig = serde_json::from_value(value.clone())
-                        .context("invalid aws_secrets_manager remote config")?;
+                    let cfg: AwsSecretsManagerRemoteConfig =
+                        serde_json::from_value(value.clone())
+                            .context("invalid aws_secrets_manager remote config")?;
+                    self.typed_remotes
+                        .push(TypedRemoteConfig::AwsSecretsManager(cfg));
                 }
                 "bitwarden" => {
-                    let _: BitwardenRemoteConfig = serde_json::from_value(value.clone())
+                    let cfg: BitwardenRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid bitwarden remote config")?;
+                    self.typed_remotes.push(TypedRemoteConfig::Bitwarden(cfg));
                 }
                 "vault" => {
-                    let _: HashicorpVaultRemoteConfig = serde_json::from_value(value.clone())
+                    let cfg: HashicorpVaultRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid vault remote config")?;
+                    self.typed_remotes.push(TypedRemoteConfig::Vault(cfg));
                 }
                 "s3" => {
-                    let _: S3RemoteConfig = serde_json::from_value(value.clone())
+                    let cfg: S3RemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid s3 remote config")?;
+                    self.typed_remotes.push(TypedRemoteConfig::S3(cfg));
                 }
                 "gcp" => {
-                    let _: GcpSecretManagerRemoteConfig = serde_json::from_value(value.clone())
-                        .context("invalid gcp remote config")?;
+                    let cfg: GcpSecretManagerRemoteConfig =
+                        serde_json::from_value(value.clone())
+                            .context("invalid gcp remote config")?;
+                    self.typed_remotes.push(TypedRemoteConfig::Gcp(cfg));
                 }
                 "azure" => {
-                    let _: AzureKeyVaultRemoteConfig = serde_json::from_value(value.clone())
+                    let cfg: AzureKeyVaultRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid azure remote config")?;
+                    self.typed_remotes.push(TypedRemoteConfig::Azure(cfg));
                 }
                 "doppler" => {
-                    let _: DopplerRemoteConfig = serde_json::from_value(value.clone())
+                    let cfg: DopplerRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid doppler remote config")?;
+                    self.typed_remotes.push(TypedRemoteConfig::Doppler(cfg));
                 }
                 "infisical" => {
-                    let _: InfisicalRemoteConfig = serde_json::from_value(value.clone())
+                    let cfg: InfisicalRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid infisical remote config")?;
+                    self.typed_remotes
+                        .push(TypedRemoteConfig::Infisical(cfg));
                 }
                 "sops" => {
-                    let _: SopsRemoteConfig = serde_json::from_value(value.clone())
+                    let cfg: SopsRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid sops remote config")?;
+                    self.typed_remotes.push(TypedRemoteConfig::Sops(cfg));
                 }
                 _ => {
                     // Check for type field to identify cloud_file remotes
@@ -910,10 +947,14 @@ impl Config {
                             .context("remote 'type' must be a string")?;
                         match type_str {
                             "cloud_file" => {
-                                let _: CloudFileRemoteConfig =
+                                let cfg: CloudFileRemoteConfig =
                                     serde_json::from_value(value.clone()).with_context(|| {
                                         format!("invalid cloud_file remote config for '{name}'")
                                     })?;
+                                self.typed_remotes.push(TypedRemoteConfig::CloudFile {
+                                    name: name.clone(),
+                                    config: cfg,
+                                });
                             }
                             other => bail!("unknown remote type '{other}' for '{name}'"),
                         }
@@ -1106,38 +1147,6 @@ impl Config {
         Ok(resolved)
     }
 
-    /// Get the parsed 1Password remote config, if configured.
-    pub fn onepassword_remote_config(&self) -> Option<OnePasswordRemoteConfig> {
-        self.remotes
-            .get("1password")
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-    }
-
-    /// Get a typed remote config by name.
-    pub fn remote_config<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
-        self.remotes
-            .get(name)
-            .and_then(|v| serde_json::from_value(v.clone()).ok())
-    }
-
-    /// Get all cloud_file remote configs: (name, config) pairs.
-    pub fn cloud_file_remote_configs(&self) -> Vec<(String, CloudFileRemoteConfig)> {
-        self.remotes
-            .iter()
-            .filter_map(|(name, value)| {
-                if name == "1password" {
-                    return None;
-                }
-                let type_val = value.get("type")?.as_str()?;
-                if type_val != "cloud_file" {
-                    return None;
-                }
-                let cfg: CloudFileRemoteConfig = serde_json::from_value(value.clone()).ok()?;
-                Some((name.clone(), cfg))
-            })
-            .collect()
-    }
-
     /// Get the set of configured target names.
     pub fn target_names(&self) -> Vec<&str> {
         let mut names: Vec<&str> = [
@@ -1175,6 +1184,36 @@ impl Config {
     /// Return the sorted list of group names from config secrets.
     pub fn secret_group_names(&self) -> Vec<String> {
         self.secrets.keys().cloned().collect()
+    }
+}
+
+#[cfg(test)]
+impl Config {
+    /// Test-only: get a typed remote config by name.
+    pub fn remote_config<T: serde::de::DeserializeOwned>(&self, name: &str) -> Option<T> {
+        self.remotes
+            .get(name)
+            .and_then(|v| serde_json::from_value(v.clone()).ok())
+    }
+
+    /// Test-only: get the parsed 1Password remote config.
+    pub fn onepassword_remote_config(&self) -> Option<OnePasswordRemoteConfig> {
+        self.remote_config("1password")
+    }
+
+    /// Test-only: get all cloud_file remote configs.
+    pub fn cloud_file_remote_configs(&self) -> Vec<(String, CloudFileRemoteConfig)> {
+        self.remotes
+            .iter()
+            .filter_map(|(name, value)| {
+                let type_val = value.get("type")?.as_str()?;
+                if type_val != "cloud_file" {
+                    return None;
+                }
+                let cfg: CloudFileRemoteConfig = serde_json::from_value(value.clone()).ok()?;
+                Some((name.clone(), cfg))
+            })
+            .collect()
     }
 }
 
@@ -2926,5 +2965,41 @@ secrets:
 "#;
         let path = write_yaml(dir.path(), yaml);
         assert!(Config::load(&path).is_ok());
+    }
+
+    #[test]
+    fn typed_remotes_populated_after_load() {
+        let dir = tempfile::tempdir().unwrap();
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let yaml = format!(
+            r#"
+project: x
+environments: [dev]
+remotes:
+  1password:
+    vault: V
+    item_pattern: test
+  dropbox:
+    type: cloud_file
+    path: {}
+    format: cleartext
+  s3:
+    bucket: my-bucket
+    format: encrypted
+"#,
+            cloud_dir.path().display()
+        );
+        let path = write_yaml(dir.path(), &yaml);
+        let config = Config::load(&path).unwrap();
+        assert_eq!(config.typed_remotes.len(), 3);
+        assert!(matches!(
+            &config.typed_remotes[0],
+            TypedRemoteConfig::OnePassword(_)
+        ));
+        assert!(matches!(
+            &config.typed_remotes[1],
+            TypedRemoteConfig::CloudFile { name, .. } if name == "dropbox"
+        ));
+        assert!(matches!(&config.typed_remotes[2], TypedRemoteConfig::S3(_)));
     }
 }

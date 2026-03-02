@@ -161,6 +161,11 @@ pub trait DeployTarget: Send + Sync {
         Ok(())
     }
 
+    /// Whether this target passes secret values as CLI arguments (visible in `ps`).
+    fn passes_value_as_cli_arg(&self) -> bool {
+        false
+    }
+
     /// Deploy a batch of secrets. Default implementation loops deploy_secret.
     fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         secrets
@@ -467,13 +472,6 @@ pub(crate) fn target_candidates<'a>(
     candidates
 }
 
-fn needs_cli_secret_arg_warning(name: &str) -> bool {
-    matches!(
-        name,
-        "netlify" | "heroku" | "azure_app_service" | "gcp_cloud_run"
-    )
-}
-
 /// Check the health of all configured targets without filtering.
 /// Returns one entry per configured target with preflight pass/fail.
 /// Runs all preflight checks in parallel.
@@ -483,26 +481,41 @@ pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<T
         return Vec::new();
     }
 
-    std::thread::scope(|s| {
-        let handles: Vec<_> = candidates
-            .iter()
-            .map(|c| {
-                let name = c.target.name().to_string();
-                let ok_message = c.ok_message;
-                s.spawn(move || match c.target.preflight() {
-                    Ok(()) => TargetHealth {
-                        name,
-                        status: HealthStatus::Ok(ok_message.to_string()),
-                    },
-                    Err(e) => TargetHealth {
-                        name,
-                        status: HealthStatus::Failed(e.to_string()),
-                    },
-                })
-            })
-            .collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
-    })
+    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let results = run_preflight_section(&items, "Targets");
+    candidates
+        .iter()
+        .zip(results)
+        .map(|(c, (ok, msg))| TargetHealth {
+            name: c.target.name().to_string(),
+            status: if ok {
+                HealthStatus::Ok(msg)
+            } else {
+                HealthStatus::Failed(msg)
+            },
+        })
+        .collect()
+}
+
+/// Item that can be preflighted (targets and remotes).
+pub(crate) trait PreflightItem: Send + Sync {
+    fn preflight_name(&self) -> &str;
+    fn preflight(&self) -> Result<()>;
+    fn ok_message(&self) -> &str;
+}
+
+impl PreflightItem for TargetCandidate<'_> {
+    fn preflight_name(&self) -> &str {
+        self.target.name()
+    }
+
+    fn preflight(&self) -> Result<()> {
+        self.target.preflight()
+    }
+
+    fn ok_message(&self) -> &str {
+        self.ok_message
+    }
 }
 
 /// Run preflight checks in parallel with animated rendering.
@@ -511,17 +524,17 @@ pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<T
 /// Non-TTY path: static `cliclack::log::step` using `section_name`.
 /// Returns `Vec<(bool, String)>` — one `(passed, message)` per candidate, parallel to input.
 pub(crate) fn run_preflight_section(
-    candidates: &[TargetCandidate],
+    items: &[&dyn PreflightItem],
     section_name: &str,
 ) -> Vec<(bool, String)> {
-    let n = candidates.len();
+    let n = items.len();
     if n == 0 {
         return Vec::new();
     }
 
-    let name_width = candidates
+    let name_width = items
         .iter()
-        .map(|c| c.target.name().len())
+        .map(|c| c.preflight_name().len())
         .max()
         .unwrap_or(0)
         + 4;
@@ -533,12 +546,11 @@ pub(crate) fn run_preflight_section(
 
     std::thread::scope(|s| {
         // Spawn preflight workers
-        for (i, c) in candidates.iter().enumerate() {
+        for (i, c) in items.iter().enumerate() {
             let results = Arc::clone(&results);
-            let ok_message = c.ok_message;
             s.spawn(move || {
-                let result = match c.target.preflight() {
-                    Ok(()) => (true, ok_message.to_string()),
+                let result = match c.preflight() {
+                    Ok(()) => (true, c.ok_message().to_string()),
                     Err(e) => (false, e.to_string()),
                 };
                 results.lock().unwrap()[i] = Some(result);
@@ -553,11 +565,11 @@ pub(crate) fn run_preflight_section(
 
             // Print header + initial spinner lines
             let _ = term.write_line(&format!("{}  {section_name}", style("\u{25C7}").dim()));
-            for c in candidates {
+            for c in items {
                 let _ = term.write_line(&format!(
                     "{bar}    {} {:<name_width$}",
                     style(frames[0]).magenta(),
-                    c.target.name(),
+                    c.preflight_name(),
                 ));
             }
 
@@ -570,9 +582,9 @@ pub(crate) fn run_preflight_section(
                 let all_done = state.iter().all(Option::is_some);
 
                 let _ = term.move_cursor_up(n);
-                for (i, c) in candidates.iter().enumerate() {
+                for (i, c) in items.iter().enumerate() {
                     let _ = term.clear_line();
-                    let name = c.target.name();
+                    let name = c.preflight_name();
                     match &state[i] {
                         Some((true, msg)) => {
                             let _ = term.write_line(&format!(
@@ -631,11 +643,11 @@ pub(crate) fn run_preflight_section(
     // Non-TTY fallback: static rendering via cliclack
     if !is_tty {
         let state = results.lock().unwrap();
-        let lines: Vec<String> = candidates
+        let lines: Vec<String> = items
             .iter()
             .enumerate()
             .map(|(i, c)| {
-                let name = c.target.name();
+                let name = c.preflight_name();
                 let (ok, msg) = state[i].as_ref().unwrap();
                 let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
                 format!("  {mark} {name:<name_width$}{}", style(msg).dim())
@@ -659,7 +671,8 @@ pub fn render_target_health(
     section_name: &str,
 ) -> Vec<TargetHealth> {
     let candidates = target_candidates(config, runner);
-    let results = run_preflight_section(&candidates, section_name);
+    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let results = run_preflight_section(&items, section_name);
     candidates
         .iter()
         .zip(results)
@@ -686,14 +699,15 @@ pub fn build_targets<'a>(
         return Vec::new();
     }
 
-    let results = run_preflight_section(&candidates, "Preflight");
+    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let results = run_preflight_section(&items, "Preflight");
 
     // Emit security warnings for passing targets
     let mut security_warnings: Vec<String> = Vec::new();
     for (i, (ok, _)) in results.iter().enumerate() {
         if *ok {
             let name = candidates[i].target.name();
-            if needs_cli_secret_arg_warning(name) {
+            if candidates[i].target.passes_value_as_cli_arg() {
                 security_warnings.push(format!(
                     "{name}: secret values are passed as CLI args and may be visible in local process listings",
                 ));

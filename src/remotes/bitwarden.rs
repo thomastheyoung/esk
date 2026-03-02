@@ -99,6 +99,10 @@ impl SyncRemote for BitwardenRemote<'_> {
         "bitwarden"
     }
 
+    fn passes_value_as_cli_arg(&self) -> bool {
+        true
+    }
+
     fn preflight(&self) -> Result<()> {
         crate::targets::check_command(self.runner, "bws").map_err(|_| {
             anyhow::anyhow!(

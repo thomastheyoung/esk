@@ -113,6 +113,13 @@ impl SyncRemote for CloudFileRemote {
         &self.name
     }
 
+    fn uses_cleartext_format(&self) -> bool {
+        matches!(
+            self.remote_config.format,
+            crate::config::CloudFileFormat::Cleartext
+        )
+    }
+
     fn preflight(&self) -> Result<()> {
         let path = self.expand_path()?;
         if !path.is_dir() {

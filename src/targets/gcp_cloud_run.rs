@@ -43,6 +43,10 @@ impl DeployTarget for GcpCloudRunTarget<'_> {
         "gcp_cloud_run"
     }
 
+    fn passes_value_as_cli_arg(&self) -> bool {
+        true
+    }
+
     fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
     }

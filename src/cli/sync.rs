@@ -539,6 +539,22 @@ pub fn run_with_runner(
         );
     }
 
+    // Tombstone GC: prune tombstones acknowledged by all remotes
+    if !dry_run {
+        let sync_index_path = config.root.join(".esk/sync-index.json");
+        let sync_index = SyncIndex::load(&sync_index_path);
+        let remote_names: Vec<&str> = target_remotes.iter().map(|r| r.name()).collect();
+        let mut current_payload = store.payload()?;
+        let pruned = current_payload.prune_tombstones(&sync_index, &remote_names);
+        if pruned > 0 {
+            store.set_payload(&current_payload)?;
+            let _ = cliclack::log::info(format!(
+                "Pruned {pruned} tombstone{}",
+                if pruned == 1 { "" } else { "s" }
+            ));
+        }
+    }
+
     // Auto-deploy after sync
     if !dry_run && auto_deploy && result.local_changed {
         cliclack::log::step("Running deploy...")?;

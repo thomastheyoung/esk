@@ -98,6 +98,34 @@ impl SyncIndex {
         );
     }
 
+    /// Returns the minimum `pushed_version` across all named remotes for an env,
+    /// considering only successful pushes.
+    ///
+    /// Returns `None` if `remote_names` is empty or if any named remote lacks a
+    /// successful push record for the env (blocks pruning to prevent resurrection
+    /// attacks from stale/offline remotes).
+    pub fn min_successful_push_version(&self, env: &str, remote_names: &[&str]) -> Option<u64> {
+        if remote_names.is_empty() {
+            return None;
+        }
+
+        let mut min_version: Option<u64> = None;
+        for name in remote_names {
+            let key = Self::tracker_key(name, env);
+            match self.records.get(&key) {
+                Some(record) if record.last_push_status == SyncStatus::Success => {
+                    min_version = Some(match min_version {
+                        Some(v) => v.min(record.pushed_version),
+                        None => record.pushed_version,
+                    });
+                }
+                _ => return None, // Missing or failed — block pruning
+            }
+        }
+
+        min_version
+    }
+
     pub fn record_failure(&mut self, remote: &str, env: &str, version: u64, error: String) {
         let key = Self::tracker_key(remote, env);
         self.records.insert(
@@ -220,5 +248,59 @@ mod tests {
         let record = &index.records["1password:dev"];
         assert_eq!(record.last_push_status, SyncStatus::Success);
         assert_eq!(record.pushed_version, 5);
+    }
+
+    #[test]
+    fn min_version_all_success() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("remote_a", "dev", 5);
+        index.record_success("remote_b", "dev", 3);
+        assert_eq!(
+            index.min_successful_push_version("dev", &["remote_a", "remote_b"]),
+            Some(3)
+        );
+    }
+
+    #[test]
+    fn min_version_one_missing() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("remote_a", "dev", 5);
+        // remote_b has no record
+        assert_eq!(
+            index.min_successful_push_version("dev", &["remote_a", "remote_b"]),
+            None
+        );
+    }
+
+    #[test]
+    fn min_version_one_failed() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("remote_a", "dev", 5);
+        index.record_failure("remote_b", "dev", 3, "err".to_string());
+        assert_eq!(
+            index.min_successful_push_version("dev", &["remote_a", "remote_b"]),
+            None
+        );
+    }
+
+    #[test]
+    fn min_version_empty_remotes() {
+        let index = SyncIndex::new(Path::new("/tmp/test.json"));
+        assert_eq!(index.min_successful_push_version("dev", &[]), None);
+    }
+
+    #[test]
+    fn min_version_multi_env() {
+        let mut index = SyncIndex::new(Path::new("/tmp/test.json"));
+        index.record_success("remote_a", "dev", 5);
+        index.record_success("remote_a", "prod", 2);
+        assert_eq!(
+            index.min_successful_push_version("dev", &["remote_a"]),
+            Some(5)
+        );
+        assert_eq!(
+            index.min_successful_push_version("prod", &["remote_a"]),
+            Some(2)
+        );
     }
 }
