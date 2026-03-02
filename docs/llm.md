@@ -19,7 +19,7 @@ Set a secret value. Prompts interactively for the value unless `--value` is prov
 | Flag | Description |
 |------|-------------|
 | `--env <ENV>` | Environment (required) |
-| `--value <VAL>` | Secret value (visible in process list; omit for interactive prompt) |
+| `--value <VAL>` | Secret value (WARNING: visible in process list; omit for interactive prompt) |
 | `--group <GROUP>` | Config group to register the secret under (skips interactive prompt) |
 | `--no-sync` | Skip auto-sync after setting |
 | `--strict` | Strict mode: fail if any remote push fails (skip target deploy) |
@@ -65,7 +65,7 @@ Deploy secrets to configured targets. Only deploys secrets whose values have cha
 | `--dry-run` | Show what would be deployed without deploying |
 | `--verbose`, `-v` | Show detailed output |
 | `--skip-validation` | Skip value validation |
-| `--strict` | Fail if any required secrets are missing (default: warn and continue) |
+| `--strict` | Fail if any required secrets are missing (default: warn and deploy available) |
 | `--allow-empty` | Allow deploying empty/whitespace-only values |
 | `--prune` | Remove orphaned secrets from targets (deployed but no longer in config) |
 
@@ -211,6 +211,19 @@ targets:                           # Deploy targets (esk deploy)
       web: srv-abc123def456
     api_key_env: RENDER_API_KEY    # Default env var name
     env_flags: {}
+  custom:                          # User-defined deploy commands
+    my-target:
+      deploy:
+        program: curl
+        args: ["-X", "PUT", "https://api.example.com/{{key}}?env={{env}}"]
+        stdin: "{{value}}"         # Template vars: {{key}}, {{value}}, {{env}}, {{app}}
+      delete:                      # Optional
+        program: curl
+        args: ["-X", "DELETE", "https://api.example.com/{{key}}?env={{env}}"]
+      preflight:                   # Optional
+        program: curl
+        args: ["--fail", "-s", "https://api.example.com/health"]
+      env_flags: {}
 
 remotes:                           # Sync remotes (esk sync)
   1password:
@@ -301,11 +314,13 @@ secrets:                           # Secrets grouped by category
 
 **Auto-sync**: `esk set` and `esk delete` automatically push to remotes and deploy to targets. Use `--no-sync` to skip.
 
-**Validation**: Checked at `set` time and before `deploy`. Formats: string, url, integer, number, boolean, email, json, base64. Also supports enum, pattern (regex), length, and range. Use `--skip-validation` to bypass.
+**Validation**: Checked at `set` time and before `deploy`. Formats: string, url, integer, number, boolean, email, json, base64. Also supports enum, pattern (regex), min_length/max_length, and range. Use `--skip-validation` to bypass.
 
-**Requirements**: `required: true` (default) means the secret must have a value in all targeted environments before deploy. `required: [prod]` limits to specific environments. `required: false` disables. Use `--strict` to fail on missing (default: warn and continue). Use `--force` to bypass entirely.
+**Requirements**: `required: true` (default) means the secret must have a value in all targeted environments before deploy. `required: [prod]` limits to specific environments. `required: false` disables. Use `--strict` to fail on missing (default: warn and deploy available). Use `--force` to bypass entirely.
 
-**Reconciliation**: Version-counter-based. Each store modification increments the version. When syncing, higher version wins. Equal-version conflicts default to local (override with `--prefer remote`).
+**Reconciliation**: Version-counter-based. Each store modification increments the version. When syncing, higher version wins; unique secrets from lower-version sources are merged in. Equal-version conflicts default to local (override with `--prefer remote`).
+
+**Allow empty**: Secrets with `allow_empty: false` (default) reject whitespace-only values at set and deploy time.
 
 ## Common workflows
 

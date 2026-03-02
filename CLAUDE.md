@@ -72,7 +72,16 @@ src/
 │   │   ├── plan.rs      # Deploy planning (change detection, validation, pruning)
 │   │   ├── execute.rs   # Deploy execution (batch + individual, animated progress)
 │   │   └── report.rs    # Deploy reporting (deployed, failed, skipped, pruned)
-│   ├── status.rs        # esk status (target-agnostic)
+│   ├── status/
+│   │   ├── mod.rs       # esk status orchestration
+│   │   ├── types.rs     # Dashboard, RemoteStatus, DeployEntry types
+│   │   ├── build.rs     # Dashboard construction from config and indices
+│   │   └── render.rs    # Terminal rendering and relative time formatting
+│   ├── doctor/
+│   │   ├── mod.rs       # esk doctor orchestration
+│   │   ├── types.rs     # Report, CheckStatus types
+│   │   ├── build.rs     # Health check construction (config, store, targets, remotes)
+│   │   └── render.rs    # Terminal rendering with pass/warn/fail indicators
 │   ├── generate.rs      # esk generate (multi-format: dts, ts, env-example)
 │   ├── sync.rs          # esk sync (remote-agnostic, bidirectional)
 │   └── llm_context.rs   # esk llm-context
