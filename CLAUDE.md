@@ -66,7 +66,12 @@ src/
 │   ├── get.rs           # esk get
 │   ├── delete.rs        # esk delete
 │   ├── list.rs          # esk list
-│   ├── deploy.rs        # esk deploy (target-agnostic)
+│   ├── deploy/
+│   │   ├── mod.rs       # esk deploy orchestration (target-agnostic)
+│   │   ├── types.rs     # Deploy types (BatchGroup, EnvWorkPlan, PlanOutput)
+│   │   ├── plan.rs      # Deploy planning (change detection, validation, pruning)
+│   │   ├── execute.rs   # Deploy execution (batch + individual, animated progress)
+│   │   └── report.rs    # Deploy reporting (deployed, failed, skipped, pruned)
 │   ├── status.rs        # esk status (target-agnostic)
 │   ├── generate.rs      # esk generate (multi-format: dts, ts, env-example)
 │   ├── sync.rs          # esk sync (remote-agnostic, bidirectional)
@@ -111,13 +116,14 @@ pub trait DeployTarget: Send + Sync {
     fn preflight(&self) -> Result<()>;  // Default: Ok(())
     fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
     fn delete_secret(&self, _key: &str, _target: &ResolvedTarget) -> Result<()>;  // Default: Ok(())
+    fn passes_value_as_cli_arg(&self) -> bool;  // Default: false. True for heroku, netlify, azure_app_service, gcp_cloud_run
     fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;  // Default: calls deploy_secret per item
 }
 ```
 
 Batch targets handle deletion by regenerating the full output without the deleted key. Individual targets override `delete_secret` to call the external CLI's delete/unset command.
 
-`DeployMode::Batch` targets (.env, kubernetes) regenerate the full output when any secret changes. `DeployMode::Individual` targets deploy one secret at a time. The `build_targets()` factory constructs all configured targets from config, running preflight checks and filtering out targets that fail.
+`DeployMode::Batch` targets (.env, kubernetes, aws_lambda) regenerate the full output when any secret changes. `DeployMode::Individual` targets deploy one secret at a time. The `build_targets()` factory constructs all configured targets from config, running preflight checks and filtering out targets that fail.
 
 ### Sync remote trait
 
@@ -127,6 +133,8 @@ pub trait SyncRemote: Send + Sync {
     fn preflight(&self) -> Result<()>;  // Default: Ok(())
     fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()>;
     fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>>;
+    fn passes_value_as_cli_arg(&self) -> bool;  // Default: false. True for 1password, bitwarden
+    fn uses_cleartext_format(&self) -> bool;  // Default: false. True for cloud_file/s3 with format: cleartext
 }
 ```
 
@@ -194,7 +202,7 @@ Secrets can declare a `validate:` block (`Validation` struct) and a `required:` 
 | `regex-lite`                        | Lightweight regex for pattern validation |
 | `zeroize`                           | Zeroing secret key bytes on drop      |
 | `hkdf`                              | HKDF-SHA256 key derivation            |
-| `keyring`                           | OS keychain for store key (optional, `keychain` feature) |
+| `keyring`                           | OS keychain for store key (default `keychain` feature) |
 | `rmcp`                              | MCP server framework (optional, `mcp` feature) |
 | `tokio`                             | Async runtime for MCP server (optional) |
 | `schemars`                          | JSON schema generation for MCP (optional) |

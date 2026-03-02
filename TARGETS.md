@@ -430,7 +430,7 @@ Deploys environment variables to Convex deployments using `npx convex env set`.
 
 ### How it works
 
-1. For each secret, runs `npx convex env set <KEY> <VALUE>` in the configured Convex project directory.
+1. For each secret, runs `npx convex env set <KEY>` with the value piped via stdin in the configured Convex project directory.
 2. If `deployment_source` is set, reads `CONVEX_DEPLOYMENT` from that file and passes it as an environment variable — this tells the Convex CLI which deployment to target.
 3. Per-environment flags (e.g., `--prod`) are appended to the command.
 
@@ -473,14 +473,14 @@ If the file doesn't exist or doesn't contain the variable, the command runs with
 ### Command executed
 
 ```bash
-# In the convex path, with CONVEX_DEPLOYMENT set:
-CONVEX_DEPLOYMENT=dev:my-app-123 npx convex env set <KEY> <VALUE> [env_flags...]
+# In the convex path, with CONVEX_DEPLOYMENT set (value piped via stdin):
+CONVEX_DEPLOYMENT=dev:my-app-123 npx convex env set <KEY> [env_flags...]
 
 # Delete:
 CONVEX_DEPLOYMENT=dev:my-app-123 npx convex env unset <KEY> [env_flags...]
 ```
 
-> **Security note**: `npx convex env set` has no stdin support. Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). This is a known limitation of the Convex CLI. A warning is printed at deploy time.
+Secret values are piped via stdin to `npx convex env set`.
 
 ### Target format
 
@@ -838,9 +838,7 @@ secrets:
 
 ## Railway
 
-Deploys environment variables to Railway projects using `railway variables --set`.
-
-> **Security note**: Secret values are passed as CLI arguments and are visible in process listings (`ps aux`). A warning is printed at deploy time.
+Deploys environment variables to Railway projects using `railway variables set` with values piped via stdin (`--stdin`).
 
 ### Prerequisites
 
@@ -862,7 +860,8 @@ targets:
 ### Command executed
 
 ```bash
-railway variables --set "KEY=VALUE" [env_flags...]
+# Value piped via stdin:
+railway variables set KEY --stdin [env_flags...]
 railway variables delete KEY [env_flags...]
 ```
 

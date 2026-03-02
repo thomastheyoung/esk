@@ -476,7 +476,7 @@ Each target and remote file is a self-contained unit. It imports from its parent
 
 - Trait definitions (`DeployTarget`, `SyncRemote`)
 - `CommandRunner`, `CommandOutput`, `CommandOpts`
-- `check_command`, `resolve_env_flags`, `extract_env_secrets`
+- `check_command`, `resolve_env_flags`, `validate_stdin_kv_value`
 - Builder functions (`build_targets`, `build_remotes`)
 
 **Not allowed:**
@@ -499,9 +499,13 @@ Enable pedantic lints selectively. In `lib.rs`:
 
 ```rust
 #![warn(clippy::pedantic)]
+#![allow(clippy::missing_errors_doc)]
+#![allow(clippy::missing_panics_doc)]
 #![allow(clippy::module_name_repetitions)]
 #![allow(clippy::must_use_candidate)]
-#![allow(clippy::match_same_arms)]
+#![allow(clippy::too_many_lines)]
+#![allow(clippy::doc_markdown)]
+#![allow(clippy::struct_excessive_bools)]
 ```
 
 Key pedantic lints to keep enabled:
@@ -509,7 +513,6 @@ Key pedantic lints to keep enabled:
 - `redundant_closure_for_method_calls` — simplifies closures
 - `manual_let_else` — encourages `let ... else` syntax
 - `needless_pass_by_value` — catches unnecessary moves
-- `doc_markdown` — catches unformatted code in docs
 - `cast_possible_truncation` — safer numeric casts
 
 ## Testing
