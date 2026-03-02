@@ -189,15 +189,7 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
     fn make_remote(runner: &dyn CommandRunner) -> InfisicalRemote<'_> {
         InfisicalRemote::new(
@@ -283,10 +275,10 @@ remotes:
         }]);
         let remote = make_remote(&runner);
         assert!(remote.preflight().is_ok());
-        let c = calls(&runner);
+        let c = runner.calls();
         assert_eq!(c.len(), 1);
-        assert_eq!(c[0].0, "infisical");
-        assert_eq!(c[0].1, vec!["--version"]);
+        assert_eq!(c[0].program, "infisical");
+        assert_eq!(c[0].args, vec!["--version"]);
     }
 
     #[test]
@@ -319,24 +311,24 @@ remotes:
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let c = calls(&runner);
+        let c = runner.calls();
         assert_eq!(c.len(), 2);
 
         // First call: export for orphan detection
-        assert_eq!(c[0].0, "infisical");
-        assert!(c[0].1.contains(&"export".to_string()));
-        assert!(c[0].1.contains(&"--projectId".to_string()));
-        assert!(c[0].1.contains(&"proj123".to_string()));
-        assert!(c[0].1.contains(&"--env".to_string()));
-        assert!(c[0].1.contains(&"development".to_string()));
+        assert_eq!(c[0].program, "infisical");
+        assert!(c[0].args.contains(&"export".to_string()));
+        assert!(c[0].args.contains(&"--projectId".to_string()));
+        assert!(c[0].args.contains(&"proj123".to_string()));
+        assert!(c[0].args.contains(&"--env".to_string()));
+        assert!(c[0].args.contains(&"development".to_string()));
 
         // Second call: secrets set with --file
-        assert_eq!(c[1].0, "infisical");
-        assert!(c[1].1.contains(&"secrets".to_string()));
-        assert!(c[1].1.contains(&"set".to_string()));
-        assert!(c[1].1.iter().any(|a| a.starts_with("--file=")));
-        assert!(c[1].1.contains(&"--silent".to_string()));
-        assert!(c[1].1.contains(&"development".to_string()));
+        assert_eq!(c[1].program, "infisical");
+        assert!(c[1].args.contains(&"secrets".to_string()));
+        assert!(c[1].args.contains(&"set".to_string()));
+        assert!(c[1].args.iter().any(|a| a.starts_with("--file=")));
+        assert!(c[1].args.contains(&"--silent".to_string()));
+        assert!(c[1].args.contains(&"development".to_string()));
     }
 
     #[test]
@@ -371,14 +363,14 @@ remotes:
         let payload = make_payload(&[("API_KEY:dev", "new_key"), ("DB_URL:dev", "new_pg")], 3);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let c = calls(&runner);
+        let c = runner.calls();
         assert_eq!(c.len(), 3);
 
         // Second call: delete orphaned key
-        assert_eq!(c[1].0, "infisical");
-        assert!(c[1].1.contains(&"secrets".to_string()));
-        assert!(c[1].1.contains(&"delete".to_string()));
-        assert!(c[1].1.contains(&"OLD_KEY".to_string()));
+        assert_eq!(c[1].program, "infisical");
+        assert!(c[1].args.contains(&"secrets".to_string()));
+        assert!(c[1].args.contains(&"delete".to_string()));
+        assert!(c[1].args.contains(&"OLD_KEY".to_string()));
     }
 
     #[test]
@@ -389,7 +381,7 @@ remotes:
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let c = calls(&runner);
+        let c = runner.calls();
         assert!(c.is_empty());
     }
 
@@ -414,11 +406,11 @@ remotes:
         let payload = make_payload(&[("API_KEY:dev", "val")], 1);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let c = calls(&runner);
+        let c = runner.calls();
         assert_eq!(c.len(), 2);
         // No delete call — just export + set
-        assert!(c[0].1.contains(&"export".to_string()));
-        assert!(c[1].1.contains(&"set".to_string()));
+        assert!(c[0].args.contains(&"export".to_string()));
+        assert!(c[1].args.contains(&"set".to_string()));
     }
 
     #[test]
@@ -441,10 +433,10 @@ remotes:
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "pg://localhost");
         assert!(!secrets.contains_key("_esk_version:dev"));
 
-        let c = calls(&runner);
+        let c = runner.calls();
         assert_eq!(c.len(), 1);
-        assert!(c[0].1.contains(&"export".to_string()));
-        assert!(c[0].1.contains(&"development".to_string()));
+        assert!(c[0].args.contains(&"export".to_string()));
+        assert!(c[0].args.contains(&"development".to_string()));
     }
 
     #[test]

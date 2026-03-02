@@ -93,15 +93,7 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
     fn make_config(with_repo: bool) -> ConfigFixture {
         let yaml = if with_repo {
@@ -158,8 +150,8 @@ targets:
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
-        assert_eq!(calls[1].1, vec!["auth", "status"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[1].args, vec!["auth", "status"]);
     }
 
     #[test]
@@ -221,10 +213,10 @@ targets:
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "gh");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "gh");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["secret", "set", "MY_KEY", "-R", "owner/repo"]
         );
     }
@@ -247,8 +239,8 @@ targets:
         target
             .deploy_secret("KEY", "my_secret", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].2.as_ref().unwrap(), b"my_secret");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].stdin.as_ref().unwrap(), b"my_secret");
     }
 
     #[test]
@@ -269,8 +261,8 @@ targets:
         target
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].1, vec!["secret", "set", "KEY"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].args, vec!["secret", "set", "KEY"]);
     }
 
     #[test]
@@ -291,9 +283,9 @@ targets:
         target
             .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "secret",
                 "set",
@@ -322,9 +314,9 @@ targets:
             runner: &runner,
         };
         target.delete_secret("MY_KEY", &make_target("dev")).unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["secret", "delete", "MY_KEY", "-R", "owner/repo"]
         );
     }

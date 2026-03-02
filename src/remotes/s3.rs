@@ -226,19 +226,8 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
-    fn make_config(yaml: &str) -> ConfigFixture {
-        ConfigFixture::new(yaml).unwrap()
-    }
 
     fn ok_output(stdout: &[u8]) -> CommandOutput {
         CommandOutput {
@@ -265,7 +254,7 @@ remotes:
   s3:
     bucket: my-secrets-bucket
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
@@ -273,10 +262,10 @@ remotes:
         ]);
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["sts", "get-caller-identity"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["sts", "get-caller-identity"]);
     }
 
     #[test]
@@ -290,7 +279,7 @@ remotes:
     region: us-west-2
     profile: myprofile
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
@@ -298,9 +287,9 @@ remotes:
         ]);
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        let sts_args = &calls[1].1;
+        let sts_args = &calls[1].args;
         assert!(sts_args.contains(&"sts".to_string()));
         assert!(sts_args.contains(&"get-caller-identity".to_string()));
         assert!(sts_args.contains(&"--region".to_string()));
@@ -318,7 +307,7 @@ remotes:
   s3:
     bucket: my-secrets-bucket
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
@@ -338,7 +327,7 @@ remotes:
   s3:
     bucket: my-secrets-bucket
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
@@ -367,7 +356,7 @@ remotes:
     bucket: my-bucket
     prefix: "esk/myapp"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
 
         let remote = S3Remote::new(fixture.config(), remote_config, &DummyRunner);
@@ -401,7 +390,7 @@ remotes:
   s3:
     bucket: my-bucket
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
 
         let remote = S3Remote::new(fixture.config(), remote_config, &DummyRunner);
@@ -429,7 +418,7 @@ remotes:
     bucket: my-bucket
     format: encrypted
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
 
         let remote = S3Remote::new(fixture.config(), remote_config, &DummyRunner);
@@ -447,7 +436,7 @@ remotes:
     prefix: backups
     format: cleartext
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
@@ -464,12 +453,12 @@ remotes:
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].1[0], "s3");
-        assert_eq!(calls[0].1[1], "cp");
-        assert_eq!(calls[0].1[2], "-");
-        assert_eq!(calls[0].1[3], "s3://my-bucket/backups/secrets-dev.json");
+        assert_eq!(calls[0].args[0], "s3");
+        assert_eq!(calls[0].args[1], "cp");
+        assert_eq!(calls[0].args[2], "-");
+        assert_eq!(calls[0].args[3], "s3://my-bucket/backups/secrets-dev.json");
     }
 
     #[test]
@@ -482,7 +471,7 @@ remotes:
     bucket: my-bucket
     format: cleartext
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
@@ -498,7 +487,7 @@ remotes:
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
-        assert!(calls(&runner).is_empty());
+        assert!(runner.calls().is_empty());
     }
 
     #[test]
@@ -511,7 +500,7 @@ remotes:
     bucket: my-bucket
     format: cleartext
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
 
         let payload = StorePayload {
@@ -546,7 +535,7 @@ remotes:
     bucket: my-bucket
     format: cleartext
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![fail_output(b"An error occurred (NoSuchKey)")]);
@@ -565,7 +554,7 @@ remotes:
     bucket: my-bucket
     format: cleartext
 ";
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![fail_output(b"Unable to locate credentials")]);
@@ -588,7 +577,7 @@ remotes:
     endpoint: "https://r2.example.com"
     format: cleartext
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
@@ -605,8 +594,8 @@ remotes:
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
-        let args = &calls[0].1;
+        let calls = runner.calls();
+        let args = &calls[0].args;
         assert!(args.contains(&"--region".to_string()));
         assert!(args.contains(&"us-west-2".to_string()));
         assert!(args.contains(&"--profile".to_string()));

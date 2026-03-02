@@ -59,7 +59,6 @@ impl DeployTarget for DockerTarget<'_> {
                 "docker is not installed or not in PATH. Install it from: https://docs.docker.com/get-docker/"
             )
         })?;
-
         let output = self
             .runner
             .run(
@@ -71,7 +70,7 @@ impl DeployTarget for DockerTarget<'_> {
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("docker daemon is not running: {stderr}");
+            anyhow::bail!("docker daemon is not running. Run: docker info\n{stderr}");
         }
 
         let state = String::from_utf8_lossy(&output.stdout).trim().to_string();
@@ -80,7 +79,6 @@ impl DeployTarget for DockerTarget<'_> {
                 "docker swarm mode is not active (state: {state}). Run: docker swarm init"
             );
         }
-
         Ok(())
     }
 
@@ -146,19 +144,11 @@ impl DeployTarget for DockerTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
@@ -170,9 +160,7 @@ targets:
     env_flags:
       prod: "--context prod-swarm"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -185,8 +173,8 @@ targets:
 
     #[test]
     fn preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -201,28 +189,28 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
         assert_eq!(
-            calls[1].1,
+            calls[1].args,
             vec!["info", "--format", "{{.Swarm.LocalNodeState}}"]
         );
     }
 
     #[test]
     fn preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -232,8 +220,8 @@ targets:
 
     #[test]
     fn preflight_daemon_not_running() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -248,7 +236,7 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -258,8 +246,8 @@ targets:
 
     #[test]
     fn preflight_swarm_not_active() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -274,7 +262,7 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -284,8 +272,8 @@ targets:
 
     #[test]
     fn deploy_creates_via_stdin() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // rm returns "no such secret" (first-time create)
@@ -302,30 +290,30 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("API_KEY", "s3cret", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
         // rm call
-        assert_eq!(calls[0].0, "docker");
-        assert_eq!(calls[0].1, vec!["secret", "rm", "myapp-dev-API_KEY"]);
+        assert_eq!(calls[0].program, "docker");
+        assert_eq!(calls[0].args, vec!["secret", "rm", "myapp-dev-API_KEY"]);
         // create call — value via stdin, not in args
-        assert_eq!(calls[1].0, "docker");
-        assert!(calls[1].1.contains(&"secret".to_string()));
-        assert!(calls[1].1.contains(&"create".to_string()));
-        assert!(calls[1].1.contains(&"myapp-dev-API_KEY".to_string()));
-        assert_eq!(calls[1].2.as_deref(), Some(b"s3cret".as_slice()));
+        assert_eq!(calls[1].program, "docker");
+        assert!(calls[1].args.contains(&"secret".to_string()));
+        assert!(calls[1].args.contains(&"create".to_string()));
+        assert!(calls[1].args.contains(&"myapp-dev-API_KEY".to_string()));
+        assert_eq!(calls[1].stdin.as_deref(), Some(b"s3cret".as_slice()));
     }
 
     #[test]
     fn deploy_replaces_existing() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // rm succeeds (secret existed)
@@ -342,23 +330,23 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("API_KEY", "new_val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["secret", "rm", "myapp-dev-API_KEY"]);
-        assert!(calls[1].1.contains(&"create".to_string()));
+        assert_eq!(calls[0].args, vec!["secret", "rm", "myapp-dev-API_KEY"]);
+        assert!(calls[1].args.contains(&"create".to_string()));
     }
 
     #[test]
     fn deploy_rm_fails_service_in_use() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // rm fails with "secret is in use"
@@ -369,7 +357,7 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -378,14 +366,14 @@ targets:
             .unwrap_err();
         assert!(err.to_string().contains("secret rm failed"));
         // Should not have attempted create
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 1);
     }
 
     #[test]
     fn deploy_create_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // rm tolerated (no such secret)
@@ -402,7 +390,7 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -414,8 +402,8 @@ targets:
 
     #[test]
     fn deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // rm (no such secret)
@@ -432,26 +420,26 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         // rm call should have env_flags
-        assert!(calls[0].1.contains(&"--context".to_string()));
-        assert!(calls[0].1.contains(&"prod-swarm".to_string()));
+        assert!(calls[0].args.contains(&"--context".to_string()));
+        assert!(calls[0].args.contains(&"prod-swarm".to_string()));
         // create call should have env_flags
-        assert!(calls[1].1.contains(&"--context".to_string()));
-        assert!(calls[1].1.contains(&"prod-swarm".to_string()));
+        assert!(calls[1].args.contains(&"--context".to_string()));
+        assert!(calls[1].args.contains(&"prod-swarm".to_string()));
     }
 
     #[test]
     fn deploy_with_labels() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // rm (no such secret)
@@ -468,23 +456,23 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         // create call should have --label
-        assert!(calls[1].1.contains(&"--label".to_string()));
-        assert!(calls[1].1.contains(&"managed-by=esk".to_string()));
+        assert!(calls[1].args.contains(&"--label".to_string()));
+        assert!(calls[1].args.contains(&"managed-by=esk".to_string()));
     }
 
     #[test]
     fn deploy_value_not_in_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -499,35 +487,35 @@ targets:
             },
         ]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "super_secret_value", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         // Value must never appear in args of any call
         for call in &calls {
             assert!(
-                !call.1.iter().any(|a| a.contains("super_secret_value")),
+                !call.args.iter().any(|a| a.contains("super_secret_value")),
                 "secret value leaked into CLI args"
             );
         }
         // Value should be in stdin of create call
         assert_eq!(
-            calls[1].2.as_deref(),
+            calls[1].stdin.as_deref(),
             Some(b"super_secret_value".as_slice())
         );
     }
 
     #[test]
     fn resolve_name_default_pattern() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &MockCommandRunner::new(),
         };
@@ -560,8 +548,8 @@ targets:
 
     #[test]
     fn delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -569,22 +557,22 @@ targets:
             stderr: vec![],
         }]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .delete_secret("API_KEY", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "docker");
-        assert_eq!(calls[0].1, vec!["secret", "rm", "myapp-dev-API_KEY"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "docker");
+        assert_eq!(calls[0].args, vec!["secret", "rm", "myapp-dev-API_KEY"]);
     }
 
     #[test]
     fn delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -592,7 +580,7 @@ targets:
             stderr: b"secret is in use".to_vec(),
         }]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -604,8 +592,8 @@ targets:
 
     #[test]
     fn delete_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.docker.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -613,14 +601,14 @@ targets:
             stderr: vec![],
         }]);
         let target = DockerTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target.delete_secret("KEY", &make_target("prod")).unwrap();
-        let calls = take_calls(&runner);
-        assert!(calls[0].1.contains(&"--context".to_string()));
-        assert!(calls[0].1.contains(&"prod-swarm".to_string()));
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"--context".to_string()));
+        assert!(calls[0].args.contains(&"prod-swarm".to_string()));
     }
 
     #[test]

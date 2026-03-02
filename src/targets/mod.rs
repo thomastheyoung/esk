@@ -591,7 +591,7 @@ pub(crate) fn run_preflight_section(
                     Ok(()) => (true, c.ok_message().to_string()),
                     Err(e) => (false, e.to_string()),
                 };
-                results.lock().unwrap()[i] = Some(result);
+                results.lock().expect("preflight results mutex poisoned")[i] = Some(result);
             });
         }
 
@@ -616,7 +616,7 @@ pub(crate) fn run_preflight_section(
                 std::thread::sleep(crate::ui::SPINNER_INTERVAL);
                 frame = (frame + 1) % frames.len();
 
-                let state = results.lock().unwrap();
+                let state = results.lock().expect("preflight results mutex poisoned");
                 let all_done = state.iter().all(Option::is_some);
 
                 let _ = term.move_cursor_up(n);
@@ -657,7 +657,7 @@ pub(crate) fn run_preflight_section(
             }
 
             // Repaint header with status color
-            let state = results.lock().unwrap();
+            let state = results.lock().expect("preflight results mutex poisoned");
             let all_ok = state.iter().all(|r| matches!(r, Some((true, _))));
             let any_ok = state.iter().any(|r| matches!(r, Some((true, _))));
             drop(state);
@@ -680,13 +680,13 @@ pub(crate) fn run_preflight_section(
 
     // Non-TTY fallback: static rendering via cliclack
     if !is_tty {
-        let state = results.lock().unwrap();
+        let state = results.lock().expect("preflight results mutex poisoned");
         let lines: Vec<String> = items
             .iter()
             .enumerate()
             .map(|(i, c)| {
                 let name = c.preflight_name();
-                let (ok, msg) = state[i].as_ref().unwrap();
+                let (ok, msg) = state[i].as_ref().expect("preflight result missing");
                 let mark = if *ok { "\u{2714}" } else { "\u{2718}" };
                 format!("  {mark} {name:<name_width$}{}", style(msg).dim())
             })
@@ -695,8 +695,8 @@ pub(crate) fn run_preflight_section(
     }
 
     // Unwrap results — all slots are filled after thread::scope completes
-    let state = results.lock().unwrap();
-    state.iter().map(|r| r.clone().unwrap()).collect()
+    let state = results.lock().expect("preflight results mutex poisoned");
+    state.iter().map(|r| r.clone().expect("preflight result missing")).collect()
 }
 
 /// Render target health with animated spinners, returning health results.

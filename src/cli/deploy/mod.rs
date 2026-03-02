@@ -157,7 +157,7 @@ pub fn run_with_runner(
     }
 
     if !opts.dry_run {
-        index.lock().unwrap().save()?;
+        index.lock().expect("deploy index mutex poisoned").save()?;
     }
 
     if report.has_failures() {

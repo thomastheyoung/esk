@@ -160,19 +160,11 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: x
 environments: [dev, staging, prod]
@@ -190,9 +182,7 @@ targets:
     env_flags:
       prod: "--debug"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(app: Option<&str>, env: &str) -> ResolvedTarget {
@@ -205,8 +195,8 @@ targets:
 
     #[test]
     fn preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -221,23 +211,23 @@ targets:
             },
         ]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].1, vec!["--version"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].args, vec!["--version"]);
         assert_eq!(
-            calls[1].1,
+            calls[1].args,
             vec!["account", "show", "--subscription", "my-sub-id"]
         );
     }
 
     #[test]
     fn preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -252,7 +242,7 @@ targets:
             },
         ]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -262,12 +252,12 @@ targets:
 
     #[test]
     fn preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -277,8 +267,8 @@ targets:
 
     #[test]
     fn deploy_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -286,17 +276,17 @@ targets:
             stderr: vec![],
         }]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "az");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "az");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "webapp",
                 "config",
@@ -316,8 +306,8 @@ targets:
 
     #[test]
     fn deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -325,21 +315,21 @@ targets:
             stderr: vec![],
         }]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target(Some("web"), "prod"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert!(calls[0].1.contains(&"--debug".to_string()));
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"--debug".to_string()));
     }
 
     #[test]
     fn deploy_with_slot() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -347,16 +337,16 @@ targets:
             stderr: vec![],
         }]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target(Some("web"), "staging"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "webapp",
                 "config",
@@ -378,8 +368,8 @@ targets:
 
     #[test]
     fn delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -387,16 +377,16 @@ targets:
             stderr: vec![],
         }]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .delete_secret("MY_KEY", &make_target(Some("web"), "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "webapp",
                 "config",
@@ -416,12 +406,12 @@ targets:
 
     #[test]
     fn requires_app() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -433,12 +423,12 @@ targets:
 
     #[test]
     fn unknown_app_mapping() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -452,8 +442,8 @@ targets:
 
     #[test]
     fn nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.azure_app_service.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -461,7 +451,7 @@ targets:
             stderr: b"auth error".to_vec(),
         }]);
         let target = AzureAppServiceTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

@@ -188,19 +188,8 @@ mod tests {
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
-    type RunnerCall = (String, Vec<String>, Vec<(String, String)>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.env))
-            .collect()
-    }
 
-    fn make_config(yaml: &str) -> ConfigFixture {
-        ConfigFixture::new(yaml).unwrap()
-    }
 
     fn ok_output(stdout: &[u8]) -> CommandOutput {
         CommandOutput {
@@ -227,17 +216,17 @@ remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(b"vault 1.15.0"), ok_output(b"{}")]);
         let remote = HashicorpVaultRemote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["token", "lookup"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["token", "lookup"]);
     }
 
     #[test]
@@ -249,7 +238,7 @@ remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner = ErrorCommandRunner::missing_command();
@@ -269,7 +258,7 @@ remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
@@ -290,7 +279,7 @@ remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
@@ -310,12 +299,12 @@ remotes:
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].1[0], "kv");
-        assert_eq!(calls[0].1[1], "put");
-        assert_eq!(calls[0].1[2], "secret/data/myapp/dev");
-        assert_eq!(calls[0].1[3], "-");
+        assert_eq!(calls[0].args[0], "kv");
+        assert_eq!(calls[0].args[1], "put");
+        assert_eq!(calls[0].args[2], "secret/data/myapp/dev");
+        assert_eq!(calls[0].args[3], "-");
     }
 
     #[test]
@@ -327,7 +316,7 @@ remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
@@ -348,7 +337,7 @@ remotes:
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
         // Verify the stdin payload contains version 10 (env-specific), not 5
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
     }
 
@@ -361,7 +350,7 @@ remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
@@ -378,7 +367,7 @@ remotes:
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
-        assert!(calls(&runner).is_empty());
+        assert!(runner.calls().is_empty());
     }
 
     #[test]
@@ -391,7 +380,7 @@ remotes:
     path: "secret/data/{project}/{environment}"
     kv_version: 2
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
 
@@ -426,7 +415,7 @@ remotes:
     path: "secret/{project}/{environment}"
     kv_version: 1
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
 
@@ -455,7 +444,7 @@ remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![fail_output(
@@ -475,7 +464,7 @@ remotes:
   vault:
     path: "secret/data/{project}/{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![fail_output(b"permission denied")]);
@@ -495,7 +484,7 @@ remotes:
     path: "secret/data/{project}/{environment}"
     addr: "https://vault.example.com"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: HashicorpVaultRemoteConfig =
             fixture.config().remote_config("vault").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b""), ok_output(b"")]);
@@ -503,12 +492,12 @@ remotes:
 
         remote.preflight().unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
         // First call is --version (check_command), no env vars
         // Second call is token lookup, should have VAULT_ADDR
         assert!(calls[1]
-            .2
+            .env
             .iter()
             .any(|(k, v)| k == "VAULT_ADDR" && v == "https://vault.example.com"));
     }

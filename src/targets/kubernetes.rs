@@ -119,17 +119,15 @@ impl DeployTarget for KubernetesTarget<'_> {
                 "kubectl is not installed or not in PATH. Install it from: https://kubernetes.io/docs/tasks/tools/"
             )
         })?;
-
         let output = self
             .runner
             .run("kubectl", &["cluster-info"], CommandOpts::default())
             .context("failed to run kubectl cluster-info")?;
         if !output.success {
             anyhow::bail!(
-                "kubectl cannot connect to a cluster. Check your kubeconfig and cluster status."
+                "kubectl cannot connect to a cluster. Run: kubectl config get-contexts"
             );
         }
-
         Ok(())
     }
 
@@ -206,19 +204,11 @@ impl DeployTarget for KubernetesTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
@@ -232,9 +222,7 @@ targets:
     env_flags:
       prod: "--dry-run=client"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -255,8 +243,8 @@ targets:
 
     #[test]
     fn preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -271,21 +259,21 @@ targets:
             },
         ]);
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["cluster-info"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["cluster-info"]);
     }
 
     #[test]
     fn preflight_cluster_unreachable() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -300,7 +288,7 @@ targets:
             },
         ]);
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -310,12 +298,12 @@ targets:
 
     #[test]
     fn preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -325,8 +313,8 @@ targets:
 
     #[test]
     fn deploy_batch_generates_manifest() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -334,7 +322,7 @@ targets:
             stderr: vec![],
         }]);
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -346,12 +334,12 @@ targets:
         let results = target.deploy_batch(&secrets, &make_target("dev"));
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "kubectl");
-        assert_eq!(calls[0].1, vec!["apply", "-f", "-"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "kubectl");
+        assert_eq!(calls[0].args, vec!["apply", "-f", "-"]);
 
         // Verify manifest content
-        let stdin = String::from_utf8(calls[0].2.clone().unwrap()).unwrap();
+        let stdin = String::from_utf8(calls[0].stdin.clone().unwrap()).unwrap();
         assert!(stdin.contains("kind: Secret"));
         assert!(stdin.contains("namespace: myapp-dev"));
         assert!(stdin.contains("name: myapp-secrets"));
@@ -362,8 +350,8 @@ targets:
 
     #[test]
     fn deploy_batch_with_context_and_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -371,7 +359,7 @@ targets:
             stderr: vec![],
         }]);
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -379,16 +367,16 @@ targets:
         let secrets = vec![make_secret("KEY", "val")];
         target.deploy_batch(&secrets, &make_target("prod"));
 
-        let calls = take_calls(&runner);
-        assert!(calls[0].1.contains(&"--context".to_string()));
-        assert!(calls[0].1.contains(&"prod-cluster".to_string()));
-        assert!(calls[0].1.contains(&"--dry-run=client".to_string()));
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"--context".to_string()));
+        assert!(calls[0].args.contains(&"prod-cluster".to_string()));
+        assert!(calls[0].args.contains(&"--dry-run=client".to_string()));
     }
 
     #[test]
     fn deploy_batch_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -396,7 +384,7 @@ targets:
             stderr: b"forbidden".to_vec(),
         }]);
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -413,12 +401,12 @@ targets:
 
     #[test]
     fn deploy_batch_unknown_namespace() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -435,11 +423,11 @@ targets:
 
     #[test]
     fn default_secret_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &MockCommandRunner::from_outputs(vec![]),
         };
@@ -511,8 +499,8 @@ targets:
 
     #[test]
     fn deploy_batch_empty() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.kubernetes.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -520,7 +508,7 @@ targets:
             stderr: vec![],
         }]);
         let target = KubernetesTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

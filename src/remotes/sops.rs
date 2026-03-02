@@ -151,19 +151,8 @@ mod tests {
 
     type StdinCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
-    fn make_config(yaml: &str) -> ConfigFixture {
-        ConfigFixture::new(yaml).unwrap()
-    }
 
     fn sops_yaml() -> &'static str {
         r#"
@@ -191,7 +180,7 @@ remotes:
 
     #[test]
     fn resolve_path_substitution() {
-        let fixture = make_config(sops_yaml());
+        let fixture = ConfigFixture::new(sops_yaml()).expect("fixture");
         let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
@@ -224,15 +213,15 @@ remotes:
         }]);
         let remote = SopsRemote::new(&config, remote_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
     }
 
     #[test]
     fn preflight_missing_sops_config() {
         // Config root has no .sops.yaml
-        let fixture = make_config(sops_yaml());
+        let fixture = ConfigFixture::new(sops_yaml()).expect("fixture");
         let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -276,7 +265,7 @@ remotes:
 "#,
             dir.path().display()
         );
-        let fixture = make_config(&yaml);
+        let fixture = ConfigFixture::new(&yaml).expect("fixture");
         let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
 
         let encrypted = b"ENCRYPTED_CONTENT";
@@ -289,10 +278,10 @@ remotes:
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "sops");
-        assert_eq!(calls[0].1, vec!["-e", "/dev/stdin"]);
+        assert_eq!(calls[0].program, "sops");
+        assert_eq!(calls[0].args, vec!["-e", "/dev/stdin"]);
 
         // Verify file was written
         assert!(dest.exists());
@@ -302,14 +291,14 @@ remotes:
 
     #[test]
     fn push_skips_empty_env() {
-        let fixture = make_config(sops_yaml());
+        let fixture = ConfigFixture::new(sops_yaml()).expect("fixture");
         let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert!(calls.is_empty());
     }
 
@@ -330,7 +319,7 @@ remotes:
 "#,
             dir.path().display()
         );
-        let fixture = make_config(&yaml);
+        let fixture = ConfigFixture::new(&yaml).expect("fixture");
         let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
 
         let decrypted = serde_json::json!({
@@ -354,14 +343,14 @@ remotes:
 
     #[test]
     fn pull_missing_file_returns_none() {
-        let fixture = make_config(sops_yaml());
+        let fixture = ConfigFixture::new(sops_yaml()).expect("fixture");
         let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
         // Path "secrets/dev.enc.json" doesn't exist
         assert!(remote.pull(fixture.config(), "dev").unwrap().is_none());
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert!(calls.is_empty());
     }
 
@@ -378,7 +367,7 @@ remotes:
                 args: &[&str],
                 opts: CommandOpts,
             ) -> Result<CommandOutput> {
-                self.calls.lock().unwrap().push((
+                self.calls.lock().expect("stdin capture mutex poisoned").push((
                     program.to_string(),
                     args.iter().map(|s| (*s).to_string()).collect(),
                     opts.stdin,
@@ -402,7 +391,7 @@ remotes:
 "#,
             dir.path().display()
         );
-        let fixture = make_config(&yaml);
+        let fixture = ConfigFixture::new(&yaml).expect("fixture");
         let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
 
         let runner = StdinCapture {
@@ -421,7 +410,7 @@ remotes:
         };
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = runner.calls.lock().unwrap();
+        let calls = runner.calls.lock().expect("stdin capture mutex poisoned");
         let stdin = calls[0].2.as_ref().unwrap();
         let json: BTreeMap<String, String> = serde_json::from_slice(stdin).unwrap();
         assert_eq!(json.get(crate::remotes::ESK_VERSION_KEY).unwrap(), "99");

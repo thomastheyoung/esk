@@ -97,19 +97,11 @@ impl DeployTarget for VercelTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: x
 environments: [dev, prod]
@@ -121,9 +113,7 @@ targets:
     env_flags:
       prod: "--scope my-team"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -136,8 +126,8 @@ targets:
 
     #[test]
     fn vercel_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -152,7 +142,7 @@ targets:
             },
         ]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -161,8 +151,8 @@ targets:
 
     #[test]
     fn vercel_preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -177,7 +167,7 @@ targets:
             },
         ]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -187,12 +177,12 @@ targets:
 
     #[test]
     fn vercel_preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -202,8 +192,8 @@ targets:
 
     #[test]
     fn vercel_deploy_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -211,25 +201,25 @@ targets:
             stderr: vec![],
         }]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "vercel");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "vercel");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["env", "add", "MY_KEY", "development", "--force"]
         );
     }
 
     #[test]
     fn vercel_passes_value_via_stdin() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -237,21 +227,21 @@ targets:
             stderr: vec![],
         }]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "my_secret", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].2.as_ref().unwrap(), b"my_secret");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].stdin.as_ref().unwrap(), b"my_secret");
     }
 
     #[test]
     fn vercel_deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -259,16 +249,16 @@ targets:
             stderr: vec![],
         }]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "env",
                 "add",
@@ -283,12 +273,12 @@ targets:
 
     #[test]
     fn vercel_missing_env_mapping() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -300,8 +290,8 @@ targets:
 
     #[test]
     fn vercel_delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -309,16 +299,16 @@ targets:
             stderr: vec![],
         }]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .delete_secret("MY_KEY", &make_target("prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "env",
                 "rm",
@@ -333,8 +323,8 @@ targets:
 
     #[test]
     fn vercel_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -342,7 +332,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -354,8 +344,8 @@ targets:
 
     #[test]
     fn vercel_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.vercel.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -363,7 +353,7 @@ targets:
             stderr: b"auth error".to_vec(),
         }]);
         let target = VercelTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

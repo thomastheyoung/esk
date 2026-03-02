@@ -243,19 +243,8 @@ mod tests {
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
-    fn make_config(yaml: &str) -> ConfigFixture {
-        ConfigFixture::new(yaml).unwrap()
-    }
 
     fn ok_output(stdout: &[u8]) -> CommandOutput {
         CommandOutput {
@@ -283,17 +272,17 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(b"bws 0.4.0"), ok_output(b"[]")]);
         let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert!(calls[1].1.contains(&"secret".to_string()));
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert!(calls[1].args.contains(&"secret".to_string()));
     }
 
     #[test]
@@ -306,7 +295,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
         let runner = ErrorCommandRunner::missing_command();
@@ -325,7 +314,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
@@ -347,7 +336,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
 
@@ -367,12 +356,12 @@ remotes:
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
         // Second call is create
-        assert_eq!(calls[1].1[0], "secret");
-        assert_eq!(calls[1].1[1], "create");
-        assert_eq!(calls[1].1[2], "myapp-dev");
+        assert_eq!(calls[1].args[0], "secret");
+        assert_eq!(calls[1].args[1], "create");
+        assert_eq!(calls[1].args[2], "myapp-dev");
     }
 
     #[test]
@@ -385,7 +374,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
 
@@ -410,12 +399,12 @@ remotes:
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
         // Second call is edit
-        assert_eq!(calls[1].1[0], "secret");
-        assert_eq!(calls[1].1[1], "edit");
-        assert_eq!(calls[1].1[2], "secret-456");
+        assert_eq!(calls[1].args[0], "secret");
+        assert_eq!(calls[1].args[1], "edit");
+        assert_eq!(calls[1].args[2], "secret-456");
     }
 
     #[test]
@@ -428,7 +417,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
@@ -445,7 +434,7 @@ remotes:
         };
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
-        assert!(calls(&runner).is_empty());
+        assert!(runner.calls().is_empty());
     }
 
     #[test]
@@ -458,7 +447,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
 
@@ -488,7 +477,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"[]")]);
@@ -518,7 +507,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
 
@@ -537,7 +526,7 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let fixture = make_config(yaml);
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: BitwardenRemoteConfig =
             fixture.config().remote_config("bitwarden").unwrap();
 

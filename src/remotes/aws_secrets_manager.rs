@@ -224,15 +224,7 @@ mod tests {
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
     #[test]
     fn secret_name_substitution() {
@@ -364,10 +356,10 @@ remotes:
         ]);
         let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["sts", "get-caller-identity"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["sts", "get-caller-identity"]);
     }
 
     #[test]
@@ -470,14 +462,14 @@ remotes:
 
         remote.push(&payload, &config, "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
         // First call: put-secret-value
-        assert!(calls[0].1.contains(&"put-secret-value".to_string()));
-        assert!(calls[0].1.contains(&"myapp/dev".to_string()));
+        assert!(calls[0].args.contains(&"put-secret-value".to_string()));
+        assert!(calls[0].args.contains(&"myapp/dev".to_string()));
         // Second call: create-secret
-        assert!(calls[1].1.contains(&"create-secret".to_string()));
-        assert!(calls[1].1.contains(&"myapp/dev".to_string()));
+        assert!(calls[1].args.contains(&"create-secret".to_string()));
+        assert!(calls[1].args.contains(&"myapp/dev".to_string()));
     }
 
     #[test]
@@ -515,9 +507,9 @@ remotes:
 
         remote.push(&payload, &config, "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
-        assert!(calls[0].1.contains(&"put-secret-value".to_string()));
+        assert!(calls[0].args.contains(&"put-secret-value".to_string()));
     }
 
     #[test]
@@ -551,7 +543,7 @@ remotes:
         };
 
         remote.push(&payload, &config, "dev").unwrap();
-        assert!(calls(&runner).is_empty());
+        assert!(runner.calls().is_empty());
     }
 
     #[test]
@@ -665,9 +657,9 @@ remotes:
 
         remote.push(&payload, &config, "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
-        let pushed: StorePayload = serde_json::from_slice(calls[0].2.as_ref().unwrap()).unwrap();
+        let pushed: StorePayload = serde_json::from_slice(calls[0].stdin.as_ref().unwrap()).unwrap();
         assert_eq!(pushed.version, 10);
         assert!(pushed.secrets.contains_key("KEY"));
         assert!(!pushed.secrets.contains_key("KEY:dev"));

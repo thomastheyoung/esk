@@ -171,24 +171,11 @@ impl DeployTarget for CloudflareTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (
-        String,
-        Vec<String>,
-        Option<std::path::PathBuf>,
-        Option<Vec<u8>>,
-    );
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.cwd, call.stdin))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: x
 environments: [dev, prod]
@@ -200,9 +187,7 @@ targets:
     env_flags:
       prod: "--env production"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(app: Option<&str>, env: &str) -> ResolvedTarget {
@@ -215,8 +200,8 @@ targets:
 
     #[test]
     fn cloudflare_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -231,21 +216,21 @@ targets:
             },
         ]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["whoami"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["whoami"]);
     }
 
     #[test]
     fn cloudflare_preflight_not_authenticated() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -260,7 +245,7 @@ targets:
             },
         ]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -271,13 +256,13 @@ targets:
 
     #[test]
     fn cloudflare_preflight_missing_wrangler() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
 
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -288,12 +273,12 @@ targets:
 
     #[test]
     fn cloudflare_requires_app() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -305,12 +290,12 @@ targets:
 
     #[test]
     fn cloudflare_unknown_app() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -322,9 +307,9 @@ targets:
 
     #[test]
     fn cloudflare_builds_correct_command() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -332,7 +317,7 @@ targets:
             stderr: vec![],
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -340,21 +325,21 @@ targets:
             .deploy_secret("MY_KEY", "secret_val", &make_target(Some("web"), "prod"))
             .unwrap();
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "wrangler");
+        assert_eq!(calls[0].program, "wrangler");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["secret", "put", "MY_KEY", "--env", "production"]
         );
-        assert_eq!(calls[0].2.as_ref().unwrap(), &dir.path().join("apps/web"));
+        assert_eq!(calls[0].cwd.as_ref().unwrap(), &fixture.path("apps/web"));
     }
 
     #[test]
     fn cloudflare_passes_value_via_stdin() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -362,7 +347,7 @@ targets:
             stderr: vec![],
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -370,15 +355,15 @@ targets:
             .deploy_secret("KEY", "my_secret", &make_target(Some("web"), "dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].3.as_ref().unwrap(), b"my_secret");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].stdin.as_ref().unwrap(), b"my_secret");
     }
 
     #[test]
     fn cloudflare_empty_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -386,7 +371,7 @@ targets:
             stderr: vec![],
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -394,16 +379,16 @@ targets:
             .deploy_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         // dev has no env_flags, so just: secret put KEY
-        assert_eq!(calls[0].1, vec!["secret", "put", "KEY"]);
+        assert_eq!(calls[0].args, vec!["secret", "put", "KEY"]);
     }
 
     #[test]
     fn cloudflare_delete_builds_correct_command() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -411,7 +396,7 @@ targets:
             stderr: vec![],
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -419,11 +404,11 @@ targets:
             .delete_secret("MY_KEY", &make_target(Some("web"), "prod"))
             .unwrap();
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "wrangler");
+        assert_eq!(calls[0].program, "wrangler");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "secret",
                 "delete",
@@ -437,9 +422,9 @@ targets:
 
     #[test]
     fn cloudflare_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -447,7 +432,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -459,12 +444,12 @@ targets:
 
     #[test]
     fn cloudflare_delete_requires_app() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -476,9 +461,9 @@ targets:
 
     #[test]
     fn cloudflare_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -486,7 +471,7 @@ targets:
             stderr: b"auth error".to_vec(),
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -498,7 +483,7 @@ targets:
 
     // --- Pages mode tests ---
 
-    fn make_pages_config(dir: &std::path::Path) -> Config {
+    fn make_pages_config() -> ConfigFixture {
         let yaml = r#"
 project: x
 environments: [dev, prod]
@@ -509,15 +494,13 @@ targets:
     env_flags:
       prod: "--env production"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     #[test]
     fn pages_deploy_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_pages_config(dir.path());
+        let fixture = make_pages_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -525,17 +508,17 @@ targets:
             stderr: vec![],
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target(None, "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "wrangler");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "wrangler");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "pages",
                 "secret",
@@ -545,13 +528,13 @@ targets:
                 "my-pages-app"
             ]
         );
-        assert_eq!(calls[0].3.as_ref().unwrap(), b"secret_val");
+        assert_eq!(calls[0].stdin.as_ref().unwrap(), b"secret_val");
     }
 
     #[test]
     fn pages_deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_pages_config(dir.path());
+        let fixture = make_pages_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -559,16 +542,16 @@ targets:
             stderr: vec![],
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target(None, "prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "pages",
                 "secret",
@@ -584,8 +567,8 @@ targets:
 
     #[test]
     fn pages_delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_pages_config(dir.path());
+        let fixture = make_pages_config();
+        let config = fixture.config();
         let target_config = config.targets.cloudflare.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -593,16 +576,16 @@ targets:
             stderr: vec![],
         }]);
         let target = CloudflareTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .delete_secret("MY_KEY", &make_target(None, "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "pages",
                 "secret",

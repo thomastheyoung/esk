@@ -162,19 +162,8 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
-    fn make_config(yaml: &str) -> ConfigFixture {
-        ConfigFixture::new(yaml).unwrap()
-    }
 
     fn doppler_yaml() -> &'static str {
         r"
@@ -205,7 +194,7 @@ remotes:
 
     #[test]
     fn config_name_resolution() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let remote = DopplerRemote::new(remote_config, &runner);
@@ -215,7 +204,7 @@ remotes:
 
     #[test]
     fn config_name_missing_env() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let remote = DopplerRemote::new(remote_config, &runner);
@@ -225,7 +214,7 @@ remotes:
 
     #[test]
     fn preflight_success() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -241,15 +230,15 @@ remotes:
         ]);
         let remote = DopplerRemote::new(remote_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["me"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["me"]);
     }
 
     #[test]
     fn preflight_missing_doppler() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let remote = DopplerRemote::new(remote_config, &runner);
@@ -260,7 +249,7 @@ remotes:
 
     #[test]
     fn preflight_auth_failure() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -281,7 +270,7 @@ remotes:
 
     #[test]
     fn push_uploads_via_stdin() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -292,12 +281,12 @@ remotes:
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
         let call = &calls[0];
-        assert_eq!(call.0, "doppler");
+        assert_eq!(call.program, "doppler");
         assert_eq!(
-            call.1,
+            call.args,
             vec![
                 "secrets",
                 "upload",
@@ -311,7 +300,7 @@ remotes:
         );
 
         // Verify secrets are passed via stdin, not in args
-        let stdin = call.2.as_ref().expect("stdin should be set");
+        let stdin = call.stdin.as_ref().expect("stdin should be set");
         let parsed: BTreeMap<String, String> = serde_json::from_slice(stdin).unwrap();
         assert_eq!(parsed.get("API_KEY").unwrap(), "sk_test");
         assert_eq!(parsed.get("DB_URL").unwrap(), "pg://");
@@ -320,20 +309,20 @@ remotes:
 
     #[test]
     fn push_skips_empty_env() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let remote = DopplerRemote::new(remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert!(calls.is_empty());
     }
 
     #[test]
     fn pull_success() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let json = serde_json::json!({
             "API_KEY": "sk_test",
@@ -357,7 +346,7 @@ remotes:
 
     #[test]
     fn pull_not_found_returns_none() {
-        let fixture = make_config(doppler_yaml());
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,

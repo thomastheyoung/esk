@@ -159,7 +159,7 @@ fn execute_animated<'a>(
 
     // Initialize results
     {
-        let mut r = results.lock().unwrap();
+        let mut r = results.lock().expect("results mutex poisoned");
         for kl in key_lines {
             r.insert(
                 kl.key.clone(),
@@ -212,8 +212,8 @@ fn execute_animated<'a>(
             s.spawn(move || {
                 let batch_results = deploy_target.deploy_batch(&bg.secrets, &target);
 
-                let mut idx = index.lock().unwrap();
-                let mut res = results.lock().unwrap();
+                let mut idx = index.lock().expect("deploy index mutex poisoned");
+                let mut res = results.lock().expect("results mutex poisoned");
 
                 // Track if any result in this batch failed
                 let mut batch_had_failure = false;
@@ -279,7 +279,7 @@ fn execute_animated<'a>(
                 // BUG FIX (esk-0vf): Record batch failures so prune workers
                 // can skip pruning for failed batch groups.
                 if batch_had_failure {
-                    failed_batch_groups.lock().unwrap().insert((
+                    failed_batch_groups.lock().expect("failed batch groups mutex poisoned").insert((
                         bg.target_name.clone(),
                         bg.app.clone(),
                         env_name.to_string(),
@@ -306,8 +306,8 @@ fn execute_animated<'a>(
                 );
                 let value_hash = DeployIndex::hash_value(value);
 
-                let mut idx = index.lock().unwrap();
-                let mut res = results.lock().unwrap();
+                let mut idx = index.lock().expect("deploy index mutex poisoned");
+                let mut res = results.lock().expect("results mutex poisoned");
                 let target_display = target.target_display();
 
                 match result {
@@ -349,8 +349,8 @@ fn execute_animated<'a>(
                     &target.environment,
                 );
 
-                let mut idx = index.lock().unwrap();
-                let mut res = results.lock().unwrap();
+                let mut idx = index.lock().expect("deploy index mutex poisoned");
+                let mut res = results.lock().expect("results mutex poisoned");
                 let target_display = target.target_display();
 
                 match result {
@@ -387,10 +387,10 @@ fn execute_animated<'a>(
             let group_key = (target_name.clone(), app.clone(), env_name.to_string());
 
             s.spawn(move || {
-                let mut idx = index.lock().unwrap();
-                let mut res = results.lock().unwrap();
+                let mut idx = index.lock().expect("deploy index mutex poisoned");
+                let mut res = results.lock().expect("results mutex poisoned");
 
-                if failed_batch_groups.lock().unwrap().contains(&group_key) {
+                if failed_batch_groups.lock().expect("failed batch groups mutex poisoned").contains(&group_key) {
                     for orphan in orphan_list {
                         if let Some(kr) = res.get_mut(&orphan.key) {
                             kr.completed_ops += 1;
@@ -443,8 +443,8 @@ fn execute_animated<'a>(
 
             s.spawn(move || {
                 let result = deploy_target.delete_secret(&orphan.key, &target);
-                let mut idx = index.lock().unwrap();
-                let mut res = results.lock().unwrap();
+                let mut idx = index.lock().expect("deploy index mutex poisoned");
+                let mut res = results.lock().expect("results mutex poisoned");
                 let target_display = orphan.target_display();
 
                 match result {
@@ -471,7 +471,7 @@ fn execute_animated<'a>(
             std::thread::sleep(ui::SPINNER_INTERVAL);
             frame = (frame + 1) % frames.len();
 
-            let state = results.lock().unwrap();
+            let state = results.lock().expect("results mutex poisoned");
             let all_done = key_lines
                 .iter()
                 .all(|kl| kl.total_ops == 0 || state.get(&kl.key).is_none_or(KeyResult::is_done));
@@ -520,7 +520,7 @@ fn execute_animated<'a>(
     });
 
     // Collect results into report vectors
-    let final_results = results.into_inner().unwrap();
+    let final_results = results.into_inner().expect("results mutex poisoned");
     let mut env_deployed = 0usize;
     let mut env_failed = 0usize;
     let env_unset_count = env_unset.len();
@@ -694,7 +694,7 @@ fn execute_sequential<'a>(
         }
 
         let batch_results = deploy_target.deploy_batch(&bg.secrets, &target);
-        let mut idx = index.lock().unwrap();
+        let mut idx = index.lock().expect("deploy index mutex poisoned");
 
         if batch_results.is_empty() {
             for key in &bg.tombstoned_keys {
@@ -746,7 +746,7 @@ fn execute_sequential<'a>(
                     target: target_display.clone(),
                     error: Some(error),
                 });
-                failed_batch_groups.lock().unwrap().insert((
+                failed_batch_groups.lock().expect("failed batch groups mutex poisoned").insert((
                     bg.target_name.clone(),
                     bg.app.clone(),
                     env_name.to_string(),
@@ -759,7 +759,7 @@ fn execute_sequential<'a>(
     // Batch prune
     for ((target_name, app), orphan_list) in &plan.batch_prune {
         let group_key = (target_name.clone(), app.clone(), env_name.to_string());
-        if failed_batch_groups.lock().unwrap().contains(&group_key) {
+        if failed_batch_groups.lock().expect("failed batch groups mutex poisoned").contains(&group_key) {
             for orphan in orphan_list {
                 failed.push(DeployEntry {
                     key: orphan.key.clone(),
@@ -770,7 +770,7 @@ fn execute_sequential<'a>(
             }
             continue;
         }
-        let mut idx = index.lock().unwrap();
+        let mut idx = index.lock().expect("deploy index mutex poisoned");
         for orphan in orphan_list {
             let target_display = orphan.target_display();
             if dry_run {
@@ -847,7 +847,7 @@ fn execute_sequential<'a>(
         );
         let value_hash = DeployIndex::hash_value(value);
 
-        let mut idx = index.lock().unwrap();
+        let mut idx = index.lock().expect("deploy index mutex poisoned");
         match result {
             Ok(()) => {
                 idx.record_success(tracker_key, target.to_string(), value_hash);
@@ -900,7 +900,7 @@ fn execute_sequential<'a>(
         let (target_idx, _) = target_map[target.service.as_str()];
         let deploy_target = &deploy_targets[target_idx];
 
-        let mut idx = index.lock().unwrap();
+        let mut idx = index.lock().expect("deploy index mutex poisoned");
         match deploy_target.delete_secret(key, target) {
             Ok(()) => {
                 let tracker_key = DeployIndex::tracker_key(
@@ -974,7 +974,7 @@ fn execute_sequential<'a>(
         let (target_idx, _) = target_map[orphan.service.as_str()];
         let deploy_target = &deploy_targets[target_idx];
 
-        let mut idx = index.lock().unwrap();
+        let mut idx = index.lock().expect("deploy index mutex poisoned");
         match deploy_target.delete_secret(&orphan.key, &target) {
             Ok(()) => {
                 idx.remove_record(&orphan.tracker_key);

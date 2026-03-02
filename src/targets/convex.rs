@@ -137,21 +137,7 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (
-        String,
-        Vec<String>,
-        Option<std::path::PathBuf>,
-        Option<Vec<u8>>,
-        Vec<(String, String)>,
-    );
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.cwd, call.stdin, call.env))
-            .collect()
-    }
 
     fn make_config(dir: &std::path::Path, deployment_source: Option<&str>) -> Config {
         let mut yaml = String::from(
@@ -204,10 +190,10 @@ targets:
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["convex", "env", "list"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["convex", "env", "list"]);
     }
 
     #[test]
@@ -275,13 +261,13 @@ targets:
             .deploy_secret("MY_KEY", "my_value", &make_target("dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "npx");
-        assert_eq!(calls[0].1, vec!["convex", "env", "set", "MY_KEY"]);
-        assert_eq!(calls[0].2.as_ref().unwrap(), &dir.path().join("apps/api"));
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "npx");
+        assert_eq!(calls[0].args, vec!["convex", "env", "set", "MY_KEY"]);
+        assert_eq!(calls[0].cwd.as_ref().unwrap(), &dir.path().join("apps/api"));
         // Value is passed via stdin, not in args
-        assert_eq!(calls[0].3.as_deref(), Some(b"my_value".as_slice()));
-        assert!(!calls[0].1.iter().any(|a| a.contains("my_value")));
+        assert_eq!(calls[0].stdin.as_deref(), Some(b"my_value".as_slice()));
+        assert!(!calls[0].args.iter().any(|a| a.contains("my_value")));
     }
 
     #[test]
@@ -306,8 +292,8 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
-        assert!(calls[0].4.contains(&(
+        let calls = runner.take_calls();
+        assert!(calls[0].env.contains(&(
             "CONVEX_DEPLOYMENT".to_string(),
             "dev:my-deploy-123".to_string()
         )));
@@ -333,8 +319,8 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
-        assert!(calls[0].4.is_empty()); // no env vars set
+        let calls = runner.take_calls();
+        assert!(calls[0].env.is_empty()); // no env vars set
     }
 
     #[test]
@@ -359,8 +345,8 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
-        assert!(calls[0].4.is_empty());
+        let calls = runner.take_calls();
+        assert!(calls[0].env.is_empty());
     }
 
     #[test]
@@ -385,9 +371,9 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert!(calls[0]
-            .4
+            .env
             .contains(&("CONVEX_DEPLOYMENT".to_string(), "my-deploy".to_string())));
     }
 
@@ -411,11 +397,11 @@ targets:
             .delete_secret("MY_KEY", &make_target("prod"))
             .unwrap();
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "npx");
+        assert_eq!(calls[0].program, "npx");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["convex", "env", "unset", "MY_KEY", "--prod"]
         );
     }

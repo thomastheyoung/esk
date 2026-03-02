@@ -93,15 +93,7 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
     fn make_config(dir: &std::path::Path, with_site: bool) -> Config {
         let yaml = if with_site {
@@ -160,8 +152,8 @@ targets:
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
-        assert_eq!(calls[1].1, vec!["status"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[1].args, vec!["status"]);
     }
 
     #[test]
@@ -223,9 +215,9 @@ targets:
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "netlify");
-        assert_eq!(calls[0].1, vec!["env:set", "MY_KEY", "secret_val"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "netlify");
+        assert_eq!(calls[0].args, vec!["env:set", "MY_KEY", "secret_val"]);
     }
 
     #[test]
@@ -246,9 +238,9 @@ targets:
         target
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["env:set", "KEY", "val", "--site", "my-site-id"]
         );
     }
@@ -271,9 +263,9 @@ targets:
         target
             .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["env:set", "KEY", "val", "--context", "production"]
         );
     }
@@ -294,9 +286,9 @@ targets:
             runner: &runner,
         };
         target.delete_secret("MY_KEY", &make_target("dev")).unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["env:unset", "MY_KEY", "--site", "my-site-id"]
         );
     }

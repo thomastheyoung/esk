@@ -57,7 +57,6 @@ impl DeployTarget for GcpCloudRunTarget<'_> {
                 "Google Cloud CLI (gcloud) is not installed or not in PATH. Install it from: https://cloud.google.com/sdk/docs/install"
             )
         })?;
-
         let project = &self.target_config.project;
         let output = self
             .runner
@@ -66,10 +65,10 @@ impl DeployTarget for GcpCloudRunTarget<'_> {
                 &["auth", "print-access-token", "--project", project],
                 CommandOpts::default(),
             )
-            .context("failed to run gcloud auth check")?;
+            .context("failed to run gcloud auth print-access-token")?;
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("GCP project '{project}' not accessible: {stderr}");
+            anyhow::bail!("GCP project '{project}' not accessible. Run: gcloud auth login\n{stderr}");
         }
         Ok(())
     }
@@ -140,19 +139,11 @@ impl DeployTarget for GcpCloudRunTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: x
 environments: [dev, staging, prod]
@@ -171,9 +162,7 @@ targets:
     env_flags:
       prod: "--project my-prod-project --region europe-west1"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(app: Option<&str>, env: &str) -> ResolvedTarget {
@@ -186,8 +175,8 @@ targets:
 
     #[test]
     fn preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -202,23 +191,23 @@ targets:
             },
         ]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].1, vec!["--version"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].args, vec!["--version"]);
         assert_eq!(
-            calls[1].1,
+            calls[1].args,
             vec!["auth", "print-access-token", "--project", "my-gcp-project"]
         );
     }
 
     #[test]
     fn preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -233,7 +222,7 @@ targets:
             },
         ]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -243,12 +232,12 @@ targets:
 
     #[test]
     fn preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -259,8 +248,8 @@ targets:
 
     #[test]
     fn deploy_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -268,17 +257,17 @@ targets:
             stderr: vec![],
         }]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "gcloud");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "gcloud");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "run",
                 "services",
@@ -296,8 +285,8 @@ targets:
 
     #[test]
     fn deploy_different_app() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -305,21 +294,21 @@ targets:
             stderr: vec![],
         }]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "val", &make_target(Some("api"), "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert!(calls[0].1.contains(&"my-api-service".to_string()));
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"my-api-service".to_string()));
     }
 
     #[test]
     fn deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -327,24 +316,24 @@ targets:
             stderr: vec![],
         }]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target(Some("web"), "prod"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert!(calls[0].1.contains(&"--project".to_string()));
-        assert!(calls[0].1.contains(&"my-prod-project".to_string()));
-        assert!(calls[0].1.contains(&"--region".to_string()));
-        assert!(calls[0].1.contains(&"europe-west1".to_string()));
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"--project".to_string()));
+        assert!(calls[0].args.contains(&"my-prod-project".to_string()));
+        assert!(calls[0].args.contains(&"--region".to_string()));
+        assert!(calls[0].args.contains(&"europe-west1".to_string()));
     }
 
     #[test]
     fn delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -352,16 +341,16 @@ targets:
             stderr: vec![],
         }]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .delete_secret("MY_KEY", &make_target(Some("web"), "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "run",
                 "services",
@@ -379,12 +368,12 @@ targets:
 
     #[test]
     fn requires_app() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -396,12 +385,12 @@ targets:
 
     #[test]
     fn unknown_app_mapping() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -415,8 +404,8 @@ targets:
 
     #[test]
     fn nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gcp_cloud_run.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -424,7 +413,7 @@ targets:
             stderr: b"permission denied".to_vec(),
         }]);
         let target = GcpCloudRunTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

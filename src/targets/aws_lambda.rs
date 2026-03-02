@@ -317,19 +317,11 @@ impl DeployTarget for AwsLambdaTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
@@ -342,9 +334,7 @@ targets:
     env_flags:
       prod: "--no-paginate"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_config_with_kms(dir: &std::path::Path) -> Config {
@@ -426,8 +416,8 @@ targets:
 
     #[test]
     fn preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -442,23 +432,23 @@ targets:
             },
         ]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].1, vec!["--version"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].args, vec!["--version"]);
         assert_eq!(
-            calls[1].1,
+            calls[1].args,
             vec!["sts", "get-caller-identity", "--region", "us-east-1"]
         );
     }
 
     #[test]
     fn preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -473,7 +463,7 @@ targets:
             },
         ]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -483,12 +473,12 @@ targets:
 
     #[test]
     fn preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -498,8 +488,8 @@ targets:
 
     #[test]
     fn deploy_batch_merge() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // get-function-configuration returns existing vars
@@ -511,7 +501,7 @@ targets:
             success_output(),
         ]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -523,20 +513,20 @@ targets:
         let results = target.deploy_batch(&secrets, &make_target("dev"));
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
 
         // Verify get call
-        assert_eq!(calls[0].1[0], "lambda");
-        assert_eq!(calls[0].1[1], "get-function-configuration");
-        assert_eq!(calls[0].1[3], "myapp-dev");
+        assert_eq!(calls[0].args[0], "lambda");
+        assert_eq!(calls[0].args[1], "get-function-configuration");
+        assert_eq!(calls[0].args[3], "myapp-dev");
 
         // Verify update call
-        assert_eq!(calls[1].1[0], "lambda");
-        assert_eq!(calls[1].1[1], "update-function-configuration");
+        assert_eq!(calls[1].args[0], "lambda");
+        assert_eq!(calls[1].args[1], "update-function-configuration");
 
         // Parse the stdin JSON to verify merge
-        let stdin = calls[1].2.as_ref().unwrap();
+        let stdin = calls[1].stdin.as_ref().unwrap();
         let json: serde_json::Value = serde_json::from_slice(stdin).unwrap();
         let vars = json["Environment"]["Variables"].as_object().unwrap();
         // Existing vars preserved
@@ -551,13 +541,13 @@ targets:
 
     #[test]
     fn deploy_batch_empty_existing() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![get_config_response_empty(), success_output()]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -566,8 +556,8 @@ targets:
         let results = target.deploy_batch(&secrets, &make_target("dev"));
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
-        let calls = take_calls(&runner);
-        let stdin = calls[1].2.as_ref().unwrap();
+        let calls = runner.take_calls();
+        let stdin = calls[1].stdin.as_ref().unwrap();
         let json: serde_json::Value = serde_json::from_slice(stdin).unwrap();
         let vars = json["Environment"]["Variables"].as_object().unwrap();
         assert_eq!(vars.len(), 1);
@@ -576,8 +566,8 @@ targets:
 
     #[test]
     fn deploy_batch_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             get_config_response(&[], "rev-1"),
@@ -588,7 +578,7 @@ targets:
             },
         ]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -605,8 +595,8 @@ targets:
 
     #[test]
     fn deploy_batch_conflict_retry() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // First attempt: get succeeds
@@ -623,7 +613,7 @@ targets:
             success_output(),
         ]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -632,20 +622,20 @@ targets:
         let results = target.deploy_batch(&secrets, &make_target("dev"));
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         // Should have 4 calls: get, update(fail), get, update(success)
         assert_eq!(calls.len(), 4);
 
         // Second update should have rev-2
-        let stdin = calls[3].2.as_ref().unwrap();
+        let stdin = calls[3].stdin.as_ref().unwrap();
         let json: serde_json::Value = serde_json::from_slice(stdin).unwrap();
         assert_eq!(json["RevisionId"], "rev-2");
     }
 
     #[test]
     fn delete_secret_removes_key() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             get_config_response(
@@ -655,7 +645,7 @@ targets:
             success_output(),
         ]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -664,10 +654,10 @@ targets:
             .delete_secret("API_KEY", &make_target("dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
 
-        let stdin = calls[1].2.as_ref().unwrap();
+        let stdin = calls[1].stdin.as_ref().unwrap();
         let json: serde_json::Value = serde_json::from_slice(stdin).unwrap();
         let vars = json["Environment"]["Variables"].as_object().unwrap();
         assert!(!vars.contains_key("API_KEY"));
@@ -676,15 +666,15 @@ targets:
 
     #[test]
     fn delete_secret_key_not_present() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![get_config_response(
             &[("NODE_ENV", "production")],
             "rev-1",
         )]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -693,19 +683,19 @@ targets:
             .delete_secret("NONEXISTENT", &make_target("dev"))
             .unwrap();
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         // Only the get call, no update needed
         assert_eq!(calls.len(), 1);
     }
 
     #[test]
     fn function_name_lookup_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -738,8 +728,8 @@ targets:
         let secrets = vec![make_secret("KEY", "val")];
         target.deploy_batch(&secrets, &make_target("dev"));
 
-        let calls = take_calls(&runner);
-        let stdin = calls[1].2.as_ref().unwrap();
+        let calls = runner.take_calls();
+        let stdin = calls[1].stdin.as_ref().unwrap();
         let json: serde_json::Value = serde_json::from_slice(stdin).unwrap();
         assert_eq!(
             json["KMSKeyArn"],
@@ -749,15 +739,15 @@ targets:
 
     #[test]
     fn env_flags_applied() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_lambda.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             get_config_response(&[], "rev-1"),
             success_output(),
         ]);
         let target = AwsLambdaTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -765,9 +755,9 @@ targets:
         let secrets = vec![make_secret("KEY", "val")];
         target.deploy_batch(&secrets, &make_target("prod"));
 
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         // Both get and update should have --no-paginate
-        assert!(calls[0].1.contains(&"--no-paginate".to_string()));
-        assert!(calls[1].1.contains(&"--no-paginate".to_string()));
+        assert!(calls[0].args.contains(&"--no-paginate".to_string()));
+        assert!(calls[1].args.contains(&"--no-paginate".to_string()));
     }
 }

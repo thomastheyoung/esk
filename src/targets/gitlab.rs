@@ -82,19 +82,11 @@ impl DeployTarget for GitlabTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: x
 environments: [dev, prod]
@@ -103,9 +95,7 @@ targets:
     env_flags:
       prod: "--masked"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -118,8 +108,8 @@ targets:
 
     #[test]
     fn gitlab_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -134,19 +124,19 @@ targets:
             },
         ]);
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
-        assert_eq!(calls[1].1, vec!["auth", "status"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[1].args, vec!["auth", "status"]);
     }
 
     #[test]
     fn gitlab_preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -161,7 +151,7 @@ targets:
             },
         ]);
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -171,12 +161,12 @@ targets:
 
     #[test]
     fn gitlab_preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -186,8 +176,8 @@ targets:
 
     #[test]
     fn gitlab_deploy_uses_stdin() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -195,28 +185,28 @@ targets:
             stderr: vec![],
         }]);
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "glab");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "glab");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["variable", "set", "MY_KEY", "--scope", "dev"]
         );
         // Value is passed via stdin, not in args
-        assert_eq!(calls[0].2.as_deref(), Some(b"secret_val".as_slice()));
-        assert!(!calls[0].1.iter().any(|a| a.contains("secret_val")));
+        assert_eq!(calls[0].stdin.as_deref(), Some(b"secret_val".as_slice()));
+        assert!(!calls[0].args.iter().any(|a| a.contains("secret_val")));
     }
 
     #[test]
     fn gitlab_deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -224,25 +214,25 @@ targets:
             stderr: vec![],
         }]);
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["variable", "set", "KEY", "--scope", "prod", "--masked"]
         );
-        assert_eq!(calls[0].2.as_deref(), Some(b"val".as_slice()));
+        assert_eq!(calls[0].stdin.as_deref(), Some(b"val".as_slice()));
     }
 
     #[test]
     fn gitlab_delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -250,22 +240,22 @@ targets:
             stderr: vec![],
         }]);
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target.delete_secret("MY_KEY", &make_target("dev")).unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["variable", "delete", "MY_KEY", "--scope", "dev"]
         );
     }
 
     #[test]
     fn gitlab_delete_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -273,22 +263,22 @@ targets:
             stderr: vec![],
         }]);
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target.delete_secret("KEY", &make_target("prod")).unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["variable", "delete", "KEY", "--scope", "prod", "--masked"]
         );
     }
 
     #[test]
     fn gitlab_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -296,7 +286,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -308,8 +298,8 @@ targets:
 
     #[test]
     fn gitlab_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -317,7 +307,7 @@ targets:
             stderr: b"api error".to_vec(),
         }]);
         let target = GitlabTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

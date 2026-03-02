@@ -187,19 +187,8 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
-    fn make_config(yaml: &str) -> ConfigFixture {
-        ConfigFixture::new(yaml).unwrap()
-    }
 
     fn azure_yaml() -> &'static str {
         r#"
@@ -228,7 +217,7 @@ remotes:
 
     #[test]
     fn secret_name_substitution() {
-        let fixture = make_config(azure_yaml());
+        let fixture = ConfigFixture::new(azure_yaml()).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
@@ -239,7 +228,7 @@ remotes:
 
     #[test]
     fn secret_name_sanitizes_underscores() {
-        let fixture = make_config(
+        let fixture = ConfigFixture::new(
             r#"
 project: my_app
 environments: [dev]
@@ -248,7 +237,7 @@ remotes:
     vault_name: v
     secret_name: "{project}_{environment}"
 "#,
-        );
+        ).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
@@ -259,7 +248,7 @@ remotes:
 
     #[test]
     fn preflight_success() {
-        let fixture = make_config(azure_yaml());
+        let fixture = ConfigFixture::new(azure_yaml()).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
@@ -276,15 +265,15 @@ remotes:
         ]);
         let remote = AzureKeyVaultRemote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert!(calls[1].1.contains(&"account".to_string()));
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert!(calls[1].args.contains(&"account".to_string()));
     }
 
     #[test]
     fn preflight_missing_az() {
-        let fixture = make_config(azure_yaml());
+        let fixture = ConfigFixture::new(azure_yaml()).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = ErrorCommandRunner::missing_command();
@@ -296,7 +285,7 @@ remotes:
 
     #[test]
     fn preflight_auth_failure() {
-        let fixture = make_config(azure_yaml());
+        let fixture = ConfigFixture::new(azure_yaml()).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
@@ -318,7 +307,7 @@ remotes:
 
     #[test]
     fn push_success() {
-        let fixture = make_config(azure_yaml());
+        let fixture = ConfigFixture::new(azure_yaml()).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
@@ -330,23 +319,23 @@ remotes:
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 1);
-        assert_eq!(calls[0].0, "az");
-        assert!(calls[0].1.contains(&"keyvault".to_string()));
-        assert!(calls[0].1.contains(&"set".to_string()));
-        assert!(calls[0].1.contains(&"my-vault".to_string()));
-        assert!(calls[0].1.contains(&"myapp-dev".to_string()));
+        assert_eq!(calls[0].program, "az");
+        assert!(calls[0].args.contains(&"keyvault".to_string()));
+        assert!(calls[0].args.contains(&"set".to_string()));
+        assert!(calls[0].args.contains(&"my-vault".to_string()));
+        assert!(calls[0].args.contains(&"myapp-dev".to_string()));
         // Verify --file is used instead of --value (no secret values in args)
-        assert!(calls[0].1.contains(&"--file".to_string()));
-        assert!(!calls[0].1.contains(&"--value".to_string()));
+        assert!(calls[0].args.contains(&"--file".to_string()));
+        assert!(!calls[0].args.contains(&"--value".to_string()));
         // Secret value should not appear in args
-        assert!(!calls[0].1.iter().any(|a| a.contains("sk_test")));
+        assert!(!calls[0].args.iter().any(|a| a.contains("sk_test")));
     }
 
     #[test]
     fn push_skips_empty_env() {
-        let fixture = make_config(azure_yaml());
+        let fixture = ConfigFixture::new(azure_yaml()).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
@@ -354,13 +343,13 @@ remotes:
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert!(calls.is_empty());
     }
 
     #[test]
     fn pull_success() {
-        let fixture = make_config(azure_yaml());
+        let fixture = ConfigFixture::new(azure_yaml()).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let inner = serde_json::json!({
@@ -387,7 +376,7 @@ remotes:
 
     #[test]
     fn pull_not_found_returns_none() {
-        let fixture = make_config(azure_yaml());
+        let fixture = ConfigFixture::new(azure_yaml()).expect("fixture");
         let remote_config: AzureKeyVaultRemoteConfig =
             fixture.config().remote_config("azure").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {

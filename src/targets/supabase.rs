@@ -42,7 +42,6 @@ impl DeployTarget for SupabaseTarget<'_> {
                 "supabase is not installed or not in PATH. Install it from: https://supabase.com/docs/guides/cli"
             )
         })?;
-
         let project_ref = &self.target_config.project_ref;
         let output = self
             .runner
@@ -55,10 +54,9 @@ impl DeployTarget for SupabaseTarget<'_> {
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
             anyhow::bail!(
-                "supabase project '{project_ref}' not accessible (not logged in or invalid project ref): {stderr}"
+                "supabase project '{project_ref}' not accessible. Run: supabase login\n{stderr}"
             );
         }
-
         Ok(())
     }
 
@@ -102,19 +100,11 @@ impl DeployTarget for SupabaseTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: x
 environments: [dev, prod]
@@ -124,9 +114,7 @@ targets:
     env_flags:
       prod: "--experimental"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -139,8 +127,8 @@ targets:
 
     #[test]
     fn supabase_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -155,24 +143,24 @@ targets:
             },
         ]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
         assert_eq!(
-            calls[1].1,
+            calls[1].args,
             vec!["secrets", "list", "--project-ref", "abcdef123456"]
         );
     }
 
     #[test]
     fn supabase_preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -187,7 +175,7 @@ targets:
             },
         ]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -197,12 +185,12 @@ targets:
 
     #[test]
     fn supabase_preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -212,8 +200,8 @@ targets:
 
     #[test]
     fn supabase_deploy_uses_stdin() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -221,31 +209,31 @@ targets:
             stderr: vec![],
         }]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "supabase");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "supabase");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["secrets", "set", "--project-ref", "abcdef123456"]
         );
         // Value is passed via stdin, not in args
         assert_eq!(
-            calls[0].2.as_deref(),
+            calls[0].stdin.as_deref(),
             Some(b"MY_KEY=secret_val\n".as_slice())
         );
-        assert!(!calls[0].1.iter().any(|a| a.contains("secret_val")));
+        assert!(!calls[0].args.iter().any(|a| a.contains("secret_val")));
     }
 
     #[test]
     fn supabase_deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -253,16 +241,16 @@ targets:
             stderr: vec![],
         }]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "secrets",
                 "set",
@@ -271,13 +259,13 @@ targets:
                 "--experimental"
             ]
         );
-        assert_eq!(calls[0].2.as_deref(), Some(b"KEY=val\n".as_slice()));
+        assert_eq!(calls[0].stdin.as_deref(), Some(b"KEY=val\n".as_slice()));
     }
 
     #[test]
     fn supabase_delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -285,14 +273,14 @@ targets:
             stderr: vec![],
         }]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target.delete_secret("MY_KEY", &make_target("dev")).unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "secrets",
                 "unset",
@@ -305,8 +293,8 @@ targets:
 
     #[test]
     fn supabase_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -314,7 +302,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -326,12 +314,12 @@ targets:
 
     #[test]
     fn supabase_rejects_newline_in_value() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -343,12 +331,12 @@ targets:
 
     #[test]
     fn supabase_rejects_cr_in_value() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -360,8 +348,8 @@ targets:
 
     #[test]
     fn supabase_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.supabase.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -369,7 +357,7 @@ targets:
             stderr: b"api error".to_vec(),
         }]);
         let target = SupabaseTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

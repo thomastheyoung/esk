@@ -102,19 +102,11 @@ impl DeployTarget for HerokuTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: x
 environments: [dev, prod]
@@ -128,9 +120,7 @@ targets:
     env_flags:
       prod: "--remote staging"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(app: Option<&str>, env: &str) -> ResolvedTarget {
@@ -143,8 +133,8 @@ targets:
 
     #[test]
     fn heroku_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -159,19 +149,19 @@ targets:
             },
         ]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
-        assert_eq!(calls[1].1, vec!["auth:whoami"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[1].args, vec!["auth:whoami"]);
     }
 
     #[test]
     fn heroku_preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -186,7 +176,7 @@ targets:
             },
         ]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -196,12 +186,12 @@ targets:
 
     #[test]
     fn heroku_preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -211,8 +201,8 @@ targets:
 
     #[test]
     fn heroku_deploy_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -220,25 +210,25 @@ targets:
             stderr: vec![],
         }]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target(Some("web"), "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "heroku");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "heroku");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["config:set", "MY_KEY=secret_val", "-a", "my-heroku-app"]
         );
     }
 
     #[test]
     fn heroku_deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -246,16 +236,16 @@ targets:
             stderr: vec![],
         }]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target(Some("web"), "prod"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "config:set",
                 "KEY=val",
@@ -269,12 +259,12 @@ targets:
 
     #[test]
     fn heroku_requires_app() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -286,12 +276,12 @@ targets:
 
     #[test]
     fn heroku_unknown_app_mapping() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -303,8 +293,8 @@ targets:
 
     #[test]
     fn heroku_delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -312,24 +302,24 @@ targets:
             stderr: vec![],
         }]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .delete_secret("MY_KEY", &make_target(Some("web"), "dev"))
             .unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec!["config:unset", "MY_KEY", "-a", "my-heroku-app"]
         );
     }
 
     #[test]
     fn heroku_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -337,7 +327,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -349,8 +339,8 @@ targets:
 
     #[test]
     fn heroku_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.heroku.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -358,7 +348,7 @@ targets:
             stderr: b"auth error".to_vec(),
         }]);
         let target = HerokuTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

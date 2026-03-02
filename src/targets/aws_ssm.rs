@@ -138,19 +138,11 @@ impl DeployTarget for AwsSsmTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
-    fn take_calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .take_calls()
-            .into_iter()
-            .map(|call| (call.program, call.args, call.stdin))
-            .collect()
-    }
 
-    fn make_config(dir: &std::path::Path) -> Config {
+    fn make_config() -> ConfigFixture {
         let yaml = r#"
 project: myapp
 environments: [dev, prod]
@@ -161,9 +153,7 @@ targets:
     env_flags:
       prod: "--no-paginate"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).expect("fixture")
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -176,8 +166,8 @@ targets:
 
     #[test]
     fn preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -192,23 +182,23 @@ targets:
             },
         ]);
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         assert!(target.preflight().is_ok());
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].1, vec!["--version"]);
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].args, vec!["--version"]);
         assert_eq!(
-            calls[1].1,
+            calls[1].args,
             vec!["sts", "get-caller-identity", "--region", "us-east-1"]
         );
     }
 
     #[test]
     fn preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -223,7 +213,7 @@ targets:
             },
         ]);
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -233,12 +223,12 @@ targets:
 
     #[test]
     fn preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -248,8 +238,8 @@ targets:
 
     #[test]
     fn deploy_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -257,17 +247,17 @@ targets:
             stderr: vec![],
         }]);
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("MY_KEY", "secret_val", &make_target("dev"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert_eq!(calls[0].0, "aws");
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "aws");
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "ssm",
                 "put-parameter",
@@ -278,7 +268,7 @@ targets:
             ]
         );
         // Verify stdin contains the JSON payload
-        let stdin = calls[0].2.as_ref().unwrap();
+        let stdin = calls[0].stdin.as_ref().unwrap();
         let json: serde_json::Value = serde_json::from_slice(stdin).unwrap();
         assert_eq!(json["Name"], "/myapp/dev/MY_KEY");
         assert_eq!(json["Value"], "secret_val");
@@ -288,8 +278,8 @@ targets:
 
     #[test]
     fn deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -297,21 +287,21 @@ targets:
             stderr: vec![],
         }]);
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target
             .deploy_secret("KEY", "val", &make_target("prod"))
             .unwrap();
-        let calls = take_calls(&runner);
-        assert!(calls[0].1.contains(&"--no-paginate".to_string()));
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"--no-paginate".to_string()));
     }
 
     #[test]
     fn delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -319,14 +309,14 @@ targets:
             stderr: vec![],
         }]);
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         target.delete_secret("MY_KEY", &make_target("dev")).unwrap();
-        let calls = take_calls(&runner);
+        let calls = runner.take_calls();
         assert_eq!(
-            calls[0].1,
+            calls[0].args,
             vec![
                 "ssm",
                 "delete-parameter",
@@ -340,8 +330,8 @@ targets:
 
     #[test]
     fn delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -349,7 +339,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -361,8 +351,8 @@ targets:
 
     #[test]
     fn deploy_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -370,7 +360,7 @@ targets:
             stderr: b"access denied".to_vec(),
         }]);
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -382,11 +372,11 @@ targets:
 
     #[test]
     fn path_interpolation() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_config();
+        let config = fixture.config();
         let target_config = config.targets.aws_ssm.as_ref().unwrap();
         let target = AwsSsmTarget {
-            config: &config,
+            config,
             target_config,
             runner: &MockCommandRunner::from_outputs(vec![]),
         };

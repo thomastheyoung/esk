@@ -321,15 +321,7 @@ mod tests {
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
-    type RunnerCall = (String, Vec<String>);
 
-    fn calls(runner: &MockCommandRunner) -> Vec<RunnerCall> {
-        runner
-            .calls()
-            .into_iter()
-            .map(|call| (call.program, call.args))
-            .collect()
-    }
 
     #[test]
     fn op_item_from_json_parses_secrets() {
@@ -465,10 +457,10 @@ remotes:
         ]);
         let remote = OnePasswordRemote::new(&config, op_config, &runner);
         assert!(remote.preflight().is_ok());
-        let calls = calls(&runner);
+        let calls = runner.calls();
         assert_eq!(calls.len(), 2);
-        assert_eq!(calls[0].1, vec!["--version"]);
-        assert_eq!(calls[1].1, vec!["vault", "get", "V", "--format", "json"]);
+        assert_eq!(calls[0].args, vec!["--version"]);
+        assert_eq!(calls[1].args, vec!["vault", "get", "V", "--format", "json"]);
     }
 
     #[test]
@@ -692,10 +684,10 @@ secrets:
         secrets.insert("SECRET".to_string(), "new_val".to_string());
         remote.push_item("dev", &secrets, 2).unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         // Last call is op item edit
         let edit_call = calls.last().unwrap();
-        let args_str = edit_call.1.join(" ");
+        let args_str = edit_call.args.join(" ");
         assert!(args_str.contains("Vendor.STALE_KEY[delete]"));
     }
 
@@ -743,9 +735,9 @@ secrets:
         secrets.insert("API_KEY".to_string(), "new_val".to_string());
         remote.push_item("dev", &secrets, 2).unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         let edit_call = calls.last().unwrap();
-        let args_str = edit_call.1.join(" ");
+        let args_str = edit_call.args.join(" ");
         assert!(!args_str.contains("[delete]"));
     }
 
@@ -789,9 +781,9 @@ remotes:
         let secrets = BTreeMap::new();
         remote.push_item("dev", &secrets, 2).unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         let edit_call = calls.last().unwrap();
-        let args_str = edit_call.1.join(" ");
+        let args_str = edit_call.args.join(" ");
         // Should use "Stripe" section from remote, not "General"
         assert!(args_str.contains("Stripe.API_KEY[delete]"));
         assert!(!args_str.contains("General.API_KEY[delete]"));
@@ -831,10 +823,10 @@ remotes:
         secrets.insert("API_KEY".to_string(), "val".to_string());
         remote.push_item("dev", &secrets, 1).unwrap();
 
-        let calls = calls(&runner);
+        let calls = runner.calls();
         // Second call is op item create
         let create_call = &calls[1];
-        let args_str = create_call.1.join(" ");
+        let args_str = create_call.args.join(" ");
         assert!(args_str.contains("create"));
         assert!(!args_str.contains("[delete]"));
     }
