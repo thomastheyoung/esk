@@ -65,6 +65,9 @@ pub struct Config {
     /// Typed remote configs, populated during validation.
     #[serde(skip)]
     pub(crate) typed_remotes: Vec<TypedRemoteConfig>,
+    /// Typed target configs, populated during validation.
+    #[serde(skip)]
+    pub(crate) typed_targets: Vec<TypedTargetConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -116,36 +119,6 @@ pub struct TargetsConfig {
     pub render: Option<RenderTargetConfig>,
     #[serde(default)]
     pub custom: BTreeMap<String, CustomTargetConfig>,
-}
-
-impl TargetsConfig {
-    /// Single source of truth for built-in target name ↔ config field mapping.
-    ///
-    /// Returns `(name, is_configured)` for each built-in target. Adding a new
-    /// target requires adding an entry here and in `target_candidates()`.
-    pub fn builtin_entries(&self) -> [(&'static str, bool); 19] {
-        [
-            (".env", self.dotenv.is_some()),
-            ("cloudflare", self.cloudflare.is_some()),
-            ("convex", self.convex.is_some()),
-            ("fly", self.fly.is_some()),
-            ("netlify", self.netlify.is_some()),
-            ("vercel", self.vercel.is_some()),
-            ("github", self.github.is_some()),
-            ("heroku", self.heroku.is_some()),
-            ("supabase", self.supabase.is_some()),
-            ("railway", self.railway.is_some()),
-            ("gitlab", self.gitlab.is_some()),
-            ("aws_ssm", self.aws_ssm.is_some()),
-            ("aws_lambda", self.aws_lambda.is_some()),
-            ("kubernetes", self.kubernetes.is_some()),
-            ("docker", self.docker.is_some()),
-            ("circleci", self.circleci.is_some()),
-            ("azure_app_service", self.azure_app_service.is_some()),
-            ("gcp_cloud_run", self.gcp_cloud_run.is_some()),
-            ("render", self.render.is_some()),
-        ]
-    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -517,6 +490,146 @@ pub(crate) enum TypedRemoteConfig {
     Sops(SopsRemoteConfig),
 }
 
+impl TypedRemoteConfig {
+    #[allow(dead_code)]
+    pub fn name(&self) -> &str {
+        match self {
+            Self::OnePassword(_) => "1password",
+            Self::CloudFile { name, .. } => name,
+            Self::AwsSecretsManager(_) => "aws_secrets_manager",
+            Self::Bitwarden(_) => "bitwarden",
+            Self::Vault(_) => "vault",
+            Self::S3(_) => "s3",
+            Self::Gcp(_) => "gcp",
+            Self::Azure(_) => "azure",
+            Self::Doppler(_) => "doppler",
+            Self::Infisical(_) => "infisical",
+            Self::Sops(_) => "sops",
+        }
+    }
+
+    pub fn ok_message(&self) -> &'static str {
+        match self {
+            Self::OnePassword(_) => "vault accessible",
+            Self::CloudFile { .. } => "directory writable",
+            Self::AwsSecretsManager(_) => "CLI available",
+            Self::Bitwarden(_) => "authenticated",
+            Self::Vault(_) => "authenticated",
+            Self::S3(_) => "CLI available",
+            Self::Gcp(_) => "authenticated",
+            Self::Azure(_) => "authenticated",
+            Self::Doppler(_) => "authenticated",
+            Self::Infisical(_) => "CLI available",
+            Self::Sops(_) => "CLI available",
+        }
+    }
+}
+
+/// Typed target configuration, populated during validation.
+/// Mirrors `TypedRemoteConfig` — brings targets to the same enum-based pattern.
+#[derive(Debug, Clone)]
+#[allow(dead_code)] // Inner config data kept for consistency; some variants unused in match arms
+pub(crate) enum TypedTargetConfig {
+    Dotenv(DotenvTargetConfig),
+    Cloudflare(CloudflareTargetConfig),
+    Convex(ConvexTargetConfig),
+    Fly(FlyTargetConfig),
+    Netlify(NetlifyTargetConfig),
+    Vercel(VercelTargetConfig),
+    Github(GithubTargetConfig),
+    Heroku(HerokuTargetConfig),
+    Supabase(SupabaseTargetConfig),
+    Railway(RailwayTargetConfig),
+    Gitlab(GitlabTargetConfig),
+    AwsSsm(AwsSsmTargetConfig),
+    AwsLambda(AwsLambdaTargetConfig),
+    Kubernetes(KubernetesTargetConfig),
+    Docker(DockerTargetConfig),
+    Circleci(CircleciTargetConfig),
+    AzureAppService(AzureAppServiceTargetConfig),
+    GcpCloudRun(GcpCloudRunTargetConfig),
+    Render(RenderTargetConfig),
+    Custom {
+        name: String,
+        config: CustomTargetConfig,
+    },
+}
+
+impl TypedTargetConfig {
+    /// All built-in target names, for collision detection with custom targets.
+    pub const BUILTIN_NAMES: &[&str] = &[
+        ".env",
+        "cloudflare",
+        "convex",
+        "fly",
+        "netlify",
+        "vercel",
+        "github",
+        "heroku",
+        "supabase",
+        "railway",
+        "gitlab",
+        "aws_ssm",
+        "aws_lambda",
+        "kubernetes",
+        "docker",
+        "circleci",
+        "azure_app_service",
+        "gcp_cloud_run",
+        "render",
+    ];
+
+    pub fn name(&self) -> &str {
+        match self {
+            Self::Dotenv(_) => ".env",
+            Self::Cloudflare(_) => "cloudflare",
+            Self::Convex(_) => "convex",
+            Self::Fly(_) => "fly",
+            Self::Netlify(_) => "netlify",
+            Self::Vercel(_) => "vercel",
+            Self::Github(_) => "github",
+            Self::Heroku(_) => "heroku",
+            Self::Supabase(_) => "supabase",
+            Self::Railway(_) => "railway",
+            Self::Gitlab(_) => "gitlab",
+            Self::AwsSsm(_) => "aws_ssm",
+            Self::AwsLambda(_) => "aws_lambda",
+            Self::Kubernetes(_) => "kubernetes",
+            Self::Docker(_) => "docker",
+            Self::Circleci(_) => "circleci",
+            Self::AzureAppService(_) => "azure_app_service",
+            Self::GcpCloudRun(_) => "gcp_cloud_run",
+            Self::Render(_) => "render",
+            Self::Custom { name, .. } => name,
+        }
+    }
+
+    pub fn ok_message(&self) -> &'static str {
+        match self {
+            Self::Dotenv(_) => "writable",
+            Self::Cloudflare(_) => "wrangler authenticated",
+            Self::Convex(_) => "deployment accessible",
+            Self::Fly(_) => "fly authenticated",
+            Self::Netlify(_) => "netlify linked",
+            Self::Vercel(_) => "vercel authenticated",
+            Self::Github(_) => "gh authenticated",
+            Self::Heroku(_) => "heroku authenticated",
+            Self::Supabase(_) => "supabase available",
+            Self::Railway(_) => "railway authenticated",
+            Self::Gitlab(_) => "glab authenticated",
+            Self::AwsSsm(_) => "aws authenticated",
+            Self::AwsLambda(_) => "aws authenticated",
+            Self::Kubernetes(_) => "kubectl available",
+            Self::Docker(_) => "swarm active",
+            Self::Circleci(_) => "circleci available",
+            Self::AzureAppService(_) => "az authenticated",
+            Self::GcpCloudRun(_) => "gcloud authenticated",
+            Self::Render(_) => "API authenticated",
+            Self::Custom { .. } => "ready",
+        }
+    }
+}
+
 /// Whether a secret is required to have a value before deploy.
 ///
 /// YAML forms: `required: true`, `required: false`, `required: [prod, staging]`.
@@ -730,11 +843,12 @@ impl Config {
                 }
             }
         }
+        // Populate typed_targets from flat config fields
+        self.populate_typed_targets();
+
         // Validate custom targets
         for (name, custom) in &self.targets.custom {
-            if self.targets.builtin_entries().iter().any(|(n, _)| *n == name.as_str())
-                || name == "custom"
-            {
+            if TypedTargetConfig::BUILTIN_NAMES.contains(&name.as_str()) || name == "custom" {
                 bail!("custom target '{name}' conflicts with built-in target name");
             }
             if !name
@@ -976,6 +1090,73 @@ impl Config {
         Ok(())
     }
 
+    fn populate_typed_targets(&mut self) {
+        if let Some(cfg) = &self.targets.dotenv {
+            self.typed_targets.push(TypedTargetConfig::Dotenv(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.cloudflare {
+            self.typed_targets.push(TypedTargetConfig::Cloudflare(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.convex {
+            self.typed_targets.push(TypedTargetConfig::Convex(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.fly {
+            self.typed_targets.push(TypedTargetConfig::Fly(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.netlify {
+            self.typed_targets.push(TypedTargetConfig::Netlify(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.vercel {
+            self.typed_targets.push(TypedTargetConfig::Vercel(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.github {
+            self.typed_targets.push(TypedTargetConfig::Github(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.heroku {
+            self.typed_targets.push(TypedTargetConfig::Heroku(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.supabase {
+            self.typed_targets.push(TypedTargetConfig::Supabase(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.railway {
+            self.typed_targets.push(TypedTargetConfig::Railway(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.gitlab {
+            self.typed_targets.push(TypedTargetConfig::Gitlab(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.aws_ssm {
+            self.typed_targets.push(TypedTargetConfig::AwsSsm(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.aws_lambda {
+            self.typed_targets.push(TypedTargetConfig::AwsLambda(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.kubernetes {
+            self.typed_targets.push(TypedTargetConfig::Kubernetes(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.docker {
+            self.typed_targets.push(TypedTargetConfig::Docker(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.circleci {
+            self.typed_targets.push(TypedTargetConfig::Circleci(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.azure_app_service {
+            self.typed_targets
+                .push(TypedTargetConfig::AzureAppService(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.gcp_cloud_run {
+            self.typed_targets.push(TypedTargetConfig::GcpCloudRun(cfg.clone()));
+        }
+        if let Some(cfg) = &self.targets.render {
+            self.typed_targets.push(TypedTargetConfig::Render(cfg.clone()));
+        }
+        for (name, cfg) in &self.targets.custom {
+            self.typed_targets.push(TypedTargetConfig::Custom {
+                name: name.clone(),
+                config: cfg.clone(),
+            });
+        }
+    }
+
     fn validate_target_string(&self, service: &str, target: &str) -> Result<()> {
         let resolved = self.parse_target(service, target)?;
         if !self.environments.contains(&resolved.environment) {
@@ -1158,15 +1339,7 @@ impl Config {
 
     /// Get the set of configured target names.
     pub fn target_names(&self) -> Vec<&str> {
-        let mut names: Vec<&str> = self
-            .targets
-            .builtin_entries()
-            .into_iter()
-            .filter(|(_, present)| *present)
-            .map(|(name, _)| name)
-            .collect();
-        names.extend(self.targets.custom.keys().map(String::as_str));
-        names
+        self.typed_targets.iter().map(|t| t.name()).collect()
     }
 
     /// Return the sorted list of group names from config secrets.

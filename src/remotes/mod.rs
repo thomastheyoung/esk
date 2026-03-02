@@ -125,75 +125,68 @@ fn remote_candidates<'a>(
     config
         .typed_remotes
         .iter()
-        .map(|typed| match typed {
-            TypedRemoteConfig::OnePassword(cfg) => RemoteCandidate {
-                remote: Box::new(onepassword::OnePasswordRemote::new(
-                    config,
-                    cfg.clone(),
-                    runner,
-                )),
-                ok_message: "vault accessible",
-            },
-            TypedRemoteConfig::CloudFile { name, config: cfg } => RemoteCandidate {
-                remote: Box::new(cloud_file::CloudFileRemote::new(
-                    name.clone(),
-                    config.project.clone(),
-                    cfg.clone(),
-                )),
-                ok_message: "directory writable",
-            },
-            TypedRemoteConfig::AwsSecretsManager(cfg) => RemoteCandidate {
-                remote: Box::new(aws_secrets_manager::AwsSecretsManagerRemote::new(
-                    config,
-                    cfg.clone(),
-                    runner,
-                )),
-                ok_message: "CLI available",
-            },
-            TypedRemoteConfig::Bitwarden(cfg) => RemoteCandidate {
-                remote: Box::new(bitwarden::BitwardenRemote::new(config, cfg.clone(), runner)),
-                ok_message: "authenticated",
-            },
-            TypedRemoteConfig::Vault(cfg) => RemoteCandidate {
-                remote: Box::new(hashicorp_vault::HashicorpVaultRemote::new(
-                    config,
-                    cfg.clone(),
-                    runner,
-                )),
-                ok_message: "authenticated",
-            },
-            TypedRemoteConfig::S3(cfg) => RemoteCandidate {
-                remote: Box::new(s3::S3Remote::new(config, cfg.clone(), runner)),
-                ok_message: "CLI available",
-            },
-            TypedRemoteConfig::Gcp(cfg) => RemoteCandidate {
-                remote: Box::new(gcp_secret_manager::GcpSecretManagerRemote::new(
-                    config,
-                    cfg.clone(),
-                    runner,
-                )),
-                ok_message: "authenticated",
-            },
-            TypedRemoteConfig::Azure(cfg) => RemoteCandidate {
-                remote: Box::new(azure_key_vault::AzureKeyVaultRemote::new(
-                    config,
-                    cfg.clone(),
-                    runner,
-                )),
-                ok_message: "authenticated",
-            },
-            TypedRemoteConfig::Doppler(cfg) => RemoteCandidate {
-                remote: Box::new(doppler::DopplerRemote::new(cfg.clone(), runner)),
-                ok_message: "authenticated",
-            },
-            TypedRemoteConfig::Infisical(cfg) => RemoteCandidate {
-                remote: Box::new(infisical::InfisicalRemote::new(cfg.clone(), runner)),
-                ok_message: "CLI available",
-            },
-            TypedRemoteConfig::Sops(cfg) => RemoteCandidate {
-                remote: Box::new(sops::SopsRemote::new(config, cfg.clone(), runner)),
-                ok_message: "CLI available",
-            },
+        .map(|typed| {
+            let ok_message = typed.ok_message();
+            let remote: Box<dyn SyncRemote + 'a> = match typed {
+                TypedRemoteConfig::OnePassword(cfg) => {
+                    Box::new(onepassword::OnePasswordRemote::new(
+                        config,
+                        cfg.clone(),
+                        runner,
+                    ))
+                }
+                TypedRemoteConfig::CloudFile { name, config: cfg } => {
+                    Box::new(cloud_file::CloudFileRemote::new(
+                        name.clone(),
+                        config.project.clone(),
+                        cfg.clone(),
+                    ))
+                }
+                TypedRemoteConfig::AwsSecretsManager(cfg) => {
+                    Box::new(aws_secrets_manager::AwsSecretsManagerRemote::new(
+                        config,
+                        cfg.clone(),
+                        runner,
+                    ))
+                }
+                TypedRemoteConfig::Bitwarden(cfg) => {
+                    Box::new(bitwarden::BitwardenRemote::new(config, cfg.clone(), runner))
+                }
+                TypedRemoteConfig::Vault(cfg) => {
+                    Box::new(hashicorp_vault::HashicorpVaultRemote::new(
+                        config,
+                        cfg.clone(),
+                        runner,
+                    ))
+                }
+                TypedRemoteConfig::S3(cfg) => {
+                    Box::new(s3::S3Remote::new(config, cfg.clone(), runner))
+                }
+                TypedRemoteConfig::Gcp(cfg) => {
+                    Box::new(gcp_secret_manager::GcpSecretManagerRemote::new(
+                        config,
+                        cfg.clone(),
+                        runner,
+                    ))
+                }
+                TypedRemoteConfig::Azure(cfg) => {
+                    Box::new(azure_key_vault::AzureKeyVaultRemote::new(
+                        config,
+                        cfg.clone(),
+                        runner,
+                    ))
+                }
+                TypedRemoteConfig::Doppler(cfg) => {
+                    Box::new(doppler::DopplerRemote::new(cfg.clone(), runner))
+                }
+                TypedRemoteConfig::Infisical(cfg) => {
+                    Box::new(infisical::InfisicalRemote::new(cfg.clone(), runner))
+                }
+                TypedRemoteConfig::Sops(cfg) => {
+                    Box::new(sops::SopsRemote::new(config, cfg.clone(), runner))
+                }
+            };
+            RemoteCandidate { remote, ok_message }
         })
         .collect()
 }

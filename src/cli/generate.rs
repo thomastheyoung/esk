@@ -473,6 +473,7 @@ mod tests {
             generate: Vec::new(),
             root: std::path::PathBuf::from("/tmp"),
             typed_remotes: Vec::new(),
+            typed_targets: Vec::new(),
         }
     }
 

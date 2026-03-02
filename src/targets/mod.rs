@@ -302,225 +302,120 @@ pub(crate) fn target_candidates<'a>(
     config: &'a Config,
     runner: &'a dyn CommandRunner,
 ) -> Vec<TargetCandidate<'a>> {
-    let mut candidates: Vec<TargetCandidate<'a>> = Vec::new();
+    use crate::config::TypedTargetConfig;
 
-    if config.targets.dotenv.is_some() {
-        candidates.push(TargetCandidate {
-            target: Box::new(dotenv::DotenvTarget { config }),
-            ok_message: "writable",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.cloudflare {
-        candidates.push(TargetCandidate {
-            target: Box::new(cloudflare::CloudflareTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "wrangler authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.convex {
-        candidates.push(TargetCandidate {
-            target: Box::new(convex::ConvexTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "deployment accessible",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.fly {
-        candidates.push(TargetCandidate {
-            target: Box::new(fly::FlyTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "fly authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.netlify {
-        candidates.push(TargetCandidate {
-            target: Box::new(netlify::NetlifyTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "netlify linked",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.vercel {
-        candidates.push(TargetCandidate {
-            target: Box::new(vercel::VercelTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "vercel authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.github {
-        candidates.push(TargetCandidate {
-            target: Box::new(github::GithubTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "gh authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.heroku {
-        candidates.push(TargetCandidate {
-            target: Box::new(heroku::HerokuTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "heroku authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.supabase {
-        candidates.push(TargetCandidate {
-            target: Box::new(supabase::SupabaseTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "supabase available",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.railway {
-        candidates.push(TargetCandidate {
-            target: Box::new(railway::RailwayTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "railway authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.gitlab {
-        candidates.push(TargetCandidate {
-            target: Box::new(gitlab::GitlabTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "glab authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.aws_ssm {
-        candidates.push(TargetCandidate {
-            target: Box::new(aws_ssm::AwsSsmTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "aws authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.aws_lambda {
-        candidates.push(TargetCandidate {
-            target: Box::new(aws_lambda::AwsLambdaTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "aws authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.kubernetes {
-        candidates.push(TargetCandidate {
-            target: Box::new(kubernetes::KubernetesTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "kubectl available",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.docker {
-        candidates.push(TargetCandidate {
-            target: Box::new(docker::DockerTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "swarm active",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.circleci {
-        candidates.push(TargetCandidate {
-            target: Box::new(circleci::CircleciTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "circleci available",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.azure_app_service {
-        candidates.push(TargetCandidate {
-            target: Box::new(azure_app_service::AzureAppServiceTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "az authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.gcp_cloud_run {
-        candidates.push(TargetCandidate {
-            target: Box::new(gcp_cloud_run::GcpCloudRunTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "gcloud authenticated",
-        });
-    }
-
-    if let Some(target_config) = &config.targets.render {
-        candidates.push(TargetCandidate {
-            target: Box::new(render::RenderTarget {
-                config,
-                target_config,
-                runner,
-            }),
-            ok_message: "API authenticated",
-        });
-    }
-
-    for (name, target_config) in &config.targets.custom {
-        candidates.push(TargetCandidate {
-            target: Box::new(custom::CustomTarget {
-                target_name: name.clone(),
-                target_config,
-                runner,
-            }),
-            ok_message: "ready",
-        });
-    }
-
-    candidates
+    config
+        .typed_targets
+        .iter()
+        .map(|typed| {
+            let ok_message = typed.ok_message();
+            let target: Box<dyn DeployTarget + 'a> = match typed {
+                TypedTargetConfig::Dotenv(_) => Box::new(dotenv::DotenvTarget { config }),
+                TypedTargetConfig::Cloudflare(cfg) => Box::new(cloudflare::CloudflareTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Convex(cfg) => Box::new(convex::ConvexTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Fly(cfg) => Box::new(fly::FlyTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Netlify(cfg) => Box::new(netlify::NetlifyTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Vercel(cfg) => Box::new(vercel::VercelTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Github(cfg) => Box::new(github::GithubTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Heroku(cfg) => Box::new(heroku::HerokuTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Supabase(cfg) => Box::new(supabase::SupabaseTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Railway(cfg) => Box::new(railway::RailwayTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Gitlab(cfg) => Box::new(gitlab::GitlabTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::AwsSsm(cfg) => Box::new(aws_ssm::AwsSsmTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::AwsLambda(cfg) => Box::new(aws_lambda::AwsLambdaTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Kubernetes(cfg) => Box::new(kubernetes::KubernetesTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Docker(cfg) => Box::new(docker::DockerTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Circleci(cfg) => Box::new(circleci::CircleciTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::AzureAppService(cfg) => {
+                    Box::new(azure_app_service::AzureAppServiceTarget {
+                        config,
+                        target_config: cfg,
+                        runner,
+                    })
+                }
+                TypedTargetConfig::GcpCloudRun(cfg) => {
+                    Box::new(gcp_cloud_run::GcpCloudRunTarget {
+                        config,
+                        target_config: cfg,
+                        runner,
+                    })
+                }
+                TypedTargetConfig::Render(cfg) => Box::new(render::RenderTarget {
+                    config,
+                    target_config: cfg,
+                    runner,
+                }),
+                TypedTargetConfig::Custom { name, config: cfg } => {
+                    Box::new(custom::CustomTarget {
+                        target_name: name.clone(),
+                        target_config: cfg,
+                        runner,
+                    })
+                }
+            };
+            TargetCandidate { target, ok_message }
+        })
+        .collect()
 }
 
 /// Check the health of all configured targets without filtering.
@@ -1055,107 +950,4 @@ targets:
         assert!(cmd_err.to_string().contains("2 more lines"));
     }
 
-    /// Verify that every name in `builtin_entries` appears in `target_candidates`
-    /// when the corresponding config field is set. Catches drift between the two
-    /// registration points.
-    #[test]
-    fn builtin_entries_matches_target_candidates() {
-        use std::collections::BTreeSet;
-
-        // Config with all 19 built-in targets enabled
-        let dir = tempfile::tempdir().unwrap();
-        let yaml = r#"
-project: x
-environments: [dev]
-apps:
-  web:
-    path: apps/web
-targets:
-  .env:
-    pattern: "{app_path}/.env"
-  cloudflare:
-    env_flags: {}
-  convex:
-    path: apps/api
-  fly:
-    app_names:
-      web: my-fly-app
-  netlify:
-    env_flags: {}
-  vercel:
-    env_names:
-      dev: development
-  github:
-    env_flags: {}
-  heroku:
-    app_names:
-      web: my-heroku-app
-  supabase:
-    project_ref: abcdef123456
-  railway:
-    env_flags: {}
-  gitlab:
-    env_flags: {}
-  aws_ssm:
-    path_prefix: "/esk/{environment}/"
-  aws_lambda:
-    function_name:
-      dev: my-lambda-fn
-  kubernetes:
-    secret_name: my-secret
-    namespace:
-      dev: default
-  docker:
-    env_flags: {}
-  circleci:
-    org_id: org-xxx
-    context_name: my-ctx
-  azure_app_service:
-    app_names:
-      web: my-azure-app
-    resource_group: rg
-  gcp_cloud_run:
-    service_names:
-      web: my-svc
-    project: my-gcp-project
-    region: us-central1
-  render:
-    service_ids:
-      web: srv-xxx
-"#;
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        let config = crate::config::Config::load(&path).unwrap();
-
-        struct OkRunner;
-        impl CommandRunner for OkRunner {
-            fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> Result<CommandOutput> {
-                Ok(CommandOutput {
-                    success: true,
-                    stdout: Vec::new(),
-                    stderr: Vec::new(),
-                })
-            }
-        }
-
-        let candidates = target_candidates(&config, &OkRunner);
-        let candidate_names: BTreeSet<&str> =
-            candidates.iter().map(|c| c.target.name()).collect();
-
-        let entry_names: BTreeSet<&str> = config
-            .targets
-            .builtin_entries()
-            .iter()
-            .map(|(name, _)| *name)
-            .collect();
-
-        assert_eq!(
-            entry_names, candidate_names,
-            "builtin_entries() and target_candidates() have drifted: \
-             in entries but not candidates: {:?}, \
-             in candidates but not entries: {:?}",
-            entry_names.difference(&candidate_names).collect::<Vec<_>>(),
-            candidate_names.difference(&entry_names).collect::<Vec<_>>(),
-        );
-    }
 }
