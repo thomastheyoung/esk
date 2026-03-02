@@ -37,16 +37,10 @@ impl AwsSsmTarget<'_> {
     }
 
     fn base_args(&self) -> Vec<String> {
-        let mut args = Vec::new();
-        if let Some(region) = &self.target_config.region {
-            args.push("--region".to_string());
-            args.push(region.clone());
-        }
-        if let Some(profile) = &self.target_config.profile {
-            args.push("--profile".to_string());
-            args.push(profile.clone());
-        }
-        args
+        crate::targets::aws_base_args(
+            self.target_config.region.as_deref(),
+            self.target_config.profile.as_deref(),
+        )
     }
 }
 

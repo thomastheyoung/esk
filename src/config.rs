@@ -17,7 +17,7 @@ pub enum GenerateFormat {
 }
 
 impl GenerateFormat {
-    pub fn default_output(&self) -> &'static str {
+    pub const fn default_output(&self) -> &'static str {
         match self {
             Self::Dts => "env.d.ts",
             Self::Ts => "env.ts",
@@ -25,11 +25,11 @@ impl GenerateFormat {
         }
     }
 
-    pub fn should_warn_gitignore(&self) -> bool {
+    pub const fn should_warn_gitignore(&self) -> bool {
         !matches!(self, Self::EnvExample)
     }
 
-    pub fn cli_name(&self) -> &'static str {
+    pub const fn cli_name(&self) -> &'static str {
         match self {
             Self::Dts => "dts",
             Self::Ts => "ts",

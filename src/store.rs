@@ -11,6 +11,13 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use zeroize::Zeroizing;
 
+/// AES-256 key length in bytes.
+const KEY_LEN: usize = 32;
+/// AES-GCM nonce length in bytes.
+const NONCE_LEN: usize = 12;
+/// AES-GCM authentication tag length in bytes.
+const TAG_LEN: usize = 16;
+
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.
 pub fn validate_key(key: &str) -> Result<()> {
@@ -311,9 +318,9 @@ impl KeyProvider {
                 let key = Zeroizing::new(
                     hex::decode(hex_str.trim()).context("invalid key hex from keychain")?,
                 );
-                if key.len() != 32 {
+                if key.len() != KEY_LEN {
                     bail!(
-                        "invalid key length from keychain: expected 32 bytes, got {}",
+                        "invalid key length from keychain: expected {KEY_LEN} bytes, got {}",
                         key.len()
                     );
                 }
@@ -357,7 +364,7 @@ impl KeyProvider {
     }
 
     fn generate_key() -> Zeroizing<Vec<u8>> {
-        let mut key = Zeroizing::new(vec![0u8; 32]);
+        let mut key = Zeroizing::new(vec![0u8; KEY_LEN]);
         rand::rng().fill_bytes(&mut key);
         key
     }
@@ -368,8 +375,11 @@ impl KeyProvider {
                 .with_context(|| format!("failed to read key from {}", path.display()))?,
         );
         let key = Zeroizing::new(hex::decode(hex_str.trim()).context("invalid key hex")?);
-        if key.len() != 32 {
-            bail!("invalid key length: expected 32 bytes, got {}", key.len());
+        if key.len() != KEY_LEN {
+            bail!(
+                "invalid key length: expected {KEY_LEN} bytes, got {}",
+                key.len()
+            );
         }
         Ok(key)
     }
@@ -619,7 +629,7 @@ pub(crate) fn encrypt_with_key(key: &[u8], plaintext: &str) -> Result<String> {
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|e| anyhow::anyhow!("failed to create cipher: {e}"))?;
 
-    let mut nonce_bytes = [0u8; 12];
+    let mut nonce_bytes = [0u8; NONCE_LEN];
     rand::rng().fill_bytes(&mut nonce_bytes);
     let nonce = Nonce::from_slice(&nonce_bytes);
 
@@ -628,8 +638,8 @@ pub(crate) fn encrypt_with_key(key: &[u8], plaintext: &str) -> Result<String> {
         .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
 
     // AES-GCM appends tag to ciphertext. Split for our format.
-    // aes-gcm crate: ciphertext includes the 16-byte tag at the end
-    let tag_start = ciphertext.len() - 16;
+    // aes-gcm crate: ciphertext includes the TAG_LEN-byte tag at the end
+    let tag_start = ciphertext.len() - TAG_LEN;
     let ct = &ciphertext[..tag_start];
     let tag = &ciphertext[tag_start..];
 
@@ -652,9 +662,9 @@ pub(crate) fn decrypt_with_key(key: &[u8], encoded: &str) -> Result<String> {
     let ct_bytes = hex::decode(parts[1]).context("invalid ciphertext hex")?;
     let tag_bytes = hex::decode(parts[2]).context("invalid tag hex")?;
 
-    if nonce_bytes.len() != 12 {
+    if nonce_bytes.len() != NONCE_LEN {
         bail!(
-            "invalid nonce length: expected 12, got {}",
+            "invalid nonce length: expected {NONCE_LEN}, got {}",
             nonce_bytes.len()
         );
     }
@@ -682,7 +692,7 @@ pub(crate) fn decrypt_with_key(key: &[u8], encoded: &str) -> Result<String> {
 /// existing encrypted remotes with no meaningful security gain.
 pub(crate) fn derive_key(master: &[u8], domain: &[u8]) -> Zeroizing<Vec<u8>> {
     let hk = Hkdf::<Sha256>::new(None, master);
-    let mut out = Zeroizing::new(vec![0u8; 32]);
+    let mut out = Zeroizing::new(vec![0u8; KEY_LEN]);
     hk.expand(domain, &mut out)
         .expect("32 bytes is valid HKDF-SHA256 output");
     out

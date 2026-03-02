@@ -44,15 +44,10 @@ impl<'a> S3Remote<'a> {
 
     /// Build base args for --region, --profile, --endpoint-url.
     fn base_args(&self) -> Vec<String> {
-        let mut args = Vec::new();
-        if let Some(region) = &self.remote_config.region {
-            args.push("--region".to_string());
-            args.push(region.clone());
-        }
-        if let Some(profile) = &self.remote_config.profile {
-            args.push("--profile".to_string());
-            args.push(profile.clone());
-        }
+        let mut args = crate::targets::aws_base_args(
+            self.remote_config.region.as_deref(),
+            self.remote_config.profile.as_deref(),
+        );
         if let Some(endpoint) = &self.remote_config.endpoint {
             args.push("--endpoint-url".to_string());
             args.push(endpoint.clone());

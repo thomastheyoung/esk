@@ -153,9 +153,7 @@ impl<'a> OnePasswordRemote<'a> {
                 "--vault".to_string(),
                 vault.clone(),
             ];
-            for assignment in &assignments {
-                args.push(assignment.clone());
-            }
+            args.extend(assignments.iter().cloned());
             let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
             let output = self
                 .runner
@@ -177,9 +175,7 @@ impl<'a> OnePasswordRemote<'a> {
                 "--vault".to_string(),
                 vault.clone(),
             ];
-            for assignment in &assignments {
-                args.push(assignment.clone());
-            }
+            args.extend(assignments.iter().cloned());
             let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
             let output = self
                 .runner

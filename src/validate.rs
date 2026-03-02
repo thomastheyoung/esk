@@ -19,14 +19,14 @@ pub enum Format {
 impl fmt::Display for Format {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Format::String => write!(f, "string"),
-            Format::Url => write!(f, "url"),
-            Format::Integer => write!(f, "integer"),
-            Format::Number => write!(f, "number"),
-            Format::Boolean => write!(f, "boolean"),
-            Format::Email => write!(f, "email"),
-            Format::Json => write!(f, "json"),
-            Format::Base64 => write!(f, "base64"),
+            Self::String => write!(f, "string"),
+            Self::Url => write!(f, "url"),
+            Self::Integer => write!(f, "integer"),
+            Self::Number => write!(f, "number"),
+            Self::Boolean => write!(f, "boolean"),
+            Self::Email => write!(f, "email"),
+            Self::Json => write!(f, "json"),
+            Self::Base64 => write!(f, "base64"),
         }
     }
 }
@@ -63,7 +63,7 @@ pub struct Validation {
 
 impl Validation {
     /// Returns true if this spec has any cross-field rules.
-    pub fn has_cross_field_rules(&self) -> bool {
+    pub const fn has_cross_field_rules(&self) -> bool {
         self.required_if.is_some() || self.required_with.is_some() || self.required_unless.is_some()
     }
 

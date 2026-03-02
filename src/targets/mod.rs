@@ -36,7 +36,7 @@ pub enum DeployOutcome {
 }
 
 impl DeployOutcome {
-    pub fn is_success(&self) -> bool {
+    pub const fn is_success(&self) -> bool {
         matches!(self, Self::Success)
     }
 
@@ -245,6 +245,20 @@ pub fn resolve_env_flags(flags: &BTreeMap<String, String>, env: &str) -> Vec<Str
         .unwrap_or_default()
 }
 
+/// Build common AWS CLI arguments for --region and --profile.
+pub fn aws_base_args(region: Option<&str>, profile: Option<&str>) -> Vec<String> {
+    let mut args = Vec::new();
+    if let Some(r) = region {
+        args.push("--region".to_string());
+        args.push(r.to_string());
+    }
+    if let Some(p) = profile {
+        args.push("--profile".to_string());
+        args.push(p.to_string());
+    }
+    args
+}
+
 /// Check that an external command is available via the CommandRunner.
 pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
     runner
@@ -263,12 +277,12 @@ pub enum HealthStatus {
 
 impl HealthStatus {
     pub fn is_ok(&self) -> bool {
-        matches!(self, HealthStatus::Ok(_))
+        matches!(self, Self::Ok(_))
     }
 
     pub fn message(&self) -> &str {
         match self {
-            HealthStatus::Ok(msg) | HealthStatus::Failed(msg) => msg,
+            Self::Ok(msg) | Self::Failed(msg) => msg,
         }
     }
 }

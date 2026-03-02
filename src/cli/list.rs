@@ -108,8 +108,6 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         })
         .collect();
 
-    let mut shown_keys: BTreeSet<String> = BTreeSet::new();
-
     // Collect uncategorized keys early so we can compute global key width
     let mut uncat_keys: BTreeSet<String> = BTreeSet::new();
     for composite_key in all_secrets.keys() {
@@ -139,9 +137,6 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
             .collect();
         if keys.is_empty() {
             continue;
-        }
-        for k in &keys {
-            shown_keys.insert((*k).to_string());
         }
 
         let body = render_table(&keys, &envs, global_key_width, |key, e| {

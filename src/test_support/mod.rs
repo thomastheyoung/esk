@@ -1,5 +1,5 @@
 use anyhow::{anyhow, Result};
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::sync::Mutex;
 use tempfile::TempDir;
 
@@ -63,13 +63,6 @@ impl MockCommandRunner {
             stdout: Vec::new(),
             stderr: stderr.to_vec(),
         });
-    }
-
-    pub fn push_error(&self, message: impl Into<String>) {
-        self.responses
-            .lock()
-            .expect("runner responses mutex poisoned")
-            .push(QueuedResponse::Error(message.into()));
     }
 
     pub fn take_calls(&self) -> Vec<RecordedCall> {
@@ -160,30 +153,7 @@ impl ConfigFixture {
         Ok(Self { dir, config })
     }
 
-    pub fn root(&self) -> &Path {
-        self.dir.path()
-    }
-
     pub fn config(&self) -> &Config {
         &self.config
-    }
-
-    pub fn path(&self, relative: &str) -> PathBuf {
-        self.root().join(relative)
-    }
-
-    pub fn create_dir_all(&self, relative: &str) -> Result<PathBuf> {
-        let path = self.path(relative);
-        std::fs::create_dir_all(&path)?;
-        Ok(path)
-    }
-
-    pub fn write(&self, relative: &str, contents: impl AsRef<[u8]>) -> Result<PathBuf> {
-        let path = self.path(relative);
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)?;
-        }
-        std::fs::write(&path, contents)?;
-        Ok(path)
     }
 }
