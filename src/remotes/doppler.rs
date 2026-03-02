@@ -141,16 +141,14 @@ impl SyncRemote for DopplerRemote<'_> {
         let json_map: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)
             .context("failed to parse Doppler secrets JSON")?;
 
-        // Check both _esk_version (current) and _ESK_VERSION (legacy) for backward compatibility
         let version: u64 = json_map
             .get(super::ESK_VERSION_KEY)
-            .or_else(|| json_map.get("_ESK_VERSION"))
             .and_then(|v| v.parse().ok())
             .unwrap_or(0);
 
         let composite: BTreeMap<String, String> = json_map
             .into_iter()
-            .filter(|(k, _)| k != super::ESK_VERSION_KEY && k != "_ESK_VERSION")
+            .filter(|(k, _)| k != super::ESK_VERSION_KEY)
             .map(|(k, v)| (format!("{k}:{env}"), v))
             .collect();
 
@@ -345,7 +343,7 @@ remotes:
         let json = serde_json::json!({
             "API_KEY": "sk_test",
             "DB_URL": "postgres://localhost",
-            "_ESK_VERSION": "7"
+            "_esk_version": "7"
         });
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -358,8 +356,7 @@ remotes:
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
-        // Neither version key variant should appear in output
-        assert!(!secrets.contains_key("_ESK_VERSION:dev"));
+        // Version key should not appear in output
         assert!(!secrets.contains_key("_esk_version:dev"));
     }
 

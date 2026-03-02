@@ -65,7 +65,6 @@ impl DeployIndex {
         match serde_json::from_str::<DeployIndex>(&contents) {
             Ok(mut index) => {
                 index.path = path.to_path_buf();
-                index.migrate_legacy_target_names();
                 index
             }
             Err(e) => {
@@ -180,26 +179,6 @@ impl DeployIndex {
         hex::encode(hasher.finalize())
     }
 
-    /// Rewrite legacy tracker keys that use `"env"` as the target name to `".env"`.
-    ///
-    /// The "env" target was renamed to ".env" — this ensures existing deploy
-    /// indexes don't orphan records and `should_deploy()` still matches.
-    fn migrate_legacy_target_names(&mut self) {
-        let legacy_keys: Vec<String> = self
-            .records
-            .keys()
-            .filter(|k| Self::parse_tracker_key(k).is_some_and(|parts| parts.service == "env"))
-            .cloned()
-            .collect();
-
-        for old_key in legacy_keys {
-            if let Some(mut record) = self.records.remove(&old_key) {
-                let new_key = old_key.replacen(":env:", ":.env:", 1);
-                record.target = record.target.replacen("env:", ".env:", 1);
-                self.records.insert(new_key, record);
-            }
-        }
-    }
 }
 
 #[cfg(test)]
@@ -503,31 +482,4 @@ mod tests {
         assert!(index.should_deploy("K", DeployIndex::TOMBSTONE_HASH, false));
     }
 
-    #[test]
-    fn migrate_legacy_env_target_name() {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("index.json");
-        let mut index = DeployIndex::new(&path);
-        // Write with legacy "env" target name
-        index.record_success(
-            "KEY:env:web:dev".to_string(),
-            "env:web:dev".to_string(),
-            "hash1".to_string(),
-        );
-        index.record_success(
-            "OTHER:cloudflare:prod".to_string(),
-            "cloudflare:prod".to_string(),
-            "hash2".to_string(),
-        );
-        index.save().unwrap();
-
-        // Reload triggers migration
-        let loaded = DeployIndex::load(&path);
-        assert_eq!(loaded.records.len(), 2);
-        assert!(loaded.records.contains_key("KEY:.env:web:dev"));
-        assert!(!loaded.records.contains_key("KEY:env:web:dev"));
-        assert_eq!(loaded.records["KEY:.env:web:dev"].target, ".env:web:dev");
-        // Non-env records are untouched
-        assert!(loaded.records.contains_key("OTHER:cloudflare:prod"));
-    }
 }

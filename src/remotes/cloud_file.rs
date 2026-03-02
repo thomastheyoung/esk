@@ -90,18 +90,6 @@ impl CloudFileRemote {
             .collect()
     }
 
-    /// Remove the legacy global file if per-env files are being written.
-    fn cleanup_legacy_file(&self, base_path: &Path) -> Result<()> {
-        let legacy = match self.remote_config.format {
-            CloudFileFormat::Encrypted => base_path.join("secrets.enc"),
-            CloudFileFormat::Cleartext => base_path.join("secrets.json"),
-        };
-        if legacy.is_file() {
-            std::fs::remove_file(&legacy)
-                .with_context(|| format!("failed to remove legacy file {}", legacy.display()))?;
-        }
-        Ok(())
-    }
 }
 
 impl SyncRemote for CloudFileRemote {
@@ -163,9 +151,6 @@ impl SyncRemote for CloudFileRemote {
             }
         }
 
-        // One-time migration: remove legacy global file
-        self.cleanup_legacy_file(&base_path)?;
-
         Ok(())
     }
 
@@ -175,73 +160,38 @@ impl SyncRemote for CloudFileRemote {
         match self.remote_config.format {
             CloudFileFormat::Encrypted => {
                 let per_env = base_path.join(format!("secrets-{env}.enc"));
-                let source = if per_env.is_file() {
-                    per_env
-                } else {
-                    // Backward compat: fall back to legacy global file
-                    let legacy = base_path.join("secrets.enc");
-                    if !legacy.is_file() {
-                        return Ok(None);
-                    }
-                    eprintln!(
-                        "Warning: reading legacy secrets.enc for {env}. Run `esk sync --env {env}` to migrate to per-env files."
-                    );
-                    legacy
-                };
-                let content = std::fs::read_to_string(&source)
-                    .with_context(|| format!("failed to read {}", source.display()))?;
+                if !per_env.is_file() {
+                    return Ok(None);
+                }
+                let content = std::fs::read_to_string(&per_env)
+                    .with_context(|| format!("failed to read {}", per_env.display()))?;
                 let content = content.trim();
                 if content.is_empty() {
                     return Ok(None);
                 }
                 let store = SecretStore::open(&config.root)?;
                 let dk = derive_key(store.master_key(), CLOUD_SYNC_DOMAIN);
-                let payload: StorePayload = match decrypt_with_key(&dk, content) {
-                    Ok(json) => serde_json::from_str(&json)
-                        .context("decrypted payload is not valid JSON")?,
-                    Err(_) => store.decrypt(content)?, // legacy: master key
-                };
-                // Per-env files have bare keys — convert to composite
-                // Legacy files have composite keys — detect by checking if keys contain ":"
-                let has_composite = payload.secrets.keys().any(|k| k.contains(':'));
-                if has_composite {
-                    // Legacy global file — return as-is
-                    Ok(Some((payload.secrets, payload.version)))
-                } else {
-                    // Per-env file — convert bare keys to composite
-                    Ok(Some((
-                        Self::bare_to_composite(&payload.secrets, env),
-                        payload.version,
-                    )))
-                }
+                let json = decrypt_with_key(&dk, content)?;
+                let payload: StorePayload =
+                    serde_json::from_str(&json).context("decrypted payload is not valid JSON")?;
+                Ok(Some((
+                    Self::bare_to_composite(&payload.secrets, env),
+                    payload.version,
+                )))
             }
             CloudFileFormat::Cleartext => {
                 let per_env = base_path.join(format!("secrets-{env}.json"));
-                let source = if per_env.is_file() {
-                    per_env
-                } else {
-                    let legacy = base_path.join("secrets.json");
-                    if !legacy.is_file() {
-                        return Ok(None);
-                    }
-                    eprintln!(
-                        "Warning: reading legacy secrets.json for {env}. Run `esk sync --env {env}` to migrate to per-env files."
-                    );
-                    legacy
-                };
-                let content = std::fs::read_to_string(&source)
-                    .with_context(|| format!("failed to read {}", source.display()))?;
+                if !per_env.is_file() {
+                    return Ok(None);
+                }
+                let content = std::fs::read_to_string(&per_env)
+                    .with_context(|| format!("failed to read {}", per_env.display()))?;
                 let payload: StorePayload =
                     serde_json::from_str(&content).context("failed to parse secrets JSON")?;
-                let has_composite = payload.secrets.keys().any(|k| k.contains(':'));
-                if has_composite {
-                    Ok(Some((payload.secrets, payload.version)))
-                } else {
-                    Ok(Some((
-                        Self::bare_to_composite(&payload.secrets, env),
-                        payload.version,
-                    )))
-                }
+                Ok(Some((
+                    Self::bare_to_composite(&payload.secrets, env),
+                    payload.version,
+                )))
             }
         }
     }
@@ -415,59 +365,6 @@ mod tests {
         let (prod_secrets, _) = remote.pull(&config, "prod").unwrap().unwrap();
         assert_eq!(prod_secrets.get("KEY:prod").unwrap(), "prod_val");
         assert!(!prod_secrets.contains_key("KEY:dev"));
-    }
-
-    #[test]
-    fn backward_compat_legacy_cleartext() {
-        let project_dir = tempfile::tempdir().unwrap();
-        let cloud_dir = tempfile::tempdir().unwrap();
-        let config = make_config_with_store(project_dir.path());
-
-        // Write a legacy global secrets.json with composite keys
-        let legacy_payload = make_payload(&[("KEY:dev", "legacy_val")], 3);
-        let json = serde_json::to_string_pretty(&legacy_payload).unwrap();
-        std::fs::write(cloud_dir.path().join("secrets.json"), json).unwrap();
-
-        let remote = CloudFileRemote::new(
-            "test".to_string(),
-            "testapp".to_string(),
-            CloudFileRemoteConfig {
-                path: cloud_dir.path().to_string_lossy().to_string(),
-                format: CloudFileFormat::Cleartext,
-            },
-        );
-
-        // Pull should fall back to legacy file
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
-        assert_eq!(version, 3);
-        assert_eq!(secrets.get("KEY:dev").unwrap(), "legacy_val");
-    }
-
-    #[test]
-    fn legacy_cleanup_on_push() {
-        let project_dir = tempfile::tempdir().unwrap();
-        let cloud_dir = tempfile::tempdir().unwrap();
-        let config = make_config_with_store(project_dir.path());
-
-        // Create a legacy file
-        std::fs::write(cloud_dir.path().join("secrets.json"), "{}").unwrap();
-        assert!(cloud_dir.path().join("secrets.json").is_file());
-
-        let remote = CloudFileRemote::new(
-            "test".to_string(),
-            "testapp".to_string(),
-            CloudFileRemoteConfig {
-                path: cloud_dir.path().to_string_lossy().to_string(),
-                format: CloudFileFormat::Cleartext,
-            },
-        );
-
-        let payload = make_payload(&[("KEY:dev", "val")], 1);
-        remote.push(&payload, &config, "dev").unwrap();
-
-        // Legacy file removed, per-env file created
-        assert!(!cloud_dir.path().join("secrets.json").is_file());
-        assert!(cloud_dir.path().join("secrets-dev.json").is_file());
     }
 
     #[test]

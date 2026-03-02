@@ -283,7 +283,7 @@ pub struct MultiReconcileResult {
 pub fn reconcile_multi(
     local: &StorePayload,
     remotes: &[(&str, &BTreeMap<String, String>, u64)], // (name, composite_secrets, version)
-    env: Option<&str>,
+    env: &str,
     prefer: ConflictPreference,
 ) -> Result<MultiReconcileResult> {
     reconcile_multi_with_jump_limit(local, remotes, env, prefer, true)
@@ -292,17 +292,11 @@ pub fn reconcile_multi(
 pub fn reconcile_multi_with_jump_limit(
     local: &StorePayload,
     remotes: &[(&str, &BTreeMap<String, String>, u64)], // (name, composite_secrets, version)
-    env: Option<&str>,
+    env: &str,
     prefer: ConflictPreference,
     enforce_jump_limit: bool,
 ) -> Result<MultiReconcileResult> {
-    let local_version = match env {
-        Some(e) => local.env_version(e),
-        // DEPRECATED: production always passes Some(env) via sync.rs.
-        // Falls back to global version for legacy compat; will be removed
-        // once all callers are migrated.
-        None => local.version,
-    };
+    let local_version = local.env_version(env);
 
     // Find the max version across local and all remotes
     let mut max_version = local_version;
@@ -422,26 +416,19 @@ pub fn reconcile_multi_with_jump_limit(
                 has_drift = true;
                 // Pull the (agreed-upon) remote content into merged
                 let (_, remote_secrets, _) = drifted_remotes[0];
-                let suffix = env.map(|e| format!(":{e}"));
+                let suffix = format!(":{env}");
                 for (key, value) in *remote_secrets {
-                    // Only touch keys in scope
-                    let in_scope = match &suffix {
-                        Some(s) => key.ends_with(s),
-                        None => true,
-                    };
-                    if in_scope {
+                    if key.ends_with(&suffix) {
                         merged.insert(key.clone(), value.clone());
                         merged_tombstones.remove(key);
                     }
                 }
                 // Remove local-only keys in scope that remote doesn't have
-                if let Some(ref s) = suffix {
-                    let local_scope_keys: Vec<_> =
-                        merged.keys().filter(|k| k.ends_with(s)).cloned().collect();
-                    for key in local_scope_keys {
-                        if !remote_secrets.contains_key(&key) {
-                            merged.remove(&key);
-                        }
+                let local_scope_keys: Vec<_> =
+                    merged.keys().filter(|k| k.ends_with(&suffix)).cloned().collect();
+                for key in local_scope_keys {
+                    if !remote_secrets.contains_key(&key) {
+                        merged.remove(&key);
                     }
                 }
             }
@@ -472,11 +459,9 @@ pub fn reconcile_multi_with_jump_limit(
 
     let mut merged_env_versions = local.env_versions.clone();
     let mut merged_env_last_changed_at = local.env_last_changed_at.clone();
-    if let Some(e) = env {
-        merged_env_versions.insert(e.to_string(), final_version);
-        if final_version != local_version {
-            merged_env_last_changed_at.insert(e.to_string(), chrono::Utc::now().to_rfc3339());
-        }
+    merged_env_versions.insert(env.to_string(), final_version);
+    if final_version != local_version {
+        merged_env_last_changed_at.insert(env.to_string(), chrono::Utc::now().to_rfc3339());
     }
 
     Ok(MultiReconcileResult {
@@ -495,19 +480,14 @@ pub fn reconcile_multi_with_jump_limit(
 
 fn scoped_composite_secrets(
     secrets: &BTreeMap<String, String>,
-    env: Option<&str>,
+    env: &str,
 ) -> BTreeMap<String, String> {
-    match env {
-        Some(e) => {
-            let suffix = format!(":{e}");
-            secrets
-                .iter()
-                .filter(|(k, _)| k.ends_with(&suffix))
-                .map(|(k, v)| (k.clone(), v.clone()))
-                .collect()
-        }
-        None => secrets.clone(),
-    }
+    let suffix = format!(":{env}");
+    secrets
+        .iter()
+        .filter(|(k, _)| k.ends_with(&suffix))
+        .map(|(k, v)| (k.clone(), v.clone()))
+        .collect()
 }
 
 #[cfg(test)]
@@ -768,7 +748,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 3)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -785,7 +765,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -823,7 +803,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -864,7 +844,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 3)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -881,7 +861,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -897,7 +877,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("r1", &remote1, 3), ("r2", &remote2, 5)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -912,7 +892,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -930,7 +910,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -947,7 +927,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -965,7 +945,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -977,7 +957,7 @@ mod tests {
     #[test]
     fn multi_empty_remotes() {
         let local = make_payload(&[("A:dev", "a")], 5);
-        let result = reconcile_multi(&local, &[], None, ConflictPreference::Local).unwrap();
+        let result = reconcile_multi(&local, &[], "dev", ConflictPreference::Local).unwrap();
         assert!(!result.local_changed);
         assert_eq!(result.merged_payload.version, 5);
     }
@@ -990,7 +970,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("r1", &r1, 3), ("r2", &r2, 2)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -1025,7 +1005,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -1059,7 +1039,7 @@ mod tests {
         let err = reconcile_multi(
             &local,
             &[("bad_remote", &remote, MAX_VERSION_JUMP + 1)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap_err();
@@ -1076,7 +1056,7 @@ mod tests {
         let err = reconcile_multi(
             &local,
             &[("safe", &r1, 6), ("evil", &r2, MAX_VERSION_JUMP + 6)],
-            None,
+            "dev",
             ConflictPreference::Local,
         )
         .unwrap_err();
@@ -1102,7 +1082,7 @@ mod tests {
         let result = reconcile_multi_with_jump_limit(
             &local,
             &[("bad_remote", &remote, MAX_VERSION_JUMP + 1)],
-            None,
+            "dev",
             ConflictPreference::Local,
             false,
         )
@@ -1139,7 +1119,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("remote1", &remote, 2)],
-            Some("prod"),
+            "prod",
             ConflictPreference::Local,
         )
         .unwrap();
@@ -1158,7 +1138,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();
@@ -1179,7 +1159,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();
@@ -1195,7 +1175,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();
@@ -1210,7 +1190,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();
@@ -1225,7 +1205,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();
@@ -1247,7 +1227,7 @@ mod tests {
         let err = reconcile_multi(
             &local,
             &[("remote1", &r1, 5), ("remote2", &r2, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap_err();
@@ -1263,7 +1243,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("remote1", &r1, 5), ("remote2", &r2, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();
@@ -1282,7 +1262,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            None,
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();
@@ -1300,7 +1280,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();
@@ -1316,7 +1296,7 @@ mod tests {
         let result = reconcile_multi(
             &local,
             &[("op", &remote, 5)],
-            Some("dev"),
+            "dev",
             ConflictPreference::Remote,
         )
         .unwrap();

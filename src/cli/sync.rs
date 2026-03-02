@@ -341,7 +341,7 @@ pub fn run_with_runner(
     let result = match reconcile::reconcile_multi_with_jump_limit(
         &payload,
         &remotes_ref,
-        Some(env),
+        env,
         prefer,
         !force,
     ) {
@@ -363,7 +363,7 @@ pub fn run_with_runner(
             reconcile::reconcile_multi_with_jump_limit(
                 &payload,
                 &remotes_ref,
-                Some(env),
+                env,
                 prefer,
                 false,
             )?

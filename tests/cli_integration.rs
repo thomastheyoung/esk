@@ -6096,8 +6096,8 @@ fn deploy_prune_batch_removes_orphan_from_index() {
     // Inject an orphan for the batch (env) target
     let mut index = DeployIndex::load(&project.deploy_index_path());
     index.record_success(
-        "REMOVED_KEY:env:web:dev".to_string(),
-        "env:web:dev".to_string(),
+        "REMOVED_KEY:.env:web:dev".to_string(),
+        ".env:web:dev".to_string(),
         "oldhash".to_string(),
     );
     index.save().unwrap();
@@ -6122,7 +6122,7 @@ fn deploy_prune_batch_removes_orphan_from_index() {
     // Orphan record should be removed
     let index = DeployIndex::load(&project.deploy_index_path());
     assert!(
-        !index.records.contains_key("REMOVED_KEY:env:web:dev"),
+        !index.records.contains_key("REMOVED_KEY:.env:web:dev"),
         "Batch orphan record should be removed after prune"
     );
 
