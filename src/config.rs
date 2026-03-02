@@ -895,9 +895,8 @@ impl Config {
                     self.typed_remotes.push(TypedRemoteConfig::OnePassword(cfg));
                 }
                 "aws_secrets_manager" => {
-                    let cfg: AwsSecretsManagerRemoteConfig =
-                        serde_json::from_value(value.clone())
-                            .context("invalid aws_secrets_manager remote config")?;
+                    let cfg: AwsSecretsManagerRemoteConfig = serde_json::from_value(value.clone())
+                        .context("invalid aws_secrets_manager remote config")?;
                     self.typed_remotes
                         .push(TypedRemoteConfig::AwsSecretsManager(cfg));
                 }
@@ -917,9 +916,8 @@ impl Config {
                     self.typed_remotes.push(TypedRemoteConfig::S3(cfg));
                 }
                 "gcp" => {
-                    let cfg: GcpSecretManagerRemoteConfig =
-                        serde_json::from_value(value.clone())
-                            .context("invalid gcp remote config")?;
+                    let cfg: GcpSecretManagerRemoteConfig = serde_json::from_value(value.clone())
+                        .context("invalid gcp remote config")?;
                     self.typed_remotes.push(TypedRemoteConfig::Gcp(cfg));
                 }
                 "azure" => {
@@ -935,8 +933,7 @@ impl Config {
                 "infisical" => {
                     let cfg: InfisicalRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid infisical remote config")?;
-                    self.typed_remotes
-                        .push(TypedRemoteConfig::Infisical(cfg));
+                    self.typed_remotes.push(TypedRemoteConfig::Infisical(cfg));
                 }
                 "sops" => {
                     let cfg: SopsRemoteConfig = serde_json::from_value(value.clone())

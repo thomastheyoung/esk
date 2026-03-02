@@ -424,8 +424,11 @@ pub fn reconcile_multi_with_jump_limit(
                     }
                 }
                 // Remove local-only keys in scope that remote doesn't have
-                let local_scope_keys: Vec<_> =
-                    merged.keys().filter(|k| k.ends_with(&suffix)).cloned().collect();
+                let local_scope_keys: Vec<_> = merged
+                    .keys()
+                    .filter(|k| k.ends_with(&suffix))
+                    .cloned()
+                    .collect();
                 for key in local_scope_keys {
                     if !remote_secrets.contains_key(&key) {
                         merged.remove(&key);

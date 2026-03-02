@@ -178,7 +178,6 @@ impl DeployIndex {
         hasher.update(value.as_bytes());
         hex::encode(hasher.finalize())
     }
-
 }
 
 #[cfg(test)]
@@ -481,5 +480,4 @@ mod tests {
         );
         assert!(index.should_deploy("K", DeployIndex::TOMBSTONE_HASH, false));
     }
-
 }

@@ -518,7 +518,8 @@ pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<T
         return Vec::new();
     }
 
-    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let items: Vec<&dyn PreflightItem> =
+        candidates.iter().map(|c| c as &dyn PreflightItem).collect();
     let results = run_preflight_section(&items, "Targets");
     candidates
         .iter()
@@ -708,7 +709,8 @@ pub fn render_target_health(
     section_name: &str,
 ) -> Vec<TargetHealth> {
     let candidates = target_candidates(config, runner);
-    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let items: Vec<&dyn PreflightItem> =
+        candidates.iter().map(|c| c as &dyn PreflightItem).collect();
     let results = run_preflight_section(&items, section_name);
     candidates
         .iter()
@@ -736,7 +738,8 @@ pub fn build_targets<'a>(
         return Vec::new();
     }
 
-    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let items: Vec<&dyn PreflightItem> =
+        candidates.iter().map(|c| c as &dyn PreflightItem).collect();
     let results = run_preflight_section(&items, "Preflight");
 
     // Emit security warnings for passing targets

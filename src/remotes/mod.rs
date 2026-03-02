@@ -150,11 +150,7 @@ fn remote_candidates<'a>(
                 ok_message: "CLI available",
             },
             TypedRemoteConfig::Bitwarden(cfg) => RemoteCandidate {
-                remote: Box::new(bitwarden::BitwardenRemote::new(
-                    config,
-                    cfg.clone(),
-                    runner,
-                )),
+                remote: Box::new(bitwarden::BitwardenRemote::new(config, cfg.clone(), runner)),
                 ok_message: "authenticated",
             },
             TypedRemoteConfig::Vault(cfg) => RemoteCandidate {
@@ -210,7 +206,8 @@ pub fn check_remote_health(config: &Config, runner: &dyn CommandRunner) -> Vec<R
         return Vec::new();
     }
 
-    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let items: Vec<&dyn PreflightItem> =
+        candidates.iter().map(|c| c as &dyn PreflightItem).collect();
     let results = crate::targets::run_preflight_section(&items, "Remotes");
     candidates
         .iter()
@@ -237,7 +234,8 @@ pub fn build_remotes<'a>(
         return Vec::new();
     }
 
-    let items: Vec<&dyn PreflightItem> = candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let items: Vec<&dyn PreflightItem> =
+        candidates.iter().map(|c| c as &dyn PreflightItem).collect();
     let results = crate::targets::run_preflight_section(&items, "Remotes");
 
     // Emit security warnings for passing remotes

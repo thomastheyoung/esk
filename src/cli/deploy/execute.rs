@@ -472,9 +472,9 @@ fn execute_animated<'a>(
             frame = (frame + 1) % frames.len();
 
             let state = results.lock().unwrap();
-            let all_done = key_lines.iter().all(|kl| {
-                kl.total_ops == 0 || state.get(&kl.key).is_none_or(KeyResult::is_done)
-            });
+            let all_done = key_lines
+                .iter()
+                .all(|kl| kl.total_ops == 0 || state.get(&kl.key).is_none_or(KeyResult::is_done));
 
             let _ = term.move_cursor_up(n);
             for kl in key_lines {
@@ -698,12 +698,8 @@ fn execute_sequential<'a>(
 
         if batch_results.is_empty() {
             for key in &bg.tombstoned_keys {
-                let tracker_key = DeployIndex::tracker_key(
-                    key,
-                    &bg.target_name,
-                    bg.app.as_deref(),
-                    env_name,
-                );
+                let tracker_key =
+                    DeployIndex::tracker_key(key, &bg.target_name, bg.app.as_deref(), env_name);
                 idx.record_success(
                     tracker_key,
                     target.to_string(),
@@ -721,12 +717,8 @@ fn execute_sequential<'a>(
         }
 
         for result in &batch_results {
-            let tracker_key = DeployIndex::tracker_key(
-                &result.key,
-                &bg.target_name,
-                bg.app.as_deref(),
-                env_name,
-            );
+            let tracker_key =
+                DeployIndex::tracker_key(&result.key, &bg.target_name, bg.app.as_deref(), env_name);
             let composite = format!("{}:{}", result.key, env_name);
             let value = payload_secrets
                 .get(&composite)
@@ -747,12 +739,7 @@ fn execute_sequential<'a>(
                     .error_message()
                     .unwrap_or_default()
                     .to_string();
-                idx.record_failure(
-                    tracker_key,
-                    target.to_string(),
-                    value_hash,
-                    error.clone(),
-                );
+                idx.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
                 failed.push(DeployEntry {
                     key: result.key.clone(),
                     env: env_name.to_string(),
@@ -878,12 +865,7 @@ fn execute_sequential<'a>(
                 }
             }
             Err(e) => {
-                idx.record_failure(
-                    tracker_key,
-                    target.to_string(),
-                    value_hash,
-                    e.to_string(),
-                );
+                idx.record_failure(tracker_key, target.to_string(), value_hash, e.to_string());
                 failed.push(DeployEntry {
                     key: key.clone(),
                     env: env_name.to_string(),

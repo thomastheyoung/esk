@@ -360,13 +360,7 @@ pub fn run_with_runner(
             } else {
                 bail!("{e}\nRun with --force to bypass version jump protection.");
             }
-            reconcile::reconcile_multi_with_jump_limit(
-                &payload,
-                &remotes_ref,
-                env,
-                prefer,
-                false,
-            )?
+            reconcile::reconcile_multi_with_jump_limit(&payload, &remotes_ref, env, prefer, false)?
         }
         Err(e) => return Err(e),
     };

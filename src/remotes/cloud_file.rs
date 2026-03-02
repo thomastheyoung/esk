@@ -89,7 +89,6 @@ impl CloudFileRemote {
             .map(|(k, v)| (format!("{k}:{env}"), v.clone()))
             .collect()
     }
-
 }
 
 impl SyncRemote for CloudFileRemote {
