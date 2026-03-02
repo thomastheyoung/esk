@@ -78,6 +78,12 @@ pub fn validate_app(name: &str) -> Result<()> {
 #[derive(Clone, Serialize, Deserialize)]
 pub struct StorePayload {
     pub secrets: BTreeMap<String, String>,
+    /// Monotonic high-water mark incremented on every set/delete across all environments.
+    ///
+    /// NOT used for reconcile decisions (env_versions handles that). Serves as:
+    /// - Tombstone version base (tombstones carry this value for cross-env consistency)
+    /// - Backward-compat fallback for pre-env-versioning stores (via `env_version()`)
+    /// - Monotonic ceiling in reconcile output (`.max(local.version)`)
     pub version: u64,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub tombstones: BTreeMap<String, u64>,

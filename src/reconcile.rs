@@ -298,6 +298,9 @@ pub fn reconcile_multi_with_jump_limit(
 ) -> Result<MultiReconcileResult> {
     let local_version = match env {
         Some(e) => local.env_version(e),
+        // DEPRECATED: production always passes Some(env) via sync.rs.
+        // Falls back to global version for legacy compat; will be removed
+        // once all callers are migrated.
         None => local.version,
     };
 

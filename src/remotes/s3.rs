@@ -87,11 +87,7 @@ impl<'a> S3Remote<'a> {
                     .map(|bare| (bare.to_string(), v.clone()))
             })
             .collect();
-        let version = payload
-            .env_versions
-            .get(env)
-            .copied()
-            .unwrap_or(payload.version);
+        let version = payload.env_version(env);
         let mut env_last_changed_at = BTreeMap::new();
         if let Some(ts) = payload.env_last_changed_at(env) {
             env_last_changed_at.insert(env.to_string(), ts.to_string());

@@ -250,12 +250,7 @@ impl SyncRemote for OnePasswordRemote<'_> {
             return Ok(());
         }
 
-        // Use env-specific version when available, falling back to global
-        let version = payload
-            .env_versions
-            .get(env)
-            .copied()
-            .unwrap_or(payload.version);
+        let version = payload.env_version(env);
         self.push_item(env, &env_secrets, version)
     }
 

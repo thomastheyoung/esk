@@ -409,7 +409,7 @@ fn do_deploy(params: &DeployParams) -> anyhow::Result<DeployResponse> {
         dry_run: params.dry_run,
         verbose: false,
         skip_validation: false,
-        bail: false,
+        strict: false,
         allow_empty: true,
         prune: params.prune,
     };

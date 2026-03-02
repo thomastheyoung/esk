@@ -69,11 +69,7 @@ impl CloudFileRemote {
     /// Uses env-specific version when available, falling back to global version.
     fn env_payload(payload: &StorePayload, env: &str) -> StorePayload {
         let bare = extract_env_secrets(&payload.secrets, env);
-        let version = payload
-            .env_versions
-            .get(env)
-            .copied()
-            .unwrap_or(payload.version);
+        let version = payload.env_version(env);
         let mut env_last_changed_at = BTreeMap::new();
         if let Some(ts) = payload.env_last_changed_at(env) {
             env_last_changed_at.insert(env.to_string(), ts.to_string());
