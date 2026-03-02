@@ -91,10 +91,9 @@ pub trait SyncRemote: Send + Sync {
 }
 
 /// Health status of a configured remote.
-#[cfg(test)]
-struct RemoteHealth {
-    name: String,
-    status: crate::targets::HealthStatus,
+pub struct RemoteHealth {
+    pub name: String,
+    pub status: crate::targets::HealthStatus,
 }
 
 pub(crate) struct RemoteCandidate<'a> {
@@ -167,6 +166,33 @@ fn remote_candidates<'a>(
                 }
             };
             RemoteCandidate { remote, ok_message }
+        })
+        .collect()
+}
+
+/// Render remote health with animated spinners, returning health results.
+///
+/// Creates candidates from config, runs `run_preflight_section()` with the
+/// given section name, and converts results to `Vec<RemoteHealth>`.
+pub fn render_remote_health(
+    config: &Config,
+    runner: &dyn CommandRunner,
+    section_name: &str,
+) -> Vec<RemoteHealth> {
+    let candidates = remote_candidates(config, runner);
+    let items: Vec<&dyn PreflightItem> =
+        candidates.iter().map(|c| c as &dyn PreflightItem).collect();
+    let results = crate::targets::run_preflight_section(&items, section_name);
+    candidates
+        .iter()
+        .zip(results)
+        .map(|(c, (ok, msg))| RemoteHealth {
+            name: c.remote.name().to_string(),
+            status: if ok {
+                crate::targets::HealthStatus::Ok(msg)
+            } else {
+                crate::targets::HealthStatus::Failed(msg)
+            },
         })
         .collect()
 }

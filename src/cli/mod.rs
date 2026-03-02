@@ -1,5 +1,6 @@
 pub mod delete;
 pub mod deploy;
+pub mod doctor;
 pub mod generate;
 pub mod get;
 pub mod init;
@@ -41,6 +42,8 @@ pub enum Commands {
         #[arg(long)]
         strict: bool,
     },
+    /// Diagnose project health
+    Doctor,
     /// Deploy secrets to configured targets
     Deploy {
         /// Filter by environment

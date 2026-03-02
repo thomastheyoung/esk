@@ -33,6 +33,10 @@ fn run() -> Result<()> {
                 },
             )?;
         }
+        Commands::Doctor => {
+            let cwd = std::env::current_dir()?;
+            esk::cli::doctor::run(&cwd)?;
+        }
         Commands::Deploy {
             env,
             force,

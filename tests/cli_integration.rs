@@ -6826,3 +6826,67 @@ fn deploy_render_delete() {
     assert!(!stdin.contains("data = "));
     std::env::remove_var("RENDER_API_KEY_DEL");
 }
+
+// === doctor ===
+
+use esk::targets::{CommandOpts, CommandOutput, CommandRunner};
+
+struct OkRunner;
+impl CommandRunner for OkRunner {
+    fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
+        Ok(CommandOutput {
+            success: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        })
+    }
+}
+
+#[test]
+fn doctor_healthy_project_succeeds() {
+    let project = TestProject::with_store(FULL_CONFIG).unwrap();
+    // Create deploy + sync indexes
+    let deploy_idx = DeployIndex::new(&project.deploy_index_path());
+    deploy_idx.save().unwrap();
+    let sync_idx = SyncIndex::new(&project.sync_index_path());
+    sync_idx.save().unwrap();
+
+    // Write complete .gitignore
+    let gitignore = ".esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n".to_string();
+    std::fs::write(project.root().join(".gitignore"), gitignore).unwrap();
+
+    // Use OkRunner to make target/remote preflights pass
+    let result = cli::doctor::run_with_runner(project.root(), &OkRunner);
+    assert!(result.is_ok());
+}
+
+#[test]
+fn doctor_missing_store_reports_failure() {
+    let dir = tempfile::tempdir().unwrap();
+    // Only create esk.yaml, no .esk/ directory
+    std::fs::write(dir.path().join("esk.yaml"), MINIMAL_CONFIG).unwrap();
+
+    let result = cli::doctor::run_with_runner(dir.path(), &OkRunner);
+    // Should fail because .esk/ directory is missing
+    assert!(result.is_err());
+}
+
+#[test]
+fn doctor_with_store_orphans() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let deploy_idx = DeployIndex::new(&project.deploy_index_path());
+    deploy_idx.save().unwrap();
+    let sync_idx = SyncIndex::new(&project.sync_index_path());
+    sync_idx.save().unwrap();
+
+    let gitignore = ".esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n".to_string();
+    std::fs::write(project.root().join(".gitignore"), gitignore).unwrap();
+
+    // Add a key to store that's not in config
+    let store = project.store().unwrap();
+    store.set("ORPHAN_KEY", "dev", "value").unwrap();
+
+    // Should succeed (orphans are warnings, not failures)
+    let result = cli::doctor::run_with_runner(project.root(), &OkRunner);
+    assert!(result.is_ok());
+}

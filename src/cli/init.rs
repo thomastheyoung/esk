@@ -84,7 +84,7 @@ impl InitReport {
 }
 
 const ESK_GITIGNORE_COMMENT: &str = "# esk (store.enc is safe to commit)";
-const ESK_GITIGNORE_ENTRIES: &[&str] = &[
+pub(crate) const ESK_GITIGNORE_ENTRIES: &[&str] = &[
     ".esk/store.key",
     ".esk/deploy-index.json",
     ".esk/sync-index.json",

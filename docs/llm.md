@@ -78,6 +78,10 @@ Show deploy and sync status — which secrets need deploying and which remotes a
 | `--env <ENV>` | Filter by environment |
 | `--all` | Show all targets including already-deployed ones |
 
+### `esk doctor`
+
+Diagnose project health. Checks project structure, config validity, store consistency, target/remote availability, and secrets health in one pass. Exits with code 1 if any failures are found.
+
 ### `esk sync`
 
 Sync secrets with remotes. Pulls from remote, reconciles with local store, pushes merged results back. Bidirectional.
