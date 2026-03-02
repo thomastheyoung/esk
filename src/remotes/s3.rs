@@ -16,8 +16,10 @@ use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 
 use crate::config::{CloudFileFormat, Config, S3RemoteConfig};
-use crate::store::{SecretStore, StorePayload};
+use crate::store::{decrypt_with_key, derive_key, encrypt_with_key, SecretStore, StorePayload};
 use crate::targets::{CommandOpts, CommandRunner};
+
+const S3_SYNC_DOMAIN: &[u8] = b"esk-s3-sync-v1";
 
 use super::SyncRemote;
 
@@ -75,38 +77,6 @@ impl<'a> S3Remote<'a> {
             )
         }
     }
-
-    /// Build a per-env StorePayload with bare keys.
-    fn env_payload(payload: &StorePayload, env: &str) -> StorePayload {
-        let suffix = format!(":{env}");
-        let bare: BTreeMap<String, String> = payload
-            .secrets
-            .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
-            })
-            .collect();
-        let version = payload.env_version(env);
-        let mut env_last_changed_at = BTreeMap::new();
-        if let Some(ts) = payload.env_last_changed_at(env) {
-            env_last_changed_at.insert(env.to_string(), ts.to_string());
-        }
-        StorePayload {
-            secrets: bare,
-            version,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at,
-        }
-    }
-
-    /// Convert bare keys back to composite keys.
-    fn bare_to_composite(bare: &BTreeMap<String, String>, env: &str) -> BTreeMap<String, String> {
-        bare.iter()
-            .map(|(k, v)| (format!("{k}:{env}"), v.clone()))
-            .collect()
-    }
 }
 
 impl SyncRemote for S3Remote<'_> {
@@ -145,7 +115,7 @@ impl SyncRemote for S3Remote<'_> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let env_payload = Self::env_payload(payload, env);
+        let env_payload = payload.for_env(env);
 
         if env_payload.secrets.is_empty() {
             return Ok(());
@@ -157,9 +127,10 @@ impl SyncRemote for S3Remote<'_> {
         let content = match self.remote_config.format {
             CloudFileFormat::Encrypted => {
                 let store = SecretStore::open(&self.config.root)?;
+                let dk = derive_key(store.master_key(), S3_SYNC_DOMAIN);
                 let json = serde_json::to_string(&env_payload)
                     .context("failed to serialize env payload")?;
-                store.encrypt(&json)?
+                encrypt_with_key(&dk, &json)?
             }
             CloudFileFormat::Cleartext => serde_json::to_string_pretty(&env_payload)
                 .context("failed to serialize env payload")?,
@@ -230,10 +201,12 @@ impl SyncRemote for S3Remote<'_> {
             return Ok(None);
         }
 
-        let payload = match self.remote_config.format {
+        let payload: StorePayload = match self.remote_config.format {
             CloudFileFormat::Encrypted => {
                 let store = SecretStore::open(&self.config.root)?;
-                store.decrypt(content)?
+                let dk = derive_key(store.master_key(), S3_SYNC_DOMAIN);
+                let json = decrypt_with_key(&dk, content)?;
+                serde_json::from_str(&json).context("failed to parse decrypted JSON from S3")?
             }
             CloudFileFormat::Cleartext => {
                 serde_json::from_str(content).context("failed to parse secrets JSON from S3")?
@@ -241,7 +214,7 @@ impl SyncRemote for S3Remote<'_> {
         };
 
         Ok(Some((
-            Self::bare_to_composite(&payload.secrets, env),
+            StorePayload::bare_to_composite(&payload.secrets, env),
             payload.version,
         )))
     }
@@ -251,7 +224,7 @@ impl SyncRemote for S3Remote<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>);
 
@@ -263,13 +236,8 @@ mod tests {
             .collect()
     }
 
-    fn make_config(yaml: &str) -> Config {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        let config = Config::load(&path).unwrap();
-        std::mem::forget(dir);
-        config
+    fn make_config(yaml: &str) -> ConfigFixture {
+        ConfigFixture::new(yaml).unwrap()
     }
 
     fn ok_output(stdout: &[u8]) -> CommandOutput {
@@ -297,13 +265,13 @@ remotes:
   s3:
     bucket: my-secrets-bucket
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             ok_output(b"{\"Account\": \"123456789012\"}"),
         ]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -322,13 +290,13 @@ remotes:
     region: us-west-2
     profile: myprofile
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             ok_output(b"{\"Account\": \"123456789012\"}"),
         ]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -350,13 +318,13 @@ remotes:
   s3:
     bucket: my-secrets-bucket
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"aws-cli/2.13.0"),
             fail_output(b"Unable to locate credentials"),
         ]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS authentication failed"));
     }
@@ -370,10 +338,10 @@ remotes:
   s3:
     bucket: my-secrets-bucket
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
     }
@@ -399,10 +367,10 @@ remotes:
     bucket: my-bucket
     prefix: "esk/myapp"
 "#;
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
 
-        let remote = S3Remote::new(&config, remote_config, &DummyRunner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &DummyRunner);
         assert_eq!(
             remote.s3_uri("dev"),
             "s3://my-bucket/esk/myapp/secrets-dev.enc"
@@ -433,10 +401,10 @@ remotes:
   s3:
     bucket: my-bucket
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
 
-        let remote = S3Remote::new(&config, remote_config, &DummyRunner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &DummyRunner);
         assert_eq!(remote.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
     }
 
@@ -461,10 +429,10 @@ remotes:
     bucket: my-bucket
     format: encrypted
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
 
-        let remote = S3Remote::new(&config, remote_config, &DummyRunner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &DummyRunner);
         assert_eq!(remote.s3_uri("dev"), "s3://my-bucket/secrets-dev.enc");
     }
 
@@ -479,10 +447,10 @@ remotes:
     prefix: backups
     format: cleartext
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -494,7 +462,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -514,10 +482,10 @@ remotes:
     bucket: my-bucket
     format: cleartext
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:prod".to_string(), "val".to_string());
@@ -529,7 +497,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
         assert!(calls(&runner).is_empty());
     }
 
@@ -543,8 +511,8 @@ remotes:
     bucket: my-bucket
     format: cleartext
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
 
         let payload = StorePayload {
             secrets: {
@@ -560,9 +528,9 @@ remotes:
         };
         let json = serde_json::to_string(&payload).unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(json.as_bytes())]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
 
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
@@ -578,13 +546,13 @@ remotes:
     bucket: my-bucket
     format: cleartext
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![fail_output(b"An error occurred (NoSuchKey)")]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
 
-        assert!(remote.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(fixture.config(), "dev").unwrap().is_none());
     }
 
     #[test]
@@ -597,13 +565,13 @@ remotes:
     bucket: my-bucket
     format: cleartext
 ";
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![fail_output(b"Unable to locate credentials")]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
 
-        let err = remote.pull(&config, "dev").unwrap_err();
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
         assert!(err.to_string().contains("Unable to locate credentials"));
     }
 
@@ -620,10 +588,10 @@ remotes:
     endpoint: "https://r2.example.com"
     format: cleartext
 "#;
-        let config = make_config(yaml);
-        let remote_config: S3RemoteConfig = config.remote_config("s3").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
-        let remote = S3Remote::new(&config, remote_config, &runner);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:dev".to_string(), "val".to_string());
@@ -635,7 +603,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         let args = &calls[0].1;

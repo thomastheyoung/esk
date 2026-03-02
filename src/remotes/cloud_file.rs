@@ -18,7 +18,6 @@ use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 
 use crate::config::{CloudFileFormat, CloudFileRemoteConfig, Config};
-use crate::reconcile::extract_env_secrets;
 use crate::store::{decrypt_with_key, derive_key, encrypt_with_key, SecretStore, StorePayload};
 
 use super::SyncRemote;
@@ -64,31 +63,6 @@ impl CloudFileRemote {
             .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(())
     }
-
-    /// Build a per-env StorePayload with bare keys for a given environment.
-    /// Uses env-specific version when available, falling back to global version.
-    fn env_payload(payload: &StorePayload, env: &str) -> StorePayload {
-        let bare = extract_env_secrets(&payload.secrets, env);
-        let version = payload.env_version(env);
-        let mut env_last_changed_at = BTreeMap::new();
-        if let Some(ts) = payload.env_last_changed_at(env) {
-            env_last_changed_at.insert(env.to_string(), ts.to_string());
-        }
-        StorePayload {
-            secrets: bare,
-            version,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at,
-        }
-    }
-
-    /// Convert bare keys from a per-env file back to composite keys.
-    fn bare_to_composite(bare: &BTreeMap<String, String>, env: &str) -> BTreeMap<String, String> {
-        bare.iter()
-            .map(|(k, v)| (format!("{k}:{env}"), v.clone()))
-            .collect()
-    }
 }
 
 impl SyncRemote for CloudFileRemote {
@@ -129,7 +103,7 @@ impl SyncRemote for CloudFileRemote {
 
     fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()> {
         let base_path = self.expand_path()?;
-        let env_payload = Self::env_payload(payload, env);
+        let env_payload = payload.for_env(env);
 
         match self.remote_config.format {
             CloudFileFormat::Encrypted => {
@@ -174,7 +148,7 @@ impl SyncRemote for CloudFileRemote {
                 let payload: StorePayload =
                     serde_json::from_str(&json).context("decrypted payload is not valid JSON")?;
                 Ok(Some((
-                    Self::bare_to_composite(&payload.secrets, env),
+                    StorePayload::bare_to_composite(&payload.secrets, env),
                     payload.version,
                 )))
             }
@@ -188,7 +162,7 @@ impl SyncRemote for CloudFileRemote {
                 let payload: StorePayload =
                     serde_json::from_str(&content).context("failed to parse secrets JSON")?;
                 Ok(Some((
-                    Self::bare_to_composite(&payload.secrets, env),
+                    StorePayload::bare_to_composite(&payload.secrets, env),
                     payload.version,
                 )))
             }

@@ -201,7 +201,7 @@ impl SyncRemote for GcpSecretManagerRemote<'_> {
 mod tests {
     use super::*;
     use crate::targets::{CommandOpts, CommandOutput};
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
     use std::sync::Mutex;
 
     type StdinCall = (String, Vec<String>, Option<Vec<u8>>);
@@ -216,14 +216,8 @@ mod tests {
             .collect()
     }
 
-    fn make_config(yaml: &str) -> Config {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        let config = Config::load(&path).unwrap();
-        // Leak the tempdir so it lives long enough
-        std::mem::forget(dir);
-        config
+    fn make_config(yaml: &str) -> ConfigFixture {
+        ConfigFixture::new(yaml).unwrap()
     }
 
     fn gcp_yaml() -> &'static str {
@@ -253,18 +247,20 @@ remotes:
 
     #[test]
     fn secret_name_substitution() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
         assert_eq!(remote.secret_name("dev"), "myapp-dev");
         assert_eq!(remote.secret_name("prod"), "myapp-prod");
     }
 
     #[test]
     fn preflight_success() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -277,7 +273,7 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -287,10 +283,11 @@ remotes:
 
     #[test]
     fn preflight_missing_gcloud() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("gcloud"));
         assert!(err.to_string().contains("not installed"));
@@ -298,8 +295,9 @@ remotes:
 
     #[test]
     fn preflight_auth_failure() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
                 success: true,
@@ -312,23 +310,24 @@ remotes:
                 stderr: b"ERROR: (gcloud.auth.print-access-token) not authenticated".to_vec(),
             },
         ]);
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("not accessible"));
     }
 
     #[test]
     fn push_success() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: Vec::new(),
             stderr: Vec::new(),
         }]);
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -340,8 +339,9 @@ remotes:
 
     #[test]
     fn push_creates_secret_on_not_found() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             // First versions add fails with NOT_FOUND
             CommandOutput {
@@ -362,9 +362,9 @@ remotes:
                 stderr: Vec::new(),
             },
         ]);
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
         let payload = make_payload(&[("KEY:dev", "val")], 1);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 3);
@@ -373,13 +373,14 @@ remotes:
 
     #[test]
     fn push_skips_empty_env() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
         // Only prod secrets, pushing dev — should skip
         let payload = make_payload(&[("KEY:prod", "val")], 1);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         assert!(calls.is_empty());
@@ -387,8 +388,9 @@ remotes:
 
     #[test]
     fn pull_success() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let json = serde_json::json!({
             "API_KEY": "sk_test",
             "DB_URL": "postgres://localhost",
@@ -399,8 +401,8 @@ remotes:
             stdout: serde_json::to_vec(&json).unwrap(),
             stderr: Vec::new(),
         }]);
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
+        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
 
         assert_eq!(version, 5);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -410,15 +412,16 @@ remotes:
 
     #[test]
     fn pull_not_found_returns_none() {
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: Vec::new(),
             stderr: b"NOT_FOUND: Secret not found".to_vec(),
         }]);
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
-        assert!(remote.pull(&config, "dev").unwrap().is_none());
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
+        assert!(remote.pull(fixture.config(), "dev").unwrap().is_none());
     }
 
     #[test]
@@ -447,12 +450,13 @@ remotes:
             }
         }
 
-        let config = make_config(gcp_yaml());
-        let remote_config: GcpSecretManagerRemoteConfig = config.remote_config("gcp").unwrap();
+        let fixture = make_config(gcp_yaml());
+        let remote_config: GcpSecretManagerRemoteConfig =
+            fixture.config().remote_config("gcp").unwrap();
         let runner = StdinCapture {
             calls: Mutex::new(Vec::new()),
         };
-        let remote = GcpSecretManagerRemote::new(&config, remote_config, &runner);
+        let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
 
         let mut env_versions = BTreeMap::new();
         env_versions.insert("dev".to_string(), 42);
@@ -463,7 +467,7 @@ remotes:
             env_versions,
             env_last_changed_at: BTreeMap::new(),
         };
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = runner.calls.lock().unwrap();
         let stdin = calls[0].2.as_ref().unwrap();

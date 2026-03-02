@@ -146,7 +146,7 @@ impl SyncRemote for SopsRemote<'_> {
 mod tests {
     use super::*;
     use crate::targets::{CommandOpts, CommandOutput};
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
     use std::sync::Mutex;
 
     type StdinCall = (String, Vec<String>, Option<Vec<u8>>);
@@ -161,13 +161,8 @@ mod tests {
             .collect()
     }
 
-    fn make_config(yaml: &str) -> Config {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        let config = Config::load(&path).unwrap();
-        std::mem::forget(dir);
-        config
+    fn make_config(yaml: &str) -> ConfigFixture {
+        ConfigFixture::new(yaml).unwrap()
     }
 
     fn sops_yaml() -> &'static str {
@@ -196,10 +191,10 @@ remotes:
 
     #[test]
     fn resolve_path_substitution() {
-        let config = make_config(sops_yaml());
-        let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
+        let fixture = make_config(sops_yaml());
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
         assert_eq!(remote.resolve_path("dev"), "secrets/dev.enc.json");
         assert_eq!(remote.resolve_path("prod"), "secrets/prod.enc.json");
     }
@@ -237,14 +232,14 @@ remotes:
     #[test]
     fn preflight_missing_sops_config() {
         // Config root has no .sops.yaml
-        let config = make_config(sops_yaml());
-        let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
+        let fixture = make_config(sops_yaml());
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: b"sops 3.8.0".to_vec(),
             stderr: Vec::new(),
         }]);
-        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains(".sops.yaml"));
         assert!(err.to_string().contains("not found"));
@@ -281,8 +276,8 @@ remotes:
 "#,
             dir.path().display()
         );
-        let config = make_config(&yaml);
-        let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
+        let fixture = make_config(&yaml);
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
 
         let encrypted = b"ENCRYPTED_CONTENT";
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
@@ -290,9 +285,9 @@ remotes:
             stdout: encrypted.to_vec(),
             stderr: Vec::new(),
         }]);
-        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 1);
@@ -307,12 +302,12 @@ remotes:
 
     #[test]
     fn push_skips_empty_env() {
-        let config = make_config(sops_yaml());
-        let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
+        let fixture = make_config(sops_yaml());
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         assert!(calls.is_empty());
@@ -335,8 +330,8 @@ remotes:
 "#,
             dir.path().display()
         );
-        let config = make_config(&yaml);
-        let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
+        let fixture = make_config(&yaml);
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
 
         let decrypted = serde_json::json!({
             "API_KEY": "sk_test",
@@ -348,8 +343,8 @@ remotes:
             stdout: serde_json::to_vec(&decrypted).unwrap(),
             stderr: Vec::new(),
         }]);
-        let remote = SopsRemote::new(&config, remote_config, &runner);
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
+        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
 
         assert_eq!(version, 5);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -359,12 +354,12 @@ remotes:
 
     #[test]
     fn pull_missing_file_returns_none() {
-        let config = make_config(sops_yaml());
-        let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
+        let fixture = make_config(sops_yaml());
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
         // Path "secrets/dev.enc.json" doesn't exist
-        assert!(remote.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(fixture.config(), "dev").unwrap().is_none());
 
         let calls = calls(&runner);
         assert!(calls.is_empty());
@@ -407,13 +402,13 @@ remotes:
 "#,
             dir.path().display()
         );
-        let config = make_config(&yaml);
-        let remote_config: SopsRemoteConfig = config.remote_config("sops").unwrap();
+        let fixture = make_config(&yaml);
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
 
         let runner = StdinCapture {
             calls: Mutex::new(Vec::new()),
         };
-        let remote = SopsRemote::new(&config, remote_config, &runner);
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
 
         let mut env_versions = BTreeMap::new();
         env_versions.insert("dev".to_string(), 99);
@@ -424,7 +419,7 @@ remotes:
             env_versions,
             env_last_changed_at: BTreeMap::new(),
         };
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = runner.calls.lock().unwrap();
         let stdin = calls[0].2.as_ref().unwrap();

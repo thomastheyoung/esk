@@ -135,6 +135,44 @@ impl StorePayload {
 
         Some((env_secrets, version))
     }
+
+    /// Build a per-env StorePayload with bare keys for syncing to remotes.
+    /// Strips the `:{env}` suffix from secret keys and includes env-specific
+    /// version and timestamp. Returns a payload with empty tombstones and env_versions.
+    pub fn for_env(&self, env: &str) -> StorePayload {
+        let suffix = format!(":{env}");
+        let bare: BTreeMap<String, String> = self
+            .secrets
+            .iter()
+            .filter_map(|(k, v)| {
+                k.strip_suffix(&suffix)
+                    .map(|bare| (bare.to_string(), v.clone()))
+            })
+            .collect();
+        let version = self.env_version(env);
+        let mut env_last_changed_at = BTreeMap::new();
+        if let Some(ts) = self.env_last_changed_at(env) {
+            env_last_changed_at.insert(env.to_string(), ts.to_string());
+        }
+        StorePayload {
+            secrets: bare,
+            version,
+            tombstones: BTreeMap::new(),
+            env_versions: BTreeMap::new(),
+            env_last_changed_at,
+        }
+    }
+
+    /// Convert bare keys back to composite keys (`KEY` → `KEY:env`).
+    pub fn bare_to_composite(
+        secrets: &BTreeMap<String, String>,
+        env: &str,
+    ) -> BTreeMap<String, String> {
+        secrets
+            .iter()
+            .map(|(k, v)| (format!("{k}:{env}"), v.clone()))
+            .collect()
+    }
 }
 
 impl StorePayload {

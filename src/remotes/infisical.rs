@@ -187,7 +187,7 @@ impl SyncRemote for InfisicalRemote<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
     type RunnerCall = (String, Vec<String>, Option<Vec<u8>>);
 
@@ -229,11 +229,8 @@ mod tests {
         }
     }
 
-    fn make_config() -> Config {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(
-            &path,
+    fn make_config() -> ConfigFixture {
+        ConfigFixture::new(
             r"
 project: myapp
 environments: [dev, prod]
@@ -245,10 +242,7 @@ remotes:
       prod: production
 ",
         )
-        .unwrap();
-        let config = Config::load(&path).unwrap();
-        std::mem::forget(dir);
-        config
+        .unwrap()
     }
 
     fn export_json(entries: &[(&str, &str)]) -> Vec<u8> {
@@ -306,7 +300,7 @@ remotes:
 
     #[test]
     fn push_sets_via_tempfile() {
-        let config = make_config();
+        let fixture = make_config();
         let runner = MockCommandRunner::from_outputs(vec![
             // export (for orphan detection)
             CommandOutput {
@@ -323,7 +317,7 @@ remotes:
         ]);
         let remote = make_remote(&runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let c = calls(&runner);
         assert_eq!(c.len(), 2);
@@ -347,7 +341,7 @@ remotes:
 
     #[test]
     fn push_deletes_orphaned_keys() {
-        let config = make_config();
+        let fixture = make_config();
         let runner = MockCommandRunner::from_outputs(vec![
             // export: remote has 3 keys, we're pushing 2
             CommandOutput {
@@ -375,7 +369,7 @@ remotes:
         ]);
         let remote = make_remote(&runner);
         let payload = make_payload(&[("API_KEY:dev", "new_key"), ("DB_URL:dev", "new_pg")], 3);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let c = calls(&runner);
         assert_eq!(c.len(), 3);
@@ -389,11 +383,11 @@ remotes:
 
     #[test]
     fn push_skips_empty_env() {
-        let config = make_config();
+        let fixture = make_config();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let remote = make_remote(&runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let c = calls(&runner);
         assert!(c.is_empty());
@@ -401,7 +395,7 @@ remotes:
 
     #[test]
     fn push_skips_delete_on_export_failure() {
-        let config = make_config();
+        let fixture = make_config();
         let runner = MockCommandRunner::from_outputs(vec![
             // export fails
             CommandOutput {
@@ -418,7 +412,7 @@ remotes:
         ]);
         let remote = make_remote(&runner);
         let payload = make_payload(&[("API_KEY:dev", "val")], 1);
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let c = calls(&runner);
         assert_eq!(c.len(), 2);
@@ -429,7 +423,7 @@ remotes:
 
     #[test]
     fn pull_success() {
-        let config = make_config();
+        let fixture = make_config();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
             stdout: export_json(&[
@@ -440,7 +434,7 @@ remotes:
             stderr: Vec::new(),
         }]);
         let remote = make_remote(&runner);
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
 
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -455,14 +449,14 @@ remotes:
 
     #[test]
     fn pull_not_found_returns_none() {
-        let config = make_config();
+        let fixture = make_config();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
             stdout: Vec::new(),
             stderr: b"project not found".to_vec(),
         }]);
         let remote = make_remote(&runner);
-        assert!(remote.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(fixture.config(), "dev").unwrap().is_none());
     }
 
     #[test]

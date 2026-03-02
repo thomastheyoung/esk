@@ -240,7 +240,7 @@ impl SyncRemote for BitwardenRemote<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
 
     type RunnerCall = (String, Vec<String>);
@@ -253,13 +253,8 @@ mod tests {
             .collect()
     }
 
-    fn make_config(yaml: &str) -> Config {
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        let config = Config::load(&path).unwrap();
-        std::mem::forget(dir);
-        config
+    fn make_config(yaml: &str) -> ConfigFixture {
+        ConfigFixture::new(yaml).unwrap()
     }
 
     fn ok_output(stdout: &[u8]) -> CommandOutput {
@@ -288,11 +283,12 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(b"bws 0.4.0"), ok_output(b"[]")]);
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
         assert!(remote.preflight().is_ok());
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -310,10 +306,11 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
         let runner = ErrorCommandRunner::missing_command();
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("bws) is not installed"));
     }
@@ -328,13 +325,14 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             ok_output(b"bws 0.4.0"),
             fail_output(b"Unauthorized"),
         ]);
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("Bitwarden authentication failed"));
     }
@@ -349,12 +347,13 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
 
         // list returns empty array (no existing secret), then create succeeds
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"[]"), ok_output(b"{}")]);
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -366,7 +365,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -386,8 +385,9 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
 
         let existing = json!([
             {"id": "secret-456", "key": "myapp-dev", "value": "{}"}
@@ -396,7 +396,7 @@ remotes:
             ok_output(&serde_json::to_vec(&existing).unwrap()),
             ok_output(b"{}"),
         ]);
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
@@ -408,7 +408,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let calls = calls(&runner);
         assert_eq!(calls.len(), 2);
@@ -428,10 +428,11 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY:prod".to_string(), "val".to_string());
@@ -443,7 +444,7 @@ remotes:
             env_last_changed_at: BTreeMap::new(),
         };
 
-        remote.push(&payload, &config, "dev").unwrap();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
         assert!(calls(&runner).is_empty());
     }
 
@@ -457,8 +458,9 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
 
         let inner_value = json!({"API_KEY": "sk_test", "DB_URL": "postgres://localhost", crate::remotes::ESK_VERSION_KEY: 7});
         let items = json!([
@@ -467,9 +469,9 @@ remotes:
         ]);
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
 
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
@@ -486,12 +488,13 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![ok_output(b"[]")]);
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
 
-        assert!(remote.pull(&config, "dev").unwrap().is_none());
+        assert!(remote.pull(fixture.config(), "dev").unwrap().is_none());
     }
 
     #[test]
@@ -515,10 +518,11 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
 
-        let remote = BitwardenRemote::new(&config, remote_config, &DummyRunner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &DummyRunner);
         assert_eq!(remote.secret_name("dev"), "myapp-dev");
         assert_eq!(remote.secret_name("prod"), "myapp-prod");
     }
@@ -533,8 +537,9 @@ remotes:
     project_id: "proj-123"
     secret_name: "{project}-{environment}"
 "#;
-        let config = make_config(yaml);
-        let remote_config: BitwardenRemoteConfig = config.remote_config("bitwarden").unwrap();
+        let fixture = make_config(yaml);
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
 
         let inner_value = json!({"KEY": "val", crate::remotes::ESK_VERSION_KEY: "42"});
         let items = json!([
@@ -542,9 +547,9 @@ remotes:
         ]);
         let runner =
             MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
-        let remote = BitwardenRemote::new(&config, remote_config, &runner);
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
 
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
         assert_eq!(version, 42);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "val");
     }

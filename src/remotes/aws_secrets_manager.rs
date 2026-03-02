@@ -95,34 +95,11 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        // Extract bare keys for this environment
-        let suffix = format!(":{env}");
-        let env_secrets: BTreeMap<String, String> = payload
-            .secrets
-            .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
-            })
-            .collect();
+        let env_payload = payload.for_env(env);
 
-        if env_secrets.is_empty() {
+        if env_payload.secrets.is_empty() {
             return Ok(());
         }
-
-        let version = payload.env_version(env);
-        let mut env_last_changed_at = BTreeMap::new();
-        if let Some(ts) = payload.env_last_changed_at(env) {
-            env_last_changed_at.insert(env.to_string(), ts.to_string());
-        }
-
-        let env_payload = StorePayload {
-            secrets: env_secrets,
-            version,
-            tombstones: BTreeMap::new(),
-            env_versions: BTreeMap::new(),
-            env_last_changed_at,
-        };
 
         let json =
             serde_json::to_string(&env_payload).context("failed to serialize store payload")?;
@@ -233,14 +210,10 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
         let remote_payload: StorePayload =
             serde_json::from_str(secret_string).context("failed to parse SecretString payload")?;
 
-        // Convert bare keys back to composite keys
-        let composite: BTreeMap<String, String> = remote_payload
-            .secrets
-            .into_iter()
-            .map(|(k, v)| (format!("{k}:{env}"), v))
-            .collect();
-
-        Ok(Some((composite, remote_payload.version)))
+        Ok(Some((
+            StorePayload::bare_to_composite(&remote_payload.secrets, env),
+            remote_payload.version,
+        )))
     }
 }
 
