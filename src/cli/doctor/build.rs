@@ -240,7 +240,11 @@ fn build_store_consistency(config: &Config, payload: &StorePayload) -> Vec<Check
     } else {
         checks.push(Check::fail(
             "Key format",
-            format!("{} keys with invalid format: {}", bad_keys.len(), bad_keys.join(", ")),
+            format!(
+                "{} keys with invalid format: {}",
+                bad_keys.len(),
+                bad_keys.join(", ")
+            ),
         ));
     }
 
@@ -306,7 +310,10 @@ fn build_store_consistency(config: &Config, payload: &StorePayload) -> Vec<Check
     } else if bad_tombstones.is_empty() {
         checks.push(Check::pass(
             "Tombstones",
-            format!("{} tombstones, all within version bounds", payload.tombstones.len()),
+            format!(
+                "{} tombstones, all within version bounds",
+                payload.tombstones.len()
+            ),
         ));
     } else {
         checks.push(Check::fail(

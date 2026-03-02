@@ -10,12 +10,13 @@ use super::types::{Check, CheckStatus, Report, Section};
 
 impl Report {
     pub(crate) fn render(&self, runner: &dyn CommandRunner) -> Result<()> {
-        let project_label = self
-            .project
-            .as_deref()
-            .unwrap_or("unknown project");
+        let project_label = self.project.as_deref().unwrap_or("unknown project");
 
-        cliclack::intro(style(format!("esk doctor · {project_label}")).bold().to_string())?;
+        cliclack::intro(
+            style(format!("esk doctor · {project_label}"))
+                .bold()
+                .to_string(),
+        )?;
 
         let term = console::Term::stderr();
         let bar = style("\u{2502}").dim();

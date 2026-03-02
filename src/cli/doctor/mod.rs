@@ -137,7 +137,9 @@ secrets:
         if let Section::Checked(checks) = &report.store_consistency {
             let orphan_check = checks.iter().find(|c| c.label == "Store orphans").unwrap();
             assert_eq!(orphan_check.status, CheckStatus::Warn);
-            assert!(orphan_check.detail.contains("1 keys in store not in config"));
+            assert!(orphan_check
+                .detail
+                .contains("1 keys in store not in config"));
         } else {
             panic!("store_consistency should be Checked");
         }
@@ -185,7 +187,9 @@ secrets:
         if let Section::Checked(checks) = &report.secrets_health {
             let failed_check = checks.iter().find(|c| c.label == "Failed deploys").unwrap();
             assert_eq!(failed_check.status, CheckStatus::Fail);
-            assert!(failed_check.detail.contains("1 deployment(s) in failed state"));
+            assert!(failed_check
+                .detail
+                .contains("1 deployment(s) in failed state"));
         } else {
             panic!("secrets_health should be Checked");
         }
