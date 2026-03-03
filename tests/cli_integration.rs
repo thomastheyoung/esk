@@ -4876,9 +4876,9 @@ fn generate_runtime() {
     let output_path = project.root().join("env.ts");
     assert!(output_path.is_file());
     let content = std::fs::read_to_string(&output_path).unwrap();
-    assert!(content.contains("function requireEnv"));
+    assert!(content.contains("function requiredEnv"));
     assert!(content.contains("export const env ="));
-    assert!(content.contains("STRIPE_KEY: requireEnv(\"STRIPE_KEY\")"));
+    assert!(content.contains("STRIPE_KEY: requiredEnv(\"STRIPE_KEY\")"));
     assert!(content.contains("as const;"));
 }
 
@@ -5322,16 +5322,16 @@ fn generate_runtime_with_typed_helpers() {
 
     let output_path = project.root().join("env.ts");
     let content = std::fs::read_to_string(&output_path).unwrap();
-    // PORT is integer → envInt
-    assert!(content.contains("PORT: envInt(\"PORT\")"));
-    assert!(content.contains("function envInt("));
-    // ENABLE_CACHE is boolean → envBool
-    assert!(content.contains("ENABLE_CACHE: envBool(\"ENABLE_CACHE\")"));
-    assert!(content.contains("function envBool("));
-    // DATABASE_URL is url → requireEnv
-    assert!(content.contains("DATABASE_URL: requireEnv(\"DATABASE_URL\")"));
-    // NODE_ENV has enum but no special format → requireEnv
-    assert!(content.contains("NODE_ENV: requireEnv(\"NODE_ENV\")"));
+    // PORT is integer → requiredInt
+    assert!(content.contains("requiredInt(\"PORT\""));
+    assert!(content.contains("function requiredInt("));
+    // ENABLE_CACHE is boolean → requiredBool
+    assert!(content.contains("ENABLE_CACHE: requiredBool(\"ENABLE_CACHE\")"));
+    assert!(content.contains("function requiredBool("));
+    // DATABASE_URL is url → requiredEnv
+    assert!(content.contains("DATABASE_URL: requiredEnv(\"DATABASE_URL\")"));
+    // NODE_ENV has enum but no special format → requiredEnv
+    assert!(content.contains("requiredEnv(\"NODE_ENV\""));
 }
 
 #[test]
@@ -5344,13 +5344,13 @@ fn generate_runtime_lazy() {
     let output_path = project.root().join("env.ts");
     assert!(output_path.is_file());
     let content = std::fs::read_to_string(&output_path).unwrap();
-    assert!(content.contains("function requireEnv"));
+    assert!(content.contains("function requiredEnv"));
     assert!(content.contains("export const env ="));
-    assert!(content.contains("get STRIPE_KEY() { return requireEnv(\"STRIPE_KEY\"); }"));
+    assert!(content.contains("get STRIPE_KEY() { return requiredEnv(\"STRIPE_KEY\"); }"));
     // Lazy mode must NOT use `as const` — TS doesn't allow it on getter objects
     assert!(!content.contains("as const"));
     // Should NOT contain eager assignments
-    assert!(!content.contains("STRIPE_KEY: requireEnv("));
+    assert!(!content.contains("STRIPE_KEY: requiredEnv("));
 }
 
 #[test]
@@ -5362,16 +5362,94 @@ fn generate_runtime_lazy_with_typed_helpers() {
 
     let output_path = project.root().join("env.ts");
     let content = std::fs::read_to_string(&output_path).unwrap();
-    // PORT is integer → envInt
-    assert!(content.contains("get PORT() { return envInt(\"PORT\"); }"));
-    assert!(content.contains("function envInt("));
-    // ENABLE_CACHE is boolean → envBool
-    assert!(content.contains("get ENABLE_CACHE() { return envBool(\"ENABLE_CACHE\"); }"));
-    assert!(content.contains("function envBool("));
-    // DATABASE_URL is url → requireEnv
-    assert!(content.contains("get DATABASE_URL() { return requireEnv(\"DATABASE_URL\"); }"));
-    // NODE_ENV has enum but no special format → requireEnv
-    assert!(content.contains("get NODE_ENV() { return requireEnv(\"NODE_ENV\"); }"));
+    // PORT is integer → requiredInt
+    assert!(content.contains("get PORT() { return requiredInt(\"PORT\""));
+    assert!(content.contains("function requiredInt("));
+    // ENABLE_CACHE is boolean → requiredBool
+    assert!(content.contains("get ENABLE_CACHE() { return requiredBool(\"ENABLE_CACHE\"); }"));
+    assert!(content.contains("function requiredBool("));
+    // DATABASE_URL is url → requiredEnv
+    assert!(content.contains("get DATABASE_URL() { return requiredEnv(\"DATABASE_URL\"); }"));
+    // NODE_ENV has enum but no special format → requiredEnv
+    assert!(content.contains("get NODE_ENV() { return requiredEnv(\"NODE_ENV\""));
+}
+
+#[test]
+fn generate_runtime_with_validation_constraints() {
+    let project = TestProject::with_store(GENERATE_VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, Some(&GenerateFormat::Ts), None, false).unwrap();
+
+    let output_path = project.root().join("env.ts");
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    // PORT: integer with range
+    assert!(content.contains("PORT: requiredInt(\"PORT\", { min: 1, max: 65535 })"));
+    // NODE_ENV: string enum
+    assert!(content.contains(
+        "NODE_ENV: requiredEnv(\"NODE_ENV\", { allowed: [\"development\", \"staging\", \"production\"] })"
+    ));
+    // API_KEY: pattern + length
+    assert!(content.contains("API_KEY: requiredEnv(\"API_KEY\", { pattern: new RegExp(\"^sk_[a-zA-Z0-9]+$\"), minLength: 10, maxLength: 100 })"));
+    // RATE_LIMIT: float with range
+    assert!(content.contains("RATE_LIMIT: requiredFloat(\"RATE_LIMIT\", { min: 0.1, max: 100 })"));
+    // OPTIONAL_FLAG: optional with enum → optionalEnv
+    assert!(content.contains("OPTIONAL_FLAG: optionalEnv(\"OPTIONAL_FLAG\", { allowed: [\"a\", \"b\", \"c\"] })"));
+    // ENABLED: boolean, no constraints
+    assert!(content.contains("ENABLED: requiredBool(\"ENABLED\")"));
+    // CONFIG_JSON: json, no constraints
+    assert!(content.contains("CONFIG_JSON: requiredJson(\"CONFIG_JSON\")"));
+}
+
+#[test]
+fn generate_runtime_lazy_with_validation_constraints() {
+    let project = TestProject::with_store(GENERATE_VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, Some(&GenerateFormat::TsLazy), None, false).unwrap();
+
+    let output_path = project.root().join("env.ts");
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    // PORT: integer with range, getter syntax
+    assert!(content.contains("get PORT() { return requiredInt(\"PORT\", { min: 1, max: 65535 }); }"));
+    // OPTIONAL_FLAG: optional with enum → optionalEnv getter
+    assert!(content.contains(
+        "get OPTIONAL_FLAG() { return optionalEnv(\"OPTIONAL_FLAG\", { allowed: [\"a\", \"b\", \"c\"] }); }"
+    ));
+    // ENABLED: boolean getter, no constraints
+    assert!(content.contains("get ENABLED() { return requiredBool(\"ENABLED\"); }"));
+}
+
+#[test]
+fn generate_runtime_optional_with_constraints() {
+    let yaml = r#"
+project: testapp
+environments: [dev, prod]
+secrets:
+  General:
+    MODE:
+      validate:
+        optional: true
+        enum: [fast, slow]
+      targets: {}
+    PLAIN:
+      validate:
+        optional: true
+      targets: {}
+"#;
+    let project = TestProject::with_store(yaml).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, Some(&GenerateFormat::Ts), None, false).unwrap();
+
+    let output_path = project.root().join("env.ts");
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    // MODE: optional with enum → optionalEnv with opts
+    assert!(content.contains("MODE: optionalEnv(\"MODE\", { allowed: [\"fast\", \"slow\"] })"));
+    // PLAIN: optional without constraints → bare process.env
+    assert!(content.contains("PLAIN: process.env.PLAIN"));
+    // optionalEnv helper should be present
+    assert!(content.contains("function optionalEnv("));
 }
 
 // === required-variable auditing ===

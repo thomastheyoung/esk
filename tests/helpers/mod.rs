@@ -603,6 +603,47 @@ secrets:
       targets: {}
 "#;
 
+/// Config with diverse validation constraints for generate testing.
+pub const GENERATE_VALIDATION_CONFIG: &str = r#"
+project: testapp
+environments: [dev, prod]
+secrets:
+  General:
+    PORT:
+      validate:
+        format: integer
+        range: [1, 65535]
+      targets: {}
+    NODE_ENV:
+      validate:
+        enum: [development, staging, production]
+      targets: {}
+    API_KEY:
+      validate:
+        pattern: "^sk_[a-zA-Z0-9]+$"
+        min_length: 10
+        max_length: 100
+      targets: {}
+    RATE_LIMIT:
+      validate:
+        format: number
+        range: [0.1, 100]
+      targets: {}
+    OPTIONAL_FLAG:
+      validate:
+        optional: true
+        enum: [a, b, c]
+      targets: {}
+    ENABLED:
+      validate:
+        format: boolean
+      targets: {}
+    CONFIG_JSON:
+      validate:
+        format: json
+      targets: {}
+"#;
+
 /// CircleCI target config for integration testing.
 pub const CIRCLECI_CONFIG: &str = r#"
 project: testapp

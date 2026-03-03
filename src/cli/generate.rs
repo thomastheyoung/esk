@@ -14,7 +14,373 @@ struct SecretMeta {
     format: Option<Format>,
     optional: bool,
     enum_values: Option<Vec<String>>,
+    pattern: Option<String>,
+    range: Option<(f64, f64)>,
+    min_length: Option<usize>,
+    max_length: Option<usize>,
 }
+
+impl SecretMeta {
+    fn from_def(key: String, def: &crate::config::SecretDef) -> Self {
+        match &def.validate {
+            Some(v) => {
+                let enums = v
+                    .enum_values
+                    .as_ref()
+                    .and_then(|raw| crate::validate::resolve_enum_values(raw).ok());
+                Self {
+                    key,
+                    description: def.description.clone(),
+                    format: v.format,
+                    optional: v.optional,
+                    enum_values: enums,
+                    pattern: v.pattern.clone(),
+                    range: v.range,
+                    min_length: v.min_length,
+                    max_length: v.max_length,
+                }
+            }
+            None => Self {
+                key,
+                description: def.description.clone(),
+                format: None,
+                optional: false,
+                enum_values: None,
+                pattern: None,
+                range: None,
+                min_length: None,
+                max_length: None,
+            },
+        }
+    }
+
+    fn has_constraints(&self) -> bool {
+        self.enum_values.is_some()
+            || self.pattern.is_some()
+            || self.range.is_some()
+            || self.min_length.is_some()
+            || self.max_length.is_some()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+enum HelperKind {
+    Bool,
+    Env,
+    Float,
+    Int,
+    Json,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct RuntimeHelper {
+    kind: HelperKind,
+    optional: bool,
+}
+
+impl RuntimeHelper {
+    fn fn_name(self) -> &'static str {
+        match (self.kind, self.optional) {
+            (HelperKind::Env, false) => "requiredEnv",
+            (HelperKind::Int, false) => "requiredInt",
+            (HelperKind::Float, false) => "requiredFloat",
+            (HelperKind::Bool, false) => "requiredBool",
+            (HelperKind::Json, false) => "requiredJson",
+            (HelperKind::Env, true) => "optionalEnv",
+            (HelperKind::Int, true) => "optionalInt",
+            (HelperKind::Float, true) => "optionalFloat",
+            (HelperKind::Bool, true) => "optionalBool",
+            (HelperKind::Json, true) => "optionalJson",
+        }
+    }
+
+    fn body(self) -> &'static str {
+        match (self.kind, self.optional) {
+            (HelperKind::Env, false) => REQUIRED_ENV_BODY,
+            (HelperKind::Int, false) => REQUIRED_INT_BODY,
+            (HelperKind::Float, false) => REQUIRED_FLOAT_BODY,
+            (HelperKind::Bool, false) => REQUIRED_BOOL_BODY,
+            (HelperKind::Json, false) => REQUIRED_JSON_BODY,
+            (HelperKind::Env, true) => OPTIONAL_ENV_BODY,
+            (HelperKind::Int, true) => OPTIONAL_INT_BODY,
+            (HelperKind::Float, true) => OPTIONAL_FLOAT_BODY,
+            (HelperKind::Bool, true) => OPTIONAL_BOOL_BODY,
+            (HelperKind::Json, true) => OPTIONAL_JSON_BODY,
+        }
+    }
+}
+
+// --- Helper body constants ---
+
+const REQUIRED_ENV_BODY: &str = r#"function requiredEnv(key: string, opts?: { allowed?: string[]; pattern?: RegExp; minLength?: number; maxLength?: number }): string {
+  const value = process.env[key];
+  if (value === undefined || value === "") {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  if (opts?.allowed && !opts.allowed.includes(value)) {
+    throw new Error(`${key} must be one of: ${opts.allowed.join(", ")}`);
+  }
+  if (opts?.pattern && !opts.pattern.test(value)) {
+    throw new Error(`${key} does not match pattern: ${opts.pattern}`);
+  }
+  if (opts?.minLength !== undefined && value.length < opts.minLength) {
+    throw new Error(`${key} must be at least ${opts.minLength} characters`);
+  }
+  if (opts?.maxLength !== undefined && value.length > opts.maxLength) {
+    throw new Error(`${key} must be at most ${opts.maxLength} characters`);
+  }
+  return value;
+}
+"#;
+
+const REQUIRED_INT_BODY: &str = r#"function requiredInt(key: string, opts?: { allowed?: number[]; min?: number; max?: number }): number {
+  const value = process.env[key];
+  if (value === undefined || value === "") {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  const num = parseInt(value, 10);
+  if (isNaN(num)) {
+    throw new Error(`Expected integer for ${key}`);
+  }
+  if (opts?.allowed && !opts.allowed.includes(num)) {
+    throw new Error(`${key} must be one of: ${opts.allowed.join(", ")}`);
+  }
+  if (opts?.min !== undefined && num < opts.min) {
+    throw new Error(`${key} must be >= ${opts.min}`);
+  }
+  if (opts?.max !== undefined && num > opts.max) {
+    throw new Error(`${key} must be <= ${opts.max}`);
+  }
+  return num;
+}
+"#;
+
+const REQUIRED_FLOAT_BODY: &str = r#"function requiredFloat(key: string, opts?: { min?: number; max?: number }): number {
+  const value = process.env[key];
+  if (value === undefined || value === "") {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  const num = parseFloat(value);
+  if (isNaN(num)) {
+    throw new Error(`Expected number for ${key}`);
+  }
+  if (opts?.min !== undefined && num < opts.min) {
+    throw new Error(`${key} must be >= ${opts.min}`);
+  }
+  if (opts?.max !== undefined && num > opts.max) {
+    throw new Error(`${key} must be <= ${opts.max}`);
+  }
+  return num;
+}
+"#;
+
+const REQUIRED_BOOL_BODY: &str = r#"function requiredBool(key: string): boolean {
+  const value = process.env[key]?.toLowerCase();
+  if (value === undefined || value === "") {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  return ["true", "1", "yes"].includes(value);
+}
+"#;
+
+const REQUIRED_JSON_BODY: &str = r#"function requiredJson(key: string): unknown {
+  const value = process.env[key];
+  if (value === undefined || value === "") {
+    throw new Error(`Missing required environment variable: ${key}`);
+  }
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`Invalid JSON for environment variable ${key}`);
+  }
+}
+"#;
+
+const OPTIONAL_ENV_BODY: &str = r#"function optionalEnv(key: string, opts?: { allowed?: string[]; pattern?: RegExp; minLength?: number; maxLength?: number }): string | undefined {
+  const value = process.env[key];
+  if (value === undefined || value === "") return undefined;
+  if (opts?.allowed && !opts.allowed.includes(value)) {
+    throw new Error(`${key} must be one of: ${opts.allowed.join(", ")}`);
+  }
+  if (opts?.pattern && !opts.pattern.test(value)) {
+    throw new Error(`${key} does not match pattern: ${opts.pattern}`);
+  }
+  if (opts?.minLength !== undefined && value.length < opts.minLength) {
+    throw new Error(`${key} must be at least ${opts.minLength} characters`);
+  }
+  if (opts?.maxLength !== undefined && value.length > opts.maxLength) {
+    throw new Error(`${key} must be at most ${opts.maxLength} characters`);
+  }
+  return value;
+}
+"#;
+
+const OPTIONAL_INT_BODY: &str = r#"function optionalInt(key: string, opts?: { allowed?: number[]; min?: number; max?: number }): number | undefined {
+  const value = process.env[key];
+  if (value === undefined || value === "") return undefined;
+  const num = parseInt(value, 10);
+  if (isNaN(num)) {
+    throw new Error(`Expected integer for ${key}`);
+  }
+  if (opts?.allowed && !opts.allowed.includes(num)) {
+    throw new Error(`${key} must be one of: ${opts.allowed.join(", ")}`);
+  }
+  if (opts?.min !== undefined && num < opts.min) {
+    throw new Error(`${key} must be >= ${opts.min}`);
+  }
+  if (opts?.max !== undefined && num > opts.max) {
+    throw new Error(`${key} must be <= ${opts.max}`);
+  }
+  return num;
+}
+"#;
+
+const OPTIONAL_FLOAT_BODY: &str = r#"function optionalFloat(key: string, opts?: { min?: number; max?: number }): number | undefined {
+  const value = process.env[key];
+  if (value === undefined || value === "") return undefined;
+  const num = parseFloat(value);
+  if (isNaN(num)) {
+    throw new Error(`Expected number for ${key}`);
+  }
+  if (opts?.min !== undefined && num < opts.min) {
+    throw new Error(`${key} must be >= ${opts.min}`);
+  }
+  if (opts?.max !== undefined && num > opts.max) {
+    throw new Error(`${key} must be <= ${opts.max}`);
+  }
+  return num;
+}
+"#;
+
+const OPTIONAL_BOOL_BODY: &str = r#"function optionalBool(key: string): boolean | undefined {
+  const value = process.env[key]?.toLowerCase();
+  if (value === undefined || value === "") return undefined;
+  return ["true", "1", "yes"].includes(value);
+}
+"#;
+
+const OPTIONAL_JSON_BODY: &str = r#"function optionalJson(key: string): unknown {
+  const value = process.env[key];
+  if (value === undefined || value === "") return undefined;
+  try {
+    return JSON.parse(value);
+  } catch {
+    throw new Error(`Invalid JSON for environment variable ${key}`);
+  }
+}
+"#;
+
+// --- Utility functions ---
+
+fn escape_js_string(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\0' => out.push_str("\\0"),
+            c if c.is_control() => {
+                let _ = write!(out, "\\u{:04X}", c as u32);
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
+fn format_f64(v: f64) -> String {
+    if v.is_finite() && v.fract() == 0.0 && v.abs() < 1e15 {
+        #[allow(clippy::cast_possible_truncation)]
+        let i = v as i64;
+        format!("{i}")
+    } else {
+        format!("{v}")
+    }
+}
+
+// --- Helper dispatch ---
+
+fn determine_helper(m: &SecretMeta) -> RuntimeHelper {
+    let kind = match m.format {
+        Some(Format::Integer) => HelperKind::Int,
+        Some(Format::Number) => HelperKind::Float,
+        Some(Format::Boolean) => HelperKind::Bool,
+        Some(Format::Json) => HelperKind::Json,
+        _ => HelperKind::Env,
+    };
+    RuntimeHelper {
+        kind,
+        optional: m.optional,
+    }
+}
+
+// --- Opts building ---
+
+fn build_string_opts(m: &SecretMeta) -> Option<String> {
+    let mut fields = Vec::new();
+    if let Some(ref values) = m.enum_values {
+        let items: Vec<String> = values.iter().map(|v| format!("\"{}\"", escape_js_string(v))).collect();
+        fields.push(format!("allowed: [{}]", items.join(", ")));
+    }
+    if let Some(ref pattern) = m.pattern {
+        fields.push(format!("pattern: new RegExp(\"{}\")", escape_js_string(pattern)));
+    }
+    if let Some(min) = m.min_length {
+        fields.push(format!("minLength: {min}"));
+    }
+    if let Some(max) = m.max_length {
+        fields.push(format!("maxLength: {max}"));
+    }
+    if fields.is_empty() {
+        None
+    } else {
+        Some(format!("{{ {} }}", fields.join(", ")))
+    }
+}
+
+fn build_int_opts(m: &SecretMeta) -> Option<String> {
+    let mut fields = Vec::new();
+    if let Some(ref values) = m.enum_values {
+        let items: Vec<String> = values.iter().map(ToString::to_string).collect();
+        fields.push(format!("allowed: [{}]", items.join(", ")));
+    }
+    if let Some((min, max)) = m.range {
+        fields.push(format!("min: {}", format_f64(min)));
+        fields.push(format!("max: {}", format_f64(max)));
+    }
+    if fields.is_empty() {
+        None
+    } else {
+        Some(format!("{{ {} }}", fields.join(", ")))
+    }
+}
+
+fn build_float_opts(m: &SecretMeta) -> Option<String> {
+    let mut fields = Vec::new();
+    if let Some((min, max)) = m.range {
+        fields.push(format!("min: {}", format_f64(min)));
+        fields.push(format!("max: {}", format_f64(max)));
+    }
+    if fields.is_empty() {
+        None
+    } else {
+        Some(format!("{{ {} }}", fields.join(", ")))
+    }
+}
+
+fn build_opts(helper: RuntimeHelper, m: &SecretMeta) -> Option<String> {
+    match helper.kind {
+        HelperKind::Env => build_string_opts(m),
+        HelperKind::Int => build_int_opts(m),
+        HelperKind::Float => build_float_opts(m),
+        HelperKind::Bool | HelperKind::Json => None,
+    }
+}
+
+// --- Report / run / resolve_outputs (unchanged logic) ---
 
 struct GenerateResult {
     relative_path: String,
@@ -222,23 +588,7 @@ fn collect_secret_metas(config: &Config) -> Vec<SecretMeta> {
     for group in config.secrets.values() {
         for (key, def) in group {
             if seen.insert(key.clone()) {
-                let (format, optional, enum_values) = match &def.validate {
-                    Some(v) => {
-                        let enums = v
-                            .enum_values
-                            .as_ref()
-                            .and_then(|raw| crate::validate::resolve_enum_values(raw).ok());
-                        (v.format, v.optional, enums)
-                    }
-                    None => (None, false, None),
-                };
-                metas.push(SecretMeta {
-                    key: key.clone(),
-                    description: def.description.clone(),
-                    format,
-                    optional,
-                    enum_values,
-                });
+                metas.push(SecretMeta::from_def(key.clone(), def));
             }
         }
     }
@@ -291,22 +641,16 @@ fn generate_runtime_inner(metas: &[SecretMeta], mode: RuntimeMode) -> String {
     let mut out = String::from("// Generated by esk — do not edit\n");
 
     // Determine which helpers are needed
-    let mut needed_helpers: BTreeSet<&str> = BTreeSet::new();
+    let mut needed: BTreeSet<RuntimeHelper> = BTreeSet::new();
     for m in metas {
-        if m.optional {
-            continue;
+        if m.optional && !m.has_constraints() {
+            continue; // bare process.env.X — no helper needed
         }
-        needed_helpers.insert(match m.format {
-            Some(Format::Integer) => "envInt",
-            Some(Format::Number) => "envFloat",
-            Some(Format::Boolean) => "envBool",
-            Some(Format::Json) => "envJson",
-            _ => "requireEnv",
-        });
+        needed.insert(determine_helper(m));
     }
 
     // Emit only the helpers that are used
-    emit_runtime_helpers(&mut out, &needed_helpers);
+    emit_runtime_helpers(&mut out, &needed);
 
     out.push_str("export const env = {\n");
     for m in metas {
@@ -319,86 +663,27 @@ fn generate_runtime_inner(metas: &[SecretMeta], mode: RuntimeMode) -> String {
     out
 }
 
-fn emit_runtime_helpers(out: &mut String, needed: &BTreeSet<&str>) {
-    if needed.contains("requireEnv") {
-        out.push_str("function requireEnv(key: string): string {\n");
-        out.push_str("  const value = process.env[key];\n");
-        out.push_str("  if (value === undefined || value === \"\") {\n");
-        out.push_str("    throw new Error(`Missing required environment variable: ${key}`);\n");
-        out.push_str("  }\n");
-        out.push_str("  return value;\n");
-        out.push_str("}\n");
-        out.push('\n');
-    }
-
-    if needed.contains("envInt") {
-        out.push_str("function envInt(key: string): number {\n");
-        out.push_str("  const value = process.env[key];\n");
-        out.push_str("  if (value === undefined || value === \"\") {\n");
-        out.push_str("    throw new Error(`Missing required environment variable: ${key}`);\n");
-        out.push_str("  }\n");
-        out.push_str("  const num = parseInt(value, 10);\n");
-        out.push_str("  if (isNaN(num)) {\n");
-        out.push_str("    throw new Error(`Expected integer for ${key}`);\n");
-        out.push_str("  }\n");
-        out.push_str("  return num;\n");
-        out.push_str("}\n");
-        out.push('\n');
-    }
-
-    if needed.contains("envFloat") {
-        out.push_str("function envFloat(key: string): number {\n");
-        out.push_str("  const value = process.env[key];\n");
-        out.push_str("  if (value === undefined || value === \"\") {\n");
-        out.push_str("    throw new Error(`Missing required environment variable: ${key}`);\n");
-        out.push_str("  }\n");
-        out.push_str("  const num = parseFloat(value);\n");
-        out.push_str("  if (isNaN(num)) {\n");
-        out.push_str("    throw new Error(`Expected number for ${key}`);\n");
-        out.push_str("  }\n");
-        out.push_str("  return num;\n");
-        out.push_str("}\n");
-        out.push('\n');
-    }
-
-    if needed.contains("envBool") {
-        out.push_str("function envBool(key: string): boolean {\n");
-        out.push_str("  const value = process.env[key]?.toLowerCase();\n");
-        out.push_str("  if (value === undefined || value === \"\") {\n");
-        out.push_str("    throw new Error(`Missing required environment variable: ${key}`);\n");
-        out.push_str("  }\n");
-        out.push_str("  return [\"true\", \"1\", \"yes\"].includes(value);\n");
-        out.push_str("}\n");
-        out.push('\n');
-    }
-
-    if needed.contains("envJson") {
-        out.push_str("function envJson(key: string): unknown {\n");
-        out.push_str("  const value = process.env[key];\n");
-        out.push_str("  if (value === undefined || value === \"\") {\n");
-        out.push_str("    throw new Error(`Missing required environment variable: ${key}`);\n");
-        out.push_str("  }\n");
-        out.push_str("  try {\n");
-        out.push_str("    return JSON.parse(value);\n");
-        out.push_str("  } catch {\n");
-        out.push_str("    throw new Error(`Invalid JSON for environment variable ${key}`);\n");
-        out.push_str("  }\n");
-        out.push_str("}\n");
+fn emit_runtime_helpers(out: &mut String, needed: &BTreeSet<RuntimeHelper>) {
+    for helper in needed {
+        out.push_str(helper.body());
         out.push('\n');
     }
 }
 
+fn format_helper_call(helper: RuntimeHelper, m: &SecretMeta) -> String {
+    let name = helper.fn_name();
+    match build_opts(helper, m) {
+        Some(opts) => format!("{name}(\"{}\", {opts})", m.key),
+        None => format!("{name}(\"{}\")", m.key),
+    }
+}
+
 fn emit_runtime_property(out: &mut String, m: &SecretMeta, mode: RuntimeMode) {
-    let call = if m.optional {
+    let call = if m.optional && !m.has_constraints() {
         format!("process.env.{}", m.key)
     } else {
-        match m.format {
-            Some(Format::Integer) => format!("envInt(\"{}\")", m.key),
-            Some(Format::Number) => format!("envFloat(\"{}\")", m.key),
-            Some(Format::Boolean) => format!("envBool(\"{}\")", m.key),
-            Some(Format::Json) => format!("envJson(\"{}\")", m.key),
-            _ => format!("requireEnv(\"{}\")", m.key),
-        }
+        let helper = determine_helper(m);
+        format_helper_call(helper, m)
     };
 
     match mode {
@@ -467,6 +752,20 @@ mod tests {
     use super::*;
     use crate::config::{Required, TargetsConfig};
     use std::collections::BTreeMap;
+
+    fn meta(key: &str) -> SecretMeta {
+        SecretMeta {
+            key: key.to_string(),
+            description: None,
+            format: None,
+            optional: false,
+            enum_values: None,
+            pattern: None,
+            range: None,
+            min_length: None,
+            max_length: None,
+        }
+    }
 
     fn collect_keys(config: &Config) -> BTreeSet<String> {
         collect_secret_metas(config)
@@ -552,22 +851,7 @@ mod tests {
 
     #[test]
     fn dts_output_format() {
-        let metas = vec![
-            SecretMeta {
-                key: "A_KEY".to_string(),
-                description: None,
-                format: None,
-                optional: false,
-                enum_values: None,
-            },
-            SecretMeta {
-                key: "B_KEY".to_string(),
-                description: None,
-                format: None,
-                optional: false,
-                enum_values: None,
-            },
-        ];
+        let metas = vec![meta("A_KEY"), meta("B_KEY")];
 
         let output = generate_dts(&metas);
         assert!(output.starts_with("// Generated by esk"));
@@ -579,47 +863,19 @@ mod tests {
 
     #[test]
     fn runtime_output_format() {
-        let metas = vec![SecretMeta {
-            key: "DB_URL".to_string(),
-            description: None,
-            format: None,
-            optional: false,
-            enum_values: None,
-        }];
+        let metas = vec![meta("DB_URL")];
 
         let output = generate_runtime(&metas);
         assert!(output.starts_with("// Generated by esk"));
-        assert!(output.contains("function requireEnv"));
+        assert!(output.contains("function requiredEnv"));
         assert!(output.contains("export const env ="));
-        assert!(output.contains("DB_URL: requireEnv(\"DB_URL\")"));
+        assert!(output.contains("DB_URL: requiredEnv(\"DB_URL\")"));
         assert!(output.contains("as const;"));
     }
 
     #[test]
     fn keys_are_sorted() {
-        let metas = vec![
-            SecretMeta {
-                key: "ZEBRA".to_string(),
-                description: None,
-                format: None,
-                optional: false,
-                enum_values: None,
-            },
-            SecretMeta {
-                key: "ALPHA".to_string(),
-                description: None,
-                format: None,
-                optional: false,
-                enum_values: None,
-            },
-            SecretMeta {
-                key: "MIDDLE".to_string(),
-                description: None,
-                format: None,
-                optional: false,
-                enum_values: None,
-            },
-        ];
+        let metas = vec![meta("ZEBRA"), meta("ALPHA"), meta("MIDDLE")];
 
         // collect_secret_metas sorts, but generate_dts takes pre-sorted slice.
         // Test via dts output order:
@@ -673,15 +929,12 @@ mod tests {
     #[test]
     fn generate_dts_enum_union_type() {
         let metas = vec![SecretMeta {
-            key: "NODE_ENV".to_string(),
-            description: None,
-            format: None,
-            optional: false,
             enum_values: Some(vec![
                 "development".to_string(),
                 "staging".to_string(),
                 "production".to_string(),
             ]),
+            ..meta("NODE_ENV")
         }];
         let output = generate_dts(&metas);
         assert!(output.contains("NODE_ENV: \"development\" | \"staging\" | \"production\";"));
@@ -690,11 +943,9 @@ mod tests {
     #[test]
     fn generate_dts_optional_field() {
         let metas = vec![SecretMeta {
-            key: "FEATURE_FLAG".to_string(),
-            description: None,
             format: Some(Format::String),
             optional: true,
-            enum_values: None,
+            ..meta("FEATURE_FLAG")
         }];
         let output = generate_dts(&metas);
         assert!(output.contains("FEATURE_FLAG?: string | undefined;"));
@@ -704,57 +955,46 @@ mod tests {
     fn generate_runtime_emits_typed_helpers() {
         let metas = vec![
             SecretMeta {
-                key: "PORT".to_string(),
-                description: None,
                 format: Some(Format::Integer),
-                optional: false,
-                enum_values: None,
+                ..meta("PORT")
             },
             SecretMeta {
-                key: "URL".to_string(),
-                description: None,
                 format: Some(Format::Url),
-                optional: false,
-                enum_values: None,
+                ..meta("URL")
             },
         ];
         let output = generate_runtime(&metas);
-        assert!(output.contains("function envInt("));
-        assert!(output.contains("PORT: envInt(\"PORT\")"));
-        assert!(output.contains("function requireEnv("));
-        assert!(output.contains("URL: requireEnv(\"URL\")"));
+        assert!(output.contains("function requiredInt("));
+        assert!(output.contains("PORT: requiredInt(\"PORT\")"));
+        assert!(output.contains("function requiredEnv("));
+        assert!(output.contains("URL: requiredEnv(\"URL\")"));
     }
 
     #[test]
     fn generate_runtime_omits_unused_helpers() {
         let metas = vec![SecretMeta {
-            key: "PORT".to_string(),
-            description: None,
             format: Some(Format::Integer),
-            optional: false,
-            enum_values: None,
+            ..meta("PORT")
         }];
         let output = generate_runtime(&metas);
-        assert!(output.contains("function envInt("));
-        assert!(!output.contains("function requireEnv("));
-        assert!(!output.contains("function envBool("));
-        assert!(!output.contains("function envFloat("));
-        assert!(!output.contains("function envJson("));
+        assert!(output.contains("function requiredInt("));
+        assert!(!output.contains("function requiredEnv("));
+        assert!(!output.contains("function requiredBool("));
+        assert!(!output.contains("function requiredFloat("));
+        assert!(!output.contains("function requiredJson("));
     }
 
     #[test]
     fn generate_runtime_optional_uses_process_env() {
         let metas = vec![SecretMeta {
-            key: "FEATURE".to_string(),
-            description: None,
             format: Some(Format::Boolean),
             optional: true,
-            enum_values: None,
+            ..meta("FEATURE")
         }];
         let output = generate_runtime(&metas);
         assert!(output.contains("FEATURE: process.env.FEATURE"));
-        // Optional doesn't need envBool helper
-        assert!(!output.contains("function envBool("));
+        // Optional with no constraints doesn't need any helper
+        assert!(!output.contains("function"));
     }
 
     #[test]
@@ -785,22 +1025,7 @@ mod tests {
 
     #[test]
     fn env_example_basic() {
-        let metas = vec![
-            SecretMeta {
-                key: "A_KEY".to_string(),
-                description: None,
-                format: None,
-                optional: false,
-                enum_values: None,
-            },
-            SecretMeta {
-                key: "B_KEY".to_string(),
-                description: None,
-                format: None,
-                optional: false,
-                enum_values: None,
-            },
-        ];
+        let metas = vec![meta("A_KEY"), meta("B_KEY")];
         let output = generate_env_example(&metas);
         assert!(output.starts_with("# Generated by esk"));
         assert!(output.contains("A_KEY=\n"));
@@ -827,15 +1052,12 @@ mod tests {
     #[test]
     fn env_example_with_enums() {
         let metas = vec![SecretMeta {
-            key: "NODE_ENV".to_string(),
-            description: None,
-            format: None,
-            optional: false,
             enum_values: Some(vec![
                 "development".to_string(),
                 "staging".to_string(),
                 "production".to_string(),
             ]),
+            ..meta("NODE_ENV")
         }];
         let output = generate_env_example(&metas);
         assert!(output.contains("# Allowed: development, staging, production\n"));
@@ -845,11 +1067,8 @@ mod tests {
     #[test]
     fn env_example_optional_commented() {
         let metas = vec![SecretMeta {
-            key: "FEATURE_FLAG".to_string(),
-            description: None,
-            format: None,
             optional: true,
-            enum_values: None,
+            ..meta("FEATURE_FLAG")
         }];
         let output = generate_env_example(&metas);
         assert!(output.contains("# Optional\n"));
@@ -984,11 +1203,8 @@ mod tests {
     #[test]
     fn env_example_multiline_description() {
         let metas = vec![SecretMeta {
-            key: "DB_URL".to_string(),
             description: Some("Connection string\nfor the database".to_string()),
-            format: None,
-            optional: false,
-            enum_values: None,
+            ..meta("DB_URL")
         }];
         let output = generate_env_example(&metas);
         assert!(output.contains("# Connection string\n# for the database\n"));
@@ -998,19 +1214,13 @@ mod tests {
 
     #[test]
     fn lazy_runtime_uses_getters() {
-        let metas = vec![SecretMeta {
-            key: "DB_URL".to_string(),
-            description: None,
-            format: None,
-            optional: false,
-            enum_values: None,
-        }];
+        let metas = vec![meta("DB_URL")];
 
         let output = generate_runtime_lazy(&metas);
         assert!(output.starts_with("// Generated by esk"));
-        assert!(output.contains("function requireEnv"));
+        assert!(output.contains("function requiredEnv"));
         assert!(output.contains("export const env ="));
-        assert!(output.contains("get DB_URL() { return requireEnv(\"DB_URL\"); }"));
+        assert!(output.contains("get DB_URL() { return requiredEnv(\"DB_URL\"); }"));
         // Lazy mode must NOT use `as const` — TS doesn't allow it on getter objects
         assert!(!output.contains("as const"));
         assert!(output.contains("};\n"));
@@ -1020,69 +1230,237 @@ mod tests {
     fn lazy_runtime_typed_helpers() {
         let metas = vec![
             SecretMeta {
-                key: "PORT".to_string(),
-                description: None,
                 format: Some(Format::Integer),
-                optional: false,
-                enum_values: None,
+                ..meta("PORT")
             },
             SecretMeta {
-                key: "RATE".to_string(),
-                description: None,
                 format: Some(Format::Number),
-                optional: false,
-                enum_values: None,
+                ..meta("RATE")
             },
             SecretMeta {
-                key: "ENABLED".to_string(),
-                description: None,
                 format: Some(Format::Boolean),
-                optional: false,
-                enum_values: None,
+                ..meta("ENABLED")
             },
             SecretMeta {
-                key: "META".to_string(),
-                description: None,
                 format: Some(Format::Json),
-                optional: false,
-                enum_values: None,
+                ..meta("META")
             },
         ];
         let output = generate_runtime_lazy(&metas);
-        assert!(output.contains("get PORT() { return envInt(\"PORT\"); }"));
-        assert!(output.contains("get RATE() { return envFloat(\"RATE\"); }"));
-        assert!(output.contains("get ENABLED() { return envBool(\"ENABLED\"); }"));
-        assert!(output.contains("get META() { return envJson(\"META\"); }"));
+        assert!(output.contains("get PORT() { return requiredInt(\"PORT\"); }"));
+        assert!(output.contains("get RATE() { return requiredFloat(\"RATE\"); }"));
+        assert!(output.contains("get ENABLED() { return requiredBool(\"ENABLED\"); }"));
+        assert!(output.contains("get META() { return requiredJson(\"META\"); }"));
     }
 
     #[test]
     fn lazy_runtime_optional_uses_process_env() {
         let metas = vec![SecretMeta {
-            key: "FEATURE".to_string(),
-            description: None,
             format: Some(Format::Boolean),
             optional: true,
-            enum_values: None,
+            ..meta("FEATURE")
         }];
         let output = generate_runtime_lazy(&metas);
         assert!(output.contains("get FEATURE() { return process.env.FEATURE; }"));
-        assert!(!output.contains("function envBool("));
+        assert!(!output.contains("function"));
     }
 
     #[test]
     fn lazy_runtime_omits_unused_helpers() {
         let metas = vec![SecretMeta {
-            key: "PORT".to_string(),
-            description: None,
             format: Some(Format::Integer),
-            optional: false,
-            enum_values: None,
+            ..meta("PORT")
         }];
         let output = generate_runtime_lazy(&metas);
-        assert!(output.contains("function envInt("));
-        assert!(!output.contains("function requireEnv("));
-        assert!(!output.contains("function envBool("));
-        assert!(!output.contains("function envFloat("));
-        assert!(!output.contains("function envJson("));
+        assert!(output.contains("function requiredInt("));
+        assert!(!output.contains("function requiredEnv("));
+        assert!(!output.contains("function requiredBool("));
+        assert!(!output.contains("function requiredFloat("));
+        assert!(!output.contains("function requiredJson("));
+    }
+
+    // --- validation constraint tests ---
+
+    #[test]
+    fn runtime_enum_in_opts() {
+        let metas = vec![SecretMeta {
+            enum_values: Some(vec!["a".to_string(), "b".to_string()]),
+            ..meta("KEY")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"KEY: requiredEnv("KEY", { allowed: ["a", "b"] })"#));
+    }
+
+    #[test]
+    fn runtime_int_enum_in_opts() {
+        let metas = vec![SecretMeta {
+            format: Some(Format::Integer),
+            enum_values: Some(vec!["80".to_string(), "443".to_string()]),
+            ..meta("PORT")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"PORT: requiredInt("PORT", { allowed: [80, 443] })"#));
+    }
+
+    #[test]
+    fn runtime_pattern_in_opts() {
+        let metas = vec![SecretMeta {
+            pattern: Some("^sk_".to_string()),
+            ..meta("KEY")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"KEY: requiredEnv("KEY", { pattern: new RegExp("^sk_") })"#));
+    }
+
+    #[test]
+    fn runtime_length_in_opts() {
+        let metas = vec![SecretMeta {
+            min_length: Some(5),
+            max_length: Some(20),
+            ..meta("KEY")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"KEY: requiredEnv("KEY", { minLength: 5, maxLength: 20 })"#));
+    }
+
+    #[test]
+    fn runtime_range_on_int() {
+        let metas = vec![SecretMeta {
+            format: Some(Format::Integer),
+            range: Some((1.0, 65535.0)),
+            ..meta("PORT")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"PORT: requiredInt("PORT", { min: 1, max: 65535 })"#));
+    }
+
+    #[test]
+    fn runtime_range_on_float() {
+        let metas = vec![SecretMeta {
+            format: Some(Format::Number),
+            range: Some((0.1, 100.0)),
+            ..meta("RATE")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"RATE: requiredFloat("RATE", { min: 0.1, max: 100 })"#));
+    }
+
+    #[test]
+    fn runtime_combined_constraints() {
+        let metas = vec![SecretMeta {
+            enum_values: Some(vec!["a".to_string(), "b".to_string()]),
+            pattern: Some("^[ab]$".to_string()),
+            min_length: Some(1),
+            max_length: Some(1),
+            ..meta("KEY")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(
+            r#"KEY: requiredEnv("KEY", { allowed: ["a", "b"], pattern: new RegExp("^[ab]$"), minLength: 1, maxLength: 1 })"#
+        ));
+    }
+
+    #[test]
+    fn runtime_optional_with_constraints() {
+        let metas = vec![SecretMeta {
+            optional: true,
+            enum_values: Some(vec!["x".to_string(), "y".to_string()]),
+            ..meta("KEY")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"KEY: optionalEnv("KEY", { allowed: ["x", "y"] })"#));
+        assert!(output.contains("function optionalEnv("));
+    }
+
+    #[test]
+    fn runtime_optional_no_constraints_bare() {
+        let metas = vec![SecretMeta {
+            optional: true,
+            ..meta("KEY")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains("KEY: process.env.KEY"));
+        assert!(!output.contains("function"));
+    }
+
+    #[test]
+    fn runtime_regex_escaping() {
+        let metas = vec![SecretMeta {
+            pattern: Some(r#"^sk_[a-z"\\]+$"#.to_string()),
+            ..meta("KEY")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output
+            .contains(r#"pattern: new RegExp("^sk_[a-z\"\\\\]+$")"#));
+    }
+
+    #[test]
+    fn runtime_f64_whole_number() {
+        assert_eq!(format_f64(1.0), "1");
+        assert_eq!(format_f64(65535.0), "65535");
+        assert_eq!(format_f64(-42.0), "-42");
+    }
+
+    #[test]
+    fn runtime_f64_fractional() {
+        assert_eq!(format_f64(0.5), "0.5");
+        assert_eq!(format_f64(99.9), "99.9");
+    }
+
+    #[test]
+    fn lazy_enum_in_opts() {
+        let metas = vec![SecretMeta {
+            enum_values: Some(vec!["a".to_string(), "b".to_string()]),
+            ..meta("KEY")
+        }];
+        let output = generate_runtime_lazy(&metas);
+        assert!(output.contains(
+            r#"get KEY() { return requiredEnv("KEY", { allowed: ["a", "b"] }); }"#
+        ));
+    }
+
+    #[test]
+    fn determine_helper_all_combinations() {
+        // required variants
+        let cases = vec![
+            (None, false, HelperKind::Env, false),
+            (Some(Format::String), false, HelperKind::Env, false),
+            (Some(Format::Url), false, HelperKind::Env, false),
+            (Some(Format::Email), false, HelperKind::Env, false),
+            (Some(Format::Base64), false, HelperKind::Env, false),
+            (Some(Format::Integer), false, HelperKind::Int, false),
+            (Some(Format::Number), false, HelperKind::Float, false),
+            (Some(Format::Boolean), false, HelperKind::Bool, false),
+            (Some(Format::Json), false, HelperKind::Json, false),
+            // optional variants
+            (None, true, HelperKind::Env, true),
+            (Some(Format::Integer), true, HelperKind::Int, true),
+            (Some(Format::Number), true, HelperKind::Float, true),
+            (Some(Format::Boolean), true, HelperKind::Bool, true),
+            (Some(Format::Json), true, HelperKind::Json, true),
+        ];
+        for (format, optional, expected_kind, expected_optional) in cases {
+            let m = SecretMeta {
+                format,
+                optional,
+                ..meta("X")
+            };
+            let helper = determine_helper(&m);
+            assert_eq!(
+                helper.kind, expected_kind,
+                "format={format:?} optional={optional}"
+            );
+            assert_eq!(
+                helper.optional, expected_optional,
+                "format={format:?} optional={optional}"
+            );
+        }
+    }
+
+    #[test]
+    fn escape_js_string_basics() {
+        assert_eq!(escape_js_string(r#"hello"world"#), r#"hello\"world"#);
+        assert_eq!(escape_js_string("line\nnew"), "line\\nnew");
+        assert_eq!(escape_js_string(r"back\slash"), "back\\\\slash");
     }
 }
