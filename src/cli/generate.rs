@@ -175,11 +175,17 @@ fn determine_helper(m: &SecretMeta) -> RuntimeHelper {
 fn build_string_opts(m: &SecretMeta) -> Option<String> {
     let mut fields = Vec::new();
     if let Some(ref values) = m.enum_values {
-        let items: Vec<String> = values.iter().map(|v| format!("\"{}\"", escape_js_string(v))).collect();
+        let items: Vec<String> = values
+            .iter()
+            .map(|v| format!("\"{}\"", escape_js_string(v)))
+            .collect();
         fields.push(format!("allowed: [{}]", items.join(", ")));
     }
     if let Some(ref pattern) = m.pattern {
-        fields.push(format!("pattern: new RegExp(\"{}\")", escape_js_string(pattern)));
+        fields.push(format!(
+            "pattern: new RegExp(\"{}\")",
+            escape_js_string(pattern)
+        ));
     }
     if let Some(min) = m.min_length {
         fields.push(format!("minLength: {min}"));
@@ -534,7 +540,8 @@ fn format_helper_call(helper: RuntimeHelper, m: &SecretMeta) -> String {
 }
 
 fn emit_runtime_property(out: &mut String, m: &SecretMeta, mode: RuntimeMode) {
-    let call = if m.optional && determine_helper(m).kind == HelperKind::Env && !m.has_constraints() {
+    let call = if m.optional && determine_helper(m).kind == HelperKind::Env && !m.has_constraints()
+    {
         format!("process.env.{}", m.key)
     } else {
         let helper = determine_helper(m);
@@ -561,7 +568,11 @@ fn generate_zod(metas: &[SecretMeta]) -> String {
         // Append constraints (only for string-based types, not enums which replace the base)
         if m.enum_values.is_none() {
             if let Some(ref pattern) = m.pattern {
-                let _ = write!(chain, ".regex(new RegExp(\"{}\"))", escape_js_string(pattern));
+                let _ = write!(
+                    chain,
+                    ".regex(new RegExp(\"{}\"))",
+                    escape_js_string(pattern)
+                );
             }
             if let Some(min) = m.min_length {
                 let _ = write!(chain, ".min({min})");
@@ -588,7 +599,10 @@ fn generate_zod(metas: &[SecretMeta]) -> String {
 fn zod_base_type(m: &SecretMeta) -> String {
     // Enum replaces base type entirely
     if let Some(ref values) = m.enum_values {
-        let items: Vec<String> = values.iter().map(|v| format!("\"{}\"", escape_js_string(v))).collect();
+        let items: Vec<String> = values
+            .iter()
+            .map(|v| format!("\"{}\"", escape_js_string(v)))
+            .collect();
         return format!("z.enum([{}])", items.join(", "));
     }
 
@@ -598,11 +612,10 @@ fn zod_base_type(m: &SecretMeta) -> String {
         Some(Format::Integer) => "z.coerce.number().int()".to_string(),
         Some(Format::Number) => "z.coerce.number()".to_string(),
         Some(Format::Boolean) => {
-            "z.string().transform(v => [\"true\", \"1\", \"yes\"].includes(v.toLowerCase()))".to_string()
+            "z.string().transform(v => [\"true\", \"1\", \"yes\"].includes(v.toLowerCase()))"
+                .to_string()
         }
-        Some(Format::Json) => {
-            "z.string().transform(v => JSON.parse(v) as unknown)".to_string()
-        }
+        Some(Format::Json) => "z.string().transform(v => JSON.parse(v) as unknown)".to_string(),
         Some(Format::Base64) => "z.string().base64()".to_string(),
         Some(Format::String) | None => "z.string()".to_string(),
     }
@@ -1325,8 +1338,7 @@ mod tests {
             ..meta("KEY")
         }];
         let output = generate_runtime(&metas);
-        assert!(output
-            .contains(r#"pattern: new RegExp("^sk_[a-z\"\\\\]+$")"#));
+        assert!(output.contains(r#"pattern: new RegExp("^sk_[a-z\"\\\\]+$")"#));
     }
 
     #[test]
@@ -1349,9 +1361,9 @@ mod tests {
             ..meta("KEY")
         }];
         let output = generate_runtime_lazy(&metas);
-        assert!(output.contains(
-            r#"get KEY() { return requiredEnv("KEY", { allowed: ["a", "b"] }); }"#
-        ));
+        assert!(
+            output.contains(r#"get KEY() { return requiredEnv("KEY", { allowed: ["a", "b"] }); }"#)
+        );
     }
 
     #[test]
@@ -1415,14 +1427,38 @@ mod tests {
     #[test]
     fn zod_all_formats() {
         let metas = vec![
-            SecretMeta { format: Some(Format::String), ..meta("A") },
-            SecretMeta { format: Some(Format::Url), ..meta("B") },
-            SecretMeta { format: Some(Format::Email), ..meta("C") },
-            SecretMeta { format: Some(Format::Integer), ..meta("D") },
-            SecretMeta { format: Some(Format::Number), ..meta("E") },
-            SecretMeta { format: Some(Format::Boolean), ..meta("F") },
-            SecretMeta { format: Some(Format::Json), ..meta("G") },
-            SecretMeta { format: Some(Format::Base64), ..meta("H") },
+            SecretMeta {
+                format: Some(Format::String),
+                ..meta("A")
+            },
+            SecretMeta {
+                format: Some(Format::Url),
+                ..meta("B")
+            },
+            SecretMeta {
+                format: Some(Format::Email),
+                ..meta("C")
+            },
+            SecretMeta {
+                format: Some(Format::Integer),
+                ..meta("D")
+            },
+            SecretMeta {
+                format: Some(Format::Number),
+                ..meta("E")
+            },
+            SecretMeta {
+                format: Some(Format::Boolean),
+                ..meta("F")
+            },
+            SecretMeta {
+                format: Some(Format::Json),
+                ..meta("G")
+            },
+            SecretMeta {
+                format: Some(Format::Base64),
+                ..meta("H")
+            },
             meta("I"), // no format
         ];
         let output = generate_zod(&metas);
@@ -1431,7 +1467,9 @@ mod tests {
         assert!(output.contains("C: z.string().email(),"));
         assert!(output.contains("D: z.coerce.number().int(),"));
         assert!(output.contains("E: z.coerce.number(),"));
-        assert!(output.contains(r#"F: z.string().transform(v => ["true", "1", "yes"].includes(v.toLowerCase())),"#));
+        assert!(output.contains(
+            r#"F: z.string().transform(v => ["true", "1", "yes"].includes(v.toLowerCase())),"#
+        ));
         assert!(output.contains("G: z.string().transform(v => JSON.parse(v) as unknown),"));
         assert!(output.contains("H: z.string().base64(),"));
         assert!(output.contains("I: z.string(),"));
@@ -1441,7 +1479,11 @@ mod tests {
     fn zod_constraints() {
         let metas = vec![
             SecretMeta {
-                enum_values: Some(vec!["debug".to_string(), "info".to_string(), "warn".to_string()]),
+                enum_values: Some(vec![
+                    "debug".to_string(),
+                    "info".to_string(),
+                    "warn".to_string(),
+                ]),
                 ..meta("LOG_LEVEL")
             },
             SecretMeta {
@@ -1458,7 +1500,9 @@ mod tests {
         ];
         let output = generate_zod(&metas);
         assert!(output.contains(r#"LOG_LEVEL: z.enum(["debug", "info", "warn"]),"#));
-        assert!(output.contains(r#"API_KEY: z.string().regex(new RegExp("^sk_[a-zA-Z0-9]+$")).min(10).max(100),"#));
+        assert!(output.contains(
+            r#"API_KEY: z.string().regex(new RegExp("^sk_[a-zA-Z0-9]+$")).min(10).max(100),"#
+        ));
         assert!(output.contains("PORT: z.coerce.number().int().min(1).max(65535),"));
     }
 
@@ -1559,7 +1603,12 @@ mod tests {
     #[test]
     fn needs_runtime_helper_formats() {
         // Formats that need typed helpers (not HelperKind::Env)
-        for fmt in [Format::Integer, Format::Number, Format::Boolean, Format::Json] {
+        for fmt in [
+            Format::Integer,
+            Format::Number,
+            Format::Boolean,
+            Format::Json,
+        ] {
             let m = SecretMeta {
                 format: Some(fmt),
                 optional: true,

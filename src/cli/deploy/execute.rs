@@ -284,7 +284,6 @@ fn execute_animated<'a>(
                         .expect("failed batch groups mutex poisoned")
                         .insert((bg.target_name.clone(), bg.app.clone(), env_name.to_string()));
                 }
-
             });
         }
 
