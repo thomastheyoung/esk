@@ -21,11 +21,10 @@ const TAG_LEN: usize = 16;
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.
 pub fn validate_key(key: &str) -> Result<()> {
-    if key.is_empty() {
-        bail!("invalid secret key '': must match [A-Za-z_][A-Za-z0-9_]*");
-    }
     let mut chars = key.chars();
-    let first = chars.next().unwrap();
+    let Some(first) = chars.next() else {
+        bail!("invalid secret key '': must match [A-Za-z_][A-Za-z0-9_]*");
+    };
     if !first.is_ascii_alphabetic() && first != '_' {
         bail!("invalid secret key '{key}': must match [A-Za-z_][A-Za-z0-9_]*");
     }
@@ -43,17 +42,14 @@ pub fn validate_key(key: &str) -> Result<()> {
 /// spaces, colons, newlines, and other characters that could cause injection
 /// when interpolated into file paths, YAML, or CLI arguments.
 pub(crate) fn validate_identifier(name: &str, label: &str) -> Result<()> {
-    if name.is_empty() {
-        bail!("invalid {label} '': must not be empty");
-    }
-    if name.len() > 64 {
-        bail!(
-            "invalid {label} '{}...': exceeds 64 character limit",
-            &name[..32]
-        );
-    }
     let mut chars = name.chars();
-    let first = chars.next().unwrap();
+    let Some(first) = chars.next() else {
+        bail!("invalid {label} '': must not be empty");
+    };
+    if name.len() > 64 {
+        let truncated: String = name.chars().take(32).collect();
+        bail!("invalid {label} '{truncated}...': exceeds 64 character limit");
+    }
     if !first.is_ascii_alphabetic() {
         bail!(
             "invalid {label} '{name}': must start with a letter and match [a-zA-Z][a-zA-Z0-9_-]*"
