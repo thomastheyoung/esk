@@ -4,8 +4,6 @@
 .cargo/
 .cargo-home/
 .cargo-tools/
-.beads/
-
 # Temp
 .temp/
 
