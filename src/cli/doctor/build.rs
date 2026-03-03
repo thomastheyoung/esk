@@ -149,11 +149,11 @@ impl Report {
 }
 
 fn check_gitignore(root: &Path, structure: &mut Vec<Check>) {
-    let gitignore_path = root.join(".gitignore");
+    let gitignore_path = root.join(".esk/.gitignore");
     if !gitignore_path.is_file() {
         structure.push(Check::warn(
-            ".gitignore",
-            "missing — sensitive files may be committed",
+            ".esk/.gitignore",
+            "missing — run `esk init` to create",
         ));
         return;
     }
@@ -161,7 +161,7 @@ fn check_gitignore(root: &Path, structure: &mut Vec<Check>) {
     let contents = match std::fs::read_to_string(&gitignore_path) {
         Ok(c) => c,
         Err(e) => {
-            structure.push(Check::warn(".gitignore", format!("unreadable: {e}")));
+            structure.push(Check::warn(".esk/.gitignore", format!("unreadable: {e}")));
             return;
         }
     };
@@ -175,12 +175,12 @@ fn check_gitignore(root: &Path, structure: &mut Vec<Check>) {
 
     if missing.is_empty() {
         structure.push(Check::pass(
-            ".gitignore",
-            format!("all {} esk entries present", expected.len()),
+            ".esk/.gitignore",
+            format!("all {} entries present", expected.len()),
         ));
     } else {
         structure.push(Check::warn(
-            ".gitignore",
+            ".esk/.gitignore",
             format!(
                 "missing {} of {} entries: {}",
                 missing.len(),
@@ -519,10 +519,10 @@ fn build_suggestions(
                 });
             }
         }
-        if check.status == CheckStatus::Warn && check.label == ".gitignore" {
+        if check.status == CheckStatus::Warn && check.label == ".esk/.gitignore" {
             suggestions.push(Suggestion {
                 command: "esk init".into(),
-                reason: "update .gitignore entries".into(),
+                reason: "create .esk/.gitignore".into(),
             });
         }
     }

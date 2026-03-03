@@ -33,7 +33,7 @@ impl InitReport {
         let store_path = esk_dir.join("store.enc");
         let deploy_index_path = esk_dir.join("deploy-index.json");
         let sync_index_path = esk_dir.join("sync-index.json");
-        let gitignore_path = cwd.join(".gitignore");
+        let gitignore_path = esk_dir.join(".gitignore");
 
         Self::render_file(&self.config, &config_path)?;
         match &self.key {
@@ -83,13 +83,12 @@ impl InitReport {
     }
 }
 
-const ESK_GITIGNORE_COMMENT: &str = "# esk (store.enc is safe to commit)";
 pub(crate) const ESK_GITIGNORE_ENTRIES: &[&str] = &[
-    ".esk/store.key",
-    ".esk/deploy-index.json",
-    ".esk/sync-index.json",
-    ".esk/lock",
-    ".esk/key-provider",
+    "store.key",
+    "deploy-index.json",
+    "sync-index.json",
+    "lock",
+    "key-provider",
 ];
 
 pub fn run(cwd: &Path, keychain: bool) -> Result<()> {
@@ -183,7 +182,7 @@ fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
     let store_path = esk_dir.join("store.enc");
     let deploy_index_path = esk_dir.join("deploy-index.json");
     let sync_index_path = esk_dir.join("sync-index.json");
-    let gitignore_path = cwd.join(".gitignore");
+    let gitignore_path = esk_dir.join(".gitignore");
 
     // Scaffold esk.yaml if it doesn't exist
     let config_status = if config_path.is_file() {
@@ -337,7 +336,7 @@ fn ensure_keychain_store(
 }
 
 fn ensure_esk_gitignore_entries(gitignore_path: &Path) -> Result<bool> {
-    let mut contents = if gitignore_path.is_file() {
+    let contents = if gitignore_path.is_file() {
         std::fs::read_to_string(gitignore_path)?
     } else {
         String::new()
@@ -353,29 +352,15 @@ fn ensure_esk_gitignore_entries(gitignore_path: &Path) -> Result<bool> {
         return Ok(false);
     }
 
-    // If no esk entries exist yet, add the comment header
-    let has_any = ESK_GITIGNORE_ENTRIES
-        .iter()
-        .any(|entry| contents.lines().any(|line| line.trim() == *entry));
-
-    if !has_any {
-        if !contents.is_empty() {
-            if !contents.ends_with('\n') {
-                contents.push('\n');
-            }
-            contents.push('\n');
-        }
-        contents.push_str(ESK_GITIGNORE_COMMENT);
-        contents.push('\n');
+    // Build the full file content with all entries
+    let mut out = String::from("# Files that must not be committed\n");
+    for entry in ESK_GITIGNORE_ENTRIES {
+        out.push_str(entry);
+        out.push('\n');
     }
 
-    for entry in &missing {
-        contents.push_str(entry);
-        contents.push('\n');
-    }
-
-    std::fs::write(gitignore_path, contents)
-        .with_context(|| format!("failed to update {}", gitignore_path.display()))?;
+    std::fs::write(gitignore_path, out)
+        .with_context(|| format!("failed to write {}", gitignore_path.display()))?;
     Ok(true)
 }
 

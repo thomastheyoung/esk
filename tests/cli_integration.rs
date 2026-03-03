@@ -32,50 +32,39 @@ fn init_idempotent() {
 }
 
 #[test]
-fn init_updates_gitignore_with_esk_entries() {
+fn init_creates_esk_gitignore() {
+    let dir = tempfile::tempdir().unwrap();
+    cli::init::run(dir.path(), false).unwrap();
+
+    let gitignore = std::fs::read_to_string(dir.path().join(".esk/.gitignore")).unwrap();
+    assert_eq!(
+        gitignore,
+        "# Files that must not be committed\nstore.key\ndeploy-index.json\nsync-index.json\nlock\nkey-provider\n"
+    );
+}
+
+#[test]
+fn init_does_not_modify_project_gitignore() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join(".gitignore"), "node_modules\n").unwrap();
     cli::init::run(dir.path(), false).unwrap();
 
     let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-    assert_eq!(
-        gitignore,
-        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n"
-    );
+    assert_eq!(gitignore, "node_modules\n");
 }
 
 #[test]
-fn init_gitignore_update_is_idempotent() {
+fn init_esk_gitignore_is_idempotent() {
     let dir = tempfile::tempdir().unwrap();
-    std::fs::write(
-        dir.path().join(".gitignore"),
-        "node_modules\n\n# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n",
-    )
-    .unwrap();
-
     cli::init::run(dir.path(), false).unwrap();
     cli::init::run(dir.path(), false).unwrap();
 
-    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-    assert_eq!(gitignore.matches(".esk/store.key").count(), 1);
-    assert_eq!(gitignore.matches(".esk/deploy-index.json").count(), 1);
-    assert_eq!(gitignore.matches(".esk/sync-index.json").count(), 1);
-    assert_eq!(gitignore.matches(".esk/lock").count(), 1);
-    assert_eq!(gitignore.matches(".esk/key-provider").count(), 1);
-}
-
-#[test]
-fn init_creates_gitignore_when_missing() {
-    let dir = tempfile::tempdir().unwrap();
-    assert!(!dir.path().join(".gitignore").exists());
-
-    cli::init::run(dir.path(), false).unwrap();
-
-    let gitignore = std::fs::read_to_string(dir.path().join(".gitignore")).unwrap();
-    assert_eq!(
-        gitignore,
-        "# esk (store.enc is safe to commit)\n.esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n"
-    );
+    let gitignore = std::fs::read_to_string(dir.path().join(".esk/.gitignore")).unwrap();
+    assert_eq!(gitignore.matches("store.key").count(), 1);
+    assert_eq!(gitignore.matches("deploy-index.json").count(), 1);
+    assert_eq!(gitignore.matches("sync-index.json").count(), 1);
+    assert_eq!(gitignore.matches("lock").count(), 1);
+    assert_eq!(gitignore.matches("key-provider").count(), 1);
 }
 
 // === get ===
@@ -7015,9 +7004,10 @@ fn doctor_healthy_project_succeeds() {
     let sync_idx = SyncIndex::new(&project.sync_index_path());
     sync_idx.save().unwrap();
 
-    // Write complete .gitignore
-    let gitignore = ".esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n".to_string();
-    std::fs::write(project.root().join(".gitignore"), gitignore).unwrap();
+    // Write .esk/.gitignore
+    let gitignore =
+        "store.key\ndeploy-index.json\nsync-index.json\nlock\nkey-provider\n".to_string();
+    std::fs::write(project.root().join(".esk/.gitignore"), gitignore).unwrap();
 
     // Use OkRunner to make target/remote preflights pass
     let result = cli::doctor::run_with_runner(project.root(), &OkRunner);
@@ -7043,8 +7033,9 @@ fn doctor_with_store_orphans() {
     let sync_idx = SyncIndex::new(&project.sync_index_path());
     sync_idx.save().unwrap();
 
-    let gitignore = ".esk/store.key\n.esk/deploy-index.json\n.esk/sync-index.json\n.esk/lock\n.esk/key-provider\n".to_string();
-    std::fs::write(project.root().join(".gitignore"), gitignore).unwrap();
+    let gitignore =
+        "store.key\ndeploy-index.json\nsync-index.json\nlock\nkey-provider\n".to_string();
+    std::fs::write(project.root().join(".esk/.gitignore"), gitignore).unwrap();
 
     // Add a key to store that's not in config
     let store = project.store().unwrap();

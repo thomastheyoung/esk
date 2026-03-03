@@ -23,8 +23,5 @@ CLAUDE.md
 .DS_Store
 Thumbs.db
 
-# Secrets (never commit the key)
-.esk/store.key
-
 # Test fixtures with real values
 tests/fixtures/*.key

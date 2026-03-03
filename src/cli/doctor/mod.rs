@@ -68,9 +68,9 @@ secrets:
         let sync_idx = SyncIndex::new(&dir.path().join(".esk/sync-index.json"));
         sync_idx.save().unwrap();
 
-        // Add gitignore entries
+        // Add .esk/.gitignore entries
         let gitignore = crate::cli::init::ESK_GITIGNORE_ENTRIES.join("\n") + "\n";
-        std::fs::write(dir.path().join(".gitignore"), gitignore).unwrap();
+        std::fs::write(dir.path().join(".esk/.gitignore"), gitignore).unwrap();
 
         dir
     }
@@ -149,15 +149,15 @@ secrets:
     fn doctor_missing_gitignore_entries() {
         let dir = setup_healthy_project();
 
-        // Write partial gitignore
-        std::fs::write(dir.path().join(".gitignore"), ".esk/store.key\n").unwrap();
+        // Write partial .esk/.gitignore
+        std::fs::write(dir.path().join(".esk/.gitignore"), "store.key\n").unwrap();
 
         let report = Report::build(dir.path());
 
         let gi_check = report
             .structure
             .iter()
-            .find(|c| c.label == ".gitignore")
+            .find(|c| c.label == ".esk/.gitignore")
             .unwrap();
         assert_eq!(gi_check.status, CheckStatus::Warn);
         assert!(gi_check.detail.contains("missing"));
