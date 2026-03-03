@@ -110,165 +110,18 @@ impl RuntimeHelper {
     }
 }
 
-// --- Helper body constants ---
+// --- Helper body constants (loaded from external JS files) ---
 
-const REQUIRED_ENV_BODY: &str = r#"function requiredEnv(key: string, opts?: { allowed?: string[]; pattern?: RegExp; minLength?: number; maxLength?: number }): string {
-  const value = process.env[key];
-  if (value === undefined || value === "") {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
-  if (opts?.allowed && !opts.allowed.includes(value)) {
-    throw new Error(`${key} must be one of: ${opts.allowed.join(", ")}`);
-  }
-  if (opts?.pattern && !opts.pattern.test(value)) {
-    throw new Error(`${key} does not match pattern: ${opts.pattern}`);
-  }
-  if (opts?.minLength !== undefined && value.length < opts.minLength) {
-    throw new Error(`${key} must be at least ${opts.minLength} characters`);
-  }
-  if (opts?.maxLength !== undefined && value.length > opts.maxLength) {
-    throw new Error(`${key} must be at most ${opts.maxLength} characters`);
-  }
-  return value;
-}
-"#;
-
-const REQUIRED_INT_BODY: &str = r#"function requiredInt(key: string, opts?: { allowed?: number[]; min?: number; max?: number }): number {
-  const value = process.env[key];
-  if (value === undefined || value === "") {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
-  const num = parseInt(value, 10);
-  if (isNaN(num)) {
-    throw new Error(`Expected integer for ${key}`);
-  }
-  if (opts?.allowed && !opts.allowed.includes(num)) {
-    throw new Error(`${key} must be one of: ${opts.allowed.join(", ")}`);
-  }
-  if (opts?.min !== undefined && num < opts.min) {
-    throw new Error(`${key} must be >= ${opts.min}`);
-  }
-  if (opts?.max !== undefined && num > opts.max) {
-    throw new Error(`${key} must be <= ${opts.max}`);
-  }
-  return num;
-}
-"#;
-
-const REQUIRED_FLOAT_BODY: &str = r#"function requiredFloat(key: string, opts?: { min?: number; max?: number }): number {
-  const value = process.env[key];
-  if (value === undefined || value === "") {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
-  const num = parseFloat(value);
-  if (isNaN(num)) {
-    throw new Error(`Expected number for ${key}`);
-  }
-  if (opts?.min !== undefined && num < opts.min) {
-    throw new Error(`${key} must be >= ${opts.min}`);
-  }
-  if (opts?.max !== undefined && num > opts.max) {
-    throw new Error(`${key} must be <= ${opts.max}`);
-  }
-  return num;
-}
-"#;
-
-const REQUIRED_BOOL_BODY: &str = r#"function requiredBool(key: string): boolean {
-  const value = process.env[key]?.toLowerCase();
-  if (value === undefined || value === "") {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
-  return ["true", "1", "yes"].includes(value);
-}
-"#;
-
-const REQUIRED_JSON_BODY: &str = r#"function requiredJson(key: string): unknown {
-  const value = process.env[key];
-  if (value === undefined || value === "") {
-    throw new Error(`Missing required environment variable: ${key}`);
-  }
-  try {
-    return JSON.parse(value);
-  } catch {
-    throw new Error(`Invalid JSON for environment variable ${key}`);
-  }
-}
-"#;
-
-const OPTIONAL_ENV_BODY: &str = r#"function optionalEnv(key: string, opts?: { allowed?: string[]; pattern?: RegExp; minLength?: number; maxLength?: number }): string | undefined {
-  const value = process.env[key];
-  if (value === undefined || value === "") return undefined;
-  if (opts?.allowed && !opts.allowed.includes(value)) {
-    throw new Error(`${key} must be one of: ${opts.allowed.join(", ")}`);
-  }
-  if (opts?.pattern && !opts.pattern.test(value)) {
-    throw new Error(`${key} does not match pattern: ${opts.pattern}`);
-  }
-  if (opts?.minLength !== undefined && value.length < opts.minLength) {
-    throw new Error(`${key} must be at least ${opts.minLength} characters`);
-  }
-  if (opts?.maxLength !== undefined && value.length > opts.maxLength) {
-    throw new Error(`${key} must be at most ${opts.maxLength} characters`);
-  }
-  return value;
-}
-"#;
-
-const OPTIONAL_INT_BODY: &str = r#"function optionalInt(key: string, opts?: { allowed?: number[]; min?: number; max?: number }): number | undefined {
-  const value = process.env[key];
-  if (value === undefined || value === "") return undefined;
-  const num = parseInt(value, 10);
-  if (isNaN(num)) {
-    throw new Error(`Expected integer for ${key}`);
-  }
-  if (opts?.allowed && !opts.allowed.includes(num)) {
-    throw new Error(`${key} must be one of: ${opts.allowed.join(", ")}`);
-  }
-  if (opts?.min !== undefined && num < opts.min) {
-    throw new Error(`${key} must be >= ${opts.min}`);
-  }
-  if (opts?.max !== undefined && num > opts.max) {
-    throw new Error(`${key} must be <= ${opts.max}`);
-  }
-  return num;
-}
-"#;
-
-const OPTIONAL_FLOAT_BODY: &str = r#"function optionalFloat(key: string, opts?: { min?: number; max?: number }): number | undefined {
-  const value = process.env[key];
-  if (value === undefined || value === "") return undefined;
-  const num = parseFloat(value);
-  if (isNaN(num)) {
-    throw new Error(`Expected number for ${key}`);
-  }
-  if (opts?.min !== undefined && num < opts.min) {
-    throw new Error(`${key} must be >= ${opts.min}`);
-  }
-  if (opts?.max !== undefined && num > opts.max) {
-    throw new Error(`${key} must be <= ${opts.max}`);
-  }
-  return num;
-}
-"#;
-
-const OPTIONAL_BOOL_BODY: &str = r#"function optionalBool(key: string): boolean | undefined {
-  const value = process.env[key]?.toLowerCase();
-  if (value === undefined || value === "") return undefined;
-  return ["true", "1", "yes"].includes(value);
-}
-"#;
-
-const OPTIONAL_JSON_BODY: &str = r#"function optionalJson(key: string): unknown {
-  const value = process.env[key];
-  if (value === undefined || value === "") return undefined;
-  try {
-    return JSON.parse(value);
-  } catch {
-    throw new Error(`Invalid JSON for environment variable ${key}`);
-  }
-}
-"#;
+const REQUIRED_ENV_BODY: &str = include_str!("generate_helpers/required_env.js");
+const REQUIRED_INT_BODY: &str = include_str!("generate_helpers/required_int.js");
+const REQUIRED_FLOAT_BODY: &str = include_str!("generate_helpers/required_float.js");
+const REQUIRED_BOOL_BODY: &str = include_str!("generate_helpers/required_bool.js");
+const REQUIRED_JSON_BODY: &str = include_str!("generate_helpers/required_json.js");
+const OPTIONAL_ENV_BODY: &str = include_str!("generate_helpers/optional_env.js");
+const OPTIONAL_INT_BODY: &str = include_str!("generate_helpers/optional_int.js");
+const OPTIONAL_FLOAT_BODY: &str = include_str!("generate_helpers/optional_float.js");
+const OPTIONAL_BOOL_BODY: &str = include_str!("generate_helpers/optional_bool.js");
+const OPTIONAL_JSON_BODY: &str = include_str!("generate_helpers/optional_json.js");
 
 // --- Utility functions ---
 
@@ -589,12 +442,12 @@ fn collect_secret_metas(config: &Config) -> Vec<SecretMeta> {
     let mut metas = Vec::new();
     for group in config.secrets.values() {
         for (key, def) in group {
-            if seen.insert(key.clone()) {
+            if seen.insert(key.as_str()) {
                 metas.push(SecretMeta::from_def(key.clone(), def));
             }
         }
     }
-    metas.sort_by(|a, b| a.key.cmp(&b.key));
+    metas.sort_unstable_by(|a, b| a.key.cmp(&b.key));
     metas
 }
 
@@ -606,7 +459,7 @@ fn generate_dts(metas: &[SecretMeta]) -> String {
         if let Some(ref values) = m.enum_values {
             let union = values
                 .iter()
-                .map(|v| format!("\"{v}\""))
+                .map(|v| format!("\"{}\"", escape_js_string(v)))
                 .collect::<Vec<_>>()
                 .join(" | ");
             if m.optional {
@@ -645,7 +498,7 @@ fn generate_runtime_inner(metas: &[SecretMeta], mode: RuntimeMode) -> String {
     // Determine which helpers are needed
     let mut needed: BTreeSet<RuntimeHelper> = BTreeSet::new();
     for m in metas {
-        if m.optional && !m.has_constraints() {
+        if m.optional && determine_helper(m).kind == HelperKind::Env && !m.has_constraints() {
             continue; // bare process.env.X — no helper needed
         }
         needed.insert(determine_helper(m));
@@ -681,7 +534,7 @@ fn format_helper_call(helper: RuntimeHelper, m: &SecretMeta) -> String {
 }
 
 fn emit_runtime_property(out: &mut String, m: &SecretMeta, mode: RuntimeMode) {
-    let call = if m.optional && !m.has_constraints() {
+    let call = if m.optional && determine_helper(m).kind == HelperKind::Env && !m.has_constraints() {
         format!("process.env.{}", m.key)
     } else {
         let helper = determine_helper(m);
@@ -708,7 +561,7 @@ fn generate_zod(metas: &[SecretMeta]) -> String {
         // Append constraints (only for string-based types, not enums which replace the base)
         if m.enum_values.is_none() {
             if let Some(ref pattern) = m.pattern {
-                let _ = write!(chain, ".regex(/{pattern}/)");
+                let _ = write!(chain, ".regex(new RegExp(\"{}\"))", escape_js_string(pattern));
             }
             if let Some(min) = m.min_length {
                 let _ = write!(chain, ".min({min})");
@@ -1044,16 +897,27 @@ mod tests {
     }
 
     #[test]
-    fn generate_runtime_optional_uses_process_env() {
+    fn generate_runtime_optional_string_uses_process_env() {
+        let metas = vec![SecretMeta {
+            format: Some(Format::String),
+            optional: true,
+            ..meta("FEATURE")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains("FEATURE: process.env.FEATURE"));
+        assert!(!output.contains("function"));
+    }
+
+    #[test]
+    fn generate_runtime_optional_bool_uses_helper() {
         let metas = vec![SecretMeta {
             format: Some(Format::Boolean),
             optional: true,
             ..meta("FEATURE")
         }];
         let output = generate_runtime(&metas);
-        assert!(output.contains("FEATURE: process.env.FEATURE"));
-        // Optional with no constraints doesn't need any helper
-        assert!(!output.contains("function"));
+        assert!(output.contains(r#"FEATURE: optionalBool("FEATURE")"#));
+        assert!(output.contains("function optionalBool("));
     }
 
     #[test]
@@ -1313,15 +1177,27 @@ mod tests {
     }
 
     #[test]
-    fn lazy_runtime_optional_uses_process_env() {
+    fn lazy_runtime_optional_string_uses_process_env() {
         let metas = vec![SecretMeta {
-            format: Some(Format::Boolean),
+            format: Some(Format::String),
             optional: true,
             ..meta("FEATURE")
         }];
         let output = generate_runtime_lazy(&metas);
         assert!(output.contains("get FEATURE() { return process.env.FEATURE; }"));
         assert!(!output.contains("function"));
+    }
+
+    #[test]
+    fn lazy_runtime_optional_bool_uses_helper() {
+        let metas = vec![SecretMeta {
+            format: Some(Format::Boolean),
+            optional: true,
+            ..meta("FEATURE")
+        }];
+        let output = generate_runtime_lazy(&metas);
+        assert!(output.contains(r#"get FEATURE() { return optionalBool("FEATURE"); }"#));
+        assert!(output.contains("function optionalBool("));
     }
 
     #[test]
@@ -1582,7 +1458,7 @@ mod tests {
         ];
         let output = generate_zod(&metas);
         assert!(output.contains(r#"LOG_LEVEL: z.enum(["debug", "info", "warn"]),"#));
-        assert!(output.contains("API_KEY: z.string().regex(/^sk_[a-zA-Z0-9]+$/).min(10).max(100),"));
+        assert!(output.contains(r#"API_KEY: z.string().regex(new RegExp("^sk_[a-zA-Z0-9]+$")).min(10).max(100),"#));
         assert!(output.contains("PORT: z.coerce.number().int().min(1).max(65535),"));
     }
 
@@ -1618,5 +1494,95 @@ mod tests {
         // enum should produce z.enum([...]) not z.string()
         assert!(output.contains(r#"MODE: z.enum(["a", "b"]),"#));
         assert!(!output.contains("z.string()"));
+    }
+
+    // --- Step 2: should_warn_gitignore for zod ---
+
+    #[test]
+    fn should_warn_gitignore_true_for_zod() {
+        assert!(GenerateFormat::Zod.should_warn_gitignore());
+    }
+
+    // --- Step 4: DTS enum escaping ---
+
+    #[test]
+    fn generate_dts_enum_escapes_special_chars() {
+        let metas = vec![SecretMeta {
+            enum_values: Some(vec![
+                r#"say "hello""#.to_string(),
+                r"back\slash".to_string(),
+            ]),
+            ..meta("ESCAPED")
+        }];
+        let output = generate_dts(&metas);
+        assert!(output.contains(r#"ESCAPED: "say \"hello\"" | "back\\slash";"#));
+    }
+
+    // --- Step 5: Zod regex injection ---
+
+    #[test]
+    fn zod_regex_with_slash() {
+        let metas = vec![SecretMeta {
+            pattern: Some("^https?://.*$".to_string()),
+            ..meta("URL")
+        }];
+        let output = generate_zod(&metas);
+        assert!(output.contains(r#"URL: z.string().regex(new RegExp("^https?://.*$")),"#));
+    }
+
+    // --- Step 8: Optional typed secrets get helpers ---
+
+    #[test]
+    fn runtime_optional_int_uses_helper() {
+        let metas = vec![SecretMeta {
+            format: Some(Format::Integer),
+            optional: true,
+            ..meta("PORT")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"PORT: optionalInt("PORT")"#));
+        assert!(output.contains("function optionalInt("));
+    }
+
+    #[test]
+    fn runtime_optional_json_uses_helper() {
+        let metas = vec![SecretMeta {
+            format: Some(Format::Json),
+            optional: true,
+            ..meta("META")
+        }];
+        let output = generate_runtime(&metas);
+        assert!(output.contains(r#"META: optionalJson("META")"#));
+        assert!(output.contains("function optionalJson("));
+    }
+
+    #[test]
+    fn needs_runtime_helper_formats() {
+        // Formats that need typed helpers (not HelperKind::Env)
+        for fmt in [Format::Integer, Format::Number, Format::Boolean, Format::Json] {
+            let m = SecretMeta {
+                format: Some(fmt),
+                optional: true,
+                ..meta("X")
+            };
+            assert_ne!(
+                determine_helper(&m).kind,
+                HelperKind::Env,
+                "format {fmt:?} should need a typed helper"
+            );
+        }
+        // Formats that map to Env (no special helper needed)
+        for fmt in [Format::String, Format::Url, Format::Email, Format::Base64] {
+            let m = SecretMeta {
+                format: Some(fmt),
+                optional: true,
+                ..meta("X")
+            };
+            assert_eq!(
+                determine_helper(&m).kind,
+                HelperKind::Env,
+                "format {fmt:?} should use Env helper"
+            );
+        }
     }
 }

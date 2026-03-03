@@ -119,6 +119,9 @@ pub fn validate_spec(key: &str, spec: &Validation, known_keys: &BTreeSet<&str>) 
             Some(Format::Integer | Format::Number) => {}
             _ => bail!("secret '{key}': range constraint requires format 'integer' or 'number'"),
         }
+        if !min.is_finite() || !max.is_finite() {
+            bail!("secret '{key}': range values must be finite numbers");
+        }
         if min > max {
             bail!("secret '{key}': range min ({min}) > max ({max})");
         }
@@ -1185,6 +1188,28 @@ mod tests {
         };
         let specs: BTreeMap<&str, &Validation> = BTreeMap::from([("A", &spec_a), ("C", &spec_c)]);
         assert!(detect_cross_field_cycles(&specs).is_ok());
+    }
+
+    #[test]
+    fn spec_rejects_non_finite_range_nan() {
+        let spec = Validation {
+            format: Some(Format::Number),
+            range: Some((f64::NAN, 10.0)),
+            ..Default::default()
+        };
+        let err = validate_spec("K", &spec, &known(&["K"])).unwrap_err();
+        assert!(err.to_string().contains("finite"));
+    }
+
+    #[test]
+    fn spec_rejects_non_finite_range_inf() {
+        let spec = Validation {
+            format: Some(Format::Integer),
+            range: Some((0.0, f64::INFINITY)),
+            ..Default::default()
+        };
+        let err = validate_spec("K", &spec, &known(&["K"])).unwrap_err();
+        assert!(err.to_string().contains("finite"));
     }
 
     #[test]

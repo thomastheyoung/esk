@@ -183,7 +183,7 @@ impl EskMcpServer {
 
     #[tool(
         name = "esk_generate",
-        description = "Generate code or config files from secret definitions. Formats: 'dts' (TypeScript declarations), 'ts' (runtime module), 'env-example' (.env.example). Omit format to run all configured outputs."
+        description = "Generate code or config files from secret definitions. Formats: 'dts' (TypeScript declarations), 'ts' (runtime module), 'ts-lazy' (lazy runtime module), 'zod' (Zod schema), 'env-example' (.env.example). Omit format to run all configured outputs."
     )]
     async fn generate(
         &self,
