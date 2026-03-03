@@ -1553,7 +1553,7 @@ mod tests {
         }];
         let output = generate_runtime(&metas);
         assert!(output.contains(r#"META: optionalJson("META")"#));
-        assert!(output.contains("function optionalJson("));
+        assert!(output.contains("function optionalJson<T = unknown>("));
     }
 
     #[test]
