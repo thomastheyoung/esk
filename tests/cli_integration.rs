@@ -5334,6 +5334,46 @@ fn generate_runtime_with_typed_helpers() {
     assert!(content.contains("NODE_ENV: requireEnv(\"NODE_ENV\")"));
 }
 
+#[test]
+fn generate_runtime_lazy() {
+    let project = TestProject::with_store(FULL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, Some(&GenerateFormat::TsLazy), None, false).unwrap();
+
+    let output_path = project.root().join("env.ts");
+    assert!(output_path.is_file());
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    assert!(content.contains("function requireEnv"));
+    assert!(content.contains("export const env ="));
+    assert!(content.contains("get STRIPE_KEY() { return requireEnv(\"STRIPE_KEY\"); }"));
+    // Lazy mode must NOT use `as const` — TS doesn't allow it on getter objects
+    assert!(!content.contains("as const"));
+    // Should NOT contain eager assignments
+    assert!(!content.contains("STRIPE_KEY: requireEnv("));
+}
+
+#[test]
+fn generate_runtime_lazy_with_typed_helpers() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, Some(&GenerateFormat::TsLazy), None, false).unwrap();
+
+    let output_path = project.root().join("env.ts");
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    // PORT is integer → envInt
+    assert!(content.contains("get PORT() { return envInt(\"PORT\"); }"));
+    assert!(content.contains("function envInt("));
+    // ENABLE_CACHE is boolean → envBool
+    assert!(content.contains("get ENABLE_CACHE() { return envBool(\"ENABLE_CACHE\"); }"));
+    assert!(content.contains("function envBool("));
+    // DATABASE_URL is url → requireEnv
+    assert!(content.contains("get DATABASE_URL() { return requireEnv(\"DATABASE_URL\"); }"));
+    // NODE_ENV has enum but no special format → requireEnv
+    assert!(content.contains("get NODE_ENV() { return requireEnv(\"NODE_ENV\"); }"));
+}
+
 // === required-variable auditing ===
 
 #[test]

@@ -13,6 +13,7 @@ use crate::suggest;
 pub enum GenerateFormat {
     Dts,
     Ts,
+    TsLazy,
     EnvExample,
 }
 
@@ -20,7 +21,7 @@ impl GenerateFormat {
     pub const fn default_output(&self) -> &'static str {
         match self {
             Self::Dts => "env.d.ts",
-            Self::Ts => "env.ts",
+            Self::Ts | Self::TsLazy => "env.ts",
             Self::EnvExample => ".env.example",
         }
     }
@@ -33,6 +34,7 @@ impl GenerateFormat {
         match self {
             Self::Dts => "dts",
             Self::Ts => "ts",
+            Self::TsLazy => "ts-lazy",
             Self::EnvExample => "env-example",
         }
     }
