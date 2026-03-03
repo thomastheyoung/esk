@@ -247,6 +247,8 @@ pub(crate) fn plan_deploy<'a>(
     // Individual-mode work items: (key, value, target)
     let mut individual_work: Vec<(String, Zeroizing<String>, crate::config::ResolvedTarget)> =
         Vec::new();
+    // Individual-mode tombstone delete work: (key, target)
+    let mut tombstone_work: Vec<(String, crate::config::ResolvedTarget)> = Vec::new();
 
     let mut skipped: Vec<DeployEntry> = Vec::new();
     let mut unset: Vec<DeployEntry> = Vec::new();
@@ -383,7 +385,7 @@ pub(crate) fn plan_deploy<'a>(
         }
     }
 
-    // Mark batch groups as dirty when tombstones exist for their secrets
+    // Classify tombstones: mark batch groups dirty or collect individual delete work
     for composite_key in payload.tombstones.keys() {
         let Some((bare_key, tomb_env)) = composite_key.rsplit_once(':') else {
             continue;
@@ -401,12 +403,64 @@ pub(crate) fn plan_deploy<'a>(
                 if target.environment != tomb_env {
                     continue;
                 }
-                if let Some((_, DeployMode::Batch)) = target_map.get(target.service.as_str()) {
-                    batch_dirty.insert((
-                        target.service.clone(),
-                        target.app.clone(),
-                        target.environment.clone(),
-                    ));
+                let Some((_, deploy_mode)) = target_map.get(target.service.as_str()) else {
+                    continue;
+                };
+                match deploy_mode {
+                    DeployMode::Batch => {
+                        batch_dirty.insert((
+                            target.service.clone(),
+                            target.app.clone(),
+                            target.environment.clone(),
+                        ));
+                    }
+                    DeployMode::Individual => {
+                        let tracker_key = DeployIndex::tracker_key(
+                            bare_key,
+                            &target.service,
+                            target.app.as_deref(),
+                            tomb_env,
+                        );
+                        if !force
+                            && !index.should_deploy(
+                                &tracker_key,
+                                DeployIndex::TOMBSTONE_HASH,
+                                false,
+                            )
+                        {
+                            continue;
+                        }
+                        tombstone_work.push((bare_key.to_string(), target.clone()));
+                    }
+                }
+            }
+        }
+    }
+
+    // Count skipped batch secrets (those in non-dirty batch target groups)
+    for secret in resolved {
+        for target in &secret.targets {
+            if let Some((_, DeployMode::Batch)) = target_map.get(target.service.as_str()) {
+                if let Some(filter_env) = env {
+                    if target.environment != filter_env {
+                        continue;
+                    }
+                }
+                let group = (
+                    target.service.clone(),
+                    target.app.clone(),
+                    target.environment.clone(),
+                );
+                if !batch_dirty.contains(&group) {
+                    let composite = format!("{}:{}", secret.key, target.environment);
+                    if payload.secrets.contains_key(&composite) {
+                        skipped.push(DeployEntry {
+                            key: secret.key.clone(),
+                            env: target.environment.clone(),
+                            target: target.target_display(),
+                            error: None,
+                        });
+                    }
                 }
             }
         }
@@ -415,44 +469,6 @@ pub(crate) fn plan_deploy<'a>(
     // -----------------------------------------------------------------------
     // Build per-environment work plans
     // -----------------------------------------------------------------------
-
-    // Collect tombstone work for individual targets
-    let mut tombstone_work: Vec<(String, crate::config::ResolvedTarget)> = Vec::new();
-    for composite_key in payload.tombstones.keys() {
-        let Some((bare_key, tomb_env)) = composite_key.rsplit_once(':') else {
-            continue;
-        };
-        if let Some(filter_env) = env {
-            if tomb_env != filter_env {
-                continue;
-            }
-        }
-        for secret in resolved {
-            if secret.key != bare_key {
-                continue;
-            }
-            for target in &secret.targets {
-                if target.environment != tomb_env {
-                    continue;
-                }
-                let Some((_, DeployMode::Individual)) = target_map.get(target.service.as_str())
-                else {
-                    continue;
-                };
-                let tracker_key = DeployIndex::tracker_key(
-                    bare_key,
-                    &target.service,
-                    target.app.as_deref(),
-                    tomb_env,
-                );
-                if !force && !index.should_deploy(&tracker_key, DeployIndex::TOMBSTONE_HASH, false)
-                {
-                    continue;
-                }
-                tombstone_work.push((bare_key.to_string(), target.clone()));
-            }
-        }
-    }
 
     let mut env_plans: BTreeMap<String, EnvWorkPlan> = BTreeMap::new();
 
@@ -522,35 +538,6 @@ pub(crate) fn plan_deploy<'a>(
     // Also collect environments that only have unset or skipped secrets
     for entry in &unset {
         env_plans.entry(entry.env.clone()).or_default();
-    }
-
-    // Count skipped batch secrets (those in non-dirty batch target groups)
-    for secret in resolved {
-        for target in &secret.targets {
-            if let Some((_, DeployMode::Batch)) = target_map.get(target.service.as_str()) {
-                if let Some(filter_env) = env {
-                    if target.environment != filter_env {
-                        continue;
-                    }
-                }
-                let group = (
-                    target.service.clone(),
-                    target.app.clone(),
-                    target.environment.clone(),
-                );
-                if !batch_dirty.contains(&group) {
-                    let composite = format!("{}:{}", secret.key, target.environment);
-                    if payload.secrets.contains_key(&composite) {
-                        skipped.push(DeployEntry {
-                            key: secret.key.clone(),
-                            env: target.environment.clone(),
-                            target: target.target_display(),
-                            error: None,
-                        });
-                    }
-                }
-            }
-        }
     }
 
     Ok(PlanOutput {
