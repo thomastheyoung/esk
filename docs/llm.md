@@ -102,7 +102,7 @@ Generate code or config files from secret definitions. Runs all configured outpu
 
 | Flag | Description |
 |------|-------------|
-| `FORMAT` | `dts` (TypeScript declarations), `ts` (runtime module), or `env-example` |
+| `FORMAT` | `dts` (TypeScript declarations), `ts` (runtime module), `ts-lazy` (lazy runtime module), `zod` (Zod schema), or `env-example` |
 | `--output`, `-o` | Output file path (requires a format argument) |
 | `--preview` | Print generated output to stdout without writing files |
 
@@ -275,6 +275,8 @@ generate:                          # Code generation outputs
   - format: dts
     output: types/env.d.ts
   - format: ts
+  - format: ts-lazy
+  - format: zod
   - format: env-example
 
 secrets:                           # Secrets grouped by category

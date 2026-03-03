@@ -277,6 +277,8 @@ generate:
     output: packages/shared/env.d.ts   # custom output path
   - format: ts                         # TypeScript runtime module (env.ts)
     output: apps/web/src/env.ts
+  - format: ts-lazy                    # Lazy runtime TypeScript module (getter-based, env.ts)
+  - format: zod                        # Zod schema with runtime parsing (env.ts)
   - format: env-example                # .env.example template
 
 # ---------------------------------------------------------------------------

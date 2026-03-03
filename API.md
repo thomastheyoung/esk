@@ -19,6 +19,7 @@ Creates:
 - `esk.yaml` — scaffold config with example structure
 - `.esk/store.key` — random 32-byte encryption key (hex-encoded, `0600` permissions)
 - `.esk/store.enc` — empty encrypted store
+- `.esk/key-provider` — records key storage method (`file` or `keychain`)
 - `.esk/deploy-index.json` — empty deploy tracker
 - `.esk/sync-index.json` — empty sync tracker
 
@@ -29,6 +30,8 @@ Idempotent — skips files that already exist. Updates `.gitignore` to include:
 .esk/store.key
 .esk/deploy-index.json
 .esk/sync-index.json
+.esk/lock
+.esk/key-provider
 ```
 
 ---
@@ -295,7 +298,7 @@ esk generate [<FORMAT>] [--output <PATH>] [--preview]
 
 | Argument          | Required | Description                                                                                     |
 | ----------------- | -------- | ----------------------------------------------------------------------------------------------- |
-| `FORMAT`          | No       | Output format: `dts`, `ts`, or `env-example`. Omit to run all configured outputs (see below).   |
+| `FORMAT`          | No       | Output format: `dts`, `ts`, `ts-lazy`, `zod`, or `env-example`. Omit to run all configured outputs (see below). |
 | `--output` / `-o` | No       | Output file path. Requires a format argument. Overrides the default path for the chosen format. |
 | `--preview`       | No       | Print generated output to stdout without writing files.                                         |
 
@@ -305,6 +308,8 @@ esk generate [<FORMAT>] [--output <PATH>] [--preview]
 | ------------- | -------------- | -------------------------------------------------------------------------------- |
 | `dts`         | `env.d.ts`     | TypeScript type declarations (`NodeJS.ProcessEnv` interface)                     |
 | `ts`          | `env.ts`       | Runtime TypeScript module with typed helpers (`requireEnv`, `envInt`, etc.)      |
+| `ts-lazy`     | `env.ts`       | Lazy runtime TypeScript module (getter-based, deferred evaluation)              |
+| `zod`         | `env.ts`       | Zod schema with runtime parsing and type inference                              |
 | `env-example` | `.env.example` | Template file with key names, descriptions, allowed values, and optional markers |
 
 **Behavior:**
@@ -314,7 +319,7 @@ esk generate [<FORMAT>] [--output <PATH>] [--preview]
 3. If no format is given and the config has a `generate:` section, generates all configured outputs.
 4. If no format and no `generate:` config, defaults to `dts`.
 5. Creates parent directories for the output path if needed.
-6. Warns when no secrets are defined. Suggests adding the output to `.gitignore` for `dts` and `ts` formats (not `env-example`).
+6. Warns when no secrets are defined. Suggests adding the output to `.gitignore` for `dts`, `ts`, `ts-lazy`, and `zod` formats (not `env-example`).
 
 **Config-driven multi-output:**
 
@@ -340,12 +345,22 @@ The `ts` format generates typed accessor helpers based on the secret's `validate
 
 Only helpers that are actually used are emitted in the output.
 
+**`ts-lazy` format details:**
+
+Same helpers as `ts`, but properties use getters instead of eagerly evaluated values. Environment variables are read on first access, not at import time. Useful when env vars are set after module initialization.
+
+**`zod` format details:**
+
+Generates a Zod schema (`z.object({...})`) that validates and parses `process.env` at runtime. Maps `validate.format` to Zod types (`z.string()`, `z.coerce.number()`, `z.coerce.boolean()`), and applies constraints (`min`, `max`, `regex`, `url`, `email`). Optional secrets use `.optional()`. Exports a typed `env` object from `envSchema.parse(process.env)`.
+
 **Examples:**
 
 ```bash
 esk generate                                    # All configured outputs, or dts by default
 esk generate dts                                # TypeScript declarations
 esk generate ts                                 # Runtime validator module
+esk generate ts-lazy                            # Lazy runtime module (getter-based)
+esk generate zod                                # Zod schema with parsing
 esk generate env-example                        # .env.example template
 esk generate ts --output src/env.ts             # Custom output path
 ```
@@ -392,6 +407,67 @@ esk sync --env prod --only 1password    # Sync specific remote
 esk sync --env prod --with-deploy       # Sync + auto-deploy
 esk sync --env prod --prefer remote     # At equal versions, prefer remote content
 esk sync --env prod --dry-run           # Preview changes
+```
+
+---
+
+## `esk doctor`
+
+Diagnose project health. Checks project structure, config validity, store consistency, target/remote availability, and secrets health in one pass.
+
+```bash
+esk doctor
+```
+
+No flags — runs all checks automatically.
+
+**Sections checked:**
+
+- **Project structure** — `.esk/` directory, `esk.yaml` parsing, key provider, encryption key, store decryption, `.gitignore` entries.
+- **Config** — environment/secret/app/target/remote counts, secrets with no targets configured.
+- **Targets** — live preflight checks for each configured target (pass/fail).
+- **Remotes** — live preflight checks for each configured remote (pass/fail).
+- **Store consistency** — key format validation, orphaned store keys (not in config), unknown environments, tombstone version sanity.
+- **Secrets** — failed deploys, missing required secrets, validation violations, cross-field rule violations, stale remote syncs, target orphans.
+- **Suggestions** — actionable commands to fix detected issues.
+
+Exits with code 1 if any failures are found.
+
+**Example output:**
+
+```
+  esk doctor · myapp
+
+  Project structure
+    ✓ .esk/ directory       exists
+    ✓ esk.yaml              exists
+    ✓ esk.yaml parses       valid config
+    ✓ Key provider          file-based key
+    ✓ Encryption key        loads successfully
+    ✓ Store decrypts        12 secret values
+    ✓ .gitignore            all 5 esk entries present
+
+  Config
+    ✓ Summary  2 environments, 6 secrets, 1 apps, 2 targets, 1 remotes
+
+  Targets
+    ✓ .env         writable
+    ✓ cloudflare   wrangler authenticated
+
+  Store consistency
+    ✓ Key format            all keys have valid KEY:env format
+    ✓ Store keys            all keys match config
+    ✓ Store environments    all environments match config
+    ✓ Tombstones            none
+
+  Secrets
+    ✓ Failed deploys     none
+    ✓ Required secrets   all present
+    ✓ Validation         all values valid
+    ✓ Remote sync        all remotes up to date
+    ✓ Target orphans     none
+
+  16 passed, 0 warnings, 0 failures
 ```
 
 ---
@@ -465,6 +541,7 @@ Boolean, default `false`. When `true`, the secret is exempt from empty-value war
 | `esk.yaml`               | Project configuration                     | Yes             |
 | `.esk/store.enc`         | AES-256-GCM encrypted secret store        | Yes             |
 | `.esk/store.key`         | 32-byte encryption key (hex)              | **No**          |
+| `.esk/key-provider`      | Key storage method (`file` or `keychain`) | No (gitignored) |
 | `.esk/deploy-index.json` | Deploy state (hashes, timestamps, status) | No (gitignored) |
 | `.esk/sync-index.json`   | Sync state (versions, timestamps)         | No (gitignored) |
 

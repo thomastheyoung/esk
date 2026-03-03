@@ -797,6 +797,8 @@ Values containing newlines are rejected (the target sends `KEY=VALUE` over stdin
 
 - [Supabase CLI](https://supabase.com/docs/guides/cli) installed.
 
+Preflight runs `supabase secrets list --project-ref <ref>` to verify CLI installation and project accessibility.
+
 ### Configuration
 
 ```yaml
@@ -843,6 +845,8 @@ Deploys environment variables to Railway projects using `railway variables set` 
 ### Prerequisites
 
 - [Railway CLI](https://docs.railway.app/guides/cli) installed and authenticated (`railway login`).
+
+Preflight runs `railway whoami` to verify CLI installation and authentication.
 
 ### Configuration
 

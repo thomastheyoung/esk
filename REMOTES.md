@@ -131,7 +131,7 @@ Files are stored per environment (`secrets-{env}.enc` or `secrets-{env}.json`), 
 
 Both formats use atomic writes (temp file + rename) and create parent directories automatically.
 
-Preflight checks that the configured path is an existing, writable directory. Fails if the path doesn't exist or isn't writable.
+Preflight creates the configured path if it doesn't exist, then checks that the directory is writable. Fails if the directory can't be created or isn't writable.
 
 **Backward compatibility**: On pull, if a per-env file doesn't exist, the remote falls back to the legacy global file (`secrets.enc` or `secrets.json`) and prints a migration warning. On push, legacy global files are automatically removed after the per-env file is written.
 
@@ -541,11 +541,11 @@ remotes:
     path: "/"
 ```
 
-| Field        | Required | Default | Description                                                      |
-| ------------ | -------- | ------- | ---------------------------------------------------------------- |
-| `project_id` | Yes      | —       | Infisical project ID.                                            |
-| `env_map`    | Yes      | —       | Maps esk environment names to Infisical environment slugs.       |
-| `path`       | Yes      | —       | Folder path within Infisical (e.g., `/` for root).               |
+| Field        | Required | Default | Description                                                                          |
+| ------------ | -------- | ------- | ------------------------------------------------------------------------------------ |
+| `project_id` | Yes      | —       | Infisical project ID.                                                                |
+| `env_map`    | No       | —       | Maps esk environment names to Infisical environment slugs. Falls back to esk env name when not mapped. |
+| `path`       | No       | `/`     | Folder path within Infisical.                                                        |
 
 ### Command executed
 

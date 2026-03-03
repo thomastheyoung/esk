@@ -6,7 +6,7 @@
 //! variables.
 //!
 //! CLI: `supabase` (Supabase's official CLI).
-//! Commands: `supabase secrets set` / `supabase secrets delete`.
+//! Commands: `supabase secrets set` / `supabase secrets unset`.
 //!
 //! Secrets are set via **stdin** in `KEY=value` format. Requires a
 //! `--project-ref` flag to identify the Supabase project. Values containing

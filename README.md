@@ -26,7 +26,7 @@ It is built for teams that want:
 - Validates values against format, pattern, enum, and range constraints
 - Audits required secrets before deploy — catches missing values early
 - Detects empty/whitespace-only values that break runtime defaults
-- Generates TypeScript declarations, runtime validators, and `.env.example` templates
+- Generates TypeScript declarations, runtime validators, Zod schemas, and `.env.example` templates
 - Prunes orphaned deploys (secrets removed from config but still deployed to targets)
 
 ## Install
@@ -87,6 +87,7 @@ esk status --env dev
 | `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets, generate) | Yes             |
 | `.esk/store.enc`         | Encrypted secret store                                                   | Yes             |
 | `.esk/store.key`         | Local encryption key (32-byte hex); or stored in OS keychain             | No              |
+| `.esk/key-provider`      | Records key storage method (`file` or `keychain`)                        | No (gitignored) |
 | `.esk/deploy-index.json` | Deploy state tracker                                                     | No (gitignored) |
 | `.esk/sync-index.json`   | Sync state tracker                                                       | No (gitignored) |
 
@@ -151,6 +152,7 @@ When you need cloud deploy targets or shared sync, add target/remote blocks. See
 | `esk status [--env <ENV>]`     | Show drift/sync dashboard                     |
 | `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state        |
 | `esk generate [<FORMAT>]`      | Generate code/config from secret definitions  |
+| `esk doctor`                   | Diagnose project health in one pass           |
 
 Full flags and behavior: [API.md](API.md).
 
@@ -261,7 +263,7 @@ cargo build --release --features mcp
 | `esk_list`     | List secrets with deploy status per environment  |
 | `esk_status`   | Project health: drift, warnings, next steps      |
 | `esk_deploy`   | Deploy secrets to configured targets             |
-| `esk_generate` | Generate TypeScript declarations, `.env.example` |
+| `esk_generate` | Generate TypeScript declarations, Zod schemas, `.env.example` |
 
 The MCP binary is feature-gated behind `mcp` to keep the main CLI binary lean.
 
