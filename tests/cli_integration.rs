@@ -5452,6 +5452,44 @@ secrets:
     assert!(content.contains("function optionalEnv("));
 }
 
+// --- zod integration tests ---
+
+#[test]
+fn generate_zod_default() {
+    let project = TestProject::with_store(GENERATE_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, Some(&GenerateFormat::Zod), None, false).unwrap();
+
+    let output_path = project.root().join("env.ts");
+    assert!(output_path.is_file());
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    assert!(content.contains("import { z } from \"zod\";"));
+    assert!(content.contains("const envSchema = z.object({"));
+    assert!(content.contains("STRIPE_KEY: z.string(),"));
+    assert!(content.contains(r#"NODE_ENV: z.enum(["development", "staging", "production"]),"#));
+    assert!(content.contains("FEATURE_FLAG: z.string().optional(),"));
+    assert!(content.contains("export const env = envSchema.parse(process.env);"));
+}
+
+#[test]
+fn generate_zod_with_validation() {
+    let project = TestProject::with_store(GENERATE_VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+
+    cli::generate::run(&config, Some(&GenerateFormat::Zod), None, false).unwrap();
+
+    let output_path = project.root().join("env.ts");
+    let content = std::fs::read_to_string(&output_path).unwrap();
+    assert!(content.contains("PORT: z.coerce.number().int().min(1).max(65535),"));
+    assert!(content.contains(r#"NODE_ENV: z.enum(["development", "staging", "production"]),"#));
+    assert!(content.contains("API_KEY: z.string().regex(/^sk_[a-zA-Z0-9]+$/).min(10).max(100),"));
+    assert!(content.contains("RATE_LIMIT: z.coerce.number().min(0.1).max(100),"));
+    assert!(content.contains(r#"OPTIONAL_FLAG: z.enum(["a", "b", "c"]).optional(),"#));
+    assert!(content.contains(r#"ENABLED: z.string().transform(v => ["true", "1", "yes"].includes(v.toLowerCase())),"#));
+    assert!(content.contains("CONFIG_JSON: z.string().transform(v => JSON.parse(v) as unknown),"));
+}
+
 // === required-variable auditing ===
 
 #[test]

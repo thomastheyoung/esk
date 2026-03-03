@@ -439,9 +439,11 @@ fn do_generate(params: &GenerateParams) -> anyhow::Result<GenerateResponse> {
             let parsed: crate::config::GenerateFormat = match f.as_str() {
                 "dts" => crate::config::GenerateFormat::Dts,
                 "ts" => crate::config::GenerateFormat::Ts,
+                "ts-lazy" => crate::config::GenerateFormat::TsLazy,
+                "zod" => crate::config::GenerateFormat::Zod,
                 "env-example" => crate::config::GenerateFormat::EnvExample,
                 other => {
-                    anyhow::bail!("unknown format '{other}': use 'dts', 'ts', or 'env-example'")
+                    anyhow::bail!("unknown format '{other}': use 'dts', 'ts', 'ts-lazy', 'zod', or 'env-example'")
                 }
             };
             Some(parsed)

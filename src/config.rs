@@ -14,6 +14,7 @@ pub enum GenerateFormat {
     Dts,
     Ts,
     TsLazy,
+    Zod,
     EnvExample,
 }
 
@@ -21,7 +22,7 @@ impl GenerateFormat {
     pub const fn default_output(&self) -> &'static str {
         match self {
             Self::Dts => "env.d.ts",
-            Self::Ts | Self::TsLazy => "env.ts",
+            Self::Ts | Self::TsLazy | Self::Zod => "env.ts",
             Self::EnvExample => ".env.example",
         }
     }
@@ -35,6 +36,7 @@ impl GenerateFormat {
             Self::Dts => "dts",
             Self::Ts => "ts",
             Self::TsLazy => "ts-lazy",
+            Self::Zod => "zod",
             Self::EnvExample => "env-example",
         }
     }
