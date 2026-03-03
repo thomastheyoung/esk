@@ -285,7 +285,6 @@ fn execute_animated<'a>(
                         .insert((bg.target_name.clone(), bg.app.clone(), env_name.to_string()));
                 }
 
-                let _ = idx.save();
             });
         }
 
@@ -329,7 +328,6 @@ fn execute_animated<'a>(
                         }
                     }
                 }
-                let _ = idx.save();
             });
         }
 
@@ -376,7 +374,6 @@ fn execute_animated<'a>(
                         }
                     }
                 }
-                let _ = idx.save();
             });
         }
 
@@ -429,7 +426,6 @@ fn execute_animated<'a>(
                         }
                     }
                 }
-                let _ = idx.save();
             });
         }
 
@@ -464,7 +460,6 @@ fn execute_animated<'a>(
                         }
                     }
                 }
-                let _ = idx.save();
             });
         }
 
