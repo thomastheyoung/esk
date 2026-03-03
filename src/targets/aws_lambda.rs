@@ -260,7 +260,7 @@ impl DeployTarget for AwsLambdaTarget<'_> {
 
             // Merge esk secrets on top
             for s in secrets {
-                vars.insert(s.key.clone(), s.value.clone());
+                vars.insert(s.key.clone(), s.value.to_string());
             }
 
             // Write merged map
@@ -357,7 +357,7 @@ targets:
     fn make_secret(key: &str, value: &str) -> SecretValue {
         SecretValue {
             key: key.to_string(),
-            value: value.to_string(),
+            value: zeroize::Zeroizing::new(value.to_string()),
             group: "G".to_string(),
         }
     }

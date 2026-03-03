@@ -108,7 +108,7 @@ impl DotenvTarget<'_> {
             by_group
                 .entry(&secret.group)
                 .or_default()
-                .push((&secret.key, &secret.value));
+                .push((&secret.key, secret.value.as_str()));
         }
 
         let mut content = String::new();
@@ -191,7 +191,7 @@ targets:
     fn make_secret(key: &str, value: &str, group: &str) -> SecretValue {
         SecretValue {
             key: key.to_string(),
-            value: value.to_string(),
+            value: zeroize::Zeroizing::new(value.to_string()),
             group: group.to_string(),
         }
     }

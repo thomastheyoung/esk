@@ -232,7 +232,7 @@ targets:
     fn make_secret(key: &str, value: &str) -> SecretValue {
         SecretValue {
             key: key.to_string(),
-            value: value.to_string(),
+            value: zeroize::Zeroizing::new(value.to_string()),
             group: "G".to_string(),
         }
     }

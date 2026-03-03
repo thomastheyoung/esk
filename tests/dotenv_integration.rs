@@ -4,12 +4,21 @@ use esk::config::ResolvedTarget;
 use esk::targets::dotenv::DotenvTarget;
 use esk::targets::{DeployTarget, SecretValue};
 use helpers::*;
+use zeroize::Zeroizing;
 
 fn make_target(app: &str, env: &str) -> ResolvedTarget {
     ResolvedTarget {
         service: ".env".to_string(),
         app: Some(app.to_string()),
         environment: env.to_string(),
+    }
+}
+
+fn make_secret(key: &str, value: &str, group: &str) -> SecretValue {
+    SecretValue {
+        key: key.to_string(),
+        value: Zeroizing::new(value.to_string()),
+        group: group.to_string(),
     }
 }
 
@@ -26,16 +35,8 @@ fn env_file_end_to_end() {
 
     let target = DotenvTarget { config: &config };
     let secrets = vec![
-        SecretValue {
-            key: "MY_SECRET".into(),
-            value: "secret_dev".into(),
-            group: "General".into(),
-        },
-        SecretValue {
-            key: "OTHER_SECRET".into(),
-            value: "other_dev".into(),
-            group: "General".into(),
-        },
+        make_secret("MY_SECRET", "secret_dev", "General"),
+        make_secret("OTHER_SECRET", "other_dev", "General"),
     ];
     let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
     assert!(results.iter().all(|r| r.outcome.is_success()));
@@ -54,21 +55,9 @@ fn env_file_multiple_groups() {
 
     let target = DotenvTarget { config: &config };
     let secrets = vec![
-        SecretValue {
-            key: "A".into(),
-            value: "1".into(),
-            group: "Stripe".into(),
-        },
-        SecretValue {
-            key: "B".into(),
-            value: "2".into(),
-            group: "Convex".into(),
-        },
-        SecretValue {
-            key: "C".into(),
-            value: "3".into(),
-            group: "Resend".into(),
-        },
+        make_secret("A", "1", "Stripe"),
+        make_secret("B", "2", "Convex"),
+        make_secret("C", "3", "Resend"),
     ];
     let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
     assert!(results.iter().all(|r| r.outcome.is_success()));
@@ -89,19 +78,11 @@ fn env_file_regeneration_replaces() {
     let resolved = make_target("web", "dev");
 
     // First write
-    let secrets1 = vec![SecretValue {
-        key: "OLD_KEY".into(),
-        value: "old".into(),
-        group: "G".into(),
-    }];
+    let secrets1 = vec![make_secret("OLD_KEY", "old", "G")];
     env_target.deploy_batch(&secrets1, &resolved);
 
     // Second write with different secrets
-    let secrets2 = vec![SecretValue {
-        key: "NEW_KEY".into(),
-        value: "new".into(),
-        group: "G".into(),
-    }];
+    let secrets2 = vec![make_secret("NEW_KEY", "new", "G")];
     env_target.deploy_batch(&secrets2, &resolved);
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();

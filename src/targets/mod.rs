@@ -57,7 +57,7 @@ pub struct DeployResult {
 #[derive(Clone)]
 pub struct SecretValue {
     pub key: String,
-    pub value: String,
+    pub value: zeroize::Zeroizing<String>,
     pub group: String,
 }
 
@@ -721,7 +721,7 @@ mod tests {
     fn make_secret(key: &str) -> SecretValue {
         SecretValue {
             key: key.to_string(),
-            value: "val".to_string(),
+            value: zeroize::Zeroizing::new("val".to_string()),
             group: "G".to_string(),
         }
     }

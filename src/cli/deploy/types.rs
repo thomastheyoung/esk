@@ -1,5 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 
+use zeroize::Zeroizing;
+
 use crate::targets::SecretValue;
 
 /// Maximum number of orphans allowed without `--force`.
@@ -18,7 +20,7 @@ pub(crate) struct BatchGroup {
 #[derive(Default)]
 pub(crate) struct EnvWorkPlan {
     pub batch_groups: Vec<BatchGroup>,
-    pub individual: Vec<(String, String, crate::config::ResolvedTarget)>,
+    pub individual: Vec<(String, Zeroizing<String>, crate::config::ResolvedTarget)>,
     pub tombstones: Vec<(String, crate::config::ResolvedTarget)>,
     pub prune_individual: Vec<crate::orphan::TargetOrphan>,
     pub batch_prune: BTreeMap<(String, Option<String>), Vec<crate::orphan::TargetOrphan>>,

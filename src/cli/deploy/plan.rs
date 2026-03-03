@@ -2,6 +2,8 @@ use anyhow::Result;
 use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::io::IsTerminal;
 
+use zeroize::Zeroizing;
+
 use crate::config::{Config, ResolvedSecret};
 use crate::deploy_tracker::DeployIndex;
 use crate::store::StorePayload;
@@ -243,7 +245,8 @@ pub(crate) fn plan_deploy<'a>(
     // Track batch-mode dirty target groups: (target_name, app, env)
     let mut batch_dirty: BTreeSet<(String, Option<String>, String)> = BTreeSet::new();
     // Individual-mode work items: (key, value, target)
-    let mut individual_work: Vec<(String, String, crate::config::ResolvedTarget)> = Vec::new();
+    let mut individual_work: Vec<(String, Zeroizing<String>, crate::config::ResolvedTarget)> =
+        Vec::new();
 
     let mut skipped: Vec<DeployEntry> = Vec::new();
     let mut unset: Vec<DeployEntry> = Vec::new();
@@ -362,7 +365,11 @@ pub(crate) fn plan_deploy<'a>(
                 }
                 DeployMode::Individual => {
                     if index.should_deploy(&tracker_key, &value_hash, force) {
-                        individual_work.push((secret.key.clone(), value.clone(), target.clone()));
+                        individual_work.push((
+                            secret.key.clone(),
+                            Zeroizing::new(value.clone()),
+                            target.clone(),
+                        ));
                     } else {
                         skipped.push(DeployEntry {
                             key: secret.key.clone(),
@@ -467,7 +474,7 @@ pub(crate) fn plan_deploy<'a>(
                     if let Some(value) = payload.secrets.get(&composite) {
                         secrets_for_batch.push(SecretValue {
                             key: secret.key.clone(),
-                            value: value.clone(),
+                            value: Zeroizing::new(value.clone()),
                             group: secret.group.clone(),
                         });
                     }
