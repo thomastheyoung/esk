@@ -135,6 +135,179 @@ pub(crate) fn render_report(report: &DeployReport, animated: bool) -> Result<()>
 }
 
 // -----------------------------------------------------------------------
+// Shared deploy/delete + index recording helpers
+// -----------------------------------------------------------------------
+
+struct BatchExecResult {
+    /// Per-key outcomes: (key, error_if_failed).
+    items: Vec<(String, Option<String>)>,
+    had_failure: bool,
+}
+
+/// Deploy a batch group and record results in the index.
+fn exec_batch_group(
+    bg: &super::types::BatchGroup,
+    env_name: &str,
+    deploy_target: &dyn DeployTarget,
+    payload_secrets: &BTreeMap<String, String>,
+    index: &Mutex<DeployIndex>,
+) -> BatchExecResult {
+    let target = crate::config::ResolvedTarget {
+        service: bg.target_name.clone(),
+        app: bg.app.clone(),
+        environment: env_name.to_string(),
+    };
+
+    let batch_results = deploy_target.deploy_batch(&bg.secrets, &target);
+
+    let mut idx = index.lock().expect("deploy index mutex poisoned");
+    let mut items = Vec::new();
+    let mut had_failure = false;
+
+    if batch_results.is_empty() {
+        // Tombstone-only batch
+        for key in &bg.tombstoned_keys {
+            let tracker_key =
+                DeployIndex::tracker_key(key, &bg.target_name, bg.app.as_deref(), env_name);
+            idx.record_success(
+                tracker_key,
+                target.to_string(),
+                DeployIndex::TOMBSTONE_HASH.to_string(),
+            );
+            items.push((key.clone(), None));
+        }
+    } else {
+        for result in &batch_results {
+            let tracker_key = DeployIndex::tracker_key(
+                &result.key,
+                &bg.target_name,
+                bg.app.as_deref(),
+                env_name,
+            );
+            let composite = format!("{}:{}", result.key, env_name);
+            let value = payload_secrets
+                .get(&composite)
+                .map_or("", std::string::String::as_str);
+            let value_hash = DeployIndex::hash_value(value);
+
+            if result.outcome.is_success() {
+                idx.record_success(tracker_key, target.to_string(), value_hash);
+                items.push((result.key.clone(), None));
+            } else {
+                had_failure = true;
+                let error = result
+                    .outcome
+                    .error_message()
+                    .unwrap_or_default()
+                    .to_string();
+                idx.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
+                items.push((result.key.clone(), Some(error)));
+            }
+        }
+    }
+
+    BatchExecResult { items, had_failure }
+}
+
+/// Deploy a single secret and record the result in the index.
+/// Returns `Ok(())` on success, `Err(error_message)` on failure.
+fn exec_individual_deploy(
+    key: &str,
+    value: &str,
+    target: &crate::config::ResolvedTarget,
+    deploy_target: &dyn DeployTarget,
+    index: &Mutex<DeployIndex>,
+) -> Result<(), String> {
+    let result = deploy_target.deploy_secret(key, value, target);
+
+    let tracker_key = DeployIndex::tracker_key(
+        key,
+        &target.service,
+        target.app.as_deref(),
+        &target.environment,
+    );
+    let value_hash = DeployIndex::hash_value(value);
+
+    let mut idx = index.lock().expect("deploy index mutex poisoned");
+    match result {
+        Ok(()) => {
+            idx.record_success(tracker_key, target.to_string(), value_hash);
+            Ok(())
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            idx.record_failure(tracker_key, target.to_string(), value_hash, msg.clone());
+            Err(msg)
+        }
+    }
+}
+
+/// Delete a tombstoned secret and record the result in the index.
+/// Returns `Ok(())` on success, `Err(error_message)` on failure.
+fn exec_tombstone_delete(
+    key: &str,
+    target: &crate::config::ResolvedTarget,
+    deploy_target: &dyn DeployTarget,
+    index: &Mutex<DeployIndex>,
+) -> Result<(), String> {
+    let result = deploy_target.delete_secret(key, target);
+
+    let tracker_key = DeployIndex::tracker_key(
+        key,
+        &target.service,
+        target.app.as_deref(),
+        &target.environment,
+    );
+
+    let mut idx = index.lock().expect("deploy index mutex poisoned");
+    match result {
+        Ok(()) => {
+            idx.record_success(
+                tracker_key,
+                target.target_display(),
+                DeployIndex::TOMBSTONE_HASH.to_string(),
+            );
+            Ok(())
+        }
+        Err(e) => {
+            let msg = e.to_string();
+            idx.record_failure(
+                tracker_key,
+                target.target_display(),
+                DeployIndex::TOMBSTONE_HASH.to_string(),
+                msg.clone(),
+            );
+            Err(msg)
+        }
+    }
+}
+
+/// Delete a pruned orphan and remove its record from the index.
+/// Returns `Ok(())` on success, `Err(error_message)` on failure.
+fn exec_prune_orphan(
+    orphan: &crate::orphan::TargetOrphan,
+    deploy_target: &dyn DeployTarget,
+    index: &Mutex<DeployIndex>,
+) -> Result<(), String> {
+    let target = crate::config::ResolvedTarget {
+        service: orphan.service.clone(),
+        app: orphan.app.clone(),
+        environment: orphan.env.clone(),
+    };
+
+    let result = deploy_target.delete_secret(&orphan.key, &target);
+
+    match result {
+        Ok(()) => {
+            let mut idx = index.lock().expect("deploy index mutex poisoned");
+            idx.remove_record(&orphan.tracker_key);
+            Ok(())
+        }
+        Err(e) => Err(e.to_string()),
+    }
+}
+
+// -----------------------------------------------------------------------
 // Animated execution
 // -----------------------------------------------------------------------
 
@@ -202,83 +375,22 @@ fn execute_animated<'a>(
         for bg in &plan.batch_groups {
             let results = &results;
             let deploy_target = &deploy_targets[bg.target_idx];
-            let target = crate::config::ResolvedTarget {
-                service: bg.target_name.clone(),
-                app: bg.app.clone(),
-                environment: env_name.to_string(),
-            };
-            let target_display = target.target_display();
+            let target_display = crate::config::format_target_label(&bg.target_name, bg.app.as_deref());
 
             s.spawn(move || {
-                let batch_results = deploy_target.deploy_batch(&bg.secrets, &target);
+                let outcome = exec_batch_group(bg, env_name, deploy_target.as_ref(), payload_secrets, index);
 
-                let mut idx = index.lock().expect("deploy index mutex poisoned");
                 let mut res = results.lock().expect("results mutex poisoned");
-
-                // Track if any result in this batch failed
-                let mut batch_had_failure = false;
-
-                if batch_results.is_empty() {
-                    // Tombstone-only batch
-                    for key in &bg.tombstoned_keys {
-                        let tracker_key = DeployIndex::tracker_key(
-                            key,
-                            &bg.target_name,
-                            bg.app.as_deref(),
-                            env_name,
-                        );
-                        idx.record_success(
-                            tracker_key,
-                            target.to_string(),
-                            DeployIndex::TOMBSTONE_HASH.to_string(),
-                        );
-                        if let Some(kr) = res.get_mut(key) {
-                            kr.completed_ops += 1;
-                        }
-                    }
-                } else {
-                    for result in &batch_results {
-                        let tracker_key = DeployIndex::tracker_key(
-                            &result.key,
-                            &bg.target_name,
-                            bg.app.as_deref(),
-                            env_name,
-                        );
-                        let composite = format!("{}:{}", result.key, env_name);
-                        let value = payload_secrets
-                            .get(&composite)
-                            .map_or("", std::string::String::as_str);
-                        let value_hash = DeployIndex::hash_value(value);
-
-                        if result.outcome.is_success() {
-                            idx.record_success(tracker_key, target.to_string(), value_hash);
-                            if let Some(kr) = res.get_mut(&result.key) {
-                                kr.completed_ops += 1;
-                            }
-                        } else {
-                            batch_had_failure = true;
-                            let error = result
-                                .outcome
-                                .error_message()
-                                .unwrap_or_default()
-                                .to_string();
-                            idx.record_failure(
-                                tracker_key,
-                                target.to_string(),
-                                value_hash,
-                                error.clone(),
-                            );
-                            if let Some(kr) = res.get_mut(&result.key) {
-                                kr.completed_ops += 1;
-                                kr.failed.push((target_display.clone(), error));
-                            }
+                for (key, error) in &outcome.items {
+                    if let Some(kr) = res.get_mut(key.as_str()) {
+                        kr.completed_ops += 1;
+                        if let Some(e) = error {
+                            kr.failed.push((target_display.clone(), e.clone()));
                         }
                     }
                 }
 
-                // BUG FIX (esk-0vf): Record batch failures so prune workers
-                // can skip pruning for failed batch groups.
-                if batch_had_failure {
+                if outcome.had_failure {
                     failed_batch_groups
                         .lock()
                         .expect("failed batch groups mutex poisoned")
@@ -294,37 +406,12 @@ fn execute_animated<'a>(
             let deploy_target = &deploy_targets[target_idx];
 
             s.spawn(move || {
-                let result = deploy_target.deploy_secret(key, value, target);
-                let tracker_key = DeployIndex::tracker_key(
-                    key,
-                    &target.service,
-                    target.app.as_deref(),
-                    &target.environment,
-                );
-                let value_hash = DeployIndex::hash_value(value);
-
-                let mut idx = index.lock().expect("deploy index mutex poisoned");
+                let outcome = exec_individual_deploy(key, value, target, deploy_target.as_ref(), index);
                 let mut res = results.lock().expect("results mutex poisoned");
-                let target_display = target.target_display();
-
-                match result {
-                    Ok(()) => {
-                        idx.record_success(tracker_key, target.to_string(), value_hash);
-                        if let Some(kr) = res.get_mut(key.as_str()) {
-                            kr.completed_ops += 1;
-                        }
-                    }
-                    Err(e) => {
-                        idx.record_failure(
-                            tracker_key,
-                            target.to_string(),
-                            value_hash,
-                            e.to_string(),
-                        );
-                        if let Some(kr) = res.get_mut(key.as_str()) {
-                            kr.completed_ops += 1;
-                            kr.failed.push((target_display, e.to_string()));
-                        }
+                if let Some(kr) = res.get_mut(key.as_str()) {
+                    kr.completed_ops += 1;
+                    if let Err(e) = outcome {
+                        kr.failed.push((target.target_display(), e));
                     }
                 }
             });
@@ -337,40 +424,12 @@ fn execute_animated<'a>(
             let deploy_target = &deploy_targets[target_idx];
 
             s.spawn(move || {
-                let result = deploy_target.delete_secret(key, target);
-                let tracker_key = DeployIndex::tracker_key(
-                    key,
-                    &target.service,
-                    target.app.as_deref(),
-                    &target.environment,
-                );
-
-                let mut idx = index.lock().expect("deploy index mutex poisoned");
+                let outcome = exec_tombstone_delete(key, target, deploy_target.as_ref(), index);
                 let mut res = results.lock().expect("results mutex poisoned");
-                let target_display = target.target_display();
-
-                match result {
-                    Ok(()) => {
-                        idx.record_success(
-                            tracker_key,
-                            target_display,
-                            DeployIndex::TOMBSTONE_HASH.to_string(),
-                        );
-                        if let Some(kr) = res.get_mut(key.as_str()) {
-                            kr.completed_ops += 1;
-                        }
-                    }
-                    Err(e) => {
-                        idx.record_failure(
-                            tracker_key,
-                            target_display.clone(),
-                            DeployIndex::TOMBSTONE_HASH.to_string(),
-                            e.to_string(),
-                        );
-                        if let Some(kr) = res.get_mut(key.as_str()) {
-                            kr.completed_ops += 1;
-                            kr.failed.push((target_display, e.to_string()));
-                        }
+                if let Some(kr) = res.get_mut(key.as_str()) {
+                    kr.completed_ops += 1;
+                    if let Err(e) = outcome {
+                        kr.failed.push((target.target_display(), e));
                     }
                 }
             });
@@ -382,14 +441,12 @@ fn execute_animated<'a>(
             let group_key = (target_name.clone(), app.clone(), env_name.to_string());
 
             s.spawn(move || {
-                let mut idx = index.lock().expect("deploy index mutex poisoned");
-                let mut res = results.lock().expect("results mutex poisoned");
-
                 if failed_batch_groups
                     .lock()
                     .expect("failed batch groups mutex poisoned")
                     .contains(&group_key)
                 {
+                    let mut res = results.lock().expect("results mutex poisoned");
                     for orphan in orphan_list {
                         if let Some(kr) = res.get_mut(&orphan.key) {
                             kr.completed_ops += 1;
@@ -405,23 +462,12 @@ fn execute_animated<'a>(
                 for orphan in orphan_list {
                     let (target_idx, _) = target_map[target_name.as_str()];
                     let deploy_target = &deploy_targets[target_idx];
-                    let target = crate::config::ResolvedTarget {
-                        service: orphan.service.clone(),
-                        app: orphan.app.clone(),
-                        environment: orphan.env.clone(),
-                    };
-                    match deploy_target.delete_secret(&orphan.key, &target) {
-                        Ok(()) => {
-                            idx.remove_record(&orphan.tracker_key);
-                            if let Some(kr) = res.get_mut(&orphan.key) {
-                                kr.completed_ops += 1;
-                            }
-                        }
-                        Err(e) => {
-                            if let Some(kr) = res.get_mut(&orphan.key) {
-                                kr.completed_ops += 1;
-                                kr.failed.push((orphan.target_display(), e.to_string()));
-                            }
+                    let outcome = exec_prune_orphan(orphan, deploy_target.as_ref(), index);
+                    let mut res = results.lock().expect("results mutex poisoned");
+                    if let Some(kr) = res.get_mut(&orphan.key) {
+                        kr.completed_ops += 1;
+                        if let Err(e) = outcome {
+                            kr.failed.push((orphan.target_display(), e));
                         }
                     }
                 }
@@ -433,30 +479,14 @@ fn execute_animated<'a>(
             let results = &results;
             let (target_idx, _) = target_map[orphan.service.as_str()];
             let deploy_target = &deploy_targets[target_idx];
-            let target = crate::config::ResolvedTarget {
-                service: orphan.service.clone(),
-                app: orphan.app.clone(),
-                environment: orphan.env.clone(),
-            };
 
             s.spawn(move || {
-                let result = deploy_target.delete_secret(&orphan.key, &target);
-                let mut idx = index.lock().expect("deploy index mutex poisoned");
+                let outcome = exec_prune_orphan(orphan, deploy_target.as_ref(), index);
                 let mut res = results.lock().expect("results mutex poisoned");
-                let target_display = orphan.target_display();
-
-                match result {
-                    Ok(()) => {
-                        idx.remove_record(&orphan.tracker_key);
-                        if let Some(kr) = res.get_mut(&orphan.key) {
-                            kr.completed_ops += 1;
-                        }
-                    }
-                    Err(e) => {
-                        if let Some(kr) = res.get_mut(&orphan.key) {
-                            kr.completed_ops += 1;
-                            kr.failed.push((target_display, e.to_string()));
-                        }
+                if let Some(kr) = res.get_mut(&orphan.key) {
+                    kr.completed_ops += 1;
+                    if let Err(e) = outcome {
+                        kr.failed.push((orphan.target_display(), e));
                     }
                 }
             });
@@ -650,13 +680,7 @@ fn execute_sequential<'a>(
 ) -> Result<()> {
     // Batch groups
     for bg in &plan.batch_groups {
-        let deploy_target = &deploy_targets[bg.target_idx];
-        let target = crate::config::ResolvedTarget {
-            service: bg.target_name.clone(),
-            app: bg.app.clone(),
-            environment: env_name.to_string(),
-        };
-        let target_display = target.target_display();
+        let target_display = crate::config::format_target_label(&bg.target_name, bg.app.as_deref());
 
         if dry_run {
             if bg.secrets.is_empty() {
@@ -668,15 +692,15 @@ fn execute_sequential<'a>(
                         error: None,
                     });
                 }
-                continue;
-            }
-            for s in &bg.secrets {
-                deployed.push(DeployEntry {
-                    key: s.key.clone(),
-                    env: env_name.to_string(),
-                    target: target_display.clone(),
-                    error: None,
-                });
+            } else {
+                for s in &bg.secrets {
+                    deployed.push(DeployEntry {
+                        key: s.key.clone(),
+                        env: env_name.to_string(),
+                        target: target_display.clone(),
+                        error: None,
+                    });
+                }
             }
             continue;
         }
@@ -686,22 +710,22 @@ fn execute_sequential<'a>(
                 "Deploying {} ({} secrets) → {}",
                 style(&bg.target_name).bold(),
                 bg.secrets.len(),
-                target
+                target_display
             ))?;
         }
 
-        let batch_results = deploy_target.deploy_batch(&bg.secrets, &target);
-        let mut idx = index.lock().expect("deploy index mutex poisoned");
+        let deploy_target = &deploy_targets[bg.target_idx];
+        let result = exec_batch_group(bg, env_name, deploy_target.as_ref(), payload_secrets, index);
 
-        if batch_results.is_empty() {
-            for key in &bg.tombstoned_keys {
-                let tracker_key =
-                    DeployIndex::tracker_key(key, &bg.target_name, bg.app.as_deref(), env_name);
-                idx.record_success(
-                    tracker_key,
-                    target.to_string(),
-                    DeployIndex::TOMBSTONE_HASH.to_string(),
-                );
+        for (key, error) in &result.items {
+            if let Some(e) = error {
+                failed.push(DeployEntry {
+                    key: key.clone(),
+                    env: env_name.to_string(),
+                    target: target_display.clone(),
+                    error: Some(e.clone()),
+                });
+            } else {
                 deployed.push(DeployEntry {
                     key: key.clone(),
                     env: env_name.to_string(),
@@ -709,47 +733,16 @@ fn execute_sequential<'a>(
                     error: None,
                 });
             }
-            idx.save()?;
-            continue;
         }
 
-        for result in &batch_results {
-            let tracker_key =
-                DeployIndex::tracker_key(&result.key, &bg.target_name, bg.app.as_deref(), env_name);
-            let composite = format!("{}:{}", result.key, env_name);
-            let value = payload_secrets
-                .get(&composite)
-                .map_or("", std::string::String::as_str);
-            let value_hash = DeployIndex::hash_value(value);
-
-            if result.outcome.is_success() {
-                idx.record_success(tracker_key, target.to_string(), value_hash);
-                deployed.push(DeployEntry {
-                    key: result.key.clone(),
-                    env: env_name.to_string(),
-                    target: target_display.clone(),
-                    error: None,
-                });
-            } else {
-                let error = result
-                    .outcome
-                    .error_message()
-                    .unwrap_or_default()
-                    .to_string();
-                idx.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
-                failed.push(DeployEntry {
-                    key: result.key.clone(),
-                    env: env_name.to_string(),
-                    target: target_display.clone(),
-                    error: Some(error),
-                });
-                failed_batch_groups
-                    .lock()
-                    .expect("failed batch groups mutex poisoned")
-                    .insert((bg.target_name.clone(), bg.app.clone(), env_name.to_string()));
-            }
+        if result.had_failure {
+            failed_batch_groups
+                .lock()
+                .expect("failed batch groups mutex poisoned")
+                .insert((bg.target_name.clone(), bg.app.clone(), env_name.to_string()));
         }
-        idx.save()?;
+
+        index.lock().expect("deploy index mutex poisoned").save()?;
     }
 
     // Batch prune
@@ -770,7 +763,7 @@ fn execute_sequential<'a>(
             }
             continue;
         }
-        let mut idx = index.lock().expect("deploy index mutex poisoned");
+
         for orphan in orphan_list {
             let target_display = orphan.target_display();
             if dry_run {
@@ -783,14 +776,8 @@ fn execute_sequential<'a>(
             } else {
                 let (target_idx, _) = target_map[target_name.as_str()];
                 let deploy_target = &deploy_targets[target_idx];
-                let target = crate::config::ResolvedTarget {
-                    service: orphan.service.clone(),
-                    app: orphan.app.clone(),
-                    environment: orphan.env.clone(),
-                };
-                match deploy_target.delete_secret(&orphan.key, &target) {
+                match exec_prune_orphan(orphan, deploy_target.as_ref(), index) {
                     Ok(()) => {
-                        idx.remove_record(&orphan.tracker_key);
                         pruned.push(DeployEntry {
                             key: orphan.key.clone(),
                             env: env_name.to_string(),
@@ -803,14 +790,14 @@ fn execute_sequential<'a>(
                             key: orphan.key.clone(),
                             env: env_name.to_string(),
                             target: target_display,
-                            error: Some(e.to_string()),
+                            error: Some(e),
                         });
                     }
                 }
             }
         }
         if !dry_run {
-            idx.save()?;
+            index.lock().expect("deploy index mutex poisoned").save()?;
         }
     }
 
@@ -837,20 +824,9 @@ fn execute_sequential<'a>(
 
         let (target_idx, _) = target_map[target.service.as_str()];
         let deploy_target = &deploy_targets[target_idx];
-        let result = deploy_target.deploy_secret(key, value, target);
 
-        let tracker_key = DeployIndex::tracker_key(
-            key,
-            &target.service,
-            target.app.as_deref(),
-            &target.environment,
-        );
-        let value_hash = DeployIndex::hash_value(value);
-
-        let mut idx = index.lock().expect("deploy index mutex poisoned");
-        match result {
+        match exec_individual_deploy(key, value, target, deploy_target.as_ref(), index) {
             Ok(()) => {
-                idx.record_success(tracker_key, target.to_string(), value_hash);
                 deployed.push(DeployEntry {
                     key: key.clone(),
                     env: env_name.to_string(),
@@ -865,12 +841,11 @@ fn execute_sequential<'a>(
                 }
             }
             Err(e) => {
-                idx.record_failure(tracker_key, target.to_string(), value_hash, e.to_string());
                 failed.push(DeployEntry {
                     key: key.clone(),
                     env: env_name.to_string(),
                     target: target_display,
-                    error: Some(e.to_string()),
+                    error: Some(e.clone()),
                 });
                 if verbose {
                     let _ = cliclack::log::error(format!(
@@ -880,7 +855,7 @@ fn execute_sequential<'a>(
                 }
             }
         }
-        idx.save()?;
+        index.lock().expect("deploy index mutex poisoned").save()?;
     }
 
     // Tombstone deletes
@@ -900,59 +875,30 @@ fn execute_sequential<'a>(
         let (target_idx, _) = target_map[target.service.as_str()];
         let deploy_target = &deploy_targets[target_idx];
 
-        let mut idx = index.lock().expect("deploy index mutex poisoned");
-        match deploy_target.delete_secret(key, target) {
+        match exec_tombstone_delete(key, target, deploy_target.as_ref(), index) {
             Ok(()) => {
-                let tracker_key = DeployIndex::tracker_key(
-                    key,
-                    &target.service,
-                    target.app.as_deref(),
-                    &target.environment,
-                );
-                idx.record_success(
-                    tracker_key,
-                    target_display,
-                    DeployIndex::TOMBSTONE_HASH.to_string(),
-                );
                 deployed.push(DeployEntry {
                     key: key.clone(),
                     env: env_name.to_string(),
-                    target: target.target_display(),
+                    target: target_display,
                     error: None,
                 });
             }
             Err(e) => {
-                let tracker_key = DeployIndex::tracker_key(
-                    key,
-                    &target.service,
-                    target.app.as_deref(),
-                    &target.environment,
-                );
-                idx.record_failure(
-                    tracker_key,
-                    target_display,
-                    DeployIndex::TOMBSTONE_HASH.to_string(),
-                    e.to_string(),
-                );
                 failed.push(DeployEntry {
                     key: key.clone(),
                     env: env_name.to_string(),
-                    target: target.target_display(),
-                    error: Some(e.to_string()),
+                    target: target_display,
+                    error: Some(e),
                 });
             }
         }
-        idx.save()?;
+        index.lock().expect("deploy index mutex poisoned").save()?;
     }
 
     // Individual prune
     for orphan in &plan.prune_individual {
         let target_display = orphan.target_display();
-        let target = crate::config::ResolvedTarget {
-            service: orphan.service.clone(),
-            app: orphan.app.clone(),
-            environment: orphan.env.clone(),
-        };
 
         if dry_run {
             pruned.push(DeployEntry {
@@ -965,6 +911,11 @@ fn execute_sequential<'a>(
         }
 
         if verbose {
+            let target = crate::config::ResolvedTarget {
+                service: orphan.service.clone(),
+                app: orphan.app.clone(),
+                environment: orphan.env.clone(),
+            };
             cliclack::log::step(format!(
                 "Pruning {}:{} → {}",
                 orphan.key, orphan.env, target
@@ -974,24 +925,22 @@ fn execute_sequential<'a>(
         let (target_idx, _) = target_map[orphan.service.as_str()];
         let deploy_target = &deploy_targets[target_idx];
 
-        let mut idx = index.lock().expect("deploy index mutex poisoned");
-        match deploy_target.delete_secret(&orphan.key, &target) {
+        match exec_prune_orphan(orphan, deploy_target.as_ref(), index) {
             Ok(()) => {
-                idx.remove_record(&orphan.tracker_key);
                 pruned.push(DeployEntry {
                     key: orphan.key.clone(),
                     env: env_name.to_string(),
                     target: target_display,
                     error: None,
                 });
-                idx.save()?;
+                index.lock().expect("deploy index mutex poisoned").save()?;
             }
             Err(e) => {
                 failed.push(DeployEntry {
                     key: orphan.key.clone(),
                     env: env_name.to_string(),
                     target: target_display,
-                    error: Some(e.to_string()),
+                    error: Some(e),
                 });
             }
         }
