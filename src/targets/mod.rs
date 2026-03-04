@@ -19,7 +19,7 @@ pub mod render;
 pub mod supabase;
 pub mod vercel;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::io::IsTerminal;
 use std::path::PathBuf;
@@ -257,6 +257,25 @@ pub fn aws_base_args(region: Option<&str>, profile: Option<&str>) -> Vec<String>
         args.push(p.to_string());
     }
     args
+}
+
+/// Run AWS CLI preflight: check `aws` is installed and authenticated.
+pub fn aws_preflight(runner: &dyn CommandRunner, base_args: &[String]) -> Result<()> {
+    check_command(runner, "aws").map_err(|_| {
+        anyhow::anyhow!(
+            "AWS CLI (aws) is not installed or not in PATH. Install it from: https://aws.amazon.com/cli/"
+        )
+    })?;
+    let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
+    args.extend(base_args.iter().map(String::as_str));
+    let output = runner
+        .run("aws", &args, CommandOpts::default())
+        .context("failed to run aws sts get-caller-identity")?;
+    if !output.success {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        anyhow::bail!("AWS authentication failed: {stderr}");
+    }
+    Ok(())
 }
 
 /// Check that an external command is available via the CommandRunner.

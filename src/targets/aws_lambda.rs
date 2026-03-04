@@ -23,8 +23,8 @@ use anyhow::{Context, Result};
 
 use crate::config::{AwsLambdaTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
-    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployOutcome,
-    DeployResult, DeployTarget, SecretValue,
+    resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployOutcome, DeployResult,
+    DeployTarget, SecretValue,
 };
 
 /// Maximum number of read-merge-write retries on `ResourceConflictException`.
@@ -181,22 +181,7 @@ impl DeployTarget for AwsLambdaTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "aws").map_err(|_| {
-            anyhow::anyhow!(
-                "aws is not installed or not in PATH. Install it from: https://aws.amazon.com/cli/"
-            )
-        })?;
-        let base = self.base_args();
-        let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
-        args.extend(base.iter().map(String::as_str));
-        let output = self
-            .runner
-            .run("aws", &args, CommandOpts::default())
-            .context("failed to run aws sts get-caller-identity")?;
-        if !output.success {
-            anyhow::bail!("aws is not authenticated. Run: aws configure");
-        }
-        Ok(())
+        crate::targets::aws_preflight(self.runner, &self.base_args())
     }
 
     fn deploy_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
@@ -460,7 +445,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("aws is not authenticated"));
+        assert!(err.to_string().contains("AWS authentication failed"));
     }
 
     #[test]
@@ -475,7 +460,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("aws is not installed"));
+        assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
     }
 
     #[test]

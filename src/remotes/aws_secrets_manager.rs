@@ -65,27 +65,7 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "aws").map_err(|_| {
-            anyhow::anyhow!(
-                "AWS CLI (aws) is not installed or not in PATH. Install it from: https://aws.amazon.com/cli/"
-            )
-        })?;
-
-        let base = self.base_args();
-        let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
-        args.extend(base.iter().map(String::as_str));
-
-        let output = self
-            .runner
-            .run("aws", &args, CommandOpts::default())
-            .context("failed to run aws sts get-caller-identity")?;
-
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("AWS authentication failed: {stderr}");
-        }
-
-        Ok(())
+        crate::targets::aws_preflight(self.runner, &self.base_args())
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {

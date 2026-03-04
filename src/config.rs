@@ -1093,81 +1093,37 @@ impl Config {
     }
 
     fn populate_typed_targets(&mut self) {
-        if let Some(cfg) = &self.targets.dotenv {
-            self.typed_targets
-                .push(TypedTargetConfig::Dotenv(cfg.clone()));
+        macro_rules! populate_targets {
+            ($( $field:ident => $variant:ident ),* $(,)?) => {
+                $(
+                    if let Some(cfg) = &self.targets.$field {
+                        self.typed_targets.push(TypedTargetConfig::$variant(cfg.clone()));
+                    }
+                )*
+            };
         }
-        if let Some(cfg) = &self.targets.cloudflare {
-            self.typed_targets
-                .push(TypedTargetConfig::Cloudflare(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.convex {
-            self.typed_targets
-                .push(TypedTargetConfig::Convex(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.fly {
-            self.typed_targets.push(TypedTargetConfig::Fly(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.netlify {
-            self.typed_targets
-                .push(TypedTargetConfig::Netlify(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.vercel {
-            self.typed_targets
-                .push(TypedTargetConfig::Vercel(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.github {
-            self.typed_targets
-                .push(TypedTargetConfig::Github(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.heroku {
-            self.typed_targets
-                .push(TypedTargetConfig::Heroku(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.supabase {
-            self.typed_targets
-                .push(TypedTargetConfig::Supabase(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.railway {
-            self.typed_targets
-                .push(TypedTargetConfig::Railway(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.gitlab {
-            self.typed_targets
-                .push(TypedTargetConfig::Gitlab(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.aws_ssm {
-            self.typed_targets
-                .push(TypedTargetConfig::AwsSsm(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.aws_lambda {
-            self.typed_targets
-                .push(TypedTargetConfig::AwsLambda(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.kubernetes {
-            self.typed_targets
-                .push(TypedTargetConfig::Kubernetes(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.docker {
-            self.typed_targets
-                .push(TypedTargetConfig::Docker(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.circleci {
-            self.typed_targets
-                .push(TypedTargetConfig::Circleci(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.azure_app_service {
-            self.typed_targets
-                .push(TypedTargetConfig::AzureAppService(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.gcp_cloud_run {
-            self.typed_targets
-                .push(TypedTargetConfig::GcpCloudRun(cfg.clone()));
-        }
-        if let Some(cfg) = &self.targets.render {
-            self.typed_targets
-                .push(TypedTargetConfig::Render(cfg.clone()));
-        }
+        populate_targets!(
+            dotenv => Dotenv,
+            cloudflare => Cloudflare,
+            convex => Convex,
+            fly => Fly,
+            netlify => Netlify,
+            vercel => Vercel,
+            github => Github,
+            heroku => Heroku,
+            supabase => Supabase,
+            railway => Railway,
+            gitlab => Gitlab,
+            aws_ssm => AwsSsm,
+            aws_lambda => AwsLambda,
+            kubernetes => Kubernetes,
+            docker => Docker,
+            circleci => Circleci,
+            azure_app_service => AzureAppService,
+            gcp_cloud_run => GcpCloudRun,
+            render => Render,
+        );
+        // Custom targets handled separately (BTreeMap, not Option)
         for (name, cfg) in &self.targets.custom {
             self.typed_targets.push(TypedTargetConfig::Custom {
                 name: name.clone(),
