@@ -221,7 +221,7 @@ pub fn find_secret(&self, key: &str) -> Option<(&str, &SecretDef)>
 Before writing a helper, check if Rust already has it:
 
 | Instead of                                          | Use                                                           |
-| --------------------------------------------------- | ------------------------------------------------------------- | --- | ----- |
+| --------------------------------------------------- | ------------------------------------------------------------- |
 | Custom `append_env_flags` fn wrapping a for loop    | `args.extend(flag_parts.iter().map(String::as_str))`          |
 | 8-line `center()` with manual padding               | `format!("{s:^width$}")`                                      |
 | `vec!["a".to_string(), format!(...)]` in flat_map   | `["a".into(), format!(...)]` — array literal, stack-allocated |
@@ -230,7 +230,7 @@ Before writing a helper, check if Rust already has it:
 | `match opt { Some(v) => v, None => return Ok(()) }` | `let Some(v) = opt else { return Ok(()); };`                  |
 | Manual loop + push on fallible operations           | `.map(\|v\| ...).collect::<Result<Vec<_>>>()`                 |
 | `if x.is_some() { x.unwrap() }`                     | `if let Some(v) = x { ... }`                                  |
-| Manual `HashMap` entry check + insert               | `map.entry(key).or_insert_with(                               |     | ...)` |
+| Manual `HashMap` entry check + insert               | `map.entry(key).or_insert_with(\|\| ...)`                     |
 
 ## Avoid redundant code
 
