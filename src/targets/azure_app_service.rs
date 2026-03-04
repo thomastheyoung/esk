@@ -66,11 +66,8 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "az").map_err(|_| {
-            anyhow::anyhow!(
-                "az is not installed or not in PATH. Install it from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli"
-            )
-        })?;
+        check_command(self.runner, "az")
+            .context("Install from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli")?;
         let base = self.base_args();
         let mut args: Vec<&str> = vec!["account", "show"];
         args.extend(base.iter().map(String::as_str));
@@ -260,7 +257,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("az is not installed"));
+        assert!(err.to_string().contains("Install from: https://learn.microsoft.com"));
     }
 
     #[test]

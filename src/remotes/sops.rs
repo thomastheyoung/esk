@@ -53,11 +53,8 @@ impl SyncRemote for SopsRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "sops").map_err(|_| {
-            anyhow::anyhow!(
-                "Mozilla SOPS (sops) is not installed or not in PATH. Install it from: https://github.com/getsops/sops"
-            )
-        })?;
+        crate::targets::check_command(self.runner, "sops")
+            .context("Install from: https://github.com/getsops/sops")?;
 
         let sops_config = self.config.root.join(".sops.yaml");
         if !sops_config.exists() {
@@ -242,8 +239,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = SopsRemote::new(&config, remote_config, &runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err.to_string().contains("SOPS"));
-        assert!(err.to_string().contains("not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

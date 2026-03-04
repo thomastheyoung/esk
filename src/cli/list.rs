@@ -204,7 +204,10 @@ fn build_cell_statuses(
 ) -> BTreeMap<(String, String), CellStatus> {
     let target_names: Vec<&str> = config.target_names();
     let index_path = config.root.join(".esk/deploy-index.json");
-    let index = DeployIndex::load(&index_path);
+    let (index, warning) = DeployIndex::load(&index_path);
+    if let Some(msg) = warning {
+        let _ = cliclack::log::warning(&msg);
+    }
 
     let mut statuses: BTreeMap<(String, String), CellStatus> = BTreeMap::new();
 

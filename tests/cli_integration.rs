@@ -1007,7 +1007,7 @@ fn deploy_records_to_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(!index.records.is_empty());
     // Should have records for each synced secret
     let keys: Vec<&String> = index.records.keys().collect();
@@ -1232,7 +1232,7 @@ fn deploy_cloudflare_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(!index.records.is_empty());
     assert!(index
         .records
@@ -1272,7 +1272,7 @@ fn deploy_cloudflare_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -1536,7 +1536,7 @@ fn deploy_convex_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -1564,7 +1564,7 @@ fn push_onepassword_creates_item() {
     runner.push_success(b"", b"");
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    let (mut sync_index, _) = SyncIndex::load(&project.sync_index_path());
     cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
@@ -1608,7 +1608,7 @@ fn push_onepassword_edits_existing() {
     runner.push_success(b"", b"");
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    let (mut sync_index, _) = SyncIndex::load(&project.sync_index_path());
     cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
@@ -1637,7 +1637,7 @@ fn push_onepassword_version_metadata() {
     runner.push_success(b"", b"");
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    let (mut sync_index, _) = SyncIndex::load(&project.sync_index_path());
     cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
@@ -1912,11 +1912,11 @@ fn push_records_sync_index() {
     runner.push_success(b"", b""); // op item create
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    let (mut sync_index, _) = SyncIndex::load(&project.sync_index_path());
     cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
     sync_index.save().unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let (index, _) = SyncIndex::load(&project.sync_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(record.remote, "1password");
@@ -1946,11 +1946,11 @@ fn push_records_env_scoped_version_when_global_is_higher() {
     runner.push_success(b"", b""); // op item create
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    let (mut sync_index, _) = SyncIndex::load(&project.sync_index_path());
     cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
     sync_index.save().unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let (index, _) = SyncIndex::load(&project.sync_index_path());
     let record = &index.records["1password:dev"];
     assert_eq!(record.pushed_version, 1);
 }
@@ -2008,7 +2008,7 @@ remotes:
     assert_eq!(repaired["secrets"]["KEY"], "local_val");
     assert_eq!(repaired["version"], 1);
 
-    let sync_index = SyncIndex::load(&project.sync_index_path());
+    let (sync_index, _) = SyncIndex::load(&project.sync_index_path());
     let record = sync_index.records.get("dropbox:dev").unwrap();
     assert_eq!(record.pushed_version, 1);
 }
@@ -2036,13 +2036,13 @@ remotes:
     runner.push_failure(b"op create failed"); // op item create fails
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
-    let mut sync_index = SyncIndex::load(&project.sync_index_path());
+    let (mut sync_index, _) = SyncIndex::load(&project.sync_index_path());
     let results =
         cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
     sync_index.save().unwrap();
     assert!(results.iter().any(|r| r.outcome.is_err()));
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let (index, _) = SyncIndex::load(&project.sync_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(
@@ -2230,7 +2230,7 @@ fn set_auto_push_records_sync_index() {
     )
     .unwrap();
 
-    let index = SyncIndex::load(&project.sync_index_path());
+    let (index, _) = SyncIndex::load(&project.sync_index_path());
     assert_eq!(index.records.len(), 1);
     let record = &index.records["1password:dev"];
     assert_eq!(
@@ -2296,7 +2296,7 @@ fn deploy_records_tombstone_delete_success() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
@@ -2337,7 +2337,7 @@ fn deploy_records_tombstone_delete_failure() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
@@ -2397,7 +2397,7 @@ fn deploy_retries_failed_tombstone_delete() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(
@@ -2440,7 +2440,7 @@ fn deploy_skips_already_deleted_tombstone() {
     .unwrap();
 
     // Verify tombstone recorded as success
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let tracker_key = DeployIndex::tracker_key("STRIPE_KEY", "cloudflare", Some("web"), "dev");
     let record = index.records.get(&tracker_key).unwrap();
     assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
@@ -2635,7 +2635,7 @@ fn deploy_fly_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2671,7 +2671,7 @@ fn deploy_fly_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -2845,7 +2845,7 @@ fn deploy_netlify_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -2881,7 +2881,7 @@ fn deploy_netlify_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -3054,7 +3054,7 @@ fn deploy_vercel_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -3090,7 +3090,7 @@ fn deploy_vercel_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -3263,7 +3263,7 @@ fn deploy_github_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -3299,7 +3299,7 @@ fn deploy_github_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -3470,7 +3470,7 @@ fn deploy_heroku_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -3506,7 +3506,7 @@ fn deploy_heroku_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -3681,7 +3681,7 @@ fn deploy_supabase_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -3717,7 +3717,7 @@ fn deploy_supabase_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -3894,7 +3894,7 @@ fn deploy_railway_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -3930,7 +3930,7 @@ fn deploy_railway_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -4099,7 +4099,7 @@ fn deploy_gitlab_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -4135,7 +4135,7 @@ fn deploy_gitlab_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -4272,7 +4272,7 @@ fn deploy_circleci_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -4307,7 +4307,7 @@ fn deploy_circleci_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()
@@ -6139,7 +6139,7 @@ fn setup_orphan_project() -> TestProject {
     .unwrap();
 
     // Now inject an orphan record (a key that doesn't exist in config)
-    let mut index = DeployIndex::load(&project.deploy_index_path());
+    let (mut index, _) = DeployIndex::load(&project.deploy_index_path());
     index.record_success(
         "OLD_SECRET:cloudflare:web:dev".to_string(),
         "cloudflare:web:dev".to_string(),
@@ -6175,7 +6175,7 @@ fn deploy_prune_dry_run_shows_orphans() {
     .unwrap();
 
     // Orphan record should still be present (dry run)
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index.records.contains_key("OLD_SECRET:cloudflare:web:dev"));
 }
 
@@ -6214,7 +6214,7 @@ fn deploy_prune_individual_calls_delete_secret() {
     );
 
     // Orphan record should be removed from index
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(
         !index.records.contains_key("OLD_SECRET:cloudflare:web:dev"),
         "Orphan record should be removed after prune"
@@ -6247,7 +6247,7 @@ fn deploy_prune_batch_removes_orphan_from_index() {
     .unwrap();
 
     // Inject an orphan for the batch (env) target
-    let mut index = DeployIndex::load(&project.deploy_index_path());
+    let (mut index, _) = DeployIndex::load(&project.deploy_index_path());
     index.record_success(
         "REMOVED_KEY:.env:web:dev".to_string(),
         ".env:web:dev".to_string(),
@@ -6273,7 +6273,7 @@ fn deploy_prune_batch_removes_orphan_from_index() {
     .unwrap();
 
     // Orphan record should be removed
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(
         !index.records.contains_key("REMOVED_KEY:.env:web:dev"),
         "Batch orphan record should be removed after prune"
@@ -6293,7 +6293,7 @@ fn deploy_prune_safety_threshold_without_force() {
     let config = project.config().unwrap();
 
     // Inject more than 10 orphan records
-    let mut index = DeployIndex::load(&project.deploy_index_path());
+    let (mut index, _) = DeployIndex::load(&project.deploy_index_path());
     for i in 0..12 {
         index.record_success(
             format!("ORPHAN_{i}:cloudflare:web:dev"),
@@ -6342,7 +6342,7 @@ fn status_shows_target_orphans() {
 
     // Verify orphan is detected via orphan::detect
     let resolved = config.resolve_secrets().unwrap();
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let orphans = esk::orphan::detect(&index, &resolved, Some("dev"));
     assert_eq!(orphans.len(), 1);
     assert_eq!(orphans[0].key, "OLD_SECRET");
@@ -6355,7 +6355,7 @@ fn deploy_prune_removes_orphan_records_from_index() {
     let config = project.config().unwrap();
 
     // Verify orphan exists before prune
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index.records.contains_key("OLD_SECRET:cloudflare:web:dev"));
 
     let runner = MockCommandRunner::new();
@@ -6379,7 +6379,7 @@ fn deploy_prune_removes_orphan_records_from_index() {
     .unwrap();
 
     // Verify orphan record removed after prune
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(
         !index.records.contains_key("OLD_SECRET:cloudflare:web:dev"),
         "Orphan record should be removed after successful prune"
@@ -6439,7 +6439,7 @@ fn deploy_prune_without_env_prunes_all_environments() {
     .unwrap();
 
     // Inject orphans in both envs
-    let mut index = DeployIndex::load(&project.deploy_index_path());
+    let (mut index, _) = DeployIndex::load(&project.deploy_index_path());
     index.record_success(
         "OLD_DEV:cloudflare:web:dev".to_string(),
         "cloudflare:web:dev".to_string(),
@@ -6473,7 +6473,7 @@ fn deploy_prune_without_env_prunes_all_environments() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(
         !index.records.contains_key("OLD_DEV:cloudflare:web:dev"),
         "Dev orphan should be removed"
@@ -6622,7 +6622,7 @@ fn deploy_custom_target_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index.records.get("API_KEY:my-api:dev");
     assert!(record.is_some(), "deploy record should exist");
     let record = record.unwrap();
@@ -6660,7 +6660,7 @@ fn deploy_custom_target_failure_tracked() {
     );
     assert!(result.is_err());
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index.records.get("API_KEY:my-api:dev");
     assert!(record.is_some());
     assert_eq!(
@@ -6806,7 +6806,7 @@ fn deploy_render_records_tracker() {
     )
     .unwrap();
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     assert!(index
         .records
         .keys()
@@ -6845,7 +6845,7 @@ fn deploy_render_failure_tracked() {
     .unwrap_err();
     assert!(err.to_string().contains("failed"));
 
-    let index = DeployIndex::load(&project.deploy_index_path());
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index
         .records
         .values()

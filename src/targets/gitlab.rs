@@ -33,11 +33,8 @@ impl DeployTarget for GitlabTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "glab").map_err(|_| {
-            anyhow::anyhow!(
-                "glab is not installed or not in PATH. Install it from: https://gitlab.com/gitlab-org/cli"
-            )
-        })?;
+        check_command(self.runner, "glab")
+            .context("Install from: https://gitlab.com/gitlab-org/cli")?;
         let output = self
             .runner
             .run("glab", &["auth", "status"], CommandOpts::default())
@@ -169,7 +166,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("glab is not installed"));
+        assert!(err.to_string().contains("Install from: https://gitlab.com"));
     }
 
     #[test]

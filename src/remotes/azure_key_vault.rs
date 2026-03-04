@@ -70,11 +70,8 @@ impl SyncRemote for AzureKeyVaultRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "az").map_err(|_| {
-            anyhow::anyhow!(
-                "Azure CLI (az) is not installed or not in PATH. Install it from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli"
-            )
-        })?;
+        crate::targets::check_command(self.runner, "az")
+            .context("Install from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli")?;
 
         let output = self
             .runner
@@ -275,8 +272,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = AzureKeyVaultRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err.to_string().contains("Azure CLI (az)"));
-        assert!(err.to_string().contains("not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

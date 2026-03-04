@@ -55,11 +55,8 @@ impl SyncRemote for GcpSecretManagerRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "gcloud").map_err(|_| {
-            anyhow::anyhow!(
-                "Google Cloud CLI (gcloud) is not installed or not in PATH. Install it from: https://cloud.google.com/sdk/docs/install"
-            )
-        })?;
+        crate::targets::check_command(self.runner, "gcloud")
+            .context("Install from: https://cloud.google.com/sdk/docs/install")?;
 
         let project = &self.remote_config.project;
         let output = self
@@ -273,8 +270,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = GcpSecretManagerRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err.to_string().contains("gcloud"));
-        assert!(err.to_string().contains("not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

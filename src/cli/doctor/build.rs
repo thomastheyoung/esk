@@ -332,7 +332,10 @@ fn build_store_consistency(config: &Config, payload: &StorePayload) -> Vec<Check
 fn build_secrets_health(config: &Config, payload: &StorePayload) -> Vec<Check> {
     let mut checks = Vec::new();
     let index_path = config.root.join(".esk/deploy-index.json");
-    let index = DeployIndex::load(&index_path);
+    let (index, warning) = DeployIndex::load(&index_path);
+    if let Some(msg) = warning {
+        let _ = cliclack::log::warning(&msg);
+    }
 
     let resolved = match config.resolve_secrets() {
         Ok(r) => r,
@@ -442,7 +445,10 @@ fn build_secrets_health(config: &Config, payload: &StorePayload) -> Vec<Check> {
 
     // 5. Stale remote sync
     let sync_index_path = config.root.join(".esk/sync-index.json");
-    let sync_index = SyncIndex::load(&sync_index_path);
+    let (sync_index, warning) = SyncIndex::load(&sync_index_path);
+    if let Some(msg) = warning {
+        let _ = cliclack::log::warning(&msg);
+    }
     let remote_names: Vec<&String> = config.remotes.keys().collect();
     let mut stale_count = 0usize;
     let mut failed_sync_count = 0usize;

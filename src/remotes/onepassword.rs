@@ -204,11 +204,8 @@ impl SyncRemote for OnePasswordRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "op").map_err(|_| {
-            anyhow::anyhow!(
-                "1Password CLI (op) is not installed or not in PATH. Install it from: https://1password.com/downloads/command-line/"
-            )
-        })?;
+        crate::targets::check_command(self.runner, "op")
+            .context("Install from: https://1password.com/downloads/command-line/")?;
         let vault = &self.remote_config.vault;
         let output = self
             .runner
@@ -507,9 +504,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = OnePasswordRemote::new(&config, op_config, &runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("1Password CLI (op) is not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

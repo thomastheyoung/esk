@@ -33,11 +33,8 @@ impl DeployTarget for CircleciTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "circleci").map_err(|_| {
-            anyhow::anyhow!(
-                "circleci is not installed or not in PATH. Install it from: https://circleci.com/docs/local-cli/"
-            )
-        })?;
+        check_command(self.runner, "circleci")
+            .context("Install from: https://circleci.com/docs/local-cli/")?;
         Ok(())
     }
 
@@ -134,7 +131,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("circleci is not installed"));
+        assert!(err.to_string().contains("Install from: https://circleci.com"));
     }
 
     #[test]

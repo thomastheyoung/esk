@@ -173,7 +173,7 @@ secrets:
 
         // Record a failed deployment
         let deploy_path = dir.path().join(".esk/deploy-index.json");
-        let mut index = DeployIndex::load(&deploy_path);
+        let (mut index, _) = DeployIndex::load(&deploy_path);
         index.record_failure(
             "API_KEY:.env:web:dev".to_string(),
             ".env:web:dev".to_string(),

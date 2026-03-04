@@ -84,11 +84,8 @@ impl DeployTarget for CloudflareTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "wrangler").map_err(|_| {
-            anyhow::anyhow!(
-                "wrangler is not installed or not in PATH. Install it with: npm install -g wrangler"
-            )
-        })?;
+        check_command(self.runner, "wrangler")
+            .context("Install with: npm install -g wrangler")?;
         let output = self
             .runner
             .run("wrangler", &["whoami"], CommandOpts::default())
@@ -265,8 +262,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("wrangler is not installed"));
-        assert!(err.to_string().contains("npm install -g wrangler"));
+        assert!(err.to_string().contains("Install with: npm install -g wrangler"));
     }
 
     #[test]

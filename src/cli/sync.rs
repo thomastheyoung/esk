@@ -505,7 +505,10 @@ pub fn run_with_runner(
 
             // Update sync index sequentially on main thread
             let sync_index_path = config.root.join(".esk/sync-index.json");
-            let mut sync_index = SyncIndex::load(&sync_index_path);
+            let (mut sync_index, warning) = SyncIndex::load(&sync_index_path);
+            if let Some(msg) = warning {
+                let _ = cliclack::log::warning(&msg);
+            }
             let pushed_version = updated_payload.env_version(env);
 
             let mut push_lines: Vec<String> = Vec::new();
@@ -536,7 +539,10 @@ pub fn run_with_runner(
     // Tombstone GC: prune tombstones acknowledged by all remotes
     if !dry_run {
         let sync_index_path = config.root.join(".esk/sync-index.json");
-        let sync_index = SyncIndex::load(&sync_index_path);
+        let (sync_index, warning) = SyncIndex::load(&sync_index_path);
+        if let Some(msg) = warning {
+            let _ = cliclack::log::warning(&msg);
+        }
         let remote_names: Vec<&str> = target_remotes.iter().map(|r| r.name()).collect();
         let mut current_payload = store.payload()?;
         let pruned = current_payload.prune_tombstones(&sync_index, &remote_names);

@@ -104,9 +104,8 @@ impl DeployTarget for RenderTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "curl").map_err(|_| {
-            anyhow::anyhow!("curl is not installed or not in PATH. Install it and try again.")
-        })?;
+        check_command(self.runner, "curl")
+            .context("curl is required for Render API access")?;
 
         let api_key = self.api_key()?;
 
@@ -309,7 +308,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("curl is not installed"));
+        assert!(err.to_string().contains("curl is required for Render API access"));
         std::env::remove_var(&env_name);
     }
 

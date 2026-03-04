@@ -268,7 +268,7 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
     let payload = store.payload()?;
     let resolved = config.resolve_secrets()?;
     let index_path = config.root.join(".esk/deploy-index.json");
-    let index = DeployIndex::load(&index_path);
+    let (index, _) = DeployIndex::load(&index_path);
     let target_names: Vec<&str> = config.target_names();
 
     let envs: Vec<&str> = match &params.env {

@@ -114,11 +114,8 @@ impl DeployTarget for KubernetesTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "kubectl").map_err(|_| {
-            anyhow::anyhow!(
-                "kubectl is not installed or not in PATH. Install it from: https://kubernetes.io/docs/tasks/tools/"
-            )
-        })?;
+        check_command(self.runner, "kubectl")
+            .context("Install from: https://kubernetes.io/docs/tasks/tools/")?;
         let output = self
             .runner
             .run("kubectl", &["cluster-info"], CommandOpts::default())
@@ -304,7 +301,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("kubectl is not installed"));
+        assert!(err.to_string().contains("Install from: https://kubernetes.io"));
     }
 
     #[test]

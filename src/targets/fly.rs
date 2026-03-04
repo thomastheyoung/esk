@@ -50,11 +50,8 @@ impl DeployTarget for FlyTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "fly").map_err(|_| {
-            anyhow::anyhow!(
-                "fly is not installed or not in PATH. Install it from: https://fly.io/docs/hands-on/install-flyctl/"
-            )
-        })?;
+        check_command(self.runner, "fly")
+            .context("Install from: https://fly.io/docs/hands-on/install-flyctl/")?;
         let output = self
             .runner
             .run("fly", &["auth", "whoami"], CommandOpts::default())
@@ -105,10 +102,9 @@ impl DeployTarget for FlyTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    fn make_config(dir: &std::path::Path) -> Config {
-        let yaml = r#"
+    const FLY_YAML: &str = r#"
 project: x
 environments: [dev, prod]
 apps:
@@ -121,9 +117,9 @@ targets:
     env_flags:
       prod: "--stage"
 "#;
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+
+    fn make_fixture() -> ConfigFixture {
+        ConfigFixture::new(FLY_YAML).unwrap()
     }
 
     fn make_target(app: Option<&str>, env: &str) -> ResolvedTarget {
@@ -136,8 +132,8 @@ targets:
 
     #[test]
     fn fly_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -152,7 +148,7 @@ targets:
             },
         ]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -165,8 +161,8 @@ targets:
 
     #[test]
     fn fly_preflight_auth_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -181,7 +177,7 @@ targets:
             },
         ]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -191,23 +187,23 @@ targets:
 
     #[test]
     fn fly_preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("fly is not installed"));
+        assert!(err.to_string().contains("Install from: https://fly.io"));
     }
 
     #[test]
     fn fly_deploy_uses_stdin() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -215,7 +211,7 @@ targets:
             stderr: vec![],
         }]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -235,8 +231,8 @@ targets:
 
     #[test]
     fn fly_deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -244,7 +240,7 @@ targets:
             stderr: vec![],
         }]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -261,12 +257,12 @@ targets:
 
     #[test]
     fn fly_requires_app() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -278,12 +274,12 @@ targets:
 
     #[test]
     fn fly_unknown_app_mapping() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -295,8 +291,8 @@ targets:
 
     #[test]
     fn fly_delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -304,7 +300,7 @@ targets:
             stderr: vec![],
         }]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -320,8 +316,8 @@ targets:
 
     #[test]
     fn fly_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -329,7 +325,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -341,12 +337,12 @@ targets:
 
     #[test]
     fn fly_rejects_newline_in_value() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -358,12 +354,12 @@ targets:
 
     #[test]
     fn fly_rejects_cr_in_value() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -375,8 +371,8 @@ targets:
 
     #[test]
     fn fly_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path());
+        let fixture = make_fixture();
+        let config = fixture.config();
         let target_config = config.targets.fly.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -384,7 +380,7 @@ targets:
             stderr: b"deploy error".to_vec(),
         }]);
         let target = FlyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

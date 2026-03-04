@@ -115,7 +115,10 @@ pub fn run_with_runner(
     let mut push_results = Vec::new();
     if !opts.no_sync && !config.remotes.is_empty() {
         let sync_index_path = config.root.join(".esk/sync-index.json");
-        let mut sync_index = SyncIndex::load(&sync_index_path);
+        let (mut sync_index, warning) = SyncIndex::load(&sync_index_path);
+        if let Some(msg) = warning {
+            let _ = cliclack::log::warning(&msg);
+        }
         let all_remotes = remotes::build_remotes(config, runner);
         push_results =
             super::sync::push_to_remotes(&all_remotes, &payload, config, env, &mut sync_index)?;

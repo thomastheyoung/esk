@@ -54,11 +54,8 @@ impl DeployTarget for DockerTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "docker").map_err(|_| {
-            anyhow::anyhow!(
-                "docker is not installed or not in PATH. Install it from: https://docs.docker.com/get-docker/"
-            )
-        })?;
+        check_command(self.runner, "docker")
+            .context("Install from: https://docs.docker.com/get-docker/")?;
         let output = self
             .runner
             .run(
@@ -213,7 +210,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("docker is not installed"));
+        assert!(err.to_string().contains("Install from: https://docs.docker.com"));
     }
 
     #[test]

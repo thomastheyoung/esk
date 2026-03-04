@@ -51,11 +51,8 @@ impl SyncRemote for DopplerRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "doppler").map_err(|_| {
-            anyhow::anyhow!(
-                "Doppler CLI (doppler) is not installed or not in PATH. Install it from: https://docs.doppler.com/docs/install-cli"
-            )
-        })?;
+        crate::targets::check_command(self.runner, "doppler")
+            .context("Install from: https://docs.doppler.com/docs/install-cli")?;
 
         let output = self
             .runner
@@ -238,8 +235,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = DopplerRemote::new(remote_config, &runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err.to_string().contains("Doppler CLI"));
-        assert!(err.to_string().contains("not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

@@ -34,11 +34,8 @@ impl DeployTarget for GithubTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "gh").map_err(|_| {
-            anyhow::anyhow!(
-                "gh is not installed or not in PATH. Install it from: https://cli.github.com/"
-            )
-        })?;
+        check_command(self.runner, "gh")
+            .context("Install from: https://cli.github.com/")?;
         let output = self
             .runner
             .run("gh", &["auth", "status"], CommandOpts::default())
@@ -190,7 +187,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("gh is not installed"));
+        assert!(err.to_string().contains("Install from: https://cli.github.com/"));
     }
 
     #[test]

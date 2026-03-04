@@ -52,11 +52,8 @@ impl DeployTarget for HerokuTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "heroku").map_err(|_| {
-            anyhow::anyhow!(
-                "heroku is not installed or not in PATH. Install it from: https://devcenter.heroku.com/articles/heroku-cli"
-            )
-        })?;
+        check_command(self.runner, "heroku")
+            .context("Install from: https://devcenter.heroku.com/articles/heroku-cli")?;
         let output = self
             .runner
             .run("heroku", &["auth:whoami"], CommandOpts::default())
@@ -194,7 +191,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("heroku is not installed"));
+        assert!(err.to_string().contains("Install from: https://devcenter.heroku.com"));
     }
 
     #[test]

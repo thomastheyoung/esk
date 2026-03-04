@@ -34,11 +34,8 @@ impl DeployTarget for RailwayTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "railway").map_err(|_| {
-            anyhow::anyhow!(
-                "railway is not installed or not in PATH. Install it from: https://docs.railway.app/guides/cli"
-            )
-        })?;
+        check_command(self.runner, "railway")
+            .context("Install from: https://docs.railway.app/guides/cli")?;
         let output = self
             .runner
             .run("railway", &["whoami"], CommandOpts::default())
@@ -171,7 +168,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("railway is not installed"));
+        assert!(err.to_string().contains("Install from: https://docs.railway.app"));
     }
 
     #[test]

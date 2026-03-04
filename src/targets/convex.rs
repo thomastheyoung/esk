@@ -63,9 +63,8 @@ impl DeployTarget for ConvexTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "npx").map_err(|_| {
-            anyhow::anyhow!("npx is not installed or not in PATH. Install Node.js to get npx.")
-        })?;
+        check_command(self.runner, "npx")
+            .context("Install Node.js to get npx")?;
         let (cwd, env_vars) = self.resolve_deployment_context()?;
         let output = self
             .runner
@@ -135,9 +134,9 @@ mod tests {
 
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    fn make_config(dir: &std::path::Path, deployment_source: Option<&str>) -> Config {
+    fn make_fixture(deployment_source: Option<&str>) -> ConfigFixture {
         let mut yaml = String::from(
             r"
 project: x
@@ -151,9 +150,7 @@ targets:
             let _ = writeln!(yaml, "    deployment_source: {s}");
         }
         yaml.push_str("    env_flags:\n      prod: \"--prod\"\n");
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(&yaml).unwrap()
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -166,9 +163,9 @@ targets:
 
     #[test]
     fn convex_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let config = make_config(dir.path(), None);
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -183,7 +180,7 @@ targets:
             },
         ]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -196,9 +193,9 @@ targets:
 
     #[test]
     fn convex_preflight_deployment_inaccessible() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let config = make_config(dir.path(), None);
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -213,7 +210,7 @@ targets:
             },
         ]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -224,26 +221,25 @@ targets:
 
     #[test]
     fn convex_preflight_missing_npx() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), None);
+        let fixture = make_fixture(None);
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
 
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("npx is not installed"));
-        assert!(err.to_string().contains("Node.js"));
+        assert!(err.to_string().contains("Install Node.js to get npx"));
     }
 
     #[test]
     fn convex_builds_correct_command() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let config = make_config(dir.path(), None);
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -251,7 +247,7 @@ targets:
             stderr: vec![],
         }]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -262,7 +258,10 @@ targets:
         let calls = runner.take_calls();
         assert_eq!(calls[0].program, "npx");
         assert_eq!(calls[0].args, vec!["convex", "env", "set", "MY_KEY"]);
-        assert_eq!(calls[0].cwd.as_ref().unwrap(), &dir.path().join("apps/api"));
+        assert_eq!(
+            calls[0].cwd.as_ref().unwrap(),
+            &fixture.path("apps/api")
+        );
         // Value is passed via stdin, not in args
         assert_eq!(calls[0].stdin.as_deref(), Some(b"my_value".as_slice()));
         assert!(!calls[0].args.iter().any(|a| a.contains("my_value")));
@@ -270,11 +269,14 @@ targets:
 
     #[test]
     fn convex_reads_deployment_source() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let source = dir.path().join("apps/api/.env.local");
-        std::fs::write(&source, "CONVEX_DEPLOYMENT=dev:my-deploy-123\n").unwrap();
-        let config = make_config(dir.path(), Some("apps/api/.env.local"));
+        let fixture = make_fixture(Some("apps/api/.env.local"));
+        fixture.create_dir_all("apps/api").unwrap();
+        std::fs::write(
+            fixture.path("apps/api/.env.local"),
+            "CONVEX_DEPLOYMENT=dev:my-deploy-123\n",
+        )
+        .unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -282,7 +284,7 @@ targets:
             stderr: vec![],
         }]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -299,9 +301,9 @@ targets:
 
     #[test]
     fn convex_deployment_source_missing_file() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let config = make_config(dir.path(), Some("apps/api/.env.local"));
+        let fixture = make_fixture(Some("apps/api/.env.local"));
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -309,7 +311,7 @@ targets:
             stderr: vec![],
         }]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -323,11 +325,14 @@ targets:
 
     #[test]
     fn convex_deployment_source_no_match() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let source = dir.path().join("apps/api/.env.local");
-        std::fs::write(&source, "OTHER_VAR=foo\nSOMETHING=bar\n").unwrap();
-        let config = make_config(dir.path(), Some("apps/api/.env.local"));
+        let fixture = make_fixture(Some("apps/api/.env.local"));
+        fixture.create_dir_all("apps/api").unwrap();
+        std::fs::write(
+            fixture.path("apps/api/.env.local"),
+            "OTHER_VAR=foo\nSOMETHING=bar\n",
+        )
+        .unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -335,7 +340,7 @@ targets:
             stderr: vec![],
         }]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -349,11 +354,14 @@ targets:
 
     #[test]
     fn convex_deployment_strips_quotes() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let source = dir.path().join("apps/api/.env.local");
-        std::fs::write(&source, "CONVEX_DEPLOYMENT=\"my-deploy\"\n").unwrap();
-        let config = make_config(dir.path(), Some("apps/api/.env.local"));
+        let fixture = make_fixture(Some("apps/api/.env.local"));
+        fixture.create_dir_all("apps/api").unwrap();
+        std::fs::write(
+            fixture.path("apps/api/.env.local"),
+            "CONVEX_DEPLOYMENT=\"my-deploy\"\n",
+        )
+        .unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -361,7 +369,7 @@ targets:
             stderr: vec![],
         }]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -377,9 +385,9 @@ targets:
 
     #[test]
     fn convex_delete_builds_correct_command() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let config = make_config(dir.path(), None);
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -387,7 +395,7 @@ targets:
             stderr: vec![],
         }]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -406,9 +414,9 @@ targets:
 
     #[test]
     fn convex_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let config = make_config(dir.path(), None);
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -416,7 +424,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -428,9 +436,9 @@ targets:
 
     #[test]
     fn convex_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        std::fs::create_dir_all(dir.path().join("apps/api")).unwrap();
-        let config = make_config(dir.path(), None);
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
         let target_config = config.targets.convex.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -438,7 +446,7 @@ targets:
             stderr: b"deploy error".to_vec(),
         }]);
         let target = ConvexTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

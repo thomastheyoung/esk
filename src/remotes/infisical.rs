@@ -80,11 +80,8 @@ impl SyncRemote for InfisicalRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "infisical").map_err(|_| {
-            anyhow::anyhow!(
-                "Infisical CLI (infisical) is not installed or not in PATH. Install it from: https://infisical.com/docs/cli/overview"
-            )
-        })?;
+        crate::targets::check_command(self.runner, "infisical")
+            .context("Install from: https://infisical.com/docs/cli/overview")?;
         Ok(())
     }
 
@@ -280,8 +277,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = make_remote(&runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err.to_string().contains("Infisical CLI"));
-        assert!(err.to_string().contains("not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

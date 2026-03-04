@@ -469,7 +469,7 @@ remotes:
         let health = check_remote_health(&config, &runner);
         assert_eq!(health.len(), 1);
         assert!(!health[0].status.is_ok());
-        assert!(health[0].status.message().contains("op) is not installed"));
+        assert!(health[0].status.message().contains("Install from:"));
     }
 
     #[test]

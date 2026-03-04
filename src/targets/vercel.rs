@@ -44,11 +44,8 @@ impl DeployTarget for VercelTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "vercel").map_err(|_| {
-            anyhow::anyhow!(
-                "vercel is not installed or not in PATH. Install it with: npm install -g vercel"
-            )
-        })?;
+        check_command(self.runner, "vercel")
+            .context("Install with: npm install -g vercel")?;
         let output = self
             .runner
             .run("vercel", &["whoami"], CommandOpts::default())
@@ -185,7 +182,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("vercel is not installed"));
+        assert!(err.to_string().contains("Install with: npm install -g vercel"));
     }
 
     #[test]

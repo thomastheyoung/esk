@@ -460,7 +460,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

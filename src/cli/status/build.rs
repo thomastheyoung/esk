@@ -18,7 +18,10 @@ impl Dashboard {
         let all_secrets = &payload.secrets;
 
         let index_path = config.root.join(".esk/deploy-index.json");
-        let index = DeployIndex::load(&index_path);
+        let (index, warning) = DeployIndex::load(&index_path);
+        if let Some(msg) = warning {
+            let _ = cliclack::log::warning(&msg);
+        }
         let resolved = config.resolve_secrets()?;
         let target_names: Vec<&str> = config.target_names();
 
@@ -224,7 +227,10 @@ impl Dashboard {
 
         // 8. Remote states
         let sync_index_path = config.root.join(".esk/sync-index.json");
-        let sync_index = SyncIndex::load(&sync_index_path);
+        let (sync_index, warning) = SyncIndex::load(&sync_index_path);
+        if let Some(msg) = warning {
+            let _ = cliclack::log::warning(&msg);
+        }
         let remote_names: Vec<&String> = config.remotes.keys().collect();
 
         let mut remote_states = Vec::new();

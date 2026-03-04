@@ -37,11 +37,8 @@ impl DeployTarget for SupabaseTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "supabase").map_err(|_| {
-            anyhow::anyhow!(
-                "supabase is not installed or not in PATH. Install it from: https://supabase.com/docs/guides/cli"
-            )
-        })?;
+        check_command(self.runner, "supabase")
+            .context("Install from: https://supabase.com/docs/guides/cli")?;
         let project_ref = &self.target_config.project_ref;
         let output = self
             .runner
@@ -193,7 +190,7 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("supabase is not installed"));
+        assert!(err.to_string().contains("Install from: https://supabase.com"));
     }
 
     #[test]

@@ -38,11 +38,8 @@ impl DeployTarget for NetlifyTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "netlify").map_err(|_| {
-            anyhow::anyhow!(
-                "netlify is not installed or not in PATH. Install it with: npm install -g netlify-cli"
-            )
-        })?;
+        check_command(self.runner, "netlify")
+            .context("Install with: npm install -g netlify-cli")?;
         let output = self
             .runner
             .run("netlify", &["status"], CommandOpts::default())
@@ -91,11 +88,18 @@ impl DeployTarget for NetlifyTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
-    use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
+    use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
-    fn make_config(dir: &std::path::Path, with_site: bool) -> Config {
-        let yaml = if with_site {
-            r#"
+    const NETLIFY_YAML: &str = r#"
+project: x
+environments: [dev, prod]
+targets:
+  netlify:
+    env_flags:
+      prod: "--context production"
+"#;
+
+    const NETLIFY_YAML_WITH_SITE: &str = r#"
 project: x
 environments: [dev, prod]
 targets:
@@ -103,20 +107,15 @@ targets:
     site: my-site-id
     env_flags:
       prod: "--context production"
-"#
+"#;
+
+    fn make_fixture(with_site: bool) -> ConfigFixture {
+        let yaml = if with_site {
+            NETLIFY_YAML_WITH_SITE
         } else {
-            r#"
-project: x
-environments: [dev, prod]
-targets:
-  netlify:
-    env_flags:
-      prod: "--context production"
-"#
+            NETLIFY_YAML
         };
-        let path = dir.join("esk.yaml");
-        std::fs::write(&path, yaml).unwrap();
-        Config::load(&path).unwrap()
+        ConfigFixture::new(yaml).unwrap()
     }
 
     fn make_target(env: &str) -> ResolvedTarget {
@@ -129,8 +128,8 @@ targets:
 
     #[test]
     fn netlify_preflight_success() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_fixture(false);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -145,7 +144,7 @@ targets:
             },
         ]);
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -156,8 +155,8 @@ targets:
 
     #[test]
     fn netlify_preflight_not_linked() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_fixture(false);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
@@ -172,7 +171,7 @@ targets:
             },
         ]);
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -182,23 +181,23 @@ targets:
 
     #[test]
     fn netlify_preflight_missing_cli() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_fixture(false);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = ErrorCommandRunner::missing_command();
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("netlify is not installed"));
+        assert!(err.to_string().contains("Install with: npm install -g netlify-cli"));
     }
 
     #[test]
     fn netlify_deploy_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_fixture(false);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -206,7 +205,7 @@ targets:
             stderr: vec![],
         }]);
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -220,8 +219,8 @@ targets:
 
     #[test]
     fn netlify_deploy_with_site() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_fixture(true);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -229,7 +228,7 @@ targets:
             stderr: vec![],
         }]);
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -245,8 +244,8 @@ targets:
 
     #[test]
     fn netlify_deploy_with_env_flags() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_fixture(false);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -254,7 +253,7 @@ targets:
             stderr: vec![],
         }]);
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -270,8 +269,8 @@ targets:
 
     #[test]
     fn netlify_delete_correct_args() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), true);
+        let fixture = make_fixture(true);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: true,
@@ -279,7 +278,7 @@ targets:
             stderr: vec![],
         }]);
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -293,8 +292,8 @@ targets:
 
     #[test]
     fn netlify_delete_failure() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_fixture(false);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -302,7 +301,7 @@ targets:
             stderr: b"not found".to_vec(),
         }]);
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };
@@ -314,8 +313,8 @@ targets:
 
     #[test]
     fn netlify_nonzero_exit() {
-        let dir = tempfile::tempdir().unwrap();
-        let config = make_config(dir.path(), false);
+        let fixture = make_fixture(false);
+        let config = fixture.config();
         let target_config = config.targets.netlify.as_ref().unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
             success: false,
@@ -323,7 +322,7 @@ targets:
             stderr: b"auth error".to_vec(),
         }]);
         let target = NetlifyTarget {
-            config: &config,
+            config,
             target_config,
             runner: &runner,
         };

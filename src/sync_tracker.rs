@@ -37,26 +37,28 @@ impl SyncIndex {
         }
     }
 
-    pub fn load(path: &Path) -> Self {
+    pub fn load(path: &Path) -> (Self, Option<String>) {
         if !path.is_file() {
-            return Self::new(path);
+            return (Self::new(path), None);
         }
         let contents = match std::fs::read_to_string(path) {
             Ok(c) => c,
             Err(e) => {
-                eprintln!("Warning: could not read sync index ({e}), starting fresh");
-                return Self::new(path);
+                return (
+                    Self::new(path),
+                    Some(format!("Could not read sync index ({e}), starting fresh")),
+                );
             }
         };
         match serde_json::from_str::<SyncIndex>(&contents) {
             Ok(mut index) => {
                 index.path = path.to_path_buf();
-                index
+                (index, None)
             }
-            Err(e) => {
-                eprintln!("Warning: sync index corrupted ({e}), starting fresh");
-                Self::new(path)
-            }
+            Err(e) => (
+                Self::new(path),
+                Some(format!("Sync index corrupted ({e}), starting fresh")),
+            ),
         }
     }
 
@@ -154,7 +156,7 @@ mod tests {
 
     #[test]
     fn load_nonexistent_returns_empty() {
-        let index = SyncIndex::load(Path::new("/nonexistent/path/test.json"));
+        let (index, _) = SyncIndex::load(Path::new("/nonexistent/path/test.json"));
         assert!(index.records.is_empty());
     }
 
@@ -166,7 +168,7 @@ mod tests {
         index.record_success("1password", "dev", 3);
         index.save().unwrap();
 
-        let loaded = SyncIndex::load(&path);
+        let (loaded, _) = SyncIndex::load(&path);
         assert_eq!(loaded.records.len(), 1);
         assert!(loaded.records.contains_key("1password:dev"));
     }
@@ -176,7 +178,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("index.json");
         std::fs::write(&path, "not valid json").unwrap();
-        let index = SyncIndex::load(&path);
+        let (index, _) = SyncIndex::load(&path);
         assert!(index.records.is_empty());
     }
 
@@ -189,7 +191,7 @@ mod tests {
         index.record_failure("dropbox", "prod", 3, "timeout".to_string());
         index.save().unwrap();
 
-        let loaded = SyncIndex::load(&path);
+        let (loaded, _) = SyncIndex::load(&path);
         assert_eq!(loaded.records.len(), 2);
         assert_eq!(
             loaded.records["1password:dev"].last_push_status,

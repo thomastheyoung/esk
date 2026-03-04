@@ -293,7 +293,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err.to_string().contains("AWS CLI (aws) is not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

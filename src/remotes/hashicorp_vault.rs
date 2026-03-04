@@ -71,11 +71,8 @@ impl SyncRemote for HashicorpVaultRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "vault").map_err(|_| {
-            anyhow::anyhow!(
-                "HashiCorp Vault CLI (vault) is not installed or not in PATH. Install it from: https://developer.hashicorp.com/vault/install"
-            )
-        })?;
+        crate::targets::check_command(self.runner, "vault")
+            .context("Install from: https://developer.hashicorp.com/vault/install")?;
 
         let output = self
             .runner
@@ -241,9 +238,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = HashicorpVaultRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("Vault CLI (vault) is not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

@@ -261,11 +261,8 @@ pub fn aws_base_args(region: Option<&str>, profile: Option<&str>) -> Vec<String>
 
 /// Run AWS CLI preflight: check `aws` is installed and authenticated.
 pub fn aws_preflight(runner: &dyn CommandRunner, base_args: &[String]) -> Result<()> {
-    check_command(runner, "aws").map_err(|_| {
-        anyhow::anyhow!(
-            "AWS CLI (aws) is not installed or not in PATH. Install it from: https://aws.amazon.com/cli/"
-        )
-    })?;
+    check_command(runner, "aws")
+        .context("Install from: https://aws.amazon.com/cli/")?;
     let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
     args.extend(base_args.iter().map(String::as_str));
     let output = runner
@@ -282,9 +279,7 @@ pub fn aws_preflight(runner: &dyn CommandRunner, base_args: &[String]) -> Result
 pub fn check_command(runner: &dyn CommandRunner, program: &str) -> Result<()> {
     runner
         .run(program, &["--version"], CommandOpts::default())
-        .map_err(|_| {
-            anyhow::anyhow!("{program} is not installed or not in PATH. Install it and try again.")
-        })?;
+        .map_err(|e| anyhow::anyhow!("{program} is not installed or not in PATH ({e})"))?;
     Ok(())
 }
 
@@ -888,7 +883,7 @@ targets:
         assert!(health[1]
             .status
             .message()
-            .contains("wrangler is not installed"));
+            .contains("Install with: npm install -g wrangler"));
     }
 
     #[test]

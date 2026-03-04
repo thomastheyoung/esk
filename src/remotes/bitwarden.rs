@@ -104,11 +104,8 @@ impl SyncRemote for BitwardenRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "bws").map_err(|_| {
-            anyhow::anyhow!(
-                "Bitwarden Secrets Manager CLI (bws) is not installed or not in PATH. Install it from: https://bitwarden.com/help/secrets-manager-cli/"
-            )
-        })?;
+        crate::targets::check_command(self.runner, "bws")
+            .context("Install from: https://bitwarden.com/help/secrets-manager-cli/")?;
 
         // Verify auth by listing secrets (requires BWS_ACCESS_TOKEN)
         let project_id = &self.remote_config.project_id;
@@ -298,7 +295,7 @@ remotes:
         let runner = ErrorCommandRunner::missing_command();
         let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
         let err = remote.preflight().unwrap_err();
-        assert!(err.to_string().contains("bws) is not installed"));
+        assert!(err.to_string().contains("Install from:"));
     }
 
     #[test]

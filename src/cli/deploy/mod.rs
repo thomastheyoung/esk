@@ -79,7 +79,10 @@ pub fn run_with_runner(
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
     let index_path = config.root.join(".esk/deploy-index.json");
-    let index = DeployIndex::load(&index_path);
+    let (index, warning) = DeployIndex::load(&index_path);
+    if let Some(msg) = warning {
+        let _ = cliclack::log::warning(&msg);
+    }
 
     let resolved = config.resolve_secrets()?;
 
