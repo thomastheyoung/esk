@@ -17,6 +17,9 @@ const KEY_LEN: usize = 32;
 const NONCE_LEN: usize = 12;
 /// AES-GCM authentication tag length in bytes.
 const TAG_LEN: usize = 16;
+const STORE_FORMAT_V2: &str = "v2";
+const STORE_AAD_V2: &[u8] = b"esk-store:v2";
+const STORE_VERSION_FILE: &str = "store.version";
 
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.
@@ -407,6 +410,7 @@ impl KeyProvider {
 pub struct SecretStore {
     key: Zeroizing<Vec<u8>>,
     store_path: PathBuf,
+    version_path: PathBuf,
 }
 
 impl std::fmt::Debug for SecretStore {
@@ -453,7 +457,12 @@ impl SecretStore {
             provider.create()?
         };
 
-        let store = Self { key, store_path };
+        let version_path = esk_dir.join(STORE_VERSION_FILE);
+        let store = Self {
+            key,
+            store_path,
+            version_path,
+        };
 
         // Create empty store file if it doesn't exist
         if !store.store_path.is_file() {
@@ -481,7 +490,12 @@ impl SecretStore {
         }
 
         let key = provider.load()?;
-        Ok(Self { key, store_path })
+        let version_path = esk_dir.join(STORE_VERSION_FILE);
+        Ok(Self {
+            key,
+            store_path,
+            version_path,
+        })
     }
 
     fn lock_path(&self) -> PathBuf {
@@ -517,9 +531,13 @@ impl SecretStore {
             .with_context(|| format!("failed to read {}", self.store_path.display()))?;
         let ciphertext = ciphertext.trim();
         if ciphertext.is_empty() {
-            return Ok(StorePayload::default());
+            let payload = StorePayload::default();
+            self.check_rollback(&payload)?;
+            return Ok(payload);
         }
-        self.decrypt(ciphertext)
+        let payload = self.decrypt(ciphertext)?;
+        self.check_rollback(&payload)?;
+        Ok(payload)
     }
 
     /// Get a single secret by composite key (e.g., "MY_SECRET:dev").
@@ -585,7 +603,7 @@ impl SecretStore {
     /// Write a payload to the store, encrypting it.
     pub(crate) fn write_payload(&self, payload: &StorePayload) -> Result<()> {
         let json = Zeroizing::new(serde_json::to_string(payload)?);
-        let encrypted = self.encrypt(&json)?;
+        let encrypted = self.encrypt_store(&json)?;
 
         let dir = self
             .store_path
@@ -601,6 +619,49 @@ impl SecretStore {
         }
         tmp.persist(&self.store_path)
             .with_context(|| format!("failed to persist store to {}", self.store_path.display()))?;
+        self.write_high_water(payload.version)?;
+        Ok(())
+    }
+
+    fn check_rollback(&self, payload: &StorePayload) -> Result<()> {
+        let recorded = if self.version_path.is_file() {
+            let text = std::fs::read_to_string(&self.version_path)
+                .with_context(|| format!("failed to read {}", self.version_path.display()))?;
+            text.trim().parse::<u64>().with_context(|| {
+                format!("invalid store high-water mark in {}", self.version_path.display())
+            })?
+        } else {
+            0
+        };
+
+        if payload.version < recorded {
+            bail!(
+                "store rollback detected: encrypted version {} is below local high-water mark {}",
+                payload.version,
+                recorded
+            );
+        }
+        if payload.version > recorded || !self.version_path.is_file() {
+            self.write_high_water(payload.version)?;
+        }
+        Ok(())
+    }
+
+    fn write_high_water(&self, version: u64) -> Result<()> {
+        let dir = self
+            .version_path
+            .parent()
+            .context("store version path has no parent")?;
+        let tmp = NamedTempFile::new_in(dir)?;
+        std::fs::write(tmp.path(), version.to_string())?;
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
+        }
+        tmp.persist(&self.version_path).with_context(|| {
+            format!("failed to persist store high-water mark to {}", self.version_path.display())
+        })?;
         Ok(())
     }
 
@@ -610,19 +671,35 @@ impl SecretStore {
     }
 
     /// Encrypt arbitrary plaintext into nonce:ciphertext:tag hex format.
+    #[cfg(test)]
     pub(crate) fn encrypt(&self, plaintext: &str) -> Result<String> {
         encrypt_with_key(&self.key, plaintext)
     }
 
     /// Decrypt ciphertext (nonce:ciphertext:tag hex format) into a StorePayload.
     pub(crate) fn decrypt(&self, encoded: &str) -> Result<StorePayload> {
-        let json = Zeroizing::new(decrypt_with_key(&self.key, encoded)?);
+        let json = Zeroizing::new(if let Some(body) = encoded.strip_prefix("v2:") {
+            decrypt_with_aad(&self.key, body, STORE_AAD_V2)?
+        } else {
+            decrypt_with_key(&self.key, encoded)?
+        });
         serde_json::from_str(&json).context("decrypted payload is not valid JSON")
+    }
+
+    fn encrypt_store(&self, plaintext: &str) -> Result<String> {
+        Ok(format!(
+            "{STORE_FORMAT_V2}:{}",
+            encrypt_with_aad(&self.key, plaintext, STORE_AAD_V2)?
+        ))
     }
 }
 
 /// Encrypt plaintext with the given key. Returns nonce:ciphertext:tag hex.
 pub(crate) fn encrypt_with_key(key: &[u8], plaintext: &str) -> Result<String> {
+    encrypt_with_aad(key, plaintext, &[])
+}
+
+fn encrypt_with_aad(key: &[u8], plaintext: &str, aad: &[u8]) -> Result<String> {
     let cipher = Aes256Gcm::new_from_slice(key)
         .map_err(|e| anyhow::anyhow!("failed to create cipher: {e}"))?;
 
@@ -631,7 +708,13 @@ pub(crate) fn encrypt_with_key(key: &[u8], plaintext: &str) -> Result<String> {
     let nonce = Nonce::from_slice(&nonce_bytes);
 
     let ciphertext = cipher
-        .encrypt(nonce, plaintext.as_bytes())
+        .encrypt(
+            nonce,
+            aes_gcm::aead::Payload {
+                msg: plaintext.as_bytes(),
+                aad,
+            },
+        )
         .map_err(|e| anyhow::anyhow!("encryption failed: {e}"))?;
 
     // AES-GCM appends tag to ciphertext. Split for our format.
@@ -650,6 +733,10 @@ pub(crate) fn encrypt_with_key(key: &[u8], plaintext: &str) -> Result<String> {
 
 /// Decrypt nonce:ciphertext:tag hex with the given key. Returns plaintext string.
 pub(crate) fn decrypt_with_key(key: &[u8], encoded: &str) -> Result<String> {
+    decrypt_with_aad(key, encoded, &[])
+}
+
+fn decrypt_with_aad(key: &[u8], encoded: &str, aad: &[u8]) -> Result<String> {
     let parts: Vec<&str> = encoded.split(':').collect();
     if parts.len() != 3 {
         bail!("invalid store format: expected nonce:ciphertext:tag");
@@ -675,7 +762,13 @@ pub(crate) fn decrypt_with_key(key: &[u8], encoded: &str) -> Result<String> {
     combined.extend_from_slice(&tag_bytes);
 
     let plaintext = cipher
-        .decrypt(nonce, combined.as_ref())
+        .decrypt(
+            nonce,
+            aes_gcm::aead::Payload {
+                msg: combined.as_ref(),
+                aad,
+            },
+        )
         .map_err(|_| anyhow::anyhow!("decryption failed — wrong key or corrupted store"))?;
 
     String::from_utf8(plaintext).context("decrypted payload is not valid UTF-8")
@@ -851,6 +944,32 @@ mod tests {
         let decrypted = store.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted.secrets.get("KEY:dev").unwrap(), "val");
         assert_eq!(decrypted.version, 1);
+    }
+
+    #[test]
+    fn store_files_use_versioned_aad_format() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        let encoded = std::fs::read_to_string(dir.path().join(".esk/store.enc")).unwrap();
+        assert!(encoded.starts_with("v2:"));
+
+        // A v2 ciphertext must not be accepted as the legacy unauthenticated-format API.
+        let legacy_shape = encoded.strip_prefix("v2:").unwrap();
+        let store = SecretStore::open(dir.path()).unwrap();
+        assert!(store.decrypt(legacy_shape).is_err());
+    }
+
+    #[test]
+    fn detects_rollback_against_local_high_water_mark() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "v1").unwrap();
+        let old_store = std::fs::read(dir.path().join(".esk/store.enc")).unwrap();
+        store.set("KEY", "dev", "v2").unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), old_store).unwrap();
+
+        let err = store.payload().unwrap_err();
+        assert!(err.to_string().contains("store rollback detected"));
     }
 
     #[test]

@@ -19,7 +19,7 @@ It is built for teams that want:
 
 ## What esk does
 
-- Stores secrets in `.esk/store.enc` (AES-256-GCM encrypted)
+- Stores secrets in `.esk/store.enc` (versioned AES-256-GCM with authenticated format metadata)
 - Keeps the decryption key locally (file or OS keychain)
 - Deploys to targets like `.env` files, Cloudflare, Convex, Vercel, GitHub Actions, Kubernetes, Docker Swarm, and more
 - Syncs with remotes like 1Password, cloud folders, AWS Secrets Manager, Vault, Bitwarden, S3, GCP, Azure, Doppler, and SOPS
@@ -87,6 +87,7 @@ esk status --env dev
 | `esk.yaml`               | Project config (environments, apps, targets, remotes, secrets, generate) | Yes             |
 | `.esk/store.enc`         | Encrypted secret store                                                   | Yes             |
 | `.esk/store.key`         | Local encryption key (32-byte hex); or stored in OS keychain             | No              |
+| `.esk/store.version`     | Local rollback-detection high-water mark                                | No              |
 | `.esk/key-provider`      | Records key storage method (`file` or `keychain`)                        | No (gitignored) |
 | `.esk/deploy-index.json` | Deploy state tracker                                                     | No (gitignored) |
 | `.esk/sync-index.json`   | Sync state tracker                                                       | No (gitignored) |
@@ -201,6 +202,7 @@ Remote config details: [REMOTES.md](REMOTES.md).
 
 - Encryption: AES-256-GCM with a random nonce for every write
 - Key isolation: `.esk/store.key` stays local and must not be committed
+- Rollback detection: `.esk/store.version` records the local version high-water mark; restoring an older committed `store.enc` is rejected
 - Tamper resistance: authenticated encryption
 - Reliability: atomic writes for store and index files
 

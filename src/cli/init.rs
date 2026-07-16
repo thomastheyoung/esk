@@ -87,6 +87,7 @@ pub(crate) const ESK_GITIGNORE_ENTRIES: &[&str] = &[
     "store.key",
     "deploy-index.json",
     "sync-index.json",
+    "store.version",
     "lock",
     "key-provider",
 ];
