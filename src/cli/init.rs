@@ -190,26 +190,26 @@ fn ensure_project(cwd: &Path, keychain: bool) -> Result<InitReport> {
     } else {
         let scaffold = r#"project: myapp
 
-    environments: [dev, prod]
+environments: [dev, prod]
 
-    apps:
-      web:
-        path: apps/web
+apps:
+  web:
+    path: apps/web
 
-    targets:
-      .env:
-        pattern: "{app_path}/.env{env_suffix}.local"
-        env_suffix:
-          dev: ""
-          prod: ".production"
+targets:
+  .env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix:
+      dev: ""
+      prod: ".production"
 
-    secrets:
-      General:
-        # EXAMPLE_SECRET:
-        #   description: An example secret
-        #   targets:
-        #     .env: [web:dev, web:prod]
-    "#;
+secrets:
+  General:
+    # EXAMPLE_SECRET:
+    #   description: An example secret
+    #   targets:
+    #     .env: [web:dev, web:prod]
+"#;
         std::fs::write(&config_path, scaffold).context("failed to write esk.yaml")?;
         FileStatus::Created
     };

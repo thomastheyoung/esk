@@ -235,6 +235,26 @@ pub fn validate_stdin_kv_value(key: &str, value: &str, target_name: &str) -> Res
     Ok(())
 }
 
+/// Replace known secret values before an error is shown or persisted.
+///
+/// Command failures can echo arguments even when the command runner itself does
+/// not retain them. Empty values are ignored so this helper cannot turn every
+/// character in an error into a redaction marker.
+pub fn redact_secrets<I, S>(message: &str, secrets: I) -> String
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    secrets.into_iter().fold(message.to_string(), |message, secret| {
+        let secret = secret.as_ref();
+        if secret.is_empty() {
+            message
+        } else {
+            message.replace(secret, "<redacted>")
+        }
+    })
+}
+
 /// Resolve env_flags for a given environment into split parts.
 /// Returns an empty vec if no flags are configured for the environment.
 pub fn resolve_env_flags(flags: &BTreeMap<String, String>, env: &str) -> Vec<String> {

@@ -9,9 +9,17 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
-  check:
-    name: Check
+  test:
+    name: Test (${{ matrix.features }})
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - features: no-default-features
+            cargo-args: --no-default-features
+          - features: mcp
+            cargo-args: --features mcp
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -22,4 +30,17 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev
       - run: cargo fmt --check
       - run: cargo clippy -- -D warnings
-      - run: cargo test
+      - run: cargo test ${{ matrix.cargo-args }}
+
+  platform-check:
+    name: Platform check (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check

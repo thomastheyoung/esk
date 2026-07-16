@@ -116,15 +116,17 @@ pub fn push_to_remotes(
                 });
             }
             Err(e) => {
+                let error =
+                    crate::targets::redact_secrets(&e.to_string(), payload.secrets.values());
                 spinner.error(format!(
-                    "\u{2191} {}  {} \u{2014} {e}",
+                    "\u{2191} {}  {} \u{2014} {error}",
                     rem.name(),
                     style("failed").red()
                 ));
-                sync_index.record_failure(rem.name(), env, pushed_version, e.to_string());
+                sync_index.record_failure(rem.name(), env, pushed_version, error.clone());
                 results.push(RemotePushResult {
                     remote: rem.name().to_string(),
-                    outcome: Err(e.to_string()),
+                    outcome: Err(error),
                 });
             }
         }
@@ -519,8 +521,12 @@ pub fn run_with_runner(
                         push_lines.push(format_push_line(name, Ok(()), false));
                     }
                     Err(e) => {
-                        sync_index.record_failure(name, env, pushed_version, e.to_string());
-                        push_lines.push(format_push_line(name, Err(&e.to_string()), false));
+                        let error = crate::targets::redact_secrets(
+                            &e.to_string(),
+                            updated_payload.secrets.values(),
+                        );
+                        sync_index.record_failure(name, env, pushed_version, error.clone());
+                        push_lines.push(format_push_line(name, Err(&error), false));
                         push_failure_count += 1;
                     }
                 }

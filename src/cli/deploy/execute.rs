@@ -200,6 +200,13 @@ fn exec_batch_group(
                     .error_message()
                     .unwrap_or_default()
                     .to_string();
+                let error = crate::targets::redact_secrets(
+                    &error,
+                    payload_secrets
+                        .get(&composite)
+                        .into_iter()
+                        .map(String::as_str),
+                );
                 idx.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
                 items.push((result.key.clone(), Some(error)));
             }
@@ -235,7 +242,7 @@ fn exec_individual_deploy(
             Ok(())
         }
         Err(e) => {
-            let msg = e.to_string();
+            let msg = crate::targets::redact_secrets(&e.to_string(), [value]);
             idx.record_failure(tracker_key, target.to_string(), value_hash, msg.clone());
             Err(msg)
         }

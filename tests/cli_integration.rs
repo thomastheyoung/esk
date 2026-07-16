@@ -22,6 +22,16 @@ fn init_creates_all_files() {
 }
 
 #[test]
+fn init_scaffold_is_loadable() {
+    let dir = tempfile::tempdir().unwrap();
+    cli::init::run(dir.path(), false).unwrap();
+
+    let config = esk::config::Config::load(&dir.path().join("esk.yaml")).unwrap();
+    assert_eq!(config.project, "myapp");
+    assert_eq!(config.environments, vec!["dev", "prod"]);
+}
+
+#[test]
 fn init_idempotent() {
     let dir = tempfile::tempdir().unwrap();
     cli::init::run(dir.path(), false).unwrap();
@@ -2026,14 +2036,14 @@ remotes:
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
-    store.set("KEY", "dev", "val").unwrap();
+    store.set("KEY", "dev", "sync-secret-sentinel").unwrap();
     let payload = store.payload().unwrap();
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
     runner.push_failure(b"isn't an item in vault"); // op item get
-    runner.push_failure(b"op create failed"); // op item create fails
+    runner.push_failure(b"op create failed: sync-secret-sentinel"); // op item create fails
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
     let (mut sync_index, _) = SyncIndex::load(&project.sync_index_path());
@@ -2049,7 +2059,11 @@ remotes:
         record.last_push_status,
         esk::sync_tracker::SyncStatus::Failed
     );
-    assert!(record.last_error.is_some());
+    let error = record.last_error.as_deref().unwrap();
+    assert!(
+        !error.contains("sync-secret-sentinel"),
+        "persisted error: {error}"
+    );
 }
 
 #[test]
@@ -3487,7 +3501,7 @@ fn deploy_heroku_failure_tracked() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // heroku --version
     runner.push_success(b"", b""); // heroku auth:whoami
-    runner.push_failure(b"auth error");
+    runner.push_failure(b"auth error: API_KEY=secret");
 
     let err = cli::deploy::run_with_runner(
         &config,
@@ -3516,6 +3530,7 @@ fn deploy_heroku_failure_tracked() {
         record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
+    assert!(!record.last_error.as_deref().unwrap().contains("secret"));
 }
 
 #[test]
@@ -6642,7 +6657,7 @@ fn deploy_custom_target_failure_tracked() {
 
     let runner = MockCommandRunner::new();
     runner.push_success(b"OK", b""); // preflight
-    runner.push_failure(b"403 Forbidden"); // deploy fails
+    runner.push_failure(b"403 Forbidden: sk_test_123"); // deploy fails
 
     let result = cli::deploy::run_with_runner(
         &config,
@@ -6663,10 +6678,16 @@ fn deploy_custom_target_failure_tracked() {
     let (index, _) = DeployIndex::load(&project.deploy_index_path());
     let record = index.records.get("API_KEY:my-api:dev");
     assert!(record.is_some());
+    let record = record.unwrap();
     assert_eq!(
-        record.unwrap().last_deploy_status,
+        record.last_deploy_status,
         esk::deploy_tracker::DeployStatus::Failed
     );
+    assert!(!record
+        .last_error
+        .as_deref()
+        .unwrap()
+        .contains("sk_test_123"));
 }
 
 #[test]

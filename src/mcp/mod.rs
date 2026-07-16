@@ -11,7 +11,6 @@ use crate::cli::deploy::DeployOptions;
 use crate::cli::status::types::Dashboard;
 use crate::config::Config;
 use crate::store::SecretStore;
-use crate::targets::RealCommandRunner;
 use crate::validate;
 
 use types::{
@@ -350,7 +349,6 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
 
 fn do_status(params: &StatusParams) -> anyhow::Result<StatusResponse> {
     let config = Config::find_and_load()?;
-    let runner = RealCommandRunner;
     let dashboard = Dashboard::build(&config, params.env.as_deref())?;
 
     Ok(StatusResponse {
