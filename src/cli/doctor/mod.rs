@@ -5,6 +5,7 @@ pub(crate) mod types;
 use anyhow::Result;
 use std::path::Path;
 
+use crate::config::Config;
 use crate::targets::{CommandRunner, RealCommandRunner};
 
 use types::Report;
@@ -16,6 +17,65 @@ pub fn run(cwd: &Path) -> Result<()> {
 pub fn run_with_runner(cwd: &Path, runner: &dyn CommandRunner) -> Result<()> {
     let report = Report::build(cwd);
     report.render(runner)
+}
+
+/// Emit the doctor report as stable JSON. Secret values are never included.
+pub fn run_json(cwd: &Path) -> Result<()> {
+    let report = Report::build(cwd);
+    let (target_health, remote_health) = match report.project.as_ref() {
+        Some(_) => match Config::load(&report.root.join("esk.yaml")) {
+            Ok(config) => (
+                crate::targets::check_target_health(&config, &crate::targets::RealCommandRunner),
+                crate::remotes::check_remote_health(&config, &crate::targets::RealCommandRunner),
+            ),
+            Err(_) => (Vec::new(), Vec::new()),
+        },
+        None => (Vec::new(), Vec::new()),
+    };
+    let check = |c: &types::Check| {
+        serde_json::json!({
+            "status": match c.status {
+                types::CheckStatus::Pass => "pass",
+                types::CheckStatus::Warn => "warn",
+                types::CheckStatus::Fail => "fail",
+            },
+            "label": c.label,
+            "detail": c.detail,
+        })
+    };
+    let section = |s: &types::Section| match s {
+        types::Section::Checked(checks) => serde_json::json!({
+            "status": "checked",
+            "checks": checks.iter().map(check).collect::<Vec<_>>(),
+        }),
+        types::Section::Skipped(reason) => serde_json::json!({
+            "status": "skipped",
+            "reason": reason,
+        }),
+    };
+    let output = serde_json::json!({
+        "project": report.project,
+        "root": report.root,
+        "structure": report.structure.iter().map(check).collect::<Vec<_>>(),
+        "config": section(&report.config),
+        "store_consistency": section(&report.store_consistency),
+        "secrets_health": section(&report.secrets_health),
+        "target_health": target_health.iter().map(|h| serde_json::json!({
+            "name": h.name,
+            "status": if h.status.is_ok() { "ok" } else { "failed" },
+            "message": h.status.message(),
+        })).collect::<Vec<_>>(),
+        "remote_health": remote_health.iter().map(|h| serde_json::json!({
+            "name": h.name,
+            "status": if h.status.is_ok() { "ok" } else { "failed" },
+            "message": h.status.message(),
+        })).collect::<Vec<_>>(),
+        "suggestions": report.suggestions.iter().map(|s| serde_json::json!({
+            "command": s.command, "reason": s.reason,
+        })).collect::<Vec<_>>(),
+    });
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
 }
 
 #[cfg(test)]

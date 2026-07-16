@@ -37,9 +37,13 @@ fn run() -> Result<i32> {
                 },
             )?;
         }
-        Commands::Doctor => {
+        Commands::Doctor { json } => {
             let cwd = std::env::current_dir()?;
-            esk::cli::doctor::run(&cwd)?;
+            if *json {
+                esk::cli::doctor::run_json(&cwd)?;
+            } else {
+                esk::cli::doctor::run(&cwd)?;
+            }
         }
         Commands::Diff {
             left_env,
@@ -68,21 +72,24 @@ fn run() -> Result<i32> {
             strict,
             allow_empty,
             prune,
+            json,
         } => {
             let config = Config::find_and_load()?;
-            esk::cli::deploy::run(
-                &config,
-                &esk::cli::deploy::DeployOptions {
-                    env: env.as_deref(),
-                    force: *force,
-                    dry_run: *dry_run,
-                    verbose: *verbose,
-                    skip_validation: *skip_validation,
-                    strict: *strict,
-                    allow_empty: *allow_empty,
-                    prune: *prune,
-                },
-            )?;
+            let opts = esk::cli::deploy::DeployOptions {
+                env: env.as_deref(),
+                force: *force,
+                dry_run: *dry_run,
+                verbose: *verbose,
+                skip_validation: *skip_validation,
+                strict: *strict,
+                allow_empty: *allow_empty,
+                prune: *prune,
+            };
+            if *json {
+                esk::cli::deploy::run_json(&config, &opts)?;
+            } else {
+                esk::cli::deploy::run(&config, &opts)?;
+            }
         }
         Commands::Init { keychain } => {
             let cwd = std::env::current_dir()?;
@@ -150,13 +157,21 @@ fn run() -> Result<i32> {
         Commands::LlmContext => {
             esk::cli::llm_context::run()?;
         }
-        Commands::List { env } => {
+        Commands::List { env, json } => {
             let config = Config::find_and_load()?;
-            esk::cli::list::run(&config, env.as_deref())?;
+            if *json {
+                esk::cli::list::run_json(&config, env.as_deref())?;
+            } else {
+                esk::cli::list::run(&config, env.as_deref())?;
+            }
         }
-        Commands::Status { env, all } => {
+        Commands::Status { env, all, json } => {
             let config = Config::find_and_load()?;
-            esk::cli::status::run(&config, env.as_deref(), *all)?;
+            if *json {
+                esk::cli::status::run_json(&config, env.as_deref(), *all)?;
+            } else {
+                esk::cli::status::run(&config, env.as_deref(), *all)?;
+            }
         }
         Commands::Sync {
             env,

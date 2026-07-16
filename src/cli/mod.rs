@@ -47,7 +47,11 @@ pub enum Commands {
         strict: bool,
     },
     /// Diagnose project health
-    Doctor,
+    Doctor {
+        /// Emit a stable JSON report
+        #[arg(long)]
+        json: bool,
+    },
     /// Compare secret keys between two environments
     Diff {
         /// Environment to compare from
@@ -89,6 +93,9 @@ pub enum Commands {
         /// Remove orphaned secrets from targets (deployed but no longer in config)
         #[arg(long)]
         prune: bool,
+        /// Emit a stable JSON dry-run report (requires --dry-run)
+        #[arg(long)]
+        json: bool,
     },
     /// Initialize encrypted store and config
     Init {
@@ -158,6 +165,9 @@ pub enum Commands {
         /// Filter by environment
         #[arg(long)]
         env: Option<String>,
+        /// Emit a stable JSON report
+        #[arg(long)]
+        json: bool,
     },
     /// Show deploy and sync status
     Status {
@@ -167,6 +177,9 @@ pub enum Commands {
         /// Show all targets including deployed ones
         #[arg(long)]
         all: bool,
+        /// Emit a stable JSON report
+        #[arg(long)]
+        json: bool,
     },
     /// Generate code or config files from secret definitions
     Generate {

@@ -23,6 +23,94 @@ pub fn run_with_runner(
     dashboard.render(config, runner, all)
 }
 
+/// Emit the status dashboard as stable JSON without exposing secret values.
+pub fn run_json(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
+    let dashboard = Dashboard::build(config, env)?;
+    let entry = |e: &types::DeployEntry| {
+        serde_json::json!({
+            "key": e.key,
+            "environment": e.env,
+            "target": e.target,
+            "error": e.error,
+            "last_deployed_at": e.last_deployed_at,
+        })
+    };
+    let remote = |r: &types::RemoteState| {
+        let mut value = serde_json::json!({
+            "name": r.name,
+            "environment": r.env,
+        });
+        let status = match &r.status {
+            types::RemoteStatus::Current { version } => {
+                serde_json::json!({ "status": "current", "version": version })
+            }
+            types::RemoteStatus::Stale { pushed, local } => serde_json::json!({
+                "status": "stale",
+                "pushed_version": pushed,
+                "local_version": local,
+            }),
+            types::RemoteStatus::Failed { version, error } => serde_json::json!({
+                "status": "failed",
+                "version": version,
+                "error": error,
+            }),
+            types::RemoteStatus::NeverSynced => serde_json::json!({ "status": "never_synced" }),
+        };
+        value["status"] = status["status"].clone();
+        if let Some(object) = status.as_object() {
+            for (key, field) in object {
+                if key != "status" {
+                    value[key] = field.clone();
+                }
+            }
+        }
+        value
+    };
+
+    let output = serde_json::json!({
+        "project": dashboard.project,
+        "version": dashboard.version,
+        "environment_filter": dashboard.filtered_env,
+        "all": all,
+        "environment_versions": dashboard.env_versions.iter().map(|(environment, version)| {
+            serde_json::json!({ "environment": environment, "version": version })
+        }).collect::<Vec<_>>(),
+        "failed": dashboard.failed.iter().map(entry).collect::<Vec<_>>(),
+        "pending": dashboard.pending.iter().map(entry).collect::<Vec<_>>(),
+        "deployed": dashboard.deployed.iter().map(entry).collect::<Vec<_>>(),
+        "unset": dashboard.unset.iter().map(entry).collect::<Vec<_>>(),
+        "validation_warnings": dashboard.validation_warnings.iter().map(|w| serde_json::json!({
+            "key": w.key, "environment": w.env, "message": w.message,
+        })).collect::<Vec<_>>(),
+        "cross_field_violations": dashboard.cross_field_violations.iter().map(|v| serde_json::json!({
+            "key": v.key, "environment": v.env, "message": v.message,
+        })).collect::<Vec<_>>(),
+        "empty_values": dashboard.empty_values.iter().map(|w| serde_json::json!({
+            "key": w.key, "environment": w.env, "kind": w.kind,
+        })).collect::<Vec<_>>(),
+        "missing_required": dashboard.missing_required.iter().map(|m| serde_json::json!({
+            "key": m.key, "environment": m.env, "targets": m.targets,
+        })).collect::<Vec<_>>(),
+        "coverage_gaps": dashboard.coverage_gaps.iter().map(|g| serde_json::json!({
+            "key": g.key, "missing_environments": g.missing_envs,
+            "present_environments": g.present_envs,
+        })).collect::<Vec<_>>(),
+        "orphans": dashboard.orphans.iter().map(|o| serde_json::json!({
+            "key": o.key, "environment": o.env,
+        })).collect::<Vec<_>>(),
+        "target_orphans": dashboard.target_orphans.iter().map(|o| serde_json::json!({
+            "tracker_key": o.tracker_key, "key": o.key, "service": o.service,
+            "app": o.app, "environment": o.env, "last_deployed_at": o.last_deployed_at,
+        })).collect::<Vec<_>>(),
+        "remote_states": dashboard.remote_states.iter().map(remote).collect::<Vec<_>>(),
+        "next_steps": dashboard.next_steps.iter().map(|s| serde_json::json!({
+            "command": s.command, "description": s.description,
+        })).collect::<Vec<_>>(),
+    });
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------

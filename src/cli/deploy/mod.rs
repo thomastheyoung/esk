@@ -76,6 +76,83 @@ pub fn run_with_runner(
     opts: &DeployOptions<'_>,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
+    let report = build_report(config, opts, runner)?;
+
+    // Determine rendering mode
+    let is_tty = std::io::stderr().is_terminal();
+    let animated = !opts.verbose && !opts.dry_run && is_tty;
+    execute::render_report(&report, animated)?;
+
+    // Warn about orphans whose target is no longer configured
+    if !report.unavailable_orphans.is_empty() {
+        let lines: Vec<String> = report
+            .unavailable_orphans
+            .iter()
+            .map(|o| format!("  {} → {} ({})", o.key, o.target_display(), o.env))
+            .collect();
+        cliclack::log::warning(format!(
+            "Cannot prune — target no longer configured:\n{}\n  \
+             Remove these manually or re-add the target config.",
+            lines.join("\n")
+        ))?;
+    }
+
+    if report.has_failures() {
+        anyhow::bail!("{} deploy(s) failed", report.failed.len());
+    }
+
+    Ok(())
+}
+
+/// Emit a machine-readable deploy preview. JSON is deliberately limited to
+/// dry-runs so a pipeline cannot combine machine output with a live deploy.
+pub fn run_json(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
+    if !opts.dry_run {
+        anyhow::bail!("--json is only supported with --dry-run");
+    }
+
+    let report = build_report(config, opts, &RealCommandRunner)?;
+    let entry = |e: &report::DeployEntry| {
+        serde_json::json!({
+            "key": e.key,
+            "environment": e.env,
+            "target": e.target,
+            "error": e.error,
+        })
+    };
+    let orphan = |o: &crate::orphan::TargetOrphan| {
+        serde_json::json!({
+            "tracker_key": o.tracker_key,
+            "key": o.key,
+            "service": o.service,
+            "app": o.app,
+            "environment": o.env,
+            "last_deployed_at": o.last_deployed_at,
+        })
+    };
+    let output = serde_json::json!({
+        "project": config.project,
+        "dry_run": true,
+        "environment_filter": opts.env,
+        "deployed": report.deployed.iter().map(entry).collect::<Vec<_>>(),
+        "failed": report.failed.iter().map(entry).collect::<Vec<_>>(),
+        "skipped": report.skipped.iter().map(entry).collect::<Vec<_>>(),
+        "unset": report.unset.iter().map(entry).collect::<Vec<_>>(),
+        "pruned": report.pruned.iter().map(entry).collect::<Vec<_>>(),
+        "unavailable_orphans": report.unavailable_orphans.iter().map(orphan).collect::<Vec<_>>(),
+    });
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    if report.has_failures() {
+        anyhow::bail!("{} deploy(s) failed", report.failed.len());
+    }
+    Ok(())
+}
+
+fn build_report(
+    config: &Config,
+    opts: &DeployOptions<'_>,
+    runner: &dyn CommandRunner,
+) -> Result<report::DeployReport> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
     let index_path = config.root.join(".esk/deploy-index.json");
@@ -94,7 +171,16 @@ pub fn run_with_runner(
         cliclack::log::warning(
             "No targets available after preflight checks. Fix the issues above and try again.",
         )?;
-        return Ok(());
+        return Ok(report::DeployReport {
+            deployed: Vec::new(),
+            failed: Vec::new(),
+            skipped: Vec::new(),
+            unset: Vec::new(),
+            pruned: Vec::new(),
+            unavailable_orphans: Vec::new(),
+            dry_run: opts.dry_run,
+            verbose: opts.verbose,
+        });
     }
 
     // Build a lookup map: target_name -> (index, deploy_mode)
@@ -126,8 +212,7 @@ pub fn run_with_runner(
             dry_run: opts.dry_run,
             verbose: opts.verbose,
         };
-        report.render()?;
-        return Ok(());
+        return Ok(report);
     }
 
     let index = Mutex::new(index);
@@ -143,32 +228,9 @@ pub fn run_with_runner(
 
     let report = execute::build_report(exec_report, plan_output);
 
-    // Determine rendering mode
-    let is_tty = std::io::stderr().is_terminal();
-    let animated = !opts.verbose && !opts.dry_run && is_tty;
-    execute::render_report(&report, animated)?;
-
-    // Warn about orphans whose target is no longer configured
-    if !report.unavailable_orphans.is_empty() {
-        let lines: Vec<String> = report
-            .unavailable_orphans
-            .iter()
-            .map(|o| format!("  {} → {} ({})", o.key, o.target_display(), o.env))
-            .collect();
-        cliclack::log::warning(format!(
-            "Cannot prune — target no longer configured:\n{}\n  \
-             Remove these manually or re-add the target config.",
-            lines.join("\n")
-        ))?;
-    }
-
     if !opts.dry_run {
         index.lock().expect("deploy index mutex poisoned").save()?;
     }
 
-    if report.has_failures() {
-        anyhow::bail!("{} deploy(s) failed", report.failed.len());
-    }
-
-    Ok(())
+    Ok(report)
 }

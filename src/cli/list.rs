@@ -196,6 +196,108 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     Ok(())
 }
 
+/// Emit the list report as stable JSON without exposing secret values.
+pub fn run_json(config: &Config, env: Option<&str>) -> Result<()> {
+    let store = SecretStore::open(&config.root)?;
+    let all_secrets = store.list()?;
+    let payload = store.payload()?;
+    let resolved = config.resolve_secrets()?;
+    let envs: Vec<&str> = match env {
+        Some(e) => vec![e],
+        None => config.environments.iter().map(String::as_str).collect(),
+    };
+
+    // Match the human command: an empty store has no secret entries to list.
+    if all_secrets.is_empty() {
+        let output = serde_json::json!({
+            "project": config.project,
+            "version": payload.version,
+            "environment_filter": env,
+            "environments": envs,
+            "entries": [],
+        });
+        println!("{}", serde_json::to_string_pretty(&output)?);
+        return Ok(());
+    }
+
+    let cell_statuses = build_cell_statuses(config, &resolved, &all_secrets, store.master_key());
+    let targeted: BTreeSet<(&str, &str)> = resolved
+        .iter()
+        .flat_map(|s| {
+            s.targets
+                .iter()
+                .map(move |t| (s.key.as_str(), t.environment.as_str()))
+        })
+        .collect();
+    let mut entries = Vec::new();
+    for (group, secrets) in &config.secrets {
+        for key in secrets.keys() {
+            for &environment in &envs {
+                let composite = format!("{key}:{environment}");
+                let has_value = all_secrets.contains_key(&composite);
+                let status = if !has_value && !targeted.contains(&(key, environment)) {
+                    CellStatus::NotTargeted
+                } else if !has_value {
+                    CellStatus::Unset
+                } else {
+                    cell_statuses
+                        .get(&(key.clone(), environment.to_string()))
+                        .copied()
+                        .unwrap_or(CellStatus::Deployed)
+                };
+                entries.push(serde_json::json!({
+                    "group": group,
+                    "key": key,
+                    "environment": environment,
+                    "status": cell_status_name(status),
+                    "has_value": has_value,
+                }));
+            }
+        }
+    }
+
+    let config_keys: BTreeSet<&str> = config
+        .secrets
+        .values()
+        .flat_map(|values| values.keys().map(String::as_str))
+        .collect();
+    for composite in all_secrets.keys() {
+        let Some((key, environment)) = composite.rsplit_once(':') else {
+            continue;
+        };
+        if !envs.contains(&environment) || config_keys.contains(key) {
+            continue;
+        }
+        entries.push(serde_json::json!({
+            "group": "Uncategorized (not in esk.yaml)",
+            "key": key,
+            "environment": environment,
+            "status": cell_status_name(CellStatus::Deployed),
+            "has_value": true,
+        }));
+    }
+
+    let output = serde_json::json!({
+        "project": config.project,
+        "version": payload.version,
+        "environment_filter": env,
+        "environments": envs,
+        "entries": entries,
+    });
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+fn cell_status_name(status: CellStatus) -> &'static str {
+    match status {
+        CellStatus::NotTargeted => "not_targeted",
+        CellStatus::Unset => "unset",
+        CellStatus::Deployed => "deployed",
+        CellStatus::Pending => "pending",
+        CellStatus::Failed => "failed",
+    }
+}
+
 /// Compute the worst deploy status for each (key, env) pair across all its targets.
 fn build_cell_statuses(
     config: &Config,

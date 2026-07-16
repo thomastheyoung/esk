@@ -448,11 +448,12 @@ pub(crate) fn target_candidates<'a>(
         .collect()
 }
 
-/// Check the health of all configured targets without filtering.
-/// Returns one entry per configured target with preflight pass/fail.
-/// Runs all preflight checks in parallel.
-#[cfg(test)]
-fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<TargetHealth> {
+/// Check the health of all configured targets without rendering a human report.
+/// Returns one entry per configured target with preflight pass/fail and runs
+/// all preflight checks in parallel.
+/// The preflight section still uses stderr for progress, leaving stdout safe for
+/// machine-readable callers such as `esk doctor --json`.
+pub fn check_target_health(config: &Config, runner: &dyn CommandRunner) -> Vec<TargetHealth> {
     let candidates = target_candidates(config, runner);
     if candidates.is_empty() {
         return Vec::new();

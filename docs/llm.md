@@ -84,6 +84,7 @@ List all secrets and their status across environments.
 | Flag | Description |
 |------|-------------|
 | `--env <ENV>` | Filter by environment |
+| `--json` | Emit a stable JSON report (never includes secret values) |
 
 ### `esk deploy`
 
@@ -94,6 +95,7 @@ Deploy secrets to configured targets. Only deploys secrets whose values have cha
 | `--env <ENV>` | Filter by environment |
 | `--force` | Deploy even if hashes match |
 | `--dry-run` | Show what would be deployed without deploying |
+| `--json` | Emit a stable JSON dry-run report (requires `--dry-run`) |
 | `--verbose`, `-v` | Show detailed output |
 | `--skip-validation` | Skip value validation |
 | `--strict` | Fail if any required secrets are missing (default: warn and deploy available) |
@@ -108,10 +110,15 @@ Show deploy and sync status — which secrets need deploying and which remotes a
 |------|-------------|
 | `--env <ENV>` | Filter by environment |
 | `--all` | Show all targets including already-deployed ones |
+| `--json` | Emit a stable JSON report (never includes secret values) |
 
 ### `esk doctor`
 
 Diagnose project health. Checks project structure, config validity, store consistency, target/remote availability, and secrets health in one pass. Exits with code 1 if any failures are found.
+
+| Flag | Description |
+|------|-------------|
+| `--json` | Emit a stable JSON report (never includes secret values) |
 
 ### `esk diff <left_env> <right_env>`
 

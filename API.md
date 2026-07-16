@@ -76,14 +76,15 @@ esk delete API_KEY --env dev --strict              # Fail hard on remote errors
 Deploy secrets to configured targets.
 
 ```bash
-esk deploy [--env <ENV>] [--force] [--dry-run] [--verbose] [--skip-validation] [--strict] [--allow-empty] [--prune]
+esk deploy [--env <ENV>] [--force] [--dry-run] [--json] [--verbose] [--skip-validation] [--strict] [--allow-empty] [--prune]
 ```
 
 | Argument            | Required | Description                                                             |
 | ------------------- | -------- | ----------------------------------------------------------------------- |
 | `--env`             | No       | Filter to a single environment                                          |
 | `--force`           | No       | Deploy all secrets, ignoring change detection hashes                    |
-| `--dry-run`         | No       | Show what would be deployed without making changes                      |
+| `--dry-run`         | No       | Show what would be deployed without making changes                     |
+| `--json`            | No       | Emit a stable JSON report; requires `--dry-run`                        |
 | `--verbose` / `-v`  | No       | Show detailed output including skipped secrets                          |
 | `--skip-validation` | No       | Bypass `validate:` checks before deploying                              |
 | `--strict`          | No       | Fail if any required secrets are missing (default: warn and continue)   |
@@ -200,12 +201,13 @@ esk get DATABASE_URL --env prod | pbcopy  # Copy to clipboard
 List all secrets and their status.
 
 ```bash
-esk list [--env <ENV>]
+esk list [--env <ENV>] [--json]
 ```
 
 | Argument | Required | Description                    |
 | -------- | -------- | ------------------------------ |
 | `--env`  | No       | Filter to a single environment |
+| `--json` | No       | Emit a stable JSON report      |
 
 **Output:**
 
@@ -239,13 +241,14 @@ esk list [--env <ENV>]
 Show status as an actionable dashboard.
 
 ```bash
-esk status [--env <ENV>] [--all]
+esk status [--env <ENV>] [--all] [--json]
 ```
 
 | Argument | Required | Description                              |
 | -------- | -------- | ---------------------------------------- |
 | `--env`  | No       | Filter to a single environment           |
 | `--all`  | No       | Show all targets including deployed ones |
+| `--json` | No       | Emit a stable JSON report                 |
 
 Displays a multi-section dashboard with the following sections:
 
@@ -416,8 +419,14 @@ esk sync --env prod --dry-run           # Preview changes
 Diagnose project health. Checks project structure, config validity, store consistency, target/remote availability, and secrets health in one pass.
 
 ```bash
-esk doctor
+esk doctor [--json]
 ```
+
+| Argument | Required | Description |
+| -------- | -------- | ----------- |
+| `--json` | No | Emit a stable JSON report |
+
+JSON reports use stable field names and never include decrypted secret values. `list` returns one `entries` item per configured key/environment plus uncategorized stored keys; `status` returns categorized arrays such as `failed`, `pending`, `deployed`, and `unset`; `doctor` returns check objects grouped into sections; and `deploy --dry-run --json` returns planned operations in `deployed`, `failed`, `skipped`, `unset`, and `pruned` arrays.
 
 No flags — runs all checks automatically.
 
