@@ -42,6 +42,11 @@ impl SetReport {
 }
 
 pub fn run(config: &Config, opts: &SetOptions<'_>) -> Result<()> {
+    if opts.value.is_some() {
+        cliclack::log::warning(
+            "Value passed with --value is visible in shell history and process listings.",
+        )?;
+    }
     let version = SecretStore::open(&config.root)?.payload()?.version;
     cliclack::intro(
         style(format!(

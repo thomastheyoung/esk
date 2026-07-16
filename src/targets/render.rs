@@ -28,12 +28,19 @@ pub struct RenderTarget<'a> {
 
 impl RenderTarget<'_> {
     fn api_key(&self) -> Result<String> {
-        std::env::var(&self.target_config.api_key_env).map_err(|_| {
+        let api_key = std::env::var(&self.target_config.api_key_env).map_err(|_| {
             anyhow::anyhow!(
                 "Render API key not found. Set the {} environment variable.",
                 self.target_config.api_key_env
             )
-        })
+        })?;
+        if api_key.chars().any(char::is_control) {
+            anyhow::bail!(
+                "Render API key in {} contains control characters",
+                self.target_config.api_key_env
+            );
+        }
+        Ok(api_key)
     }
 
     fn resolve_service_id(&self, target: &ResolvedTarget) -> Result<&str> {
@@ -52,7 +59,10 @@ impl RenderTarget<'_> {
 /// Escape a string for use inside a curl config file value.
 /// Backslashes and double quotes must be escaped.
 fn curl_config_escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    s.replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\r', "\\r")
+        .replace('\n', "\\n")
 }
 
 /// Build a curl config string for `--config -` stdin.
@@ -104,8 +114,7 @@ impl DeployTarget for RenderTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "curl")
-            .context("curl is required for Render API access")?;
+        check_command(self.runner, "curl").context("curl is required for Render API access")?;
 
         let api_key = self.api_key()?;
 
@@ -308,7 +317,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("curl is required for Render API access"));
+        assert!(err
+            .to_string()
+            .contains("curl is required for Render API access"));
         std::env::remove_var(&env_name);
     }
 
@@ -573,7 +584,27 @@ targets:
     #[test]
     fn curl_config_escape_special_chars() {
         assert_eq!(curl_config_escape(r#"a"b\c"#), r#"a\"b\\c"#);
+        assert_eq!(curl_config_escape("line1\r\nline2"), "line1\\r\\nline2");
         assert_eq!(curl_config_escape("normal"), "normal");
         assert_eq!(curl_config_escape(""), "");
+    }
+
+    #[test]
+    fn api_key_rejects_control_characters() {
+        let env_name = "RENDER_TEST_API_KEY_CONTROL";
+        let fixture = make_config(env_name);
+        let config = fixture.config();
+        let target_config = config.targets.render.as_ref().unwrap();
+        let runner = MockCommandRunner::new();
+        let target = RenderTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+        std::env::set_var(env_name, "valid\nheader = \"X-Evil: yes\"");
+
+        let err = target.api_key().unwrap_err();
+        assert!(err.to_string().contains("contains control characters"));
+        std::env::remove_var(env_name);
     }
 }

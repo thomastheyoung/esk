@@ -206,6 +206,14 @@ Remote config details: [REMOTES.md](REMOTES.md).
 
 The encrypted store file is safe to commit. The key file is not.
 
+### Memory handling
+
+The store zeroizes selected transient key, serialization, and deploy buffers.
+Secret payloads and target interfaces still use ordinary `String` values in
+several paths, so this is defense in depth rather than a guarantee that no
+plaintext copy can remain in process memory. Treat host memory and crash dumps
+as part of the threat model; do not run esk on an untrusted host.
+
 ### Key storage
 
 The encryption key can be stored in two ways:
