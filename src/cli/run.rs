@@ -34,7 +34,25 @@ pub fn run(config: &Config, opts: &RunOptions<'_>) -> Result<i32> {
     let status = command
         .status()
         .with_context(|| format!("failed to start command '{program}'"))?;
-    Ok(status.code().unwrap_or(1))
+    Ok(child_exit_code(status))
+}
+
+fn child_exit_code(status: std::process::ExitStatus) -> i32 {
+    if let Some(code) = status.code() {
+        return code;
+    }
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+
+        status.signal().map_or(1, |signal| 128 + signal)
+    }
+
+    #[cfg(not(unix))]
+    {
+        1
+    }
 }
 
 fn collect_env_secrets(
@@ -103,5 +121,16 @@ mod tests {
 
         let all_dev = collect_env_secrets(&resolved, &payload, "dev", None);
         assert_eq!(all_dev.len(), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn preserves_signal_termination_as_shell_exit_code() {
+        let status = Command::new("sh")
+            .args(["-c", "kill -TERM $$"])
+            .status()
+            .unwrap();
+
+        assert_eq!(child_exit_code(status), 128 + 15);
     }
 }
