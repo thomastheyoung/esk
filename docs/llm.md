@@ -17,6 +17,11 @@ Initialize a new esk project in the current directory. Creates `esk.yaml`, `.esk
 Generate a new encryption key and re-encrypt the current store. Use this after
 the local key may have been exposed.
 
+### `esk completions <SHELL>`
+
+Generate shell completion scripts for `bash`, `elvish`, `fish`, `powershell`,
+or `zsh` and write the script to stdout.
+
 ### `esk import <FILE> --env <ENV>`
 
 Import a dotenv file in one store transaction. Unknown keys are registered in

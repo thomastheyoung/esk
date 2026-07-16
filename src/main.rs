@@ -1,5 +1,6 @@
 use anyhow::Result;
-use clap::Parser;
+use clap::{CommandFactory, Parser};
+use clap_complete::generate;
 use console::style;
 use esk::cli::{Cli, Commands, KeyCommands};
 use esk::config::Config;
@@ -39,6 +40,10 @@ fn run() -> Result<i32> {
         Commands::Doctor => {
             let cwd = std::env::current_dir()?;
             esk::cli::doctor::run(&cwd)?;
+        }
+        Commands::Completions { shell } => {
+            let mut command = Cli::command();
+            generate(*shell, &mut command, "esk", &mut std::io::stdout());
         }
         Commands::Key { command } => match command {
             KeyCommands::Rotate => {

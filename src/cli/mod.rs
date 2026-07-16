@@ -172,6 +172,12 @@ pub enum Commands {
     /// Print LLM context reference document
     #[command(name = "llm-context", hide = true)]
     LlmContext,
+    /// Generate shell completion scripts
+    Completions {
+        /// Shell to generate completions for
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
     /// Sync secrets with remotes (pull, reconcile, push)
     Sync {
         /// Environment to sync (omit to sync all)
