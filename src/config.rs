@@ -53,6 +53,9 @@ pub struct GenerateOutput {
 pub struct Config {
     pub project: String,
     pub environments: Vec<String>,
+    /// Policy applied when the optional MCP server handles this project.
+    #[serde(default)]
+    pub mcp: McpConfig,
     #[serde(default)]
     pub apps: BTreeMap<String, AppConfig>,
     #[serde(default)]
@@ -72,6 +75,20 @@ pub struct Config {
     /// Typed target configs, populated during validation.
     #[serde(skip)]
     pub(crate) typed_targets: Vec<TypedTargetConfig>,
+}
+
+/// Controls the capabilities exposed by `esk-mcp` for a project.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpConfig {
+    /// Return secret values from `esk_get`. Defaults to metadata/redaction.
+    #[serde(default)]
+    pub expose_values: bool,
+    /// Restrict MCP operations to these environments. Empty means all configured envs.
+    #[serde(default)]
+    pub envs: Vec<String>,
+    /// Disable mutating tools (`esk_set`, `esk_delete`, and `esk_deploy`).
+    #[serde(default)]
+    pub read_only: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -826,6 +843,11 @@ impl Config {
         validate_project(&self.project)?;
         for env in &self.environments {
             validate_environment(env)?;
+        }
+        for env in &self.mcp.envs {
+            if !self.environments.iter().any(|configured| configured == env) {
+                bail!("MCP environment policy references unknown environment '{env}'");
+            }
         }
         for app_name in self.apps.keys() {
             validate_app(app_name)?;

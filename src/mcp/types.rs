@@ -1,33 +1,33 @@
 use serde::Serialize;
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct GetResponse {
     pub key: String,
     pub env: String,
     pub value: Option<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct SetResponse {
     pub key: String,
     pub env: String,
     pub version: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct DeleteResponse {
     pub key: String,
     pub env: String,
     pub version: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ListResponse {
     pub secrets: Vec<ListSecret>,
     pub environments: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ListSecret {
     pub key: String,
     pub group: String,
@@ -35,7 +35,7 @@ pub struct ListSecret {
     pub environments: Vec<ListSecretEnv>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct ListSecretEnv {
     pub env: String,
     pub has_value: bool,
@@ -43,7 +43,7 @@ pub struct ListSecretEnv {
     pub status: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct StatusResponse {
     pub project: String,
     pub version: u64,
@@ -58,45 +58,45 @@ pub struct StatusResponse {
     pub next_steps: Vec<StatusNextStep>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct EnvVersion {
     pub env: String,
     pub version: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct StatusWarning {
     pub key: String,
     pub env: String,
     pub message: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct StatusMissing {
     pub key: String,
     pub env: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct StatusCoverageGap {
     pub key: String,
     pub missing_envs: Vec<String>,
     pub present_envs: Vec<String>,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct StatusNextStep {
     pub command: String,
     pub description: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct DeployResponse {
     pub success: bool,
     pub message: String,
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize)]
 pub struct GenerateResponse {
     pub success: bool,
     pub message: String,

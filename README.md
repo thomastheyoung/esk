@@ -275,6 +275,24 @@ cargo build --release --features mcp
 
 The MCP binary is feature-gated behind `mcp` to keep the main CLI binary lean.
 
+### MCP security policy
+
+MCP values are redacted by default. To permit a client to read plaintext values,
+add `mcp.expose_values: true` to `esk.yaml`. You can restrict the server to an
+environment allowlist and disable all mutating tools:
+
+```yaml
+mcp:
+  expose_values: false
+  envs: [dev]
+  read_only: true
+```
+
+An environment allowlist requires `esk_status` and `esk_deploy` to name an
+allowed environment explicitly. Treat MCP clients as automation with access to
+the project: prompt injection can cause a connected client to request tools,
+so keep plaintext access disabled and use `read_only` unless writes are needed.
+
 ## Development
 
 `cargo xtask sandbox` builds a release binary and scaffolds a test project in `/private/tmp/esk-test` with mock CLI shims and sample secrets.

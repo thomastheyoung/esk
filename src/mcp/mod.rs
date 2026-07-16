@@ -10,6 +10,7 @@ use serde::Deserialize;
 use crate::cli::deploy::DeployOptions;
 use crate::cli::status::types::Dashboard;
 use crate::config::Config;
+use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
 use crate::validate;
 
@@ -216,17 +217,34 @@ impl ServerHandler for EskMcpServer {
 
 fn do_get(params: GetParams) -> anyhow::Result<GetResponse> {
     let config = Config::find_and_load()?;
+    do_get_with_config(&config, params)
+}
+
+fn do_get_with_config(config: &Config, params: GetParams) -> anyhow::Result<GetResponse> {
+    ensure_env_allowed(config, &params.env)?;
     let store = SecretStore::open(&config.root)?;
     let value = store.get(&params.key, &params.env)?;
     Ok(GetResponse {
         key: params.key,
         env: params.env,
-        value,
+        value: value.map(|value| {
+            if config.mcp.expose_values {
+                value
+            } else {
+                "<redacted>".to_string()
+            }
+        }),
     })
 }
 
 fn do_set(params: SetParams) -> anyhow::Result<SetResponse> {
     let config = Config::find_and_load()?;
+    do_set_with_config(&config, params)
+}
+
+fn do_set_with_config(config: &Config, params: SetParams) -> anyhow::Result<SetResponse> {
+    ensure_writable(config)?;
+    ensure_env_allowed(config, &params.env)?;
 
     // Run validation if the secret has a validation spec
     if !params.skip_validation {
@@ -250,6 +268,12 @@ fn do_set(params: SetParams) -> anyhow::Result<SetResponse> {
 
 fn do_delete(params: DeleteParams) -> anyhow::Result<DeleteResponse> {
     let config = Config::find_and_load()?;
+    do_delete_with_config(&config, params)
+}
+
+fn do_delete_with_config(config: &Config, params: DeleteParams) -> anyhow::Result<DeleteResponse> {
+    ensure_writable(config)?;
+    ensure_env_allowed(config, &params.env)?;
     let store = SecretStore::open(&config.root)?;
     let payload = store.delete(&params.key, &params.env)?;
     Ok(DeleteResponse {
@@ -260,9 +284,14 @@ fn do_delete(params: DeleteParams) -> anyhow::Result<DeleteResponse> {
 }
 
 fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
-    use crate::deploy_tracker::{DeployIndex, DeployStatus};
-
     let config = Config::find_and_load()?;
+    do_list_with_config(&config, params)
+}
+
+fn do_list_with_config(
+    config: &Config,
+    params: &ListParams,
+) -> anyhow::Result<ListResponse> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
     let resolved = config.resolve_secrets()?;
@@ -270,16 +299,13 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
     let (index, _) = DeployIndex::load(&index_path);
     let target_names: Vec<&str> = config.target_names();
 
-    let envs: Vec<&str> = match &params.env {
-        Some(e) => vec![e.as_str()],
-        None => config.environments.iter().map(String::as_str).collect(),
-    };
+    let envs = permitted_envs(config, params.env.as_deref())?;
 
     let mut secrets = Vec::new();
     for secret in &resolved {
         let mut environments = Vec::new();
 
-        for &env_name in &envs {
+        for env_name in &envs {
             let composite = format!("{}:{}", secret.key, env_name);
             let has_value = payload.secrets.contains_key(&composite);
 
@@ -287,7 +313,7 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
             let env_targets: Vec<_> = secret
                 .targets
                 .iter()
-                .filter(|t| t.environment == env_name && target_names.contains(&t.service.as_str()))
+                .filter(|t| t.environment == *env_name && target_names.contains(&t.service.as_str()))
                 .collect();
 
             let status = if env_targets.is_empty() {
@@ -344,13 +370,27 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
 
     Ok(ListResponse {
         secrets,
-        environments: envs.iter().map(|s| (*s).to_string()).collect(),
+        environments: envs,
     })
 }
 
 fn do_status(params: &StatusParams) -> anyhow::Result<StatusResponse> {
     let config = Config::find_and_load()?;
-    let dashboard = Dashboard::build(&config, params.env.as_deref())?;
+    do_status_with_config(&config, params)
+}
+
+fn do_status_with_config(config: &Config, params: &StatusParams) -> anyhow::Result<StatusResponse> {
+    let env = match params.env.as_deref() {
+        Some(env) => {
+            ensure_env_allowed(config, env)?;
+            Some(env)
+        }
+        None if !config.mcp.envs.is_empty() => {
+            anyhow::bail!("MCP env policy requires esk_status to specify --env")
+        }
+        None => None,
+    };
+    let dashboard = Dashboard::build(config, env)?;
 
     Ok(StatusResponse {
         project: dashboard.project,
@@ -403,6 +443,16 @@ fn do_status(params: &StatusParams) -> anyhow::Result<StatusResponse> {
 
 fn do_deploy(params: &DeployParams) -> anyhow::Result<DeployResponse> {
     let config = Config::find_and_load()?;
+    do_deploy_with_config(&config, params)
+}
+
+fn do_deploy_with_config(config: &Config, params: &DeployParams) -> anyhow::Result<DeployResponse> {
+    ensure_writable(config)?;
+    if let Some(env) = params.env.as_deref() {
+        ensure_env_allowed(config, env)?;
+    } else if !config.mcp.envs.is_empty() {
+        anyhow::bail!("MCP env policy requires esk_deploy to specify --env")
+    }
     let opts = DeployOptions {
         env: params.env.as_deref(),
         force: params.force,
@@ -410,11 +460,11 @@ fn do_deploy(params: &DeployParams) -> anyhow::Result<DeployResponse> {
         verbose: false,
         skip_validation: false,
         strict: false,
-        allow_empty: true,
+        allow_empty: false,
         prune: params.prune,
     };
 
-    match crate::cli::deploy::run(&config, &opts) {
+    match crate::cli::deploy::run(config, &opts) {
         Ok(()) => Ok(DeployResponse {
             success: true,
             message: if params.dry_run {
@@ -432,7 +482,13 @@ fn do_deploy(params: &DeployParams) -> anyhow::Result<DeployResponse> {
 
 fn do_generate(params: &GenerateParams) -> anyhow::Result<GenerateResponse> {
     let config = Config::find_and_load()?;
+    do_generate_with_config(&config, params)
+}
 
+fn do_generate_with_config(
+    config: &Config,
+    params: &GenerateParams,
+) -> anyhow::Result<GenerateResponse> {
     let format = match &params.format {
         Some(f) => {
             let parsed: crate::config::GenerateFormat = match f.as_str() {
@@ -450,7 +506,7 @@ fn do_generate(params: &GenerateParams) -> anyhow::Result<GenerateResponse> {
         None => None,
     };
 
-    match crate::cli::generate::run(&config, format.as_ref(), None, false) {
+    match crate::cli::generate::run(config, format.as_ref(), None, false) {
         Ok(()) => Ok(GenerateResponse {
             success: true,
             message: "Generate completed successfully".to_string(),
@@ -466,6 +522,35 @@ fn do_generate(params: &GenerateParams) -> anyhow::Result<GenerateResponse> {
 // Helpers
 // ---------------------------------------------------------------------------
 
+fn ensure_writable(config: &Config) -> anyhow::Result<()> {
+    if config.mcp.read_only {
+        anyhow::bail!("MCP server is read-only for this project")
+    }
+    Ok(())
+}
+
+fn ensure_env_allowed(config: &Config, env: &str) -> anyhow::Result<()> {
+    config.validate_env(env)?;
+    if !config.mcp.envs.is_empty() && !config.mcp.envs.iter().any(|allowed| allowed == env) {
+        anyhow::bail!("environment '{env}' is not allowed by the MCP policy")
+    }
+    Ok(())
+}
+
+fn permitted_envs(config: &Config, requested: Option<&str>) -> anyhow::Result<Vec<String>> {
+    if let Some(env) = requested {
+        ensure_env_allowed(config, env)?;
+        return Ok(vec![env.to_string()]);
+    }
+
+    Ok(config
+        .environments
+        .iter()
+        .filter(|env| config.mcp.envs.is_empty() || config.mcp.envs.iter().any(|allowed| allowed == *env))
+        .cloned()
+        .collect())
+}
+
 fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, ErrorData> {
     let json = serde_json::to_string_pretty(value)
         .map_err(|e| ErrorData::internal_error(format!("JSON serialization failed: {e}"), None))?;
@@ -474,4 +559,131 @@ fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, ErrorDa
 
 fn error_result(err: &anyhow::Error) -> CallToolResult {
     CallToolResult::error(vec![Content::text(format!("{err:#}"))])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store::SecretStore;
+
+    fn project(mcp: &str) -> (tempfile::TempDir, Config) {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = format!(
+            "project: demo\nenvironments: [dev, prod]\nmcp:\n{mcp}secrets:\n  App:\n    API_KEY:\n      description: API credential\n"
+        );
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        SecretStore::load_or_create(dir.path()).unwrap().set(
+            "API_KEY",
+            "dev",
+            "sentinel-value",
+        ).unwrap();
+        (dir, Config::load(&path).unwrap())
+    }
+
+    #[test]
+    fn get_redacts_values_by_default() {
+        let (_dir, config) = project("");
+        let response = do_get_with_config(
+            &config,
+            GetParams {
+                key: "API_KEY".into(),
+                env: "dev".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(response.value.as_deref(), Some("<redacted>"));
+    }
+
+    #[test]
+    fn get_can_expose_values_only_when_opted_in() {
+        let (_dir, mut config) = project("  expose_values: true\n");
+        let response = do_get_with_config(
+            &config,
+            GetParams {
+                key: "API_KEY".into(),
+                env: "dev".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(response.value.as_deref(), Some("sentinel-value"));
+        config.mcp.expose_values = false;
+        let response = do_get_with_config(
+            &config,
+            GetParams {
+                key: "API_KEY".into(),
+                env: "dev".into(),
+            },
+        )
+        .unwrap();
+        assert_eq!(response.value.as_deref(), Some("<redacted>"));
+    }
+
+    #[test]
+    fn environment_policy_applies_to_get_and_list() {
+        let (_dir, config) = project("  envs: [dev]\n");
+        let err = do_get_with_config(
+            &config,
+            GetParams {
+                key: "API_KEY".into(),
+                env: "prod".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("not allowed"));
+
+        let response = do_list_with_config(&config, &ListParams { env: None }).unwrap();
+        assert_eq!(response.environments, vec!["dev"]);
+    }
+
+    #[test]
+    fn read_only_policy_blocks_set_and_delete_without_mutating_store() {
+        let (_dir, config) = project("  read_only: true\n");
+        let set_err = do_set_with_config(
+            &config,
+            SetParams {
+                key: "API_KEY".into(),
+                env: "dev".into(),
+                value: "new-value".into(),
+                skip_validation: false,
+            },
+        )
+        .unwrap_err();
+        assert!(set_err.to_string().contains("read-only"));
+        let delete_err = do_delete_with_config(
+            &config,
+            DeleteParams {
+                key: "API_KEY".into(),
+                env: "dev".into(),
+            },
+        )
+        .unwrap_err();
+        assert!(delete_err.to_string().contains("read-only"));
+        assert_eq!(
+            SecretStore::open(&config.root)
+                .unwrap()
+                .get("API_KEY", "dev")
+                .unwrap()
+                .as_deref(),
+            Some("sentinel-value")
+        );
+    }
+
+    #[test]
+    fn restricted_status_and_deploy_require_an_allowed_environment() {
+        let (_dir, config) = project("  envs: [dev]\n");
+        let status_err = do_status_with_config(&config, &StatusParams { env: None }).unwrap_err();
+        assert!(status_err.to_string().contains("specify --env"));
+        let deploy_err = do_deploy_with_config(
+            &config,
+            &DeployParams {
+                env: None,
+                force: false,
+                dry_run: true,
+                prune: false,
+            },
+        )
+        .unwrap_err();
+        assert!(deploy_err.to_string().contains("specify --env"));
+    }
 }

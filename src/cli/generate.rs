@@ -705,6 +705,7 @@ mod tests {
         Config {
             project: "test".to_string(),
             environments: vec!["dev".to_string(), "prod".to_string()],
+            mcp: crate::config::McpConfig::default(),
             apps: BTreeMap::new(),
             targets: TargetsConfig::default(),
             remotes: BTreeMap::new(),
