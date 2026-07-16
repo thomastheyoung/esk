@@ -113,6 +113,16 @@ Show deploy and sync status — which secrets need deploying and which remotes a
 
 Diagnose project health. Checks project structure, config validity, store consistency, target/remote availability, and secrets health in one pass. Exits with code 1 if any failures are found.
 
+### `esk diff <ENV_A> <ENV_B>`
+
+Compare secret keys between two environments. By default, output contains keys
+only and never prints secret values. Use `--values` to include old and new
+values for changed keys.
+
+| Flag | Description |
+|------|-------------|
+| `--values` | Include old and new values for changed keys |
+
 ### `esk sync`
 
 Sync secrets with remotes. Pulls from remote, reconciles with local store, pushes merged results back. Bidirectional.

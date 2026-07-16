@@ -1,4 +1,5 @@
 pub mod delete;
+pub mod diff;
 pub mod deploy;
 pub mod doctor;
 pub mod generate;
@@ -47,6 +48,16 @@ pub enum Commands {
     },
     /// Diagnose project health
     Doctor,
+    /// Compare secret keys between two environments
+    Diff {
+        /// Environment to compare from
+        left_env: String,
+        /// Environment to compare to
+        right_env: String,
+        /// Include old and new values in changed entries
+        #[arg(long)]
+        values: bool,
+    },
     /// Manage encryption keys
     Key {
         #[command(subcommand)]

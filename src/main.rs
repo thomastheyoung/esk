@@ -41,6 +41,14 @@ fn run() -> Result<i32> {
             let cwd = std::env::current_dir()?;
             esk::cli::doctor::run(&cwd)?;
         }
+        Commands::Diff {
+            left_env,
+            right_env,
+            values,
+        } => {
+            let config = Config::find_and_load()?;
+            esk::cli::diff::run(&config, left_env, right_env, *values)?;
+        }
         Commands::Completions { shell } => {
             let mut command = Cli::command();
             generate(*shell, &mut command, "esk", &mut std::io::stdout());
