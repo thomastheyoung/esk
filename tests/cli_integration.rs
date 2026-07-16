@@ -49,7 +49,7 @@ fn init_creates_esk_gitignore() {
     let gitignore = std::fs::read_to_string(dir.path().join(".esk/.gitignore")).unwrap();
     assert_eq!(
         gitignore,
-        "# Files that must not be committed\nstore.key\ndeploy-index.json\nsync-index.json\nlock\nkey-provider\n"
+        "# Files that must not be committed\nstore.key\ndeploy-index.json\nsync-index.json\nstore.version\nkey-rotation.json\n.tmp*\nlock\nkey-provider\n"
     );
 }
 
@@ -73,6 +73,9 @@ fn init_esk_gitignore_is_idempotent() {
     assert_eq!(gitignore.matches("store.key").count(), 1);
     assert_eq!(gitignore.matches("deploy-index.json").count(), 1);
     assert_eq!(gitignore.matches("sync-index.json").count(), 1);
+    assert_eq!(gitignore.matches("store.version").count(), 1);
+    assert_eq!(gitignore.matches("key-rotation.json").count(), 1);
+    assert_eq!(gitignore.matches(".tmp*").count(), 1);
     assert_eq!(gitignore.matches("lock").count(), 1);
     assert_eq!(gitignore.matches("key-provider").count(), 1);
 }
@@ -92,7 +95,7 @@ fn get_missing_value() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let config = project.config().unwrap();
     let err = cli::get::run(&config, "NONEXISTENT", "dev").unwrap_err();
-    assert!(err.to_string().contains("no value"));
+    assert!(err.to_string().contains("not defined"));
 }
 
 #[test]
