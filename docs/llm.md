@@ -12,6 +12,21 @@ Initialize a new esk project in the current directory. Creates `esk.yaml`, `.esk
 |------|-------------|
 | `--keychain` | Store encryption key in OS keychain instead of file |
 
+### `esk key rotate`
+
+Generate a new encryption key and re-encrypt the current store. Use this after
+the local key may have been exposed.
+
+### `esk import <FILE> --env <ENV>`
+
+Import a dotenv file in one store transaction. Unknown keys are registered in
+the selected config group and no sync or deploy is performed.
+
+| Flag | Description |
+|------|-------------|
+| `--env <ENV>` | Environment to populate (required) |
+| `--group <GROUP>` | Config group for newly registered keys (default: `Imported`) |
+
 ### `esk set <KEY> --env <ENV>`
 
 Set a secret value. Prompts interactively for the value unless `--value` is provided.
@@ -35,6 +50,17 @@ Retrieve and print a secret value.
 | Flag | Description |
 |------|-------------|
 | `--env <ENV>` | Environment (required) |
+
+### `esk run --env <ENV> -- <COMMAND>...`
+
+Run a local command with secrets targeted to the selected environment injected
+into its process environment. Use `--app <APP>` to select one application.
+
+| Flag | Description |
+|------|-------------|
+| `--env <ENV>` | Environment to inject (required) |
+| `--app <APP>` | Optional application target filter |
+| `<COMMAND>...` | Command and arguments after `--` |
 
 ### `esk delete <KEY> --env <ENV>`
 
