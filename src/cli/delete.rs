@@ -81,7 +81,7 @@ pub fn run_with_runner(
     config.validate_env(env)?;
 
     if config.find_secret(key).is_none() {
-        cliclack::log::warning(format!("Secret '{key}' is not defined in esk.yaml"))?;
+        cliclack::log::warning(super::get::unknown_secret_message(config, key))?;
     }
 
     // Warn if deleting a required secret
