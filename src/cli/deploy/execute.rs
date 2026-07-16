@@ -17,6 +17,7 @@ pub(crate) fn execute_deploy<'a>(
     deploy_targets: &[Box<dyn DeployTarget + 'a>],
     target_map: &HashMap<&str, (usize, DeployMode)>,
     payload_secrets: &BTreeMap<String, String>,
+    master_key: &[u8],
     index: &Mutex<DeployIndex>,
     opts: &DeployOptions<'_>,
 ) -> Result<DeployReport> {
@@ -61,6 +62,7 @@ pub(crate) fn execute_deploy<'a>(
                 deploy_targets,
                 target_map,
                 payload_secrets,
+                master_key,
                 index,
                 &failed_batch_groups,
                 &mut deployed,
@@ -74,6 +76,7 @@ pub(crate) fn execute_deploy<'a>(
                 deploy_targets,
                 target_map,
                 payload_secrets,
+                master_key,
                 index,
                 &failed_batch_groups,
                 &mut deployed,
@@ -150,6 +153,7 @@ fn exec_batch_group(
     env_name: &str,
     deploy_target: &dyn DeployTarget,
     payload_secrets: &BTreeMap<String, String>,
+    master_key: &[u8],
     index: &Mutex<DeployIndex>,
 ) -> BatchExecResult {
     let target = crate::config::ResolvedTarget {
@@ -188,7 +192,7 @@ fn exec_batch_group(
             let value = payload_secrets
                 .get(&composite)
                 .map_or("", std::string::String::as_str);
-            let value_hash = DeployIndex::hash_value(value);
+            let value_hash = DeployIndex::hash_value(value, master_key);
 
             if result.outcome.is_success() {
                 idx.record_success(tracker_key, target.to_string(), value_hash);
@@ -223,6 +227,7 @@ fn exec_individual_deploy(
     value: &str,
     target: &crate::config::ResolvedTarget,
     deploy_target: &dyn DeployTarget,
+    master_key: &[u8],
     index: &Mutex<DeployIndex>,
 ) -> Result<(), String> {
     let result = deploy_target.deploy_secret(key, value, target);
@@ -233,7 +238,7 @@ fn exec_individual_deploy(
         target.app.as_deref(),
         &target.environment,
     );
-    let value_hash = DeployIndex::hash_value(value);
+    let value_hash = DeployIndex::hash_value(value, master_key);
 
     let mut idx = index.lock().expect("deploy index mutex poisoned");
     match result {
@@ -328,6 +333,7 @@ fn execute_animated<'a>(
     deploy_targets: &[Box<dyn DeployTarget + 'a>],
     target_map: &HashMap<&str, (usize, DeployMode)>,
     payload_secrets: &BTreeMap<String, String>,
+    master_key: &[u8],
     index: &Mutex<DeployIndex>,
     failed_batch_groups: &Mutex<BTreeSet<(String, Option<String>, String)>>,
     deployed: &mut Vec<DeployEntry>,
@@ -385,7 +391,14 @@ fn execute_animated<'a>(
             let target_display = crate::config::format_target_label(&bg.target_name, bg.app.as_deref());
 
             s.spawn(move || {
-                let outcome = exec_batch_group(bg, env_name, deploy_target.as_ref(), payload_secrets, index);
+                let outcome = exec_batch_group(
+                    bg,
+                    env_name,
+                    deploy_target.as_ref(),
+                    payload_secrets,
+                    master_key,
+                    index,
+                );
 
                 let mut res = results.lock().expect("results mutex poisoned");
                 for (key, error) in &outcome.items {
@@ -413,7 +426,14 @@ fn execute_animated<'a>(
             let deploy_target = &deploy_targets[target_idx];
 
             s.spawn(move || {
-                let outcome = exec_individual_deploy(key, value, target, deploy_target.as_ref(), index);
+                let outcome = exec_individual_deploy(
+                    key,
+                    value,
+                    target,
+                    deploy_target.as_ref(),
+                    master_key,
+                    index,
+                );
                 let mut res = results.lock().expect("results mutex poisoned");
                 if let Some(kr) = res.get_mut(key.as_str()) {
                     kr.completed_ops += 1;
@@ -677,6 +697,7 @@ fn execute_sequential<'a>(
     deploy_targets: &[Box<dyn DeployTarget + 'a>],
     target_map: &HashMap<&str, (usize, DeployMode)>,
     payload_secrets: &BTreeMap<String, String>,
+    master_key: &[u8],
     index: &Mutex<DeployIndex>,
     failed_batch_groups: &Mutex<BTreeSet<(String, Option<String>, String)>>,
     deployed: &mut Vec<DeployEntry>,
@@ -722,7 +743,14 @@ fn execute_sequential<'a>(
         }
 
         let deploy_target = &deploy_targets[bg.target_idx];
-        let result = exec_batch_group(bg, env_name, deploy_target.as_ref(), payload_secrets, index);
+        let result = exec_batch_group(
+            bg,
+            env_name,
+            deploy_target.as_ref(),
+            payload_secrets,
+            master_key,
+            index,
+        );
 
         for (key, error) in &result.items {
             if let Some(e) = error {
@@ -832,7 +860,14 @@ fn execute_sequential<'a>(
         let (target_idx, _) = target_map[target.service.as_str()];
         let deploy_target = &deploy_targets[target_idx];
 
-        match exec_individual_deploy(key, value, target, deploy_target.as_ref(), index) {
+        match exec_individual_deploy(
+            key,
+            value,
+            target,
+            deploy_target.as_ref(),
+            master_key,
+            index,
+        ) {
             Ok(()) => {
                 deployed.push(DeployEntry {
                     key: key.clone(),

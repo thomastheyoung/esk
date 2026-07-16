@@ -14,9 +14,11 @@ use super::report::DeployEntry;
 use super::types::{BatchGroup, EnvWorkPlan, PlanOutput, PRUNE_THRESHOLD};
 use super::DeployOptions;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn plan_deploy<'a>(
     config: &Config,
     payload: &StorePayload,
+    master_key: &[u8],
     index: &DeployIndex,
     resolved: &[ResolvedSecret],
     deploy_targets: &[Box<dyn DeployTarget + 'a>],
@@ -56,7 +58,7 @@ pub(crate) fn plan_deploy<'a>(
                 };
 
                 // Only validate if this secret needs deploying (changed or never deployed)
-                let value_hash = DeployIndex::hash_value(value);
+                let value_hash = DeployIndex::hash_value(value, master_key);
                 let tracker_key = DeployIndex::tracker_key(
                     &secret.key,
                     &target.service,
@@ -188,7 +190,7 @@ pub(crate) fn plan_deploy<'a>(
                 };
 
                 // Only check secrets that need deploying (changed or never deployed)
-                let value_hash = DeployIndex::hash_value(value);
+                let value_hash = DeployIndex::hash_value(value, master_key);
                 let tracker_key = DeployIndex::tracker_key(
                     &secret.key,
                     &target.service,
@@ -347,7 +349,7 @@ pub(crate) fn plan_deploy<'a>(
                 continue;
             };
 
-            let value_hash = DeployIndex::hash_value(value);
+            let value_hash = DeployIndex::hash_value(value, master_key);
             let tracker_key = DeployIndex::tracker_key(
                 &secret.key,
                 &target.service,

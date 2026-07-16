@@ -1,6 +1,7 @@
 use anyhow::{Context, Result};
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
+use hmac::{Hmac, Mac};
+use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -174,11 +175,17 @@ impl DeployIndex {
         self.records.remove(tracker_key);
     }
 
-    /// Compute SHA-256 hash of a value.
-    pub fn hash_value(value: &str) -> String {
-        let mut hasher = Sha256::new();
-        hasher.update(value.as_bytes());
-        hex::encode(hasher.finalize())
+    /// Prefix for keyed deploy-index hashes. Older unkeyed hashes are retained
+    /// for migration and naturally compare unequal to this format.
+    pub const HASH_PREFIX: &str = "hmac-sha256:";
+
+    /// Compute a project-scoped HMAC-SHA-256 hash of a value.
+    pub fn hash_value(value: &str, master_key: &[u8]) -> String {
+        let signing_key = crate::store::derive_key(master_key, b"esk-deploy-index");
+        let mut mac = Hmac::<Sha256>::new_from_slice(&signing_key)
+            .expect("HMAC accepts keys of every non-empty length");
+        mac.update(value.as_bytes());
+        format!("{}{}", Self::HASH_PREFIX, hex::encode(mac.finalize().into_bytes()))
     }
 }
 
@@ -190,6 +197,15 @@ mod tests {
     fn new_empty() {
         let index = DeployIndex::new(Path::new("/tmp/test.json"));
         assert!(index.records.is_empty());
+    }
+
+    #[test]
+    fn hash_is_keyed_and_domain_separated() {
+        let first = DeployIndex::hash_value("same", b"project-one-key");
+        let second = DeployIndex::hash_value("same", b"project-two-key");
+
+        assert_ne!(first, second);
+        assert!(first.starts_with(DeployIndex::HASH_PREFIX));
     }
 
     #[test]
@@ -362,32 +378,29 @@ mod tests {
 
     #[test]
     fn hash_value_deterministic() {
-        let h1 = DeployIndex::hash_value("hello");
-        let h2 = DeployIndex::hash_value("hello");
+        let h1 = DeployIndex::hash_value("hello", b"test-key");
+        let h2 = DeployIndex::hash_value("hello", b"test-key");
         assert_eq!(h1, h2);
     }
 
     #[test]
     fn hash_value_different_inputs() {
-        let h1 = DeployIndex::hash_value("hello");
-        let h2 = DeployIndex::hash_value("world");
+        let h1 = DeployIndex::hash_value("hello", b"test-key");
+        let h2 = DeployIndex::hash_value("world", b"test-key");
         assert_ne!(h1, h2);
     }
 
     #[test]
     fn hash_value_empty_string() {
-        let hash = DeployIndex::hash_value("");
-        // SHA-256 of empty string is well-known
-        assert_eq!(
-            hash,
-            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
-        );
+        let hash = DeployIndex::hash_value("", b"test-key");
+        assert!(hash.starts_with(DeployIndex::HASH_PREFIX));
+        assert_eq!(hash.len(), DeployIndex::HASH_PREFIX.len() + 64);
     }
 
     #[test]
     fn tombstone_hash_is_not_valid_sha256() {
         // TOMBSTONE_HASH must never collide with a real SHA-256 output
-        let any_hash = DeployIndex::hash_value("anything");
+        let any_hash = DeployIndex::hash_value("anything", b"test-key");
         assert_ne!(DeployIndex::TOMBSTONE_HASH, any_hash);
         assert_ne!(DeployIndex::TOMBSTONE_HASH.len(), 64); // SHA-256 hex is 64 chars
     }

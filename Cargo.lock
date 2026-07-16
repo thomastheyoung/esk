@@ -710,6 +710,7 @@ dependencies = [
  "fs2",
  "hex",
  "hkdf",
+ "hmac",
  "keyring",
  "rand 0.10.0",
  "regex-lite",

@@ -74,7 +74,7 @@ impl Dashboard {
                     (None, _) => unset.push(entry),
                     (Some(_), None) => pending.push(entry),
                     (Some(v), Some(rec)) => {
-                        let current_hash = DeployIndex::hash_value(v);
+                        let current_hash = DeployIndex::hash_value(v, store.master_key());
                         if rec.last_deploy_status == DeployStatus::Failed {
                             failed.push(DeployEntry {
                                 error: Some(

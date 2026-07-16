@@ -96,7 +96,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     let resolved = config.resolve_secrets()?;
 
     // Build deploy status map: (key, env) → worst status across all targets
-    let cell_statuses = build_cell_statuses(config, &resolved, &all_secrets);
+    let cell_statuses = build_cell_statuses(config, &resolved, &all_secrets, store.master_key());
 
     // Build set of (key, env) pairs that have at least one configured target
     let targeted: BTreeSet<(&str, &str)> = resolved
@@ -201,6 +201,7 @@ fn build_cell_statuses(
     config: &Config,
     resolved: &[ResolvedSecret],
     all_secrets: &BTreeMap<String, String>,
+    master_key: &[u8],
 ) -> BTreeMap<(String, String), CellStatus> {
     let target_names: Vec<&str> = config.target_names();
     let index_path = config.root.join(".esk/deploy-index.json");
@@ -230,7 +231,7 @@ fn build_cell_statuses(
                 (None, _) => continue, // no value — cell status determined by has_value check
                 (Some(_), None) => CellStatus::Pending,
                 (Some(v), Some(record)) => {
-                    let current_hash = DeployIndex::hash_value(v);
+                    let current_hash = DeployIndex::hash_value(v, master_key);
                     if record.last_deploy_status == DeployStatus::Failed {
                         CellStatus::Failed
                     } else if current_hash != record.value_hash {

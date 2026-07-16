@@ -106,6 +106,7 @@ pub fn run_with_runner(
     let plan_output = plan::plan_deploy(
         config,
         &payload,
+        store.master_key(),
         &index,
         &resolved,
         &deploy_targets,
@@ -134,6 +135,7 @@ pub fn run_with_runner(
         &deploy_targets,
         &target_map,
         &payload.secrets,
+        store.master_key(),
         &index,
         opts,
     )?;
