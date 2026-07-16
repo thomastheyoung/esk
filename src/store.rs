@@ -20,6 +20,7 @@ const TAG_LEN: usize = 16;
 const STORE_FORMAT_V2: &str = "v2";
 const STORE_AAD_V2: &[u8] = b"esk-store:v2";
 const STORE_VERSION_FILE: &str = "store.version";
+const ROTATION_JOURNAL_FILE: &str = "key-rotation.json";
 
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.
@@ -97,6 +98,12 @@ pub struct StorePayload {
     pub env_versions: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env_last_changed_at: BTreeMap<String, String>,
+}
+
+#[derive(Serialize, Deserialize)]
+struct RotationJournal {
+    new_key: String,
+    temp_store: PathBuf,
 }
 
 impl StorePayload {
@@ -449,6 +456,9 @@ impl SecretStore {
         }
 
         let provider = KeyProvider::from_marker(&esk_dir)?;
+        if esk_dir.join(ROTATION_JOURNAL_FILE).is_file() {
+            recover_pending_rotation(&esk_dir, &provider)?;
+        }
         let store_path = esk_dir.join("store.enc");
 
         let key = if provider.exists() {
@@ -478,6 +488,9 @@ impl SecretStore {
         let store_path = esk_dir.join("store.enc");
 
         let provider = KeyProvider::from_marker(&esk_dir)?;
+        if esk_dir.join(ROTATION_JOURNAL_FILE).is_file() {
+            recover_pending_rotation(&esk_dir, &provider)?;
+        }
 
         if !provider.exists() {
             bail!("encryption key not found. Run `esk init` first.");
@@ -595,6 +608,63 @@ impl SecretStore {
         self.with_lock(|| self.write_payload(payload))
     }
 
+    /// Generate a new encryption key and re-encrypt the current store with it.
+    ///
+    /// The provider is updated only after the authenticated replacement payload
+    /// has been prepared. If replacing the store fails after the provider update,
+    /// the previous key is restored before returning the error.
+    pub fn rotate_key(&self) -> Result<()> {
+        self.with_lock(|| {
+            let payload = self.payload()?;
+            let json = Zeroizing::new(serde_json::to_string(&payload)?);
+            let new_key = KeyProvider::generate_key();
+            let encrypted = encrypt_store_with_key(&new_key, &json)?;
+            let old_key = self.key.clone();
+            let provider = KeyProvider::from_marker(
+                self.store_path
+                    .parent()
+                    .context("store path has no parent")?,
+            )?;
+
+            let dir = self
+                .store_path
+                .parent()
+                .context("store path has no parent")?;
+            let tmp = NamedTempFile::new_in(dir)?;
+            std::fs::write(tmp.path(), encrypted)?;
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
+            }
+
+            let journal_path = dir.join(ROTATION_JOURNAL_FILE);
+            let journal = RotationJournal {
+                new_key: hex::encode(&new_key),
+                temp_store: tmp.path().to_path_buf(),
+            };
+            write_rotation_journal(&journal_path, &journal)?;
+            if let Err(error) = provider.store(&new_key) {
+                let _ = std::fs::remove_file(&journal_path);
+                return Err(error);
+            }
+            if let Err(error) = tmp.persist(&self.store_path) {
+                let restore_result = provider.store(&old_key);
+                if let Err(restore_error) = restore_result {
+                    return Err(anyhow::anyhow!(
+                        "key rotation failed and restoring the previous key also failed: {error}; {restore_error}"
+                    ));
+                }
+                let _ = std::fs::remove_file(&journal_path);
+                return Err(error.into());
+            }
+            std::fs::remove_file(&journal_path).with_context(|| {
+                format!("failed to remove {}", journal_path.display())
+            })?;
+            Ok(())
+        })
+    }
+
     /// List all secrets (returns the full BTreeMap).
     pub fn list(&self) -> Result<BTreeMap<String, String>> {
         Ok(self.payload()?.secrets)
@@ -687,11 +757,69 @@ impl SecretStore {
     }
 
     fn encrypt_store(&self, plaintext: &str) -> Result<String> {
-        Ok(format!(
-            "{STORE_FORMAT_V2}:{}",
-            encrypt_with_aad(&self.key, plaintext, STORE_AAD_V2)?
-        ))
+        encrypt_store_with_key(&self.key, plaintext)
     }
+}
+
+fn encrypt_store_with_key(key: &[u8], plaintext: &str) -> Result<String> {
+    Ok(format!(
+        "{STORE_FORMAT_V2}:{}",
+        encrypt_with_aad(key, plaintext, STORE_AAD_V2)?
+    ))
+}
+
+fn write_rotation_journal(path: &Path, journal: &RotationJournal) -> Result<()> {
+    let dir = path.parent().context("rotation journal path has no parent")?;
+    let tmp = NamedTempFile::new_in(dir)?;
+    std::fs::write(tmp.path(), serde_json::to_vec(journal)?)?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
+    }
+    tmp.persist(path)
+        .with_context(|| format!("failed to persist rotation journal to {}", path.display()))?;
+    Ok(())
+}
+
+fn recover_pending_rotation(esk_dir: &Path, provider: &KeyProvider) -> Result<()> {
+    let journal_path = esk_dir.join(ROTATION_JOURNAL_FILE);
+    let journal: RotationJournal = serde_json::from_slice(
+        &std::fs::read(&journal_path)
+            .with_context(|| format!("failed to read {}", journal_path.display()))?,
+    )
+    .with_context(|| format!("invalid key rotation journal {}", journal_path.display()))?;
+    let new_key = Zeroizing::new(
+        hex::decode(&journal.new_key).context("invalid key in key rotation journal")?,
+    );
+    if new_key.len() != KEY_LEN {
+        bail!("invalid key length in key rotation journal");
+    }
+
+    provider.store(&new_key)?;
+    let store_path = esk_dir.join("store.enc");
+    if journal.temp_store.is_file() {
+        std::fs::rename(&journal.temp_store, &store_path).with_context(|| {
+            format!(
+                "failed to finish key rotation from {}",
+                journal.temp_store.display()
+            )
+        })?;
+    } else {
+        let encoded = std::fs::read_to_string(&store_path)
+            .with_context(|| format!("failed to read {} during key rotation recovery", store_path.display()))?;
+        let body = encoded
+            .trim()
+            .strip_prefix("v2:")
+            .context("key rotation journal exists but store replacement is missing")?;
+        let _: StorePayload = serde_json::from_str(
+            &decrypt_with_aad(&new_key, body, STORE_AAD_V2)?,
+        )
+        .context("key rotation journal exists but new store is not recoverable")?;
+    }
+    std::fs::remove_file(&journal_path)
+        .with_context(|| format!("failed to remove {}", journal_path.display()))?;
+    Ok(())
 }
 
 /// Encrypt plaintext with the given key. Returns nonce:ciphertext:tag hex.
@@ -970,6 +1098,52 @@ mod tests {
 
         let err = store.payload().unwrap_err();
         assert!(err.to_string().contains("store rollback detected"));
+    }
+
+    #[test]
+    fn rotates_key_without_changing_payload() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "sentinel").unwrap();
+        let old_key = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
+
+        store.rotate_key().unwrap();
+
+        let new_key = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
+        assert_ne!(old_key, new_key);
+        let reopened = SecretStore::open(dir.path()).unwrap();
+        assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
+        assert!(decrypt_with_key(
+            &hex::decode(old_key.trim()).unwrap(),
+            &std::fs::read_to_string(dir.path().join(".esk/store.enc")).unwrap()
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn recovers_interrupted_key_rotation_on_open() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "sentinel").unwrap();
+        let payload = store.payload().unwrap();
+        let new_key = KeyProvider::generate_key();
+        let json = serde_json::to_string(&payload).unwrap();
+        let encrypted = encrypt_store_with_key(&new_key, &json).unwrap();
+        let temp_store = dir.path().join(".esk/pending-store");
+        std::fs::write(&temp_store, encrypted).unwrap();
+        write_rotation_journal(
+            &dir.path().join(".esk/key-rotation.json"),
+            &RotationJournal {
+                new_key: hex::encode(&new_key),
+                temp_store: temp_store.clone(),
+            },
+        )
+        .unwrap();
+
+        let reopened = SecretStore::open(dir.path()).unwrap();
+        assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
+        assert!(!temp_store.exists());
+        assert!(!dir.path().join(".esk/key-rotation.json").exists());
     }
 
     #[test]

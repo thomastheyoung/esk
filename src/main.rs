@@ -1,7 +1,7 @@
 use anyhow::Result;
 use clap::Parser;
 use console::style;
-use esk::cli::{Cli, Commands};
+use esk::cli::{Cli, Commands, KeyCommands};
 use esk::config::Config;
 
 fn main() {
@@ -37,6 +37,12 @@ fn run() -> Result<()> {
             let cwd = std::env::current_dir()?;
             esk::cli::doctor::run(&cwd)?;
         }
+        Commands::Key { command } => match command {
+            KeyCommands::Rotate => {
+                let config = Config::find_and_load()?;
+                esk::cli::key::rotate(&config)?;
+            }
+        },
         Commands::Deploy {
             env,
             force,

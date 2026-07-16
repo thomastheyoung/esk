@@ -92,6 +92,11 @@ esk status --env dev
 | `.esk/deploy-index.json` | Deploy state tracker                                                     | No (gitignored) |
 | `.esk/sync-index.json`   | Sync state tracker                                                       | No (gitignored) |
 
+If the local encryption key may have been exposed, run `esk key rotate` from
+the project root. It generates a new key, re-encrypts the store, and updates
+the configured file or OS-keychain provider; distribute the new key to trusted
+team members through the normal out-of-band process.
+
 ## Mental model
 
 `esk` has 3 parts:

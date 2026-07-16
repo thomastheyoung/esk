@@ -4,6 +4,7 @@ pub mod doctor;
 pub mod generate;
 pub mod get;
 pub mod init;
+pub mod key;
 pub mod list;
 pub mod llm_context;
 pub mod set;
@@ -44,6 +45,11 @@ pub enum Commands {
     },
     /// Diagnose project health
     Doctor,
+    /// Manage encryption keys
+    Key {
+        #[command(subcommand)]
+        command: KeyCommands,
+    },
     /// Deploy secrets to configured targets
     Deploy {
         /// Filter by environment
@@ -165,4 +171,10 @@ pub enum Commands {
         #[arg(long, value_enum, default_value_t = ConflictPreference::Local)]
         prefer: ConflictPreference,
     },
+}
+
+#[derive(Subcommand)]
+pub enum KeyCommands {
+    /// Generate a new key and re-encrypt the store
+    Rotate,
 }
