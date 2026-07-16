@@ -72,6 +72,17 @@ fn run() -> Result<()> {
             let cwd = std::env::current_dir()?;
             esk::cli::init::run(&cwd, *keychain)?;
         }
+        Commands::Import { path, env, group } => {
+            let config = Config::find_and_load()?;
+            esk::cli::import::run(
+                &config,
+                &esk::cli::import::ImportOptions {
+                    path,
+                    env,
+                    group: group.as_deref(),
+                },
+            )?;
+        }
         Commands::Set {
             key,
             env,

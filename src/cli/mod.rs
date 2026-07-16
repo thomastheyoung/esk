@@ -4,6 +4,7 @@ pub mod doctor;
 pub mod generate;
 pub mod get;
 pub mod init;
+pub mod import;
 pub mod key;
 pub mod list;
 pub mod llm_context;
@@ -82,6 +83,17 @@ pub enum Commands {
         /// Store encryption key in OS keychain instead of file
         #[arg(long)]
         keychain: bool,
+    },
+    /// Import values from a dotenv file without syncing or deploying
+    Import {
+        /// Dotenv file to import
+        path: std::path::PathBuf,
+        /// Environment to populate
+        #[arg(long)]
+        env: String,
+        /// Config group for newly registered keys
+        #[arg(long)]
+        group: Option<String>,
     },
     /// Set a secret value
     Set {

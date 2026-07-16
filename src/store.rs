@@ -582,6 +582,36 @@ impl SecretStore {
         })
     }
 
+    /// Set multiple values for one environment in a single locked transaction.
+    pub fn set_many(
+        &self,
+        env: &str,
+        values: &BTreeMap<String, String>,
+    ) -> Result<StorePayload> {
+        for (key, value) in values {
+            validate_key(key)?;
+            if value.contains('\0') {
+                bail!("secret value for '{key}' contains null bytes");
+            }
+        }
+        self.with_lock(|| {
+            let mut payload = self.payload()?;
+            for (key, value) in values {
+                let composite = format!("{key}:{env}");
+                payload.secrets.insert(composite.clone(), value.clone());
+                payload.tombstones.remove(&composite);
+                payload.version += 1;
+                let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+                *env_v += 1;
+                payload
+                    .env_last_changed_at
+                    .insert(env.to_string(), chrono::Utc::now().to_rfc3339());
+            }
+            self.write_payload(&payload)?;
+            Ok(payload)
+        })
+    }
+
     /// Delete a secret, adding a tombstone. Acquires exclusive lock.
     pub fn delete(&self, key: &str, env: &str) -> Result<StorePayload> {
         validate_key(key)?;
@@ -1022,6 +1052,21 @@ mod tests {
         assert_eq!(p1.version, 1);
         assert_eq!(p2.version, 2);
         assert_eq!(p3.version, 3);
+    }
+
+    #[test]
+    fn set_many_updates_all_values_in_one_transaction() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let values = BTreeMap::from([
+            ("A".to_string(), "one".to_string()),
+            ("B".to_string(), "two".to_string()),
+        ]);
+        let payload = store.set_many("dev", &values).unwrap();
+        assert_eq!(payload.version, 2);
+        assert_eq!(payload.env_version("dev"), 2);
+        assert_eq!(store.get("A", "dev").unwrap().as_deref(), Some("one"));
+        assert_eq!(store.get("B", "dev").unwrap().as_deref(), Some("two"));
     }
 
     #[test]
