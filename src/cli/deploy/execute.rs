@@ -352,6 +352,7 @@ fn execute_animated<'a>(
                 KeyResult {
                     completed_ops: 0,
                     total_ops: kl.total_ops,
+                    succeeded: Vec::new(),
                     failed: Vec::new(),
                 },
             );
@@ -406,6 +407,8 @@ fn execute_animated<'a>(
                         kr.completed_ops += 1;
                         if let Some(e) = error {
                             kr.failed.push((target_display.clone(), e.clone()));
+                        } else {
+                            kr.succeeded.push(target_display.clone());
                         }
                     }
                 }
@@ -439,6 +442,8 @@ fn execute_animated<'a>(
                     kr.completed_ops += 1;
                     if let Err(e) = outcome {
                         kr.failed.push((target.target_display(), e));
+                    } else {
+                        kr.succeeded.push(target.target_display());
                     }
                 }
             });
@@ -457,6 +462,8 @@ fn execute_animated<'a>(
                     kr.completed_ops += 1;
                     if let Err(e) = outcome {
                         kr.failed.push((target.target_display(), e));
+                    } else {
+                        kr.succeeded.push(target.target_display());
                     }
                 }
             });
@@ -595,13 +602,17 @@ fn execute_animated<'a>(
                     });
                     env_failed += 1;
                 }
-                // Count non-failed ops as deployed
-                let ok_count = kr.completed_ops.saturating_sub(kr.failed.len());
-                for target in kl.targets.iter().take(ok_count) {
+                // Preserve the target attached to each outcome. Worker completion
+                // order is intentionally nondeterministic, so inferring success
+                // from the first N target labels can attribute a success to the
+                // wrong target in a mixed-outcome run.
+                let mut succeeded = kr.succeeded.clone();
+                succeeded.sort();
+                for target in succeeded {
                     deployed.push(DeployEntry {
                         key: kl.key.clone(),
                         env: env_name.to_string(),
-                        target: target.clone(),
+                        target,
                         error: None,
                     });
                     env_deployed += 1;
@@ -1067,4 +1078,134 @@ fn build_key_lines(plan: &EnvWorkPlan, unset_entries: &[&DeployEntry]) -> Vec<Ke
             total_ops,
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::time::{Duration, Instant};
+
+    struct ParallelTarget {
+        name: &'static str,
+        started: Arc<AtomicUsize>,
+        succeeds: bool,
+    }
+
+    impl crate::targets::DeployTarget for ParallelTarget {
+        fn name(&self) -> &str {
+            self.name
+        }
+
+        fn deploy_mode(&self) -> crate::targets::DeployMode {
+            crate::targets::DeployMode::Individual
+        }
+
+        fn deploy_secret(
+            &self,
+            _key: &str,
+            _value: &str,
+            _target: &crate::config::ResolvedTarget,
+        ) -> anyhow::Result<()> {
+            self.started.fetch_add(1, Ordering::SeqCst);
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while self.started.load(Ordering::SeqCst) < 2 {
+                if Instant::now() >= deadline {
+                    anyhow::bail!("targets were not executed in parallel");
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            if self.succeeds {
+                Ok(())
+            } else {
+                anyhow::bail!("intentional mixed-outcome failure")
+            }
+        }
+    }
+
+    #[test]
+    fn animated_parallel_deploy_preserves_mixed_outcomes_by_target() {
+        let started = Arc::new(AtomicUsize::new(0));
+        let deploy_targets: Vec<Box<dyn crate::targets::DeployTarget>> = vec![
+            Box::new(ParallelTarget {
+                name: "fail",
+                started: Arc::clone(&started),
+                succeeds: false,
+            }),
+            Box::new(ParallelTarget {
+                name: "ok",
+                started,
+                succeeds: true,
+            }),
+        ];
+        let target_map = HashMap::from([
+            ("fail", (0, crate::targets::DeployMode::Individual)),
+            ("ok", (1, crate::targets::DeployMode::Individual)),
+        ]);
+        let mut env_plan = EnvWorkPlan::default();
+        env_plan.individual.push((
+            "SHARED".to_string(),
+            zeroize::Zeroizing::new("secret".to_string()),
+            crate::config::ResolvedTarget {
+                service: "fail".to_string(),
+                app: None,
+                environment: "dev".to_string(),
+            },
+        ));
+        env_plan.individual.push((
+            "SHARED".to_string(),
+            zeroize::Zeroizing::new("secret".to_string()),
+            crate::config::ResolvedTarget {
+                service: "ok".to_string(),
+                app: None,
+                environment: "dev".to_string(),
+            },
+        ));
+        let key_lines = build_key_lines(&env_plan, &[]);
+        let index_dir = tempfile::tempdir().unwrap();
+        let index = Mutex::new(DeployIndex::new(
+            &index_dir.path().join("deploy-index.json"),
+        ));
+        let payload_secrets = BTreeMap::from([("SHARED:dev".to_string(), "secret".to_string())]);
+        let failed_batch_groups = Mutex::new(BTreeSet::new());
+        let mut deployed = Vec::new();
+        let mut failed = Vec::new();
+        let mut pruned = Vec::new();
+
+        execute_animated(
+            "dev",
+            &env_plan,
+            &key_lines,
+            &[],
+            DEPLOY_LINE_WIDTH,
+            &deploy_targets,
+            &target_map,
+            &payload_secrets,
+            b"test-master-key",
+            &index,
+            &failed_batch_groups,
+            &mut deployed,
+            &mut failed,
+            &mut pruned,
+        );
+
+        assert_eq!(deployed.len(), 1);
+        assert_eq!(deployed[0].target, "ok");
+        assert_eq!(failed.len(), 1);
+        assert_eq!(failed[0].target, "fail");
+
+        let index = index.into_inner().unwrap();
+        assert_eq!(index.records.len(), 2);
+        assert!(index.records.values().any(|r| {
+            r.target == "ok:dev"
+                && r.last_deploy_status == crate::deploy_tracker::DeployStatus::Success
+        }));
+        assert!(index.records.values().any(|r| {
+            r.target == "fail:dev"
+                && r.last_deploy_status == crate::deploy_tracker::DeployStatus::Failed
+        }));
+    }
 }

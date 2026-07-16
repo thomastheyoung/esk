@@ -62,6 +62,7 @@ pub(crate) struct KeyLine {
 pub(crate) struct KeyResult {
     pub completed_ops: usize,
     pub total_ops: usize,
+    pub succeeded: Vec<String>,
     pub failed: Vec<(String, String)>, // (target_display, error)
 }
 
