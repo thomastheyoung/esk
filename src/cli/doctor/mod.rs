@@ -164,6 +164,21 @@ secrets:
     }
 
     #[test]
+    fn doctor_flags_keychain_backup_file() {
+        let dir = setup_healthy_project();
+        std::fs::write(dir.path().join(".esk/key-provider"), "keychain\n").unwrap();
+        std::fs::write(dir.path().join(".esk/store.key"), "backup").unwrap();
+
+        let report = Report::build(dir.path());
+        let check = report
+            .structure
+            .iter()
+            .find(|check| check.label == "Keychain backup")
+            .expect("doctor should report a lingering keychain backup");
+        assert_eq!(check.status, CheckStatus::Warn);
+    }
+
+    #[test]
     fn doctor_failed_deploys() {
         let dir = setup_healthy_project();
 

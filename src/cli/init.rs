@@ -322,6 +322,9 @@ fn ensure_keychain_store(
         crate::store::KeyProvider::write_marker(esk_dir, "keychain")?;
         let provider = crate::store::KeyProvider::from_marker(esk_dir)?;
         provider.store(&key)?;
+        cliclack::log::warning(
+            "Keychain migration kept .esk/store.key as a backup. Remove it after verifying keychain access.",
+        )?;
 
         return Ok((
             KeyStatus::Keychain(FileStatus::Created),

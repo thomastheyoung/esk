@@ -52,6 +52,14 @@ impl Report {
                         KeyProvider::Keychain { .. } => "OS keychain",
                     };
                     structure.push(Check::pass("Key provider", desc));
+                    if matches!(&p, KeyProvider::Keychain { .. })
+                        && esk_dir.join("store.key").is_file()
+                    {
+                        structure.push(Check::warn(
+                            "Keychain backup",
+                            ".esk/store.key is still present; remove it after verifying keychain access",
+                        ));
+                    }
                     Some(p)
                 }
                 Err(e) => {
