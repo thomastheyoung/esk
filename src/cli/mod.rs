@@ -8,6 +8,7 @@ pub mod import;
 pub mod key;
 pub mod list;
 pub mod llm_context;
+pub mod run;
 pub mod set;
 pub mod status;
 pub mod sync;
@@ -128,6 +129,18 @@ pub enum Commands {
         /// Environment to retrieve from
         #[arg(long)]
         env: String,
+    },
+    /// Run a command with selected secrets injected into its environment
+    Run {
+        /// Environment to inject
+        #[arg(long)]
+        env: String,
+        /// Optional application target to select
+        #[arg(long)]
+        app: Option<String>,
+        /// Command and arguments (must follow `--`)
+        #[arg(last = true, required = true)]
+        command: Vec<String>,
     },
     /// List all secrets and their status
     List {

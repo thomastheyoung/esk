@@ -92,6 +92,18 @@ esk status --env dev
 | `.esk/deploy-index.json` | Deploy state tracker                                                     | No (gitignored) |
 | `.esk/sync-index.json`   | Sync state tracker                                                       | No (gitignored) |
 
+For local development, inject the selected environment directly into a child
+process without writing a dotenv file:
+
+```bash
+esk run --env dev -- npm start
+esk run --env dev --app web -- npm run dev
+```
+
+Only secrets targeted to the selected environment (and app, when supplied) are
+injected. The child process can still expose its environment to descendants,
+so use this for trusted local commands.
+
 If the local encryption key may have been exposed, run `esk key rotate` from
 the project root. It generates a new key, re-encrypts the store, and updates
 the configured file or OS-keychain provider; distribute the new key to trusted

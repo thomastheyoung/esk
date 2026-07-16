@@ -5,13 +5,16 @@ use esk::cli::{Cli, Commands, KeyCommands};
 use esk::config::Config;
 
 fn main() {
-    if let Err(e) = run() {
-        eprintln!("\n {} {:#}\n", style("✖").red().bold(), e);
-        std::process::exit(1);
+    match run() {
+        Ok(code) => std::process::exit(code),
+        Err(e) => {
+            eprintln!("\n {} {:#}\n", style("✖").red().bold(), e);
+            std::process::exit(1);
+        }
     }
 }
 
-fn run() -> Result<()> {
+fn run() -> Result<i32> {
     cliclack::set_theme(esk::ui::EskTheme);
     let cli = Cli::parse();
 
@@ -112,6 +115,17 @@ fn run() -> Result<()> {
             let config = Config::find_and_load()?;
             esk::cli::get::run(&config, key, env)?;
         }
+        Commands::Run { env, app, command } => {
+            let config = Config::find_and_load()?;
+            return esk::cli::run::run(
+                &config,
+                &esk::cli::run::RunOptions {
+                    env,
+                    app: app.as_deref(),
+                    command,
+                },
+            );
+        }
         Commands::Generate {
             format,
             output,
@@ -156,5 +170,5 @@ fn run() -> Result<()> {
         }
     }
 
-    Ok(())
+    Ok(0)
 }
