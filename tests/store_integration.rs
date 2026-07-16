@@ -96,6 +96,37 @@ fn store_concurrent_reads() {
 }
 
 #[test]
+fn store_concurrent_writers_preserve_all_values_and_versions() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let root = project.root().to_path_buf();
+    let workers = 4;
+    let writes_per_worker = 8;
+
+    std::thread::scope(|scope| {
+        for worker in 0..workers {
+            let root = &root;
+            scope.spawn(move || {
+                let store = SecretStore::open(root).unwrap();
+                for write in 0..writes_per_worker {
+                    store
+                        .set(
+                            &format!("WORKER_{worker}_{write}"),
+                            "dev",
+                            &format!("value_{worker}_{write}"),
+                        )
+                        .unwrap();
+                }
+            });
+        }
+    });
+
+    let store = SecretStore::open(&root).unwrap();
+    let payload = store.payload().unwrap();
+    assert_eq!(payload.version, (workers * writes_per_worker) as u64);
+    assert_eq!(payload.secrets.len(), workers * writes_per_worker);
+}
+
+#[test]
 fn store_overwrite_preserves_others() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let store = project.store().unwrap();

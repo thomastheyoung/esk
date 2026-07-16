@@ -305,4 +305,37 @@ mod tests {
             Some(2)
         );
     }
+
+    #[test]
+    fn concurrent_locked_writers_preserve_sync_records() {
+        let dir = tempfile::tempdir().unwrap();
+        let esk_dir = dir.path().join(".esk");
+        std::fs::create_dir_all(&esk_dir).unwrap();
+        let path = esk_dir.join("sync-index.json");
+        let workers = 4;
+        let records_per_worker = 8;
+
+        std::thread::scope(|scope| {
+            for worker in 0..workers {
+                let root = dir.path();
+                let path = &path;
+                scope.spawn(move || {
+                    let _lock = crate::store::acquire_project_lock(root).unwrap();
+                    let (mut index, warning) = SyncIndex::load(path);
+                    assert!(warning.is_none());
+                    for record in 0..records_per_worker {
+                        index.record_success(
+                            &format!("remote_{worker}_{record}"),
+                            "dev",
+                            record as u64,
+                        );
+                    }
+                    index.save().unwrap();
+                });
+            }
+        });
+
+        let (index, _) = SyncIndex::load(&path);
+        assert_eq!(index.records.len(), workers * records_per_worker);
+    }
 }

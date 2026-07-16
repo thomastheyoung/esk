@@ -506,6 +506,7 @@ pub fn run_with_runner(
             ));
 
             // Update sync index sequentially on main thread
+            let _project_lock = crate::store::acquire_project_lock(&config.root)?;
             let sync_index_path = config.root.join(".esk/sync-index.json");
             let (mut sync_index, warning) = SyncIndex::load(&sync_index_path);
             if let Some(msg) = warning {

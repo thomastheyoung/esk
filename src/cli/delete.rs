@@ -114,6 +114,7 @@ pub fn run_with_runner(
 
     let mut push_results = Vec::new();
     if !opts.no_sync && !config.remotes.is_empty() {
+        let _project_lock = crate::store::acquire_project_lock(&config.root)?;
         let sync_index_path = config.root.join(".esk/sync-index.json");
         let (mut sync_index, warning) = SyncIndex::load(&sync_index_path);
         if let Some(msg) = warning {

@@ -79,6 +79,7 @@ pub fn run_with_runner(
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
     let index_path = config.root.join(".esk/deploy-index.json");
+    let _project_lock = crate::store::acquire_project_lock(&config.root)?;
     let (index, warning) = DeployIndex::load(&index_path);
     if let Some(msg) = warning {
         let _ = cliclack::log::warning(&msg);

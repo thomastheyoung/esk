@@ -7,6 +7,7 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
+use std::fs::File;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use zeroize::Zeroizing;
@@ -420,6 +421,22 @@ pub struct SecretStore {
     version_path: PathBuf,
 }
 
+/// Acquire the project-wide mutation lock shared by the encrypted store and
+/// tracker files. The returned file holds the lock until dropped.
+pub(crate) fn acquire_project_lock(root: &Path) -> Result<File> {
+    let esk_dir = root.join(".esk");
+    let lock_path = esk_dir.join("lock");
+    if !lock_path.exists() {
+        File::create(&lock_path)
+            .with_context(|| format!("failed to create lock file {}", lock_path.display()))?;
+    }
+    let file = File::open(&lock_path)
+        .with_context(|| format!("failed to open {} for locking", lock_path.display()))?;
+    file.lock_exclusive()
+        .with_context(|| format!("failed to acquire lock on {}", lock_path.display()))?;
+    Ok(file)
+}
+
 impl std::fmt::Debug for SecretStore {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("SecretStore")
@@ -511,27 +528,17 @@ impl SecretStore {
         })
     }
 
-    fn lock_path(&self) -> PathBuf {
-        self.store_path
-            .parent()
-            .expect("store_path has no parent")
-            .join("lock")
-    }
-
     /// Acquire an exclusive file lock on `.esk/lock`, run the closure, then release.
     fn with_lock<F, R>(&self, f: F) -> Result<R>
     where
         F: FnOnce() -> Result<R>,
     {
-        let lock_path = self.lock_path();
-        if !lock_path.exists() {
-            std::fs::File::create(&lock_path)
-                .with_context(|| format!("failed to create lock file {}", lock_path.display()))?;
-        }
-        let file = std::fs::File::open(&lock_path)
-            .with_context(|| format!("failed to open {} for locking", lock_path.display()))?;
-        file.lock_exclusive()
-            .with_context(|| format!("failed to acquire lock on {}", lock_path.display()))?;
+        let root = self
+            .store_path
+            .parent()
+            .and_then(Path::parent)
+            .context("store path has no project root")?;
+        let file = acquire_project_lock(root)?;
         let result = f();
         // Lock released when `file` is dropped
         drop(file);
