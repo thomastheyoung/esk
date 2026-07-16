@@ -495,6 +495,7 @@ fn scoped_composite_secrets(
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use super::*;
 
     fn make_payload(secrets: &[(&str, &str)], version: u64) -> StorePayload {
@@ -514,6 +515,119 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect()
+    }
+
+    fn generated_composite_map(
+        prefix: &'static str,
+    ) -> impl Strategy<Value = BTreeMap<String, String>> {
+        prop::collection::btree_map(any::<u8>(), any::<u32>(), 0..8).prop_map(move |entries| {
+            entries
+                .into_iter()
+                .map(|(key, value)| (format!("{prefix}{key}:dev"), value.to_string()))
+                .collect()
+        })
+    }
+
+    proptest! {
+        #[test]
+        fn reconcile_multi_is_monotonic_and_order_invariant(
+            local_entries in generated_composite_map("LOCAL"),
+            remote_entries in generated_composite_map("REMOTE"),
+            local_version in 0u64..10_000,
+            remote_one_version in 0u64..10_000,
+            remote_two_version in 0u64..10_000,
+        ) {
+            let local = StorePayload {
+                secrets: local_entries,
+                version: local_version,
+                env_versions: BTreeMap::from([("dev".to_string(), local_version)]),
+                ..Default::default()
+            };
+            let remote_one = remote_entries.clone();
+            let remote_two = remote_entries;
+
+            let forward = reconcile_multi_with_jump_limit(
+                &local,
+                &[
+                    ("one", &remote_one, remote_one_version),
+                    ("two", &remote_two, remote_two_version),
+                ],
+                "dev",
+                ConflictPreference::Local,
+                false,
+            ).unwrap();
+            let reverse = reconcile_multi_with_jump_limit(
+                &local,
+                &[
+                    ("two", &remote_two, remote_two_version),
+                    ("one", &remote_one, remote_one_version),
+                ],
+                "dev",
+                ConflictPreference::Local,
+                false,
+            ).unwrap();
+
+            prop_assert!(forward.merged_payload.version >= local.version);
+            prop_assert!(forward.merged_payload.env_version("dev") >= local.env_version("dev"));
+            prop_assert_eq!(forward.merged_payload.secrets, reverse.merged_payload.secrets);
+            prop_assert_eq!(forward.merged_payload.tombstones, reverse.merged_payload.tombstones);
+            prop_assert_eq!(forward.merged_payload.version, reverse.merged_payload.version);
+            prop_assert_eq!(forward.merged_payload.env_versions, reverse.merged_payload.env_versions);
+            prop_assert_eq!(forward.local_changed, reverse.local_changed);
+            prop_assert_eq!(forward.has_drift, reverse.has_drift);
+
+            let mut forward_updates = forward.sources_to_update;
+            let mut reverse_updates = reverse.sources_to_update;
+            forward_updates.sort();
+            reverse_updates.sort();
+            prop_assert_eq!(forward_updates, reverse_updates);
+        }
+
+        #[test]
+        fn newer_value_beats_older_tombstone(tombstone_version in 0u64..10_000, version_delta in 1u64..1_000) {
+            let remote_version = tombstone_version + version_delta;
+            let local = StorePayload {
+                version: tombstone_version,
+                tombstones: BTreeMap::from([("KEY:dev".to_string(), tombstone_version)]),
+                env_versions: BTreeMap::from([("dev".to_string(), tombstone_version)]),
+                ..Default::default()
+            };
+            let remote = BTreeMap::from([("KEY:dev".to_string(), "remote".to_string())]);
+
+            let result = reconcile_multi_with_jump_limit(
+                &local,
+                &[("remote", &remote, remote_version)],
+                "dev",
+                ConflictPreference::Local,
+                false,
+            ).unwrap();
+
+            prop_assert_eq!(result.merged_payload.secrets.get("KEY:dev"), Some(&"remote".to_string()));
+            prop_assert!(!result.merged_payload.tombstones.contains_key("KEY:dev"));
+        }
+
+        #[test]
+        fn newer_tombstone_beats_older_value(tombstone_version in 1u64..10_000, version_delta in 0u64..1_000) {
+            let remote_version = tombstone_version.saturating_sub(version_delta);
+            let local = StorePayload {
+                version: tombstone_version,
+                tombstones: BTreeMap::from([("KEY:dev".to_string(), tombstone_version)]),
+                env_versions: BTreeMap::from([("dev".to_string(), tombstone_version)]),
+                ..Default::default()
+            };
+            let remote = BTreeMap::from([("KEY:dev".to_string(), "remote".to_string())]);
+
+            let result = reconcile_multi_with_jump_limit(
+                &local,
+                &[("remote", &remote, remote_version)],
+                "dev",
+                ConflictPreference::Local,
+                false,
+            ).unwrap();
+
+            prop_assert!(!result.merged_payload.secrets.contains_key("KEY:dev"));
+            prop_assert_eq!(result.merged_payload.tombstones.get("KEY:dev"), Some(&tombstone_version));
+        }
     }
 
     #[test]

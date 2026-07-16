@@ -955,6 +955,7 @@ pub(crate) fn derive_key(master: &[u8], domain: &[u8]) -> Zeroizing<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
+    use proptest::prelude::*;
     use super::*;
 
     fn tmp_root() -> tempfile::TempDir {
@@ -1124,6 +1125,79 @@ mod tests {
         let decrypted = store.decrypt(&encrypted).unwrap();
         assert_eq!(decrypted.secrets.get("KEY:dev").unwrap(), "val");
         assert_eq!(decrypted.version, 1);
+    }
+
+    fn payload_strategy() -> impl Strategy<Value = StorePayload> {
+        (
+            prop::collection::btree_map(any::<u8>(), any::<u32>(), 0..8),
+            prop::collection::btree_map(any::<u8>(), any::<u64>(), 0..4),
+            any::<u64>(),
+        )
+            .prop_map(|(secrets, tombstones, version)| {
+                let secrets = secrets
+                    .into_iter()
+                    .map(|(key, value)| (format!("KEY{key}:dev"), value.to_string()))
+                    .collect();
+                let tombstones = tombstones
+                    .into_iter()
+                    .map(|(key, value)| (format!("DELETED{key}:dev"), value))
+                    .collect();
+                let mut env_versions = BTreeMap::new();
+                env_versions.insert("dev".to_string(), version);
+                StorePayload {
+                    secrets,
+                    version,
+                    tombstones,
+                    env_versions,
+                    env_last_changed_at: BTreeMap::from([(
+                        "dev".to_string(),
+                        version.to_string(),
+                    )]),
+                }
+            })
+    }
+
+    proptest! {
+        #[test]
+        fn encrypted_payload_roundtrips(payload in payload_strategy()) {
+            let key = [0x42; KEY_LEN];
+            let json = serde_json::to_string(&payload).unwrap();
+            let encoded = encrypt_store_with_key(&key, &json).unwrap();
+            let body = encoded.strip_prefix("v2:").unwrap();
+            let decoded = decrypt_with_aad(&key, body, STORE_AAD_V2).unwrap();
+            let restored: StorePayload = serde_json::from_str(&decoded).unwrap();
+
+            prop_assert_eq!(restored.secrets, payload.secrets);
+            prop_assert_eq!(restored.version, payload.version);
+            prop_assert_eq!(restored.tombstones, payload.tombstones);
+            prop_assert_eq!(restored.env_versions, payload.env_versions);
+            prop_assert_eq!(restored.env_last_changed_at, payload.env_last_changed_at);
+        }
+
+        #[test]
+        fn any_single_byte_ciphertext_component_flip_fails(
+            payload in payload_strategy(),
+            component in 0usize..3,
+            byte_index in 0usize..64,
+        ) {
+            let key = [0x42; KEY_LEN];
+            let json = serde_json::to_string(&payload).unwrap();
+            let encoded = encrypt_store_with_key(&key, &json).unwrap();
+            let body = encoded.strip_prefix("v2:").unwrap();
+            let mut fields: Vec<Vec<u8>> = body
+                .split(':')
+                .map(|field| hex::decode(field).unwrap())
+                .collect();
+            let index = byte_index % fields[component].len();
+            fields[component][index] ^= 0x01;
+            let tampered = fields
+                .iter()
+                .map(hex::encode)
+                .collect::<Vec<_>>()
+                .join(":");
+
+            prop_assert!(decrypt_with_aad(&key, &tampered, STORE_AAD_V2).is_err());
+        }
     }
 
     #[test]

@@ -59,6 +59,9 @@ schemars = { version = "1", optional = true }
 
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service", "crypto-rust"], optional = true }
 
+[dev-dependencies]
+proptest = "1"
+
 [features]
 default = ["keychain"]
 keychain = ["dep:keyring"]
