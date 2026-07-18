@@ -7,7 +7,8 @@ use rand::Rng;
 use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
-use std::fs::File;
+use std::fs::{File, OpenOptions};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
 use zeroize::Zeroizing;
@@ -106,10 +107,28 @@ pub struct StorePayload {
     pub env_last_changed_at: BTreeMap<String, String>,
 }
 
-#[derive(Serialize, Deserialize)]
+const ROTATION_JOURNAL_VERSION: u8 = 1;
+const ROTATION_STAGE_ID_BYTES: usize = 16;
+
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 struct RotationJournal {
-    new_key: String,
-    temp_store: PathBuf,
+    version: u8,
+    stage_id: String,
+    phase: RotationPhase,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+enum RotationPhase {
+    Prepared,
+    StorePromoted,
+    ProviderPromoted,
+}
+
+struct RotationStage {
+    candidate_store: PathBuf,
+    staged_key: KeyProvider,
 }
 
 impl StorePayload {
@@ -285,10 +304,7 @@ impl KeyProvider {
                     .map_err(|_| anyhow::anyhow!("{STORE_KEY_ENV} is set but is not valid UTF-8"))
             })
             .transpose()?;
-        Self::from_environment_value_or_marker(
-            esk_dir,
-            value.as_ref().map(|value| value.as_str()),
-        )
+        Self::from_environment_value_or_marker(esk_dir, value.as_ref().map(|value| value.as_str()))
     }
 
     fn from_environment_value_or_marker(
@@ -450,16 +466,18 @@ impl KeyProvider {
 
     fn write_key_file(path: &Path, key: &[u8]) -> Result<()> {
         let dir = path.parent().context("key path has no parent")?;
-        let tmp = NamedTempFile::new_in(dir)?;
+        let mut tmp = NamedTempFile::new_in(dir)?;
         let hex_key = Zeroizing::new(hex::encode(key));
-        std::fs::write(tmp.path(), hex_key.as_bytes())?;
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
         }
+        tmp.as_file_mut().write_all(hex_key.as_bytes())?;
+        tmp.as_file_mut().sync_all()?;
         tmp.persist(path)
             .with_context(|| format!("failed to persist key to {}", path.display()))?;
+        sync_directory(dir)?;
         Ok(())
     }
 
@@ -533,7 +551,7 @@ impl SecretStore {
             }
             None => KeyProvider::from_environment_or_marker(&esk_dir)?,
         };
-        if esk_dir.join(ROTATION_JOURNAL_FILE).is_file() {
+        if rotation_journal_exists(&esk_dir)? {
             recover_pending_rotation_with_durable_provider(&esk_dir, &provider)?;
         }
         let store_path = esk_dir.join("store.enc");
@@ -570,7 +588,7 @@ impl SecretStore {
         let esk_dir = root.join(".esk");
         let store_path = esk_dir.join("store.enc");
 
-        if esk_dir.join(ROTATION_JOURNAL_FILE).is_file() {
+        if rotation_journal_exists(&esk_dir)? {
             recover_pending_rotation_with_durable_provider(&esk_dir, provider)?;
         }
 
@@ -655,11 +673,7 @@ impl SecretStore {
     }
 
     /// Set multiple values for one environment in a single locked transaction.
-    pub fn set_many(
-        &self,
-        env: &str,
-        values: &BTreeMap<String, String>,
-    ) -> Result<StorePayload> {
+    pub fn set_many(&self, env: &str, values: &BTreeMap<String, String>) -> Result<StorePayload> {
         for (key, value) in values {
             validate_key(key)?;
             if value.contains('\0') {
@@ -712,9 +726,9 @@ impl SecretStore {
 
     /// Generate a new encryption key and re-encrypt the current store with it.
     ///
-    /// The provider is updated only after the authenticated replacement payload
-    /// has been prepared. If replacing the store fails after the provider update,
-    /// the previous key is restored before returning the error.
+    /// Rotation is recoverable through a constrained staged state machine. The
+    /// journal has no secret material or paths; all artifacts are derived from
+    /// its opaque stage identifier.
     pub fn rotate_key(&self) -> Result<()> {
         self.with_lock(|| {
             let provider = KeyProvider::from_environment_or_marker(
@@ -732,43 +746,63 @@ impl SecretStore {
             let json = Zeroizing::new(serde_json::to_string(&payload)?);
             let new_key = KeyProvider::generate_key();
             let encrypted = encrypt_store_with_key(&new_key, &json)?;
-            let old_key = self.key.clone();
 
             let dir = self
                 .store_path
                 .parent()
                 .context("store path has no parent")?;
-            let tmp = NamedTempFile::new_in(dir)?;
-            std::fs::write(tmp.path(), encrypted)?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
-            }
-
-            let journal_path = dir.join(ROTATION_JOURNAL_FILE);
-            let journal = RotationJournal {
-                new_key: hex::encode(&new_key),
-                temp_store: tmp.path().to_path_buf(),
+            let stage_id = generate_rotation_stage_id();
+            let stage = rotation_stage(dir, &provider, &stage_id)?;
+            write_staged_key(&stage.staged_key, &new_key)?;
+            let staged_key = match load_staged_key(&stage.staged_key) {
+                Ok(key) => key,
+                Err(error) => {
+                    let _ = remove_staged_key(&stage.staged_key);
+                    return Err(error);
+                }
             };
-            write_rotation_journal(&journal_path, &journal)?;
-            if let Err(error) = provider.store(&new_key) {
-                let _ = std::fs::remove_file(&journal_path);
+            if let Err(error) = write_private_new_file(&stage.candidate_store, encrypted.as_bytes()) {
+                let _ = remove_staged_key(&stage.staged_key);
                 return Err(error);
             }
-            if let Err(error) = tmp.persist(&self.store_path) {
-                let restore_result = provider.store(&old_key);
-                if let Err(restore_error) = restore_result {
-                    return Err(anyhow::anyhow!(
-                        "key rotation failed and restoring the previous key also failed: {error}; {restore_error}"
-                    ));
-                }
-                let _ = std::fs::remove_file(&journal_path);
-                return Err(error.into());
+            if let Err(error) = authenticate_store_file(&stage.candidate_store, &staged_key) {
+                let _ = std::fs::remove_file(&stage.candidate_store);
+                let _ = sync_directory(dir);
+                let _ = remove_staged_key(&stage.staged_key);
+                return Err(error);
             }
+            let journal_path = dir.join(ROTATION_JOURNAL_FILE);
+            let journal = RotationJournal {
+                version: ROTATION_JOURNAL_VERSION,
+                stage_id,
+                phase: RotationPhase::Prepared,
+            };
+            write_rotation_journal(&journal_path, &journal)?;
+
+            std::fs::rename(&stage.candidate_store, &self.store_path).with_context(|| {
+                format!("failed to promote staged store {}", stage.candidate_store.display())
+            })?;
+            sync_directory(dir)?;
+            write_rotation_journal(
+                &journal_path,
+                &RotationJournal {
+                    phase: RotationPhase::StorePromoted,
+                    ..journal.clone()
+                },
+            )?;
+            provider.store(&new_key)?;
+            write_rotation_journal(
+                &journal_path,
+                &RotationJournal {
+                    phase: RotationPhase::ProviderPromoted,
+                    ..journal
+                },
+            )?;
             std::fs::remove_file(&journal_path).with_context(|| {
                 format!("failed to remove {}", journal_path.display())
             })?;
+            sync_directory(dir)?;
+            remove_staged_key(&stage.staged_key)?;
             Ok(())
         })
     }
@@ -806,7 +840,10 @@ impl SecretStore {
             let text = std::fs::read_to_string(&self.version_path)
                 .with_context(|| format!("failed to read {}", self.version_path.display()))?;
             text.trim().parse::<u64>().with_context(|| {
-                format!("invalid store high-water mark in {}", self.version_path.display())
+                format!(
+                    "invalid store high-water mark in {}",
+                    self.version_path.display()
+                )
             })?
         } else {
             0
@@ -838,7 +875,10 @@ impl SecretStore {
             std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
         }
         tmp.persist(&self.version_path).with_context(|| {
-            format!("failed to persist store high-water mark to {}", self.version_path.display())
+            format!(
+                "failed to persist store high-water mark to {}",
+                self.version_path.display()
+            )
         })?;
         Ok(())
     }
@@ -877,17 +917,176 @@ fn encrypt_store_with_key(key: &[u8], plaintext: &str) -> Result<String> {
 }
 
 fn write_rotation_journal(path: &Path, journal: &RotationJournal) -> Result<()> {
-    let dir = path.parent().context("rotation journal path has no parent")?;
-    let tmp = NamedTempFile::new_in(dir)?;
-    std::fs::write(tmp.path(), serde_json::to_vec(journal)?)?;
+    let dir = path
+        .parent()
+        .context("rotation journal path has no parent")?;
+    let mut tmp = NamedTempFile::new_in(dir)?;
     #[cfg(unix)]
     {
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(tmp.path(), std::fs::Permissions::from_mode(0o600))?;
     }
+    tmp.as_file_mut().write_all(&serde_json::to_vec(journal)?)?;
+    tmp.as_file_mut().sync_all()?;
     tmp.persist(path)
         .with_context(|| format!("failed to persist rotation journal to {}", path.display()))?;
+    sync_directory(dir)?;
     Ok(())
+}
+
+#[cfg(unix)]
+fn sync_directory(dir: &Path) -> Result<()> {
+    File::open(dir)
+        .with_context(|| format!("failed to open directory {} for sync", dir.display()))?
+        .sync_all()
+        .with_context(|| format!("failed to sync directory {}", dir.display()))
+}
+
+#[cfg(not(unix))]
+fn sync_directory(_dir: &Path) -> Result<()> {
+    Ok(())
+}
+
+fn rotation_journal_exists(esk_dir: &Path) -> Result<bool> {
+    let path = esk_dir.join(ROTATION_JOURNAL_FILE);
+    match std::fs::symlink_metadata(&path) {
+        Ok(metadata) => {
+            if metadata.file_type().is_symlink() || !metadata.is_file() {
+                bail!("unsafe key rotation journal at {}", path.display());
+            }
+            Ok(true)
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(false),
+        Err(error) => Err(error).with_context(|| format!("failed to inspect {}", path.display())),
+    }
+}
+
+fn generate_rotation_stage_id() -> String {
+    let mut bytes = [0_u8; ROTATION_STAGE_ID_BYTES];
+    rand::rng().fill_bytes(&mut bytes);
+    hex::encode(bytes)
+}
+
+fn validate_rotation_stage_id(stage_id: &str) -> Result<()> {
+    if stage_id.len() != ROTATION_STAGE_ID_BYTES * 2
+        || !stage_id
+            .bytes()
+            .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+    {
+        bail!("invalid key rotation stage identifier");
+    }
+    Ok(())
+}
+
+fn rotation_stage(esk_dir: &Path, provider: &KeyProvider, stage_id: &str) -> Result<RotationStage> {
+    validate_rotation_stage_id(stage_id)?;
+    let candidate_store = esk_dir.join(format!("rotation-{stage_id}.store"));
+    let staged_key = match provider {
+        KeyProvider::Environment { .. } => {
+            bail!("environment key provider cannot stage a key rotation")
+        }
+        KeyProvider::File { .. } => KeyProvider::File {
+            path: esk_dir.join(format!("rotation-{stage_id}.key")),
+        },
+        KeyProvider::Keychain { service, account } => KeyProvider::Keychain {
+            service: service.clone(),
+            account: format!("{account}:rotation:{stage_id}"),
+        },
+    };
+    Ok(RotationStage {
+        candidate_store,
+        staged_key,
+    })
+}
+
+fn ensure_regular_file(path: &Path, label: &str) -> Result<()> {
+    let metadata = std::fs::symlink_metadata(path)
+        .with_context(|| format!("failed to inspect {label} {}", path.display()))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        bail!("unsafe {label} at {}", path.display());
+    }
+    Ok(())
+}
+
+fn write_private_new_file(path: &Path, contents: &[u8]) -> Result<()> {
+    let mut options = OpenOptions::new();
+    options.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.mode(0o600);
+    }
+    let mut file = options
+        .open(path)
+        .with_context(|| format!("failed to create staged artifact {}", path.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))?;
+    }
+    file.write_all(contents)?;
+    file.sync_all()?;
+    sync_directory(
+        path.parent()
+            .context("staged artifact path has no parent")?,
+    )?;
+    Ok(())
+}
+
+fn write_staged_key(provider: &KeyProvider, key: &[u8]) -> Result<()> {
+    match provider {
+        KeyProvider::File { path } => write_private_new_file(path, hex::encode(key).as_bytes()),
+        KeyProvider::Keychain { .. } => provider.store(key),
+        KeyProvider::Environment { .. } => {
+            bail!("environment key provider cannot stage a key rotation")
+        }
+    }
+}
+
+fn load_staged_key(provider: &KeyProvider) -> Result<Zeroizing<Vec<u8>>> {
+    if let KeyProvider::File { path } = provider {
+        ensure_regular_file(path, "staged rotation key")?;
+    }
+    provider.load()
+}
+
+fn remove_staged_key(provider: &KeyProvider) -> Result<()> {
+    match provider {
+        KeyProvider::File { path } => {
+            ensure_regular_file(path, "staged rotation key")?;
+            std::fs::remove_file(path).with_context(|| {
+                format!("failed to remove staged rotation key {}", path.display())
+            })?;
+            sync_directory(
+                path.parent()
+                    .context("staged rotation key path has no parent")?,
+            )
+        }
+        #[cfg(feature = "keychain")]
+        KeyProvider::Keychain { service, account } => {
+            let entry = keyring::Entry::new(service, account)
+                .map_err(|error| anyhow::anyhow!("failed to access OS keychain: {error}"))?;
+            entry.delete_credential().map_err(|error| {
+                anyhow::anyhow!("failed to remove staged rotation key from OS keychain: {error}")
+            })
+        }
+        #[cfg(not(feature = "keychain"))]
+        KeyProvider::Keychain { .. } => Ok(()),
+        KeyProvider::Environment { .. } => {
+            bail!("environment key provider cannot stage a key rotation")
+        }
+    }
+}
+
+fn authenticate_store_file(path: &Path, key: &[u8]) -> Result<StorePayload> {
+    let encoded = std::fs::read_to_string(path)
+        .with_context(|| format!("failed to read staged store {}", path.display()))?;
+    let body = encoded
+        .trim()
+        .strip_prefix("v2:")
+        .context("staged store has an unsupported format")?;
+    let plaintext = Zeroizing::new(decrypt_with_aad(key, body, STORE_AAD_V2)?);
+    serde_json::from_str(&plaintext).context("staged store payload is not valid JSON")
 }
 
 fn recover_pending_rotation_with_durable_provider(
@@ -898,51 +1097,88 @@ fn recover_pending_rotation_with_durable_provider(
     // must finish updating the durable provider before the store can be
     // considered recovered. Keep the environment provider for opening the
     // recovered store, but use the marker-selected provider for this write.
-    if matches!(provider, KeyProvider::Environment { .. }) {
+    let root = esk_dir
+        .parent()
+        .context("rotation directory has no project root")?;
+    let lock = acquire_project_lock(root)?;
+    let result = if matches!(provider, KeyProvider::Environment { .. }) {
         let durable_provider = KeyProvider::from_marker(esk_dir)?;
         recover_pending_rotation(esk_dir, &durable_provider)
     } else {
         recover_pending_rotation(esk_dir, provider)
-    }
+    };
+    drop(lock);
+    result
 }
 
 fn recover_pending_rotation(esk_dir: &Path, provider: &KeyProvider) -> Result<()> {
     let journal_path = esk_dir.join(ROTATION_JOURNAL_FILE);
+    ensure_regular_file(&journal_path, "key rotation journal")?;
     let journal: RotationJournal = serde_json::from_slice(
         &std::fs::read(&journal_path)
             .with_context(|| format!("failed to read {}", journal_path.display()))?,
     )
     .with_context(|| format!("invalid key rotation journal {}", journal_path.display()))?;
-    let new_key = Zeroizing::new(
-        hex::decode(&journal.new_key).context("invalid key in key rotation journal")?,
-    );
-    if new_key.len() != KEY_LEN {
-        bail!("invalid key length in key rotation journal");
+    if journal.version != ROTATION_JOURNAL_VERSION {
+        bail!("unsupported key rotation journal version");
     }
-
-    provider.store(&new_key)?;
+    let stage = rotation_stage(esk_dir, provider, &journal.stage_id)?;
+    let new_key = load_staged_key(&stage.staged_key)?;
     let store_path = esk_dir.join("store.enc");
-    if journal.temp_store.is_file() {
-        std::fs::rename(&journal.temp_store, &store_path).with_context(|| {
-            format!(
-                "failed to finish key rotation from {}",
-                journal.temp_store.display()
-            )
-        })?;
-    } else {
-        let encoded = std::fs::read_to_string(&store_path)
-            .with_context(|| format!("failed to read {} during key rotation recovery", store_path.display()))?;
-        let body = encoded
-            .trim()
-            .strip_prefix("v2:")
-            .context("key rotation journal exists but store replacement is missing")?;
-        let _: StorePayload = serde_json::from_str(
-            &decrypt_with_aad(&new_key, body, STORE_AAD_V2)?,
-        )
-        .context("key rotation journal exists but new store is not recoverable")?;
+    let candidate_exists = match std::fs::symlink_metadata(&stage.candidate_store) {
+        Ok(_) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(error)
+                .with_context(|| format!("failed to inspect {}", stage.candidate_store.display()))
+        }
+    };
+
+    match journal.phase {
+        RotationPhase::Prepared if candidate_exists => {
+            ensure_regular_file(&stage.candidate_store, "staged rotation store")?;
+            authenticate_store_file(&stage.candidate_store, &new_key)?;
+            std::fs::rename(&stage.candidate_store, &store_path).with_context(|| {
+                format!(
+                    "failed to promote staged store {}",
+                    stage.candidate_store.display()
+                )
+            })?;
+            sync_directory(esk_dir)?;
+            write_rotation_journal(
+                &journal_path,
+                &RotationJournal {
+                    phase: RotationPhase::StorePromoted,
+                    ..journal.clone()
+                },
+            )?;
+        }
+        RotationPhase::Prepared
+        | RotationPhase::StorePromoted
+        | RotationPhase::ProviderPromoted
+            if !candidate_exists =>
+        {
+            ensure_regular_file(&store_path, "promoted rotation store")?;
+            authenticate_store_file(&store_path, &new_key)
+                .context("key rotation journal exists but the promoted store is not recoverable")?;
+        }
+        RotationPhase::StorePromoted | RotationPhase::ProviderPromoted => {
+            bail!("key rotation journal phase does not match staged artifacts")
+        }
+        RotationPhase::Prepared => bail!("key rotation journal has an invalid staged state"),
     }
+    provider.store(&new_key)?;
+    write_rotation_journal(
+        &journal_path,
+        &RotationJournal {
+            phase: RotationPhase::ProviderPromoted,
+            ..journal
+        },
+    )?;
     std::fs::remove_file(&journal_path)
         .with_context(|| format!("failed to remove {}", journal_path.display()))?;
+    sync_directory(esk_dir)?;
+    remove_staged_key(&stage.staged_key)?;
     Ok(())
 }
 
@@ -1042,8 +1278,8 @@ pub(crate) fn derive_key(master: &[u8], domain: &[u8]) -> Zeroizing<Vec<u8>> {
 
 #[cfg(test)]
 mod tests {
-    use proptest::prelude::*;
     use super::*;
+    use proptest::prelude::*;
 
     fn tmp_root() -> tempfile::TempDir {
         tempfile::tempdir().unwrap()
@@ -1236,10 +1472,7 @@ mod tests {
                     version,
                     tombstones,
                     env_versions,
-                    env_last_changed_at: BTreeMap::from([(
-                        "dev".to_string(),
-                        version.to_string(),
-                    )]),
+                    env_last_changed_at: BTreeMap::from([("dev".to_string(), version.to_string())]),
                 }
             })
     }
@@ -1325,7 +1558,10 @@ mod tests {
         let new_key = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
         assert_ne!(old_key, new_key);
         let reopened = SecretStore::open(dir.path()).unwrap();
-        assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
+        assert_eq!(
+            reopened.get("KEY", "dev").unwrap().as_deref(),
+            Some("sentinel")
+        );
         assert!(decrypt_with_key(
             &hex::decode(old_key.trim()).unwrap(),
             &std::fs::read_to_string(dir.path().join(".esk/store.enc")).unwrap()
@@ -1333,83 +1569,235 @@ mod tests {
         .is_err());
     }
 
-    #[test]
-    fn recovers_interrupted_key_rotation_on_open() {
-        let dir = tmp_root();
+    fn staged_rotation(dir: &tempfile::TempDir) -> (RotationStage, Zeroizing<Vec<u8>>) {
         let store = SecretStore::load_or_create(dir.path()).unwrap();
         store.set("KEY", "dev", "sentinel").unwrap();
         let payload = store.payload().unwrap();
-        let new_key = KeyProvider::generate_key();
-        let json = serde_json::to_string(&payload).unwrap();
-        let encrypted = encrypt_store_with_key(&new_key, &json).unwrap();
-        let temp_store = dir.path().join(".esk/pending-store");
-        std::fs::write(&temp_store, encrypted).unwrap();
+        let esk_dir = dir.path().join(".esk");
+        let provider = KeyProvider::from_marker(&esk_dir).unwrap();
+        let stage =
+            rotation_stage(&esk_dir, &provider, "0123456789abcdef0123456789abcdef").unwrap();
+        let key = KeyProvider::generate_key();
+        write_staged_key(&stage.staged_key, &key).unwrap();
+        let encrypted =
+            encrypt_store_with_key(&key, &serde_json::to_string(&payload).unwrap()).unwrap();
+        write_private_new_file(&stage.candidate_store, encrypted.as_bytes()).unwrap();
+        authenticate_store_file(&stage.candidate_store, &key).unwrap();
         write_rotation_journal(
-            &dir.path().join(".esk/key-rotation.json"),
+            &esk_dir.join(ROTATION_JOURNAL_FILE),
             &RotationJournal {
-                new_key: hex::encode(&new_key),
-                temp_store: temp_store.clone(),
+                version: ROTATION_JOURNAL_VERSION,
+                stage_id: "0123456789abcdef0123456789abcdef".to_string(),
+                phase: RotationPhase::Prepared,
             },
         )
         .unwrap();
+        (stage, key)
+    }
 
+    fn assert_rotation_recovered(dir: &tempfile::TempDir, stage: &RotationStage) {
         let reopened = SecretStore::open(dir.path()).unwrap();
-        assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
-        assert!(!temp_store.exists());
+        assert_eq!(
+            reopened.get("KEY", "dev").unwrap().as_deref(),
+            Some("sentinel")
+        );
+        assert!(!stage.candidate_store.exists());
+        if let KeyProvider::File { path } = &stage.staged_key {
+            assert!(!path.exists());
+        }
         assert!(!dir.path().join(".esk/key-rotation.json").exists());
     }
 
     #[test]
-    fn recovers_pending_rotation_with_environment_provider_and_temp_store() {
-        let dir = tmp_root();
-        let store = SecretStore::load_or_create(dir.path()).unwrap();
-        store.set("KEY", "dev", "sentinel").unwrap();
-        let payload = store.payload().unwrap();
-        let new_key = KeyProvider::generate_key();
-        let json = serde_json::to_string(&payload).unwrap();
-        let encrypted = encrypt_store_with_key(&new_key, &json).unwrap();
-        let temp_store = dir.path().join(".esk/pending-store");
-        std::fs::write(&temp_store, encrypted).unwrap();
-        write_rotation_journal(
-            &dir.path().join(".esk/key-rotation.json"),
-            &RotationJournal {
-                new_key: hex::encode(&new_key),
-                temp_store: temp_store.clone(),
-            },
-        )
-        .unwrap();
-
-        let provider = KeyProvider::from_environment_value(&hex::encode(&new_key)).unwrap();
-        let reopened = SecretStore::open_with_provider(dir.path(), &provider).unwrap();
-        assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
-        assert!(!temp_store.exists());
-        assert!(!dir.path().join(".esk/key-rotation.json").exists());
+    fn rotation_journal_contains_only_version_stage_and_phase() {
+        let journal = RotationJournal {
+            version: ROTATION_JOURNAL_VERSION,
+            stage_id: "0123456789abcdef0123456789abcdef".to_string(),
+            phase: RotationPhase::Prepared,
+        };
+        let serialized = serde_json::to_string(&journal).unwrap();
+        assert!(!serialized.contains("key"), "{serialized}");
+        assert!(!serialized.contains("path"), "{serialized}");
     }
 
     #[test]
-    fn recovers_persisted_pending_rotation_with_environment_provider() {
+    fn recovers_rotation_crashed_before_store_promotion() {
         let dir = tmp_root();
-        let store = SecretStore::load_or_create(dir.path()).unwrap();
-        store.set("KEY", "dev", "sentinel").unwrap();
-        let payload = store.payload().unwrap();
-        let new_key = KeyProvider::generate_key();
-        let json = serde_json::to_string(&payload).unwrap();
-        let encrypted = encrypt_store_with_key(&new_key, &json).unwrap();
-        std::fs::write(dir.path().join(".esk/store.enc"), encrypted).unwrap();
-        let missing_temp_store = dir.path().join(".esk/pending-store");
+        let (stage, _) = staged_rotation(&dir);
+        assert_rotation_recovered(&dir, &stage);
+    }
+
+    #[test]
+    fn recovers_rotation_crashed_after_store_promotion() {
+        let dir = tmp_root();
+        let (stage, _) = staged_rotation(&dir);
+        let journal_path = dir.path().join(".esk/key-rotation.json");
+        std::fs::rename(&stage.candidate_store, dir.path().join(".esk/store.enc")).unwrap();
         write_rotation_journal(
-            &dir.path().join(".esk/key-rotation.json"),
+            &journal_path,
             &RotationJournal {
-                new_key: hex::encode(&new_key),
-                temp_store: missing_temp_store,
+                version: ROTATION_JOURNAL_VERSION,
+                stage_id: "0123456789abcdef0123456789abcdef".to_string(),
+                phase: RotationPhase::StorePromoted,
             },
         )
         .unwrap();
+        assert_rotation_recovered(&dir, &stage);
+    }
 
-        let provider = KeyProvider::from_environment_value(&hex::encode(&new_key)).unwrap();
+    #[test]
+    fn recovers_rotation_crashed_after_provider_promotion() {
+        let dir = tmp_root();
+        let (stage, key) = staged_rotation(&dir);
+        let esk_dir = dir.path().join(".esk");
+        std::fs::rename(&stage.candidate_store, esk_dir.join("store.enc")).unwrap();
+        KeyProvider::from_marker(&esk_dir)
+            .unwrap()
+            .store(&key)
+            .unwrap();
+        write_rotation_journal(
+            &esk_dir.join(ROTATION_JOURNAL_FILE),
+            &RotationJournal {
+                version: ROTATION_JOURNAL_VERSION,
+                stage_id: "0123456789abcdef0123456789abcdef".to_string(),
+                phase: RotationPhase::ProviderPromoted,
+            },
+        )
+        .unwrap();
+        assert_rotation_recovered(&dir, &stage);
+    }
+
+    #[test]
+    fn recovers_rotation_with_environment_provider_using_durable_provider() {
+        let dir = tmp_root();
+        let (stage, key) = staged_rotation(&dir);
+        let provider = KeyProvider::from_environment_value(&hex::encode(&key)).unwrap();
         let reopened = SecretStore::open_with_provider(dir.path(), &provider).unwrap();
-        assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
+        assert_eq!(
+            reopened.get("KEY", "dev").unwrap().as_deref(),
+            Some("sentinel")
+        );
+        assert!(!stage.candidate_store.exists());
         assert!(!dir.path().join(".esk/key-rotation.json").exists());
+        let durable_key = KeyProvider::from_marker(&dir.path().join(".esk"))
+            .unwrap()
+            .load()
+            .unwrap();
+        assert_eq!(&*durable_key, &*key);
+    }
+
+    #[test]
+    fn forged_legacy_or_path_journals_fail_closed_without_touching_outside_files() {
+        let dir = tmp_root();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        let outside = dir.path().join("outside-sentinel");
+        std::fs::write(&outside, "do not touch").unwrap();
+        let journal_path = dir.path().join(".esk/key-rotation.json");
+
+        std::fs::write(
+            &journal_path,
+            r#"{"new_key":"deadbeef","temp_store":"../outside-sentinel"}"#,
+        )
+        .unwrap();
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("invalid key rotation journal"));
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "do not touch");
+
+        std::fs::write(
+            &journal_path,
+            r#"{"version":1,"stage_id":"../../outside-sentinel","phase":"prepared"}"#,
+        )
+        .unwrap();
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invalid key rotation stage identifier"));
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "do not touch");
+
+        std::fs::write(
+            &journal_path,
+            r#"{"version":1,"stage_id":"0123456789abcdef0123456789abcdef","phase":"unknown"}"#,
+        )
+        .unwrap();
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("invalid key rotation journal"));
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "do not touch");
+    }
+
+    #[test]
+    fn recovery_rejects_nonregular_staged_artifacts_before_mutating_live_store() {
+        let dir = tmp_root();
+        let (stage, _) = staged_rotation(&dir);
+        std::fs::remove_file(&stage.candidate_store).unwrap();
+        std::fs::create_dir(&stage.candidate_store).unwrap();
+        let before = std::fs::read(dir.path().join(".esk/store.enc")).unwrap();
+
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("unsafe staged rotation store"));
+        assert_eq!(
+            std::fs::read(dir.path().join(".esk/store.enc")).unwrap(),
+            before
+        );
+    }
+
+    #[test]
+    fn recovery_rejects_directory_live_store_before_mutating_provider() {
+        let dir = tmp_root();
+        let (stage, _) = staged_rotation(&dir);
+        let esk_dir = dir.path().join(".esk");
+        let store_path = esk_dir.join("store.enc");
+        let provider_path = esk_dir.join("store.key");
+        let provider_before = std::fs::read(&provider_path).unwrap();
+        let outside = dir.path().join("outside-sentinel");
+        std::fs::write(&outside, "do not touch").unwrap();
+        std::fs::remove_file(&stage.candidate_store).unwrap();
+        std::fs::remove_file(&store_path).unwrap();
+        std::fs::create_dir(&store_path).unwrap();
+
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("unsafe promoted rotation store"));
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_before);
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "do not touch");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_rejects_symlinked_live_store_before_mutating_provider_or_target() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tmp_root();
+        let (stage, _) = staged_rotation(&dir);
+        let esk_dir = dir.path().join(".esk");
+        let store_path = esk_dir.join("store.enc");
+        let provider_path = esk_dir.join("store.key");
+        let provider_before = std::fs::read(&provider_path).unwrap();
+        let outside = dir.path().join("outside-sentinel");
+        std::fs::write(&outside, "do not touch").unwrap();
+        std::fs::remove_file(&stage.candidate_store).unwrap();
+        std::fs::remove_file(&store_path).unwrap();
+        symlink(&outside, &store_path).unwrap();
+
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("unsafe promoted rotation store"));
+        assert_eq!(std::fs::read(&provider_path).unwrap(), provider_before);
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "do not touch");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn recovery_rejects_symlinked_staged_artifacts_without_touching_target() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tmp_root();
+        let (stage, _) = staged_rotation(&dir);
+        let outside = dir.path().join("outside-sentinel");
+        std::fs::write(&outside, "do not touch").unwrap();
+        std::fs::remove_file(&stage.candidate_store).unwrap();
+        symlink(&outside, &stage.candidate_store).unwrap();
+
+        let err = SecretStore::open(dir.path()).unwrap_err();
+        assert!(err.to_string().contains("unsafe staged rotation store"));
+        assert_eq!(std::fs::read_to_string(&outside).unwrap(), "do not touch");
     }
 
     #[test]
@@ -1956,8 +2344,7 @@ mod tests {
 
     #[test]
     fn environment_provider_cannot_rotate_or_store_a_new_key() {
-        let provider =
-            KeyProvider::from_environment_value(&hex::encode([0_u8; KEY_LEN])).unwrap();
+        let provider = KeyProvider::from_environment_value(&hex::encode([0_u8; KEY_LEN])).unwrap();
         let err = provider.store(&[0_u8; KEY_LEN]).unwrap_err();
         assert!(err
             .to_string()
