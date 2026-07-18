@@ -22,7 +22,11 @@ const STORE_FORMAT_V2: &str = "v2";
 const STORE_AAD_V2: &[u8] = b"esk-store:v2";
 const STORE_VERSION_FILE: &str = "store.version";
 const ROTATION_JOURNAL_FILE: &str = "key-rotation.json";
-const STORE_KEY_ENV: &str = "ESK_STORE_KEY";
+/// Environment variable containing the store's master encryption key.
+///
+/// This is crate-visible so every subprocess boundary can explicitly remove
+/// the key before spawning an external command.
+pub(crate) const STORE_KEY_ENV: &str = "ESK_STORE_KEY";
 
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.

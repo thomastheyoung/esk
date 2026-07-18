@@ -28,6 +28,7 @@ use std::sync::{Arc, Mutex};
 use console::style;
 
 use crate::config::{Config, ResolvedTarget};
+use crate::store::STORE_KEY_ENV;
 
 /// Whether a deploy succeeded or failed.
 pub enum DeployOutcome {
@@ -155,6 +156,11 @@ impl CommandRunner for RealCommandRunner {
         for (k, v) in &opts.env {
             cmd.env(k, v);
         }
+
+        // The store master key must never be inherited by target CLIs. Remove
+        // it after applying explicit environment values so callers cannot
+        // accidentally reintroduce this reserved internal variable.
+        cmd.env_remove(STORE_KEY_ENV);
 
         if opts.stdin.is_some() {
             cmd.stdin(Stdio::piped());
@@ -724,6 +730,10 @@ mod tests {
     use super::*;
     use crate::test_support::ErrorCommandRunner;
 
+    const COMMAND_RUNNER_DRIVER_ENV: &str = "ESK_TEST_COMMAND_RUNNER_DRIVER";
+    const COMMAND_RUNNER_PROBE_ENV: &str = "ESK_TEST_COMMAND_RUNNER_PROBE";
+    const TARGET_CREDENTIAL_ENV: &str = "ESK_TEST_TARGET_CREDENTIAL";
+
     struct TestTarget {
         fail_keys: Vec<String>,
     }
@@ -788,6 +798,76 @@ mod tests {
         let target = TestTarget { fail_keys: vec![] };
         let results = target.deploy_batch(&[], &make_target());
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn real_command_runner_removes_store_key_and_preserves_other_explicit_environment() {
+        if std::env::var_os(COMMAND_RUNNER_DRIVER_ENV).is_some() {
+            let executable = std::env::current_exe().unwrap();
+            let program = executable.to_string_lossy();
+            let output = RealCommandRunner
+                .run(
+                    &program,
+                    &[
+                        "targets::tests::command_runner_environment_probe",
+                        "--exact",
+                        "--nocapture",
+                    ],
+                    CommandOpts {
+                        env: vec![
+                            (COMMAND_RUNNER_PROBE_ENV.to_string(), "1".to_string()),
+                            (TARGET_CREDENTIAL_ENV.to_string(), "present".to_string()),
+                            (STORE_KEY_ENV.to_string(), "explicit-master-key".to_string()),
+                        ],
+                        ..Default::default()
+                    },
+                )
+                .unwrap();
+
+            assert!(
+                output.success,
+                "probe failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            let stdout = String::from_utf8(output.stdout).unwrap();
+            assert!(stdout.contains("store_key=absent"), "{stdout}");
+            assert!(stdout.contains("target_credential=present"), "{stdout}");
+            return;
+        }
+
+        let executable = std::env::current_exe().unwrap();
+        let status = std::process::Command::new(executable)
+            .args([
+                "targets::tests::real_command_runner_removes_store_key_and_preserves_other_explicit_environment",
+                "--exact",
+                "--nocapture",
+            ])
+            .env(STORE_KEY_ENV, "inherited-master-key")
+            .env(COMMAND_RUNNER_DRIVER_ENV, "1")
+            .status()
+            .unwrap();
+
+        assert!(status.success());
+    }
+
+    #[test]
+    fn command_runner_environment_probe() {
+        if std::env::var_os(COMMAND_RUNNER_PROBE_ENV).is_none() {
+            return;
+        }
+
+        println!(
+            "store_key={}",
+            if std::env::var_os(STORE_KEY_ENV).is_some() {
+                "present"
+            } else {
+                "absent"
+            }
+        );
+        println!(
+            "target_credential={}",
+            std::env::var(TARGET_CREDENTIAL_ENV).unwrap_or_default()
+        );
     }
 
     #[test]
