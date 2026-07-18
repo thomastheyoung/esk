@@ -235,18 +235,38 @@ as part of the threat model; do not run esk on an untrusted host.
 
 ### Key storage
 
-The encryption key can be stored in two ways:
+The encryption key can be stored in three ways:
 
 | Provider | How | When to use |
 |----------|-----|-------------|
 | File (default) | `.esk/store.key`, gitignored | Works everywhere, including CI and headless |
 | OS keychain | macOS Keychain, Windows Credential Manager, Linux Secret Service | Interactive workstations; hardware-backed on macOS/Windows |
+| Environment | `ESK_STORE_KEY` (32-byte hex) | CI and other headless, ephemeral environments |
 
 Initialize with `esk init` (file) or `esk init --keychain` (keychain). On supported platforms (macOS, Windows, Linux with Secret Service), `esk init` will prompt to choose.
 
 **Why not 1Password, Bitwarden, or other password managers?** The encryption key is read on every `esk` command. It must be local, instant, and available offline. Password managers require network access and interactive auth, making them unsuitable as a key provider. They also create a circular dependency: esk uses these services as sync remotes for the encrypted store, so the key that decrypts the store cannot itself depend on reaching those services.
 
 For team key distribution, share the key out-of-band (paste it into a shared vault, send via a secure channel). The encrypted store is then shared via remotes as usual.
+
+#### CI and headless environments
+
+Set `ESK_STORE_KEY` to the same 64-character hexadecimal key normally stored in
+`.esk/store.key`. It takes precedence over the configured file or OS-keychain
+provider, is never written to disk by esk, and works with every command that
+opens the encrypted store.
+
+```yaml
+# GitHub Actions
+env:
+  ESK_STORE_KEY: ${{ secrets.ESK_STORE_KEY }}
+```
+
+The variable must contain exactly 32 bytes encoded as hexadecimal. Keep it in
+the CI provider's masked secret store; environment variables can be exposed by
+debug logging, child processes, or compromised runners. `esk init` continues to
+honor its explicit file/keychain choice, and `esk key rotate` must be run with
+the environment variable unset so the new key can be persisted.
 
 ## Quick troubleshooting
 

@@ -281,7 +281,9 @@ fn ensure_file_store(
         return Ok((KeyStatus::File(FileStatus::Existed), FileStatus::Existed));
     }
 
-    let _store = SecretStore::load_or_create(cwd)?;
+    // `esk init` explicitly selected file-backed storage. Do not let a
+    // process-level CI key change that durable initialization choice.
+    let _store = SecretStore::load_or_create_with_provider(cwd, Some("file"))?;
     Ok((KeyStatus::File(FileStatus::Created), FileStatus::Created))
 }
 

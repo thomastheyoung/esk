@@ -22,6 +22,7 @@ const STORE_FORMAT_V2: &str = "v2";
 const STORE_AAD_V2: &[u8] = b"esk-store:v2";
 const STORE_VERSION_FILE: &str = "store.version";
 const ROTATION_JOURNAL_FILE: &str = "key-rotation.json";
+const STORE_KEY_ENV: &str = "ESK_STORE_KEY";
 
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.
@@ -251,6 +252,9 @@ impl std::fmt::Debug for StorePayload {
 }
 
 pub(crate) enum KeyProvider {
+    Environment {
+        key: Zeroizing<Vec<u8>>,
+    },
     File {
         path: PathBuf,
     },
@@ -262,6 +266,43 @@ pub(crate) enum KeyProvider {
 }
 
 impl KeyProvider {
+    /// Select the environment key when present, otherwise use the configured
+    /// persistent provider from `.esk/key-provider`.
+    ///
+    /// Presence, rather than successful parsing, determines precedence. This
+    /// prevents a malformed `ESK_STORE_KEY` from silently falling back to a
+    /// different key source and producing a confusing decryption failure.
+    pub(crate) fn from_environment_or_marker(esk_dir: &Path) -> Result<Self> {
+        let value = std::env::var_os(STORE_KEY_ENV)
+            .map(|value| {
+                value
+                    .into_string()
+                    .map(Zeroizing::new)
+                    .map_err(|_| anyhow::anyhow!("{STORE_KEY_ENV} is set but is not valid UTF-8"))
+            })
+            .transpose()?;
+        Self::from_environment_value_or_marker(
+            esk_dir,
+            value.as_ref().map(|value| value.as_str()),
+        )
+    }
+
+    fn from_environment_value_or_marker(
+        esk_dir: &Path,
+        environment_value: Option<&str>,
+    ) -> Result<Self> {
+        match environment_value {
+            Some(value) => Self::from_environment_value(value),
+            None => Self::from_marker(esk_dir),
+        }
+    }
+
+    fn from_environment_value(value: &str) -> Result<Self> {
+        Ok(Self::Environment {
+            key: Self::decode_key(value.trim(), STORE_KEY_ENV)?,
+        })
+    }
+
     pub(crate) fn from_marker(esk_dir: &Path) -> Result<Self> {
         let marker = esk_dir.join("key-provider");
         let provider = if marker.is_file() {
@@ -291,6 +332,7 @@ impl KeyProvider {
 
     fn exists(&self) -> bool {
         match self {
+            Self::Environment { .. } => true,
             Self::File { path } => path.is_file(),
             #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
@@ -307,6 +349,7 @@ impl KeyProvider {
 
     pub(crate) fn load(&self) -> Result<Zeroizing<Vec<u8>>> {
         match self {
+            Self::Environment { key } => Ok(key.clone()),
             Self::File { path } => Self::read_key_file(path),
             #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
@@ -349,6 +392,9 @@ impl KeyProvider {
 
     pub(crate) fn store(&self, key: &[u8]) -> Result<()> {
         match self {
+            Self::Environment { .. } => bail!(
+                "cannot write a new encryption key to {STORE_KEY_ENV}; unset {STORE_KEY_ENV} and use the configured file or OS-keychain provider"
+            ),
             Self::File { path } => Self::write_key_file(path, key),
             #[cfg(feature = "keychain")]
             Self::Keychain { service, account } => {
@@ -382,10 +428,16 @@ impl KeyProvider {
             std::fs::read_to_string(path)
                 .with_context(|| format!("failed to read key from {}", path.display()))?,
         );
-        let key = Zeroizing::new(hex::decode(hex_str.trim()).context("invalid key hex")?);
+        let key = Self::decode_key(hex_str.trim(), "key")?;
+        Ok(key)
+    }
+
+    fn decode_key(value: &str, source: &str) -> Result<Zeroizing<Vec<u8>>> {
+        let key =
+            Zeroizing::new(hex::decode(value).with_context(|| format!("invalid {source} hex"))?);
         if key.len() != KEY_LEN {
             bail!(
-                "invalid key length: expected {KEY_LEN} bytes, got {}",
+                "invalid {source} length: expected {KEY_LEN} bytes, got {}",
                 key.len()
             );
         }
@@ -468,13 +520,17 @@ impl SecretStore {
             std::fs::set_permissions(&esk_dir, std::fs::Permissions::from_mode(0o700))?;
         }
 
-        if let Some(prov) = provider_override {
-            KeyProvider::write_marker(&esk_dir, prov)?;
-        }
-
-        let provider = KeyProvider::from_marker(&esk_dir)?;
+        let provider = match provider_override {
+            Some(prov) => {
+                // Explicit initialization choices must be deterministic even
+                // when a CI environment happens to export ESK_STORE_KEY.
+                KeyProvider::write_marker(&esk_dir, prov)?;
+                KeyProvider::from_marker(&esk_dir)?
+            }
+            None => KeyProvider::from_environment_or_marker(&esk_dir)?,
+        };
         if esk_dir.join(ROTATION_JOURNAL_FILE).is_file() {
-            recover_pending_rotation(&esk_dir, &provider)?;
+            recover_pending_rotation_with_durable_provider(&esk_dir, &provider)?;
         }
         let store_path = esk_dir.join("store.enc");
 
@@ -502,11 +558,16 @@ impl SecretStore {
     /// Open an existing store (errors if key or store file is missing).
     pub fn open(root: &Path) -> Result<Self> {
         let esk_dir = root.join(".esk");
+        let provider = KeyProvider::from_environment_or_marker(&esk_dir)?;
+        Self::open_with_provider(root, &provider)
+    }
+
+    fn open_with_provider(root: &Path, provider: &KeyProvider) -> Result<Self> {
+        let esk_dir = root.join(".esk");
         let store_path = esk_dir.join("store.enc");
 
-        let provider = KeyProvider::from_marker(&esk_dir)?;
         if esk_dir.join(ROTATION_JOURNAL_FILE).is_file() {
-            recover_pending_rotation(&esk_dir, &provider)?;
+            recover_pending_rotation_with_durable_provider(&esk_dir, provider)?;
         }
 
         if !provider.exists() {
@@ -652,16 +713,22 @@ impl SecretStore {
     /// the previous key is restored before returning the error.
     pub fn rotate_key(&self) -> Result<()> {
         self.with_lock(|| {
+            let provider = KeyProvider::from_environment_or_marker(
+                self.store_path
+                    .parent()
+                    .context("store path has no parent")?,
+            )?;
+            if matches!(provider, KeyProvider::Environment { .. }) {
+                bail!(
+                    "cannot rotate the encryption key while {STORE_KEY_ENV} is set; unset {STORE_KEY_ENV} and retry"
+                );
+            }
+
             let payload = self.payload()?;
             let json = Zeroizing::new(serde_json::to_string(&payload)?);
             let new_key = KeyProvider::generate_key();
             let encrypted = encrypt_store_with_key(&new_key, &json)?;
             let old_key = self.key.clone();
-            let provider = KeyProvider::from_marker(
-                self.store_path
-                    .parent()
-                    .context("store path has no parent")?,
-            )?;
 
             let dir = self
                 .store_path
@@ -817,6 +884,22 @@ fn write_rotation_journal(path: &Path, journal: &RotationJournal) -> Result<()> 
     tmp.persist(path)
         .with_context(|| format!("failed to persist rotation journal to {}", path.display()))?;
     Ok(())
+}
+
+fn recover_pending_rotation_with_durable_provider(
+    esk_dir: &Path,
+    provider: &KeyProvider,
+) -> Result<()> {
+    // ESK_STORE_KEY is intentionally read-only. A rotation journal, however,
+    // must finish updating the durable provider before the store can be
+    // considered recovered. Keep the environment provider for opening the
+    // recovered store, but use the marker-selected provider for this write.
+    if matches!(provider, KeyProvider::Environment { .. }) {
+        let durable_provider = KeyProvider::from_marker(esk_dir)?;
+        recover_pending_rotation(esk_dir, &durable_provider)
+    } else {
+        recover_pending_rotation(esk_dir, provider)
+    }
 }
 
 fn recover_pending_rotation(esk_dir: &Path, provider: &KeyProvider) -> Result<()> {
@@ -1269,6 +1352,59 @@ mod tests {
         let reopened = SecretStore::open(dir.path()).unwrap();
         assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
         assert!(!temp_store.exists());
+        assert!(!dir.path().join(".esk/key-rotation.json").exists());
+    }
+
+    #[test]
+    fn recovers_pending_rotation_with_environment_provider_and_temp_store() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "sentinel").unwrap();
+        let payload = store.payload().unwrap();
+        let new_key = KeyProvider::generate_key();
+        let json = serde_json::to_string(&payload).unwrap();
+        let encrypted = encrypt_store_with_key(&new_key, &json).unwrap();
+        let temp_store = dir.path().join(".esk/pending-store");
+        std::fs::write(&temp_store, encrypted).unwrap();
+        write_rotation_journal(
+            &dir.path().join(".esk/key-rotation.json"),
+            &RotationJournal {
+                new_key: hex::encode(&new_key),
+                temp_store: temp_store.clone(),
+            },
+        )
+        .unwrap();
+
+        let provider = KeyProvider::from_environment_value(&hex::encode(&new_key)).unwrap();
+        let reopened = SecretStore::open_with_provider(dir.path(), &provider).unwrap();
+        assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
+        assert!(!temp_store.exists());
+        assert!(!dir.path().join(".esk/key-rotation.json").exists());
+    }
+
+    #[test]
+    fn recovers_persisted_pending_rotation_with_environment_provider() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "sentinel").unwrap();
+        let payload = store.payload().unwrap();
+        let new_key = KeyProvider::generate_key();
+        let json = serde_json::to_string(&payload).unwrap();
+        let encrypted = encrypt_store_with_key(&new_key, &json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), encrypted).unwrap();
+        let missing_temp_store = dir.path().join(".esk/pending-store");
+        write_rotation_journal(
+            &dir.path().join(".esk/key-rotation.json"),
+            &RotationJournal {
+                new_key: hex::encode(&new_key),
+                temp_store: missing_temp_store,
+            },
+        )
+        .unwrap();
+
+        let provider = KeyProvider::from_environment_value(&hex::encode(&new_key)).unwrap();
+        let reopened = SecretStore::open_with_provider(dir.path(), &provider).unwrap();
+        assert_eq!(reopened.get("KEY", "dev").unwrap().as_deref(), Some("sentinel"));
         assert!(!dir.path().join(".esk/key-rotation.json").exists());
     }
 
@@ -1775,6 +1911,53 @@ mod tests {
         std::fs::write(dir.path().join(".esk/store.key"), "").unwrap();
         let err = SecretStore::open(dir.path()).unwrap_err();
         assert!(err.to_string().contains("invalid key length"));
+    }
+
+    #[test]
+    fn environment_provider_loads_store_without_key_file() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "value").unwrap();
+        let key = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
+        std::fs::remove_file(dir.path().join(".esk/store.key")).unwrap();
+
+        let provider = KeyProvider::from_environment_value(&format!("  {key}\n")).unwrap();
+        let reopened = SecretStore::open_with_provider(dir.path(), &provider).unwrap();
+        assert_eq!(
+            reopened.get("KEY", "dev").unwrap(),
+            Some("value".to_string())
+        );
+    }
+
+    #[test]
+    fn environment_provider_takes_precedence_over_file_key() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("KEY", "dev", "value").unwrap();
+
+        let wrong_key = hex::encode([0xa5_u8; KEY_LEN]);
+        let provider = KeyProvider::from_environment_value(&wrong_key).unwrap();
+        let reopened = SecretStore::open_with_provider(dir.path(), &provider).unwrap();
+        let err = reopened.get("KEY", "dev").unwrap_err();
+        assert!(err.to_string().contains("decryption failed"));
+    }
+
+    #[test]
+    fn environment_provider_rejects_invalid_values() {
+        for value in ["", "not-hex", "00"] {
+            let err = KeyProvider::from_environment_value(value).err().unwrap();
+            assert!(err.to_string().contains("invalid ESK_STORE_KEY"));
+        }
+    }
+
+    #[test]
+    fn environment_provider_cannot_rotate_or_store_a_new_key() {
+        let provider =
+            KeyProvider::from_environment_value(&hex::encode([0_u8; KEY_LEN])).unwrap();
+        let err = provider.store(&[0_u8; KEY_LEN]).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("cannot write a new encryption key"));
     }
 
     // --- Phase 6a: null byte rejection ---

@@ -34,6 +34,73 @@ fn store_reopen_after_set() {
 }
 
 #[test]
+fn cli_reopens_store_with_esk_store_key_without_key_file() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let store = project.store().unwrap();
+    store.set("KEY", "dev", "value-from-ci").unwrap();
+    let key = std::fs::read_to_string(project.root().join(".esk/store.key")).unwrap();
+    std::fs::remove_file(project.root().join(".esk/store.key")).unwrap();
+
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_esk"))
+        .current_dir(project.root())
+        .env("ESK_STORE_KEY", key.trim())
+        .args(["get", "KEY", "--env", "dev"])
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "value-from-ci");
+
+    let rotate = std::process::Command::new(env!("CARGO_BIN_EXE_esk"))
+        .current_dir(project.root())
+        .env("ESK_STORE_KEY", key.trim())
+        .args(["key", "rotate"])
+        .output()
+        .unwrap();
+    assert!(!rotate.status.success());
+    assert!(String::from_utf8_lossy(&rotate.stderr).contains("cannot rotate"));
+}
+
+#[test]
+fn cli_rejects_malformed_esk_store_key_instead_of_falling_back() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_esk"))
+        .current_dir(project.root())
+        .env("ESK_STORE_KEY", "not-a-key")
+        .args(["get", "KEY", "--env", "dev"])
+        .output()
+        .unwrap();
+
+    assert!(!output.status.success());
+    assert!(String::from_utf8_lossy(&output.stderr).contains("invalid ESK_STORE_KEY"));
+}
+
+#[test]
+fn init_keeps_explicit_file_provider_when_esk_store_key_is_set() {
+    let dir = tempfile::tempdir().unwrap();
+    let environment_key = hex::encode([0x5a_u8; 32]);
+    let output = std::process::Command::new(env!("CARGO_BIN_EXE_esk"))
+        .current_dir(dir.path())
+        .env("ESK_STORE_KEY", &environment_key)
+        .arg("init")
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let file_key = std::fs::read_to_string(dir.path().join(".esk/store.key")).unwrap();
+    assert_ne!(file_key.trim(), environment_key);
+    assert!(dir.path().join(".esk/store.enc").is_file());
+}
+
+#[test]
 fn store_large_payload() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let store = project.store().unwrap();

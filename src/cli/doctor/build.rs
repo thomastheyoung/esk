@@ -43,11 +43,12 @@ impl Report {
             None
         };
 
-        // 3. Key provider marker exists and is valid
+        // 3. The active key provider is valid (environment override or marker)
         let provider = if esk_dir_ok {
-            match KeyProvider::from_marker(&esk_dir) {
+            match KeyProvider::from_environment_or_marker(&esk_dir) {
                 Ok(p) => {
                     let desc = match &p {
+                        KeyProvider::Environment { .. } => "ESK_STORE_KEY environment variable",
                         KeyProvider::File { .. } => "file-based key",
                         KeyProvider::Keychain { .. } => "OS keychain",
                     };
