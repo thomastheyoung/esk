@@ -81,23 +81,10 @@ pub fn run_json(cwd: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::types::*;
-    use super::*;
     use crate::deploy_tracker::DeployIndex;
     use crate::store::SecretStore;
     use crate::sync_tracker::SyncIndex;
-    use crate::targets::{CommandOpts, CommandOutput};
     use tempfile::TempDir;
-
-    struct OkRunner;
-    impl CommandRunner for OkRunner {
-        fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
-            Ok(CommandOutput {
-                success: true,
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            })
-        }
-    }
 
     fn setup_healthy_project() -> TempDir {
         let dir = TempDir::new().unwrap();

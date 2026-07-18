@@ -17,7 +17,6 @@ pub struct RecordedCall {
 
 enum QueuedResponse {
     Output(CommandOutput),
-    Error(String),
 }
 
 /// Shared command runner test double for target and remote unit tests.
@@ -110,7 +109,6 @@ impl CommandRunner for MockCommandRunner {
 
         match responses.remove(0) {
             QueuedResponse::Output(output) => Ok(output),
-            QueuedResponse::Error(message) => Err(anyhow!(message)),
         }
     }
 }

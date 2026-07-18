@@ -3133,7 +3133,7 @@ secrets:
         let dir = tempfile::tempdir().unwrap();
         let cloud_dir = tempfile::tempdir().unwrap();
         let yaml = format!(
-            r#"
+            r"
 project: x
 environments: [dev]
 remotes:
@@ -3147,7 +3147,7 @@ remotes:
   s3:
     bucket: my-bucket
     format: encrypted
-"#,
+",
             cloud_dir.path().display()
         );
         let path = write_yaml(dir.path(), &yaml);

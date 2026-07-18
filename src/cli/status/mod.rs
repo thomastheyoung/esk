@@ -121,7 +121,6 @@ mod tests {
     use crate::config::Config;
     use crate::store::SecretStore;
     use crate::sync_tracker::SyncIndex;
-    use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
     use chrono::Utc;
 
     #[test]
@@ -154,17 +153,6 @@ mod tests {
             crate::ui::format_relative_time("not-a-timestamp"),
             "not-a-timestamp"
         );
-    }
-
-    struct OkRunner;
-    impl CommandRunner for OkRunner {
-        fn run(&self, _: &str, _: &[&str], _: CommandOpts) -> anyhow::Result<CommandOutput> {
-            Ok(CommandOutput {
-                success: true,
-                stdout: Vec::new(),
-                stderr: Vec::new(),
-            })
-        }
     }
 
     #[test]
