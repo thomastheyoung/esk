@@ -764,30 +764,26 @@ pub struct MissingRequirement {
     pub targets: Vec<String>,
 }
 
-/// Check whether `target` stays within `root` after normalizing `..` components.
-/// Does not require paths to exist on disk.
-fn is_within_root(root: &Path, target: &Path) -> bool {
+/// Normalize a project-relative output path while rejecting components that
+/// could change its meaning after it is joined to the project root.
+fn normalize_project_relative_output(output: &str) -> Result<PathBuf> {
     let mut normalized = PathBuf::new();
-    for component in target.components() {
+    for component in Path::new(output).components() {
         match component {
+            std::path::Component::Normal(part) => normalized.push(part),
+            std::path::Component::CurDir => {}
             std::path::Component::ParentDir => {
-                normalized.pop();
+                bail!("project output path must not contain '..'");
             }
-            c => normalized.push(c),
+            std::path::Component::RootDir | std::path::Component::Prefix(_) => {
+                bail!("project output path must be relative");
+            }
         }
     }
-    normalized.starts_with(root)
-}
-
-/// Return the closest existing ancestor (including `path` itself).
-fn nearest_existing_ancestor(path: &Path) -> Option<&Path> {
-    let mut cur = path;
-    loop {
-        if cur.exists() {
-            return Some(cur);
-        }
-        cur = cur.parent()?;
+    if normalized.as_os_str().is_empty() {
+        bail!("project output path must name a file");
     }
+    Ok(normalized)
 }
 
 impl Config {
@@ -797,6 +793,59 @@ impl Config {
             bail!("{}", crate::suggest::unknown_env(env, &self.environments));
         }
         Ok(())
+    }
+
+    /// Resolve a generated local output path safely beneath the project root.
+    ///
+    /// The input is normalized as a relative path, existing components are
+    /// checked without following symlinks, and an existing output must be a
+    /// regular file. Callers that create parent directories must resolve again
+    /// before writing, because filesystem topology can change after validation.
+    pub fn resolve_project_output_path(&self, output: &str) -> Result<PathBuf> {
+        let relative = normalize_project_relative_output(output)?;
+        let resolved = self.root.join(&relative);
+
+        std::fs::canonicalize(&self.root).with_context(|| {
+            format!(
+                "failed to canonicalize project root {}",
+                self.root.display()
+            )
+        })?;
+
+        let components: Vec<_> = relative.components().collect();
+        let mut current = self.root.clone();
+        for (index, component) in components.iter().enumerate() {
+            current.push(component.as_os_str());
+            match std::fs::symlink_metadata(&current) {
+                Ok(metadata) => {
+                    if metadata.file_type().is_symlink() {
+                        bail!(
+                            "project output '{}' traverses a symlink at {}",
+                            output,
+                            current.display()
+                        );
+                    }
+                    if index + 1 == components.len() {
+                        if !metadata.is_file() {
+                            bail!("project output '{output}' is not a regular file");
+                        }
+                    } else if !metadata.is_dir() {
+                        bail!(
+                            "project output '{}' has a non-directory parent at {}",
+                            output,
+                            current.display()
+                        );
+                    }
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
+                Err(error) => {
+                    return Err(error)
+                        .with_context(|| format!("failed to inspect {}", current.display()));
+                }
+            }
+        }
+
+        Ok(resolved)
     }
 
     /// Find `esk.yaml` from the current directory and load it.
@@ -998,19 +1047,20 @@ impl Config {
         }
 
         // --- Validate generate outputs ---
-        if self.generate.len() > 1 {
-            let mut seen_paths = BTreeSet::new();
-            for entry in &self.generate {
-                let path = entry
-                    .output
-                    .as_deref()
-                    .unwrap_or(entry.format.default_output());
-                if !seen_paths.insert(path.to_string()) {
-                    bail!(
-                        "duplicate generate output path '{path}' — \
-                         use different 'output' values to disambiguate"
-                    );
-                }
+        let mut seen_paths = BTreeSet::new();
+        for entry in &self.generate {
+            let path = entry
+                .output
+                .as_deref()
+                .unwrap_or(entry.format.default_output());
+            let resolved = self
+                .resolve_project_output_path(path)
+                .with_context(|| format!("invalid generate output '{path}'"))?;
+            if !seen_paths.insert(resolved) {
+                bail!(
+                    "duplicate generate output path '{path}' after normalization — \
+                     use different 'output' values to disambiguate"
+                );
             }
         }
 
@@ -1303,35 +1353,8 @@ impl Config {
             .replace("{app_path}", &app_config.path)
             .replace("{env_suffix}", &suffix);
 
-        let resolved = self.root.join(&path);
-
-        // Defence-in-depth: ensure resolved path stays within project root
-        if !is_within_root(&self.root, &resolved) {
-            bail!(
-                "env path '{}' resolves outside project root",
-                resolved.display()
-            );
-        }
-
-        // Additional defence: reject symlink escapes (e.g. apps -> /tmp/outside).
-        let root_real = std::fs::canonicalize(&self.root).with_context(|| {
-            format!(
-                "failed to canonicalize project root {}",
-                self.root.display()
-            )
-        })?;
-        let existing = nearest_existing_ancestor(&resolved)
-            .context("env path has no existing ancestor to validate")?;
-        let existing_real = std::fs::canonicalize(existing)
-            .with_context(|| format!("failed to canonicalize {}", existing.display()))?;
-        if !existing_real.starts_with(&root_real) {
-            bail!(
-                "env path '{}' escapes project root via symlinked components",
-                resolved.display()
-            );
-        }
-
-        Ok(resolved)
+        self.resolve_project_output_path(&path)
+            .with_context(|| format!("invalid .env output path '{path}'"))
     }
 
     /// Get the set of configured target names.
@@ -2259,7 +2282,7 @@ targets:
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let err = config.resolve_dotenv_path("web", "dev").unwrap_err();
-        assert!(err.to_string().contains("resolves outside project root"));
+        assert!(format!("{err:#}").contains("must not contain '..'"));
     }
 
     #[test]
@@ -2307,9 +2330,7 @@ targets:
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let err = config.resolve_dotenv_path("web", "dev").unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("escapes project root via symlinked components"));
+        assert!(format!("{err:#}").contains("traverses a symlink"));
     }
 
     // --- add_secret_to_config tests ---
@@ -3022,6 +3043,80 @@ generate:
             err.to_string().contains("duplicate generate output path"),
             "got: {err}"
         );
+    }
+
+    #[test]
+    fn generate_duplicate_output_paths_are_normalized_before_comparison() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r"
+project: testapp
+environments: [dev]
+generate:
+  - format: dts
+    output: ./types/env.d.ts
+  - format: ts
+    output: types//env.d.ts
+";
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("duplicate generate output path 'types//env.d.ts' after normalization"),
+            "got: {err}"
+        );
+    }
+
+    #[test]
+    fn generate_output_validation_rejects_traversal_and_empty_paths() {
+        for output in ["../outside.ts", ".", ""] {
+            let dir = tempfile::tempdir().unwrap();
+            let yaml = format!(
+                "project: testapp\nenvironments: [dev]\ngenerate:\n  - format: dts\n    output: {output:?}\n"
+            );
+            let path = write_yaml(dir.path(), &yaml);
+            let err = Config::load(&path).unwrap_err();
+            assert!(
+                err.to_string().contains("invalid generate output"),
+                "output {output:?} unexpectedly produced: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn project_output_resolver_rejects_absolute_and_nonregular_outputs() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = write_yaml(dir.path(), "project: testapp\nenvironments: [dev]");
+        let config = Config::load(&config_path).unwrap();
+
+        let absolute = dir.path().join("outside.ts");
+        let err = config
+            .resolve_project_output_path(absolute.to_str().unwrap())
+            .unwrap_err();
+        assert!(err.to_string().contains("must be relative"));
+
+        std::fs::create_dir(dir.path().join("generated")).unwrap();
+        let err = config.resolve_project_output_path("generated").unwrap_err();
+        assert!(err.to_string().contains("not a regular file"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn generate_output_validation_rejects_symlinked_components() {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        symlink(outside.path(), dir.path().join("generated")).unwrap();
+        let yaml = r"
+project: testapp
+environments: [dev]
+generate:
+  - format: dts
+    output: generated/env.d.ts
+";
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(format!("{err:#}").contains("traverses a symlink"));
     }
 
     #[test]

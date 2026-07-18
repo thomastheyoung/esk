@@ -99,6 +99,21 @@ impl DeployTarget for DotenvTarget<'_> {
 
 impl DotenvTarget<'_> {
     fn write_dotenv_file(&self, app: &str, env: &str, secrets: &[SecretValue]) -> Result<()> {
+        self.write_dotenv_file_inner(app, env, secrets, |_| {})
+    }
+
+    /// The hook keeps the parent-creation/revalidation boundary testable; the
+    /// production caller supplies a no-op.
+    fn write_dotenv_file_inner<F>(
+        &self,
+        app: &str,
+        env: &str,
+        secrets: &[SecretValue],
+        after_parent_creation: F,
+    ) -> Result<()>
+    where
+        F: FnOnce(&std::path::Path),
+    {
         let path = self.config.resolve_dotenv_path(app, env)?;
 
         // Group secrets by group, maintaining sorted order
@@ -131,6 +146,11 @@ impl DotenvTarget<'_> {
             std::fs::create_dir_all(parent)
                 .with_context(|| format!("failed to create directory {}", parent.display()))?;
         }
+        after_parent_creation(&path);
+
+        // Parent creation can race with a path replacement. Resolve again
+        // immediately before creating or promoting the temporary file.
+        let path = self.config.resolve_dotenv_path(app, env)?;
 
         // Atomic write
         let dir = path.parent().context("env path has no parent")?;
@@ -297,6 +317,42 @@ targets:
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(results[0].outcome.is_success());
         assert!(fixture.path("apps/web/.env.local").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_rejects_symlink_added_after_an_earlier_path_resolution() {
+        use std::os::unix::fs::symlink;
+
+        let fixture = make_fixture();
+        let initial = fixture.config().resolve_dotenv_path("web", "dev").unwrap();
+        assert_eq!(initial, fixture.path("apps/web/.env.local"));
+
+        let outside = tempfile::tempdir().unwrap();
+        let sentinel = outside.path().join(".env.local");
+        std::fs::write(&sentinel, "outside sentinel\n").unwrap();
+
+        let target = DotenvTarget {
+            config: fixture.config(),
+        };
+        let err = target
+            .write_dotenv_file_inner(
+                "web",
+                "dev",
+                &[make_secret("KEY", "value", "General")],
+                |path| {
+                    let parent = path.parent().unwrap();
+                    assert!(parent.is_dir());
+                    std::fs::remove_dir_all(parent).unwrap();
+                    symlink(outside.path(), parent).unwrap();
+                },
+            )
+            .unwrap_err();
+        assert!(format!("{err:#}").contains("traverses a symlink"));
+        assert_eq!(
+            std::fs::read_to_string(&sentinel).unwrap(),
+            "outside sentinel\n"
+        );
     }
 
     #[test]
