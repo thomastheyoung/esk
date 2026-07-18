@@ -11,7 +11,11 @@
 
 **`ESK`** is an encrypted secrets manager that lets you define secrets once and deploy them to many targets.
 
-It is built for teams that want:
+Its differentiator is drift detection: one Git-versioned source of truth can show
+which configured targets differ from their last recorded deploy before a deployment
+surprises you.
+
+It is built for builders shipping one application to multiple environments and platforms:
 
 - A local encrypted source of truth
 - Simple deploys to local files and cloud platforms
@@ -20,7 +24,7 @@ It is built for teams that want:
 ## What esk does
 
 - Stores secrets in `.esk/store.enc` (versioned AES-256-GCM with authenticated format metadata)
-- Keeps the decryption key locally (file or OS keychain)
+- Obtains the decryption key from the configured local file or OS keychain; `ESK_STORE_KEY` supports CI and other headless runs
 - Deploys to targets like `.env` files, Cloudflare, Convex, Vercel, GitHub Actions, Kubernetes, Docker Swarm, and more
 - Syncs with remotes like 1Password, cloud folders, AWS Secrets Manager, Vault, Bitwarden, S3, GCP, Azure, Doppler, and SOPS
 - Validates values against format, pattern, enum, and range constraints
@@ -28,6 +32,16 @@ It is built for teams that want:
 - Detects empty/whitespace-only values that break runtime defaults
 - Generates TypeScript declarations, runtime validators, Zod schemas, and `.env.example` templates
 - Prunes orphaned deploys (secrets removed from config but still deployed to targets)
+
+## Scope and non-goals
+
+esk has no hosted dashboard, account system, or control plane. Local store access and
+decryption do not depend on an esk service. Deploying to a cloud target still requires
+network access to that target and may require its CLI or API credentials.
+
+esk is designed for solo developers and small product teams. It does not provide
+per-user access control, user-attributed audit logs, or a live credential-rotation
+service; teams needing those controls should evaluate a service or KMS-backed tool.
 
 ## Install
 
@@ -219,7 +233,7 @@ Remote config details: [REMOTES.md](REMOTES.md).
 
 - Encryption: AES-256-GCM with a random nonce for every write
 - Key isolation: `.esk/store.key` stays local and must not be committed
-- Rollback detection: `.esk/store.version` records the local version high-water mark; restoring an older committed `store.enc` is rejected
+- Rollback detection: when the local `.esk/store.version` marker is present, it records a version high-water mark and rejects restoring an older committed `store.enc`
 - Tamper resistance: authenticated encryption
 - Reliability: atomic writes for store and index files
 
@@ -240,14 +254,14 @@ The encryption key can be stored in three ways:
 | Provider | How | When to use |
 |----------|-----|-------------|
 | File (default) | `.esk/store.key`, gitignored | Works everywhere, including CI and headless |
-| OS keychain | macOS Keychain, Windows Credential Manager, Linux Secret Service | Interactive workstations; hardware-backed on macOS/Windows |
+| OS keychain | macOS Keychain, Windows Credential Manager, Linux Secret Service | Interactive workstations using the native OS credential store |
 | Environment | `ESK_STORE_KEY` (32-byte hex) | CI and other headless, ephemeral environments |
 
 Initialize with `esk init` (file) or `esk init --keychain` (keychain). On supported platforms (macOS, Windows, Linux with Secret Service), `esk init` will prompt to choose.
 
 **Why not 1Password, Bitwarden, or other password managers?** The encryption key is read on every `esk` command. It must be local, instant, and available offline. Password managers require network access and interactive auth, making them unsuitable as a key provider. They also create a circular dependency: esk uses these services as sync remotes for the encrypted store, so the key that decrypts the store cannot itself depend on reaching those services.
 
-For team key distribution, share the key out-of-band (paste it into a shared vault, send via a secure channel). The encrypted store is then shared via remotes as usual.
+For small-team key distribution, share the key out-of-band through a secure channel. The encrypted store is then shared via remotes as usual.
 
 #### CI and headless environments
 
