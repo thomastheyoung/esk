@@ -7,10 +7,9 @@
 # Temp
 .temp/
 
-# Claude Code
-CLAUDE.md
-.claude/settings.local.json
-.claude/worktrees/
+# AI & dev
+.claude/
+.beads/
 
 # IDE
 .idea/
