@@ -89,12 +89,122 @@ impl Validation {
     }
 }
 
+/// Stable category for a validation failure.
+///
+/// These codes intentionally describe constraints, never candidate or
+/// configured secret values. They are safe to persist and expose through the
+/// CLI and MCP responses.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ValidationCode {
+    Empty,
+    Format,
+    Enum,
+    Pattern,
+    MinLength,
+    MaxLength,
+    Range,
+    RequiredIf,
+    RequiredWith,
+    RequiredUnless,
+}
+
+impl ValidationCode {
+    const fn message(self) -> &'static str {
+        match self {
+            Self::Empty => "value must not be empty",
+            Self::Format => "value does not match the required format",
+            Self::Enum => "value is not an allowed option",
+            Self::Pattern => "value does not satisfy the configured pattern",
+            Self::MinLength => "value is shorter than the configured minimum length",
+            Self::MaxLength => "value exceeds the configured maximum length",
+            Self::Range => "value is outside the configured range",
+            Self::RequiredIf => "value is required because configured conditions are met",
+            Self::RequiredWith => "value is required because a related secret is set",
+            Self::RequiredUnless => "value is required because no alternative secret is set",
+        }
+    }
+}
+
+/// Non-sensitive details about the failed constraint.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ValidationConstraint {
+    Format { format: Format },
+    Enum { allowed_count: usize },
+    Pattern,
+    MinLength { minimum: usize },
+    MaxLength { maximum: usize },
+    Range,
+}
+
+/// A value-free, serializable validation failure.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct ValidationIssue {
+    key: String,
+    code: ValidationCode,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    constraint: Option<ValidationConstraint>,
+}
+
+impl ValidationIssue {
+    fn new(key: &str, code: ValidationCode, constraint: Option<ValidationConstraint>) -> Self {
+        Self {
+            key: key.to_string(),
+            code,
+            message: code.message().to_string(),
+            constraint,
+        }
+    }
+
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub const fn code(&self) -> ValidationCode {
+        self.code
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
+
+    pub const fn constraint(&self) -> Option<&ValidationConstraint> {
+        self.constraint.as_ref()
+    }
+}
+
 /// A cross-field validation violation found during deploy or status checks.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CrossFieldViolation {
-    pub key: String,
-    pub env: String,
-    pub message: String,
+    key: String,
+    env: String,
+    code: ValidationCode,
+    references: Vec<String>,
+    message: String,
+}
+
+impl CrossFieldViolation {
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn env(&self) -> &str {
+        &self.env
+    }
+
+    pub const fn code(&self) -> ValidationCode {
+        self.code
+    }
+
+    pub fn references(&self) -> &[String] {
+        &self.references
+    }
+
+    pub fn message(&self) -> &str {
+        &self.message
+    }
 }
 
 /// Coerce a list of values (bool, number, string) to strings.
@@ -105,7 +215,7 @@ pub fn resolve_enum_values(raw: &[serde_json::Value]) -> Result<Vec<String>> {
             serde_json::Value::Bool(b) => result.push(b.to_string()),
             serde_json::Value::Number(n) => result.push(n.to_string()),
             serde_json::Value::String(s) => result.push(s.clone()),
-            other => bail!("unsupported enum value: {other:?}"),
+            _ => bail!("unsupported enum value type (expected string, number, or boolean)"),
         }
     }
     Ok(result)
@@ -137,7 +247,7 @@ pub fn validate_spec(key: &str, spec: &Validation, known_keys: &BTreeSet<&str>) 
     // pattern must compile
     if let Some(ref pat) = spec.pattern {
         if regex_lite::Regex::new(pat).is_err() {
-            bail!("secret '{key}': invalid regex pattern '{pat}'");
+            bail!("secret '{key}': invalid regex pattern");
         }
     }
 
@@ -146,8 +256,8 @@ pub fn validate_spec(key: &str, spec: &Validation, known_keys: &BTreeSet<&str>) 
         let values = resolve_enum_values(raw_values)?;
         if let Some(format) = spec.format {
             for v in &values {
-                if let Err(e) = validate_format(v, format) {
-                    bail!("secret '{key}': enum value '{v}' does not match format '{format}': {e}");
+                if validate_format(v, format).is_err() {
+                    bail!("secret '{key}': an enum value does not match format '{format}'");
                 }
             }
         }
@@ -201,27 +311,30 @@ fn validate_cross_field_ref(
     Ok(())
 }
 
-/// Validate a single value against a spec. Returns a human-readable error message.
+/// Validate a single value against a spec without retaining the candidate value.
 pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), ValidationError> {
-    let is_optional = spec.optional;
-
     // Empty value handling
     if value.is_empty() {
-        if is_optional {
+        if spec.optional {
             return Ok(());
         }
-        return Err(ValidationError {
-            key: key.to_string(),
-            message: "value is empty (set optional: true to allow)".to_string(),
-        });
+        return Err(ValidationError::new(vec![ValidationIssue::new(
+            key,
+            ValidationCode::Empty,
+            None,
+        )]));
     }
 
-    let mut errors = Vec::new();
+    let mut violations = Vec::new();
 
     // Format check
     if let Some(format) = spec.format {
-        if let Err(msg) = validate_format(value, format) {
-            errors.push(msg);
+        if validate_format(value, format).is_err() {
+            violations.push(ValidationIssue::new(
+                key,
+                ValidationCode::Format,
+                Some(ValidationConstraint::Format { format }),
+            ));
         }
     }
 
@@ -230,10 +343,12 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
         // resolve_enum_values should not fail at this point (validated at spec time)
         if let Ok(allowed) = resolve_enum_values(raw_values) {
             if !allowed.iter().any(|v| v == value) {
-                errors.push(format!(
-                    "expected one of [{}], got {:?}",
-                    allowed.join(", "),
-                    value
+                violations.push(ValidationIssue::new(
+                    key,
+                    ValidationCode::Enum,
+                    Some(ValidationConstraint::Enum {
+                        allowed_count: allowed.len(),
+                    }),
                 ));
             }
         }
@@ -243,7 +358,11 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
     if let Some(ref pat) = spec.pattern {
         if let Ok(re) = regex_lite::Regex::new(pat) {
             if !re.is_match(value) {
-                errors.push(format!("does not match pattern '{pat}'"));
+                violations.push(ValidationIssue::new(
+                    key,
+                    ValidationCode::Pattern,
+                    Some(ValidationConstraint::Pattern),
+                ));
             }
         }
     }
@@ -252,13 +371,21 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
     if let Some(min) = spec.min_length {
         let len = value.chars().count();
         if len < min {
-            errors.push(format!("length {len} is below minimum {min}"));
+            violations.push(ValidationIssue::new(
+                key,
+                ValidationCode::MinLength,
+                Some(ValidationConstraint::MinLength { minimum: min }),
+            ));
         }
     }
     if let Some(max) = spec.max_length {
         let len = value.chars().count();
         if len > max {
-            errors.push(format!("length {len} exceeds maximum {max}"));
+            violations.push(ValidationIssue::new(
+                key,
+                ValidationCode::MaxLength,
+                Some(ValidationConstraint::MaxLength { maximum: max }),
+            ));
         }
     }
 
@@ -266,19 +393,20 @@ pub fn validate_value(key: &str, value: &str, spec: &Validation) -> Result<(), V
     if let Some((min, max)) = spec.range {
         if let Ok(n) = value.parse::<f64>() {
             if n < min || n > max {
-                errors.push(format!("value {n} is outside range [{min}, {max}]"));
+                violations.push(ValidationIssue::new(
+                    key,
+                    ValidationCode::Range,
+                    Some(ValidationConstraint::Range),
+                ));
             }
         }
         // If not parseable as number, the format check already caught it
     }
 
-    if errors.is_empty() {
+    if violations.is_empty() {
         Ok(())
     } else {
-        Err(ValidationError {
-            key: key.to_string(),
-            message: errors.join("; "),
-        })
+        Err(ValidationError::new(violations))
     }
 }
 
@@ -324,20 +452,12 @@ pub fn validate_cross_field(
             });
 
             if all_match && !has_value {
-                let reasons: Vec<String> = conditions
-                    .iter()
-                    .map(|(k, v)| {
-                        if v == "*" {
-                            format!("{k} is set")
-                        } else {
-                            format!("{k} = \"{v}\"")
-                        }
-                    })
-                    .collect();
                 violations.push(CrossFieldViolation {
                     key: key.to_string(),
                     env: env.to_string(),
-                    message: format!("required because {}", reasons.join(" and ")),
+                    code: ValidationCode::RequiredIf,
+                    references: conditions.keys().cloned().collect(),
+                    message: ValidationCode::RequiredIf.message().to_string(),
                 });
             }
         }
@@ -354,7 +474,9 @@ pub fn validate_cross_field(
                         violations.push(CrossFieldViolation {
                             key: key.to_string(),
                             env: env.to_string(),
-                            message: format!("required because {peer} is set"),
+                            code: ValidationCode::RequiredWith,
+                            references: vec![peer.clone()],
+                            message: ValidationCode::RequiredWith.message().to_string(),
                         });
                         break;
                     }
@@ -374,11 +496,12 @@ pub fn validate_cross_field(
                 });
 
                 if !any_alt_set {
-                    let names = alternatives.join(", ");
                     violations.push(CrossFieldViolation {
                         key: key.to_string(),
                         env: env.to_string(),
-                        message: format!("required because none of {names} is set"),
+                        code: ValidationCode::RequiredUnless,
+                        references: alternatives.clone(),
+                        message: ValidationCode::RequiredUnless.message().to_string(),
                     });
                 }
             }
@@ -468,7 +591,7 @@ pub fn detect_cross_field_cycles(specs: &BTreeMap<&str, &Validation>) -> Result<
     Ok(())
 }
 
-fn validate_format(value: &str, format: Format) -> Result<(), String> {
+fn validate_format(value: &str, format: Format) -> Result<(), ()> {
     match format {
         Format::String => {
             // Any non-empty string is valid (emptiness checked earlier)
@@ -477,45 +600,43 @@ fn validate_format(value: &str, format: Format) -> Result<(), String> {
         Format::Url => {
             let scheme = value.split("://").next().unwrap_or("");
             if scheme.is_empty() || scheme == value {
-                return Err("expected url (must contain '://')".to_string());
+                return Err(());
             }
             let after_scheme = value.split("://").nth(1).unwrap_or("");
             if after_scheme.is_empty() || after_scheme == "/" {
-                return Err("expected url with host after scheme".to_string());
+                return Err(());
             }
             Ok(())
         }
         Format::Integer => {
             if value.parse::<i64>().is_err() {
-                return Err(format!("expected integer, got {value:?}"));
+                return Err(());
             }
             Ok(())
         }
         Format::Number => {
             if value.parse::<f64>().is_err() {
-                return Err(format!("expected number, got {value:?}"));
+                return Err(());
             }
             Ok(())
         }
         Format::Boolean => {
             let lower = value.to_lowercase();
             if !["true", "false", "1", "0", "yes", "no"].contains(&lower.as_str()) {
-                return Err(format!(
-                    "expected boolean (true/false/1/0/yes/no), got {value:?}"
-                ));
+                return Err(());
             }
             Ok(())
         }
         Format::Email => {
             let parts: Vec<&str> = value.splitn(2, '@').collect();
             if parts.len() != 2 || parts[0].is_empty() || !parts[1].contains('.') {
-                return Err(format!("expected email address, got {value:?}"));
+                return Err(());
             }
             Ok(())
         }
         Format::Json => {
             if serde_json::from_str::<serde_json::Value>(value).is_err() {
-                return Err(format!("expected valid JSON, got {value:?}"));
+                return Err(());
             }
             Ok(())
         }
@@ -525,22 +646,53 @@ fn validate_format(value: &str, format: Format) -> Result<(), String> {
                 .decode(value)
                 .is_err()
             {
-                return Err(format!("expected valid base64, got {value:?}"));
+                return Err(());
             }
             Ok(())
         }
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct ValidationError {
-    pub key: String,
-    pub message: String,
+    key: String,
+    violations: Vec<ValidationIssue>,
+}
+
+impl ValidationError {
+    fn new(violations: Vec<ValidationIssue>) -> Self {
+        debug_assert!(!violations.is_empty());
+        let key = violations
+            .first()
+            .map(|issue| issue.key().to_string())
+            .unwrap_or_default();
+        Self { key, violations }
+    }
+
+    pub fn message(&self) -> String {
+        self.violations
+            .iter()
+            .map(ValidationIssue::message)
+            .collect::<Vec<_>>()
+            .join("; ")
+    }
+
+    pub fn key(&self) -> &str {
+        &self.key
+    }
+
+    pub fn violations(&self) -> &[ValidationIssue] {
+        &self.violations
+    }
+
+    pub fn into_violations(self) -> Vec<ValidationIssue> {
+        self.violations
+    }
 }
 
 impl fmt::Display for ValidationError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.message)
+        f.write_str(&self.message())
     }
 }
 
@@ -739,7 +891,7 @@ mod tests {
             ..Default::default()
         };
         let err = validate_value("K", "staging", &spec).unwrap_err();
-        assert!(err.message.contains("expected one of"));
+        assert_eq!(err.violations()[0].code(), ValidationCode::Enum);
     }
 
     #[test]
@@ -788,7 +940,7 @@ mod tests {
             ..Default::default()
         };
         let err = validate_value("K", "pk_test", &spec).unwrap_err();
-        assert!(err.message.contains("pattern"));
+        assert_eq!(err.violations()[0].code(), ValidationCode::Pattern);
     }
 
     // --- Range ---
@@ -813,9 +965,9 @@ mod tests {
             ..Default::default()
         };
         let err = validate_value("K", "0", &spec).unwrap_err();
-        assert!(err.message.contains("outside range"));
+        assert_eq!(err.violations()[0].code(), ValidationCode::Range);
         let err = validate_value("K", "99999", &spec).unwrap_err();
-        assert!(err.message.contains("outside range"));
+        assert_eq!(err.violations()[0].code(), ValidationCode::Range);
     }
 
     // --- Length ---
@@ -838,7 +990,7 @@ mod tests {
             ..Default::default()
         };
         let err = validate_value("K", "abc", &spec).unwrap_err();
-        assert!(err.message.contains("below minimum"));
+        assert_eq!(err.violations()[0].code(), ValidationCode::MinLength);
     }
 
     #[test]
@@ -848,7 +1000,27 @@ mod tests {
             ..Default::default()
         };
         let err = validate_value("K", "abcde", &spec).unwrap_err();
-        assert!(err.message.contains("exceeds maximum"));
+        assert_eq!(err.violations()[0].code(), ValidationCode::MaxLength);
+    }
+
+    #[test]
+    fn issues_never_disclose_candidate_or_constraint_values() {
+        let candidate = "candidate-sentinel";
+        let allowed = "allowed-sentinel";
+        let pattern = "^pattern-sentinel$";
+        let spec = Validation {
+            enum_values: Some(vec![serde_json::Value::String(allowed.to_string())]),
+            pattern: Some(pattern.to_string()),
+            ..Default::default()
+        };
+
+        let err = validate_value("TOKEN", candidate, &spec).unwrap_err();
+        let rendered = serde_json::to_string(err.violations()).unwrap();
+        for secret_material in [candidate, allowed, pattern] {
+            assert!(!rendered.contains(secret_material), "{rendered}");
+        }
+        assert_eq!(err.violations()[0].code(), ValidationCode::Enum);
+        assert_eq!(err.violations()[1].code(), ValidationCode::Pattern);
     }
 
     // --- validate_spec ---
@@ -954,6 +1126,36 @@ mod tests {
         assert_eq!(values, vec!["dev", "true", "42"]);
     }
 
+    #[test]
+    fn unsupported_enum_types_do_not_disclose_config_values() {
+        let sentinel = "enum-sentinel";
+        let spec = Validation {
+            enum_values: Some(vec![serde_json::json!([sentinel])]),
+            ..Default::default()
+        };
+        let err = validate_spec("TOKEN", &spec, &known(&["TOKEN"])).unwrap_err();
+        let message = err.to_string();
+        assert!(message.contains("unsupported enum value type"), "{message}");
+        assert!(!message.contains(sentinel), "{message}");
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(
+            &path,
+            format!(
+                "project: demo\nenvironments: [dev]\nsecrets:\n  App:\n    TOKEN:\n      validate:\n        enum:\n          - [{sentinel}]\n"
+            ),
+        )
+        .unwrap();
+        let err = crate::config::Config::load(&path).unwrap_err();
+        let error_chain = format!("{err:#}");
+        assert!(
+            error_chain.contains("unsupported enum value type"),
+            "{error_chain}"
+        );
+        assert!(!error_chain.contains(sentinel), "{error_chain}");
+    }
+
     // --- has_cross_field_rules ---
 
     #[test]
@@ -1003,8 +1205,9 @@ mod tests {
         let store = secrets(&[("AUTH_ENABLED:dev", "true")]);
         let v = validate_cross_field(&specs, &store, "dev");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].key, "AUTH_SECRET");
-        assert!(v[0].message.contains("AUTH_ENABLED = \"true\""));
+        assert_eq!(v[0].key(), "AUTH_SECRET");
+        assert_eq!(v[0].code(), ValidationCode::RequiredIf);
+        assert_eq!(v[0].references(), ["AUTH_ENABLED"]);
     }
 
     #[test]
@@ -1019,6 +1222,22 @@ mod tests {
     }
 
     #[test]
+    fn cross_field_issues_never_disclose_predicate_values() {
+        let predicate = "predicate-sentinel";
+        let spec = Validation {
+            required_if: Some(BTreeMap::from([("SWITCH".into(), predicate.into())])),
+            ..Default::default()
+        };
+        let specs = BTreeMap::from([("REQUIRED", &spec)]);
+        let store = secrets(&[("SWITCH:dev", predicate)]);
+
+        let violations = validate_cross_field(&specs, &store, "dev");
+        let rendered = serde_json::to_string(&violations).unwrap();
+        assert!(!rendered.contains(predicate), "{rendered}");
+        assert_eq!(violations[0].references(), ["SWITCH"]);
+    }
+
+    #[test]
     fn required_if_wildcard() {
         let spec = Validation {
             required_if: Some(BTreeMap::from([("DB_HOST".into(), "*".into())])),
@@ -1028,7 +1247,7 @@ mod tests {
         let store = secrets(&[("DB_HOST:dev", "localhost")]);
         let v = validate_cross_field(&specs, &store, "dev");
         assert_eq!(v.len(), 1);
-        assert!(v[0].message.contains("DB_HOST is set"));
+        assert_eq!(v[0].code(), ValidationCode::RequiredIf);
     }
 
     #[test]
@@ -1083,7 +1302,7 @@ mod tests {
         let store = secrets(&[("OAUTH_CLIENT_SECRET:dev", "secret123")]);
         let v = validate_cross_field(&specs, &store, "dev");
         assert_eq!(v.len(), 1);
-        assert!(v[0].message.contains("OAUTH_CLIENT_SECRET is set"));
+        assert_eq!(v[0].code(), ValidationCode::RequiredWith);
     }
 
     #[test]
@@ -1121,7 +1340,7 @@ mod tests {
         let store = secrets(&[]);
         let v = validate_cross_field(&specs, &store, "dev");
         assert_eq!(v.len(), 1);
-        assert!(v[0].message.contains("none of DB_URL is set"));
+        assert_eq!(v[0].code(), ValidationCode::RequiredUnless);
     }
 
     #[test]

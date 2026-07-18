@@ -114,7 +114,7 @@ pub(crate) fn plan_deploy<'a>(
                 let violations =
                     validate::validate_cross_field(&cross_field_specs, &payload.secrets, env_name);
                 for v in violations {
-                    cross_errors.push(format!("  {}:{} — {}", v.key, v.env, v.message));
+                    cross_errors.push(format!("  {}:{} — {}", v.key(), v.env(), v.message()));
                 }
             }
             if !cross_errors.is_empty() {

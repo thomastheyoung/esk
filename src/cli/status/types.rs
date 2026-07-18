@@ -43,6 +43,7 @@ pub(crate) struct ValidationWarning {
     pub(crate) key: String,
     pub(crate) env: String,
     pub(crate) message: String,
+    pub(crate) violations: Vec<validate::ValidationIssue>,
 }
 
 pub(crate) struct EmptyValueWarning {

@@ -16,8 +16,8 @@ use crate::validate;
 
 use types::{
     DeleteResponse, DeployResponse, EnvVersion, GenerateResponse, GetResponse, ListResponse,
-    ListSecret, ListSecretEnv, SetResponse, StatusCoverageGap, StatusMissing, StatusNextStep,
-    StatusResponse, StatusWarning,
+    ListSecret, ListSecretEnv, SetResponse, StatusCoverageGap, StatusCrossFieldViolation,
+    StatusMissing, StatusNextStep, StatusResponse, StatusWarning,
 };
 
 // ---------------------------------------------------------------------------
@@ -250,9 +250,7 @@ fn do_set_with_config(config: &Config, params: SetParams) -> anyhow::Result<SetR
     if !params.skip_validation {
         if let Some((_, def)) = config.find_secret(&params.key) {
             if let Some(ref spec) = def.validate {
-                validate::validate_value(&params.key, &params.value, spec).map_err(|e| {
-                    anyhow::anyhow!("validation failed for {}: {}", params.key, e.message)
-                })?;
+                validate::validate_value(&params.key, &params.value, spec)?;
             }
         }
     }
@@ -288,10 +286,7 @@ fn do_list(params: &ListParams) -> anyhow::Result<ListResponse> {
     do_list_with_config(&config, params)
 }
 
-fn do_list_with_config(
-    config: &Config,
-    params: &ListParams,
-) -> anyhow::Result<ListResponse> {
+fn do_list_with_config(config: &Config, params: &ListParams) -> anyhow::Result<ListResponse> {
     let store = SecretStore::open(&config.root)?;
     let payload = store.payload()?;
     let resolved = config.resolve_secrets()?;
@@ -313,7 +308,9 @@ fn do_list_with_config(
             let env_targets: Vec<_> = secret
                 .targets
                 .iter()
-                .filter(|t| t.environment == *env_name && target_names.contains(&t.service.as_str()))
+                .filter(|t| {
+                    t.environment == *env_name && target_names.contains(&t.service.as_str())
+                })
                 .collect();
 
             let status = if env_targets.is_empty() {
@@ -411,6 +408,18 @@ fn do_status_with_config(config: &Config, params: &StatusParams) -> anyhow::Resu
                 key: w.key.clone(),
                 env: w.env.clone(),
                 message: w.message.clone(),
+                violations: w.violations.clone(),
+            })
+            .collect(),
+        cross_field_violations: dashboard
+            .cross_field_violations
+            .iter()
+            .map(|v| StatusCrossFieldViolation {
+                key: v.key().to_string(),
+                env: v.env().to_string(),
+                code: v.code(),
+                references: v.references().to_vec(),
+                message: v.message().to_string(),
             })
             .collect(),
         missing_required: dashboard
@@ -546,7 +555,9 @@ fn permitted_envs(config: &Config, requested: Option<&str>) -> anyhow::Result<Ve
     Ok(config
         .environments
         .iter()
-        .filter(|env| config.mcp.envs.is_empty() || config.mcp.envs.iter().any(|allowed| allowed == *env))
+        .filter(|env| {
+            config.mcp.envs.is_empty() || config.mcp.envs.iter().any(|allowed| allowed == *env)
+        })
         .cloned()
         .collect())
 }
@@ -558,6 +569,13 @@ fn json_result<T: serde::Serialize>(value: &T) -> Result<CallToolResult, ErrorDa
 }
 
 fn error_result(err: &anyhow::Error) -> CallToolResult {
+    if let Some(validation) = err.downcast_ref::<validate::ValidationError>() {
+        let body = serde_json::json!({
+            "message": validation.to_string(),
+            "violations": validation.violations(),
+        });
+        return CallToolResult::error(vec![Content::text(body.to_string())]);
+    }
     CallToolResult::error(vec![Content::text(format!("{err:#}"))])
 }
 
@@ -573,12 +591,93 @@ mod tests {
         );
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
-        SecretStore::load_or_create(dir.path()).unwrap().set(
-            "API_KEY",
-            "dev",
-            "sentinel-value",
-        ).unwrap();
+        SecretStore::load_or_create(dir.path())
+            .unwrap()
+            .set("API_KEY", "dev", "sentinel-value")
+            .unwrap();
         (dir, Config::load(&path).unwrap())
+    }
+
+    fn validation_project() -> (tempfile::TempDir, Config, [&'static str; 4]) {
+        let candidate = "candidate-sentinel";
+        let allowed = "allowed-sentinel";
+        let pattern = "^pattern-sentinel$";
+        let predicate = "predicate-sentinel";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(
+            &path,
+            format!(
+                "project: demo\nenvironments: [dev]\nsecrets:\n  App:\n    TOKEN:\n      validate:\n        enum: [{allowed}]\n        pattern: '{pattern}'\n    REQUIRED:\n      validate:\n        required_if:\n          SWITCH: {predicate}\n    SWITCH: {{}}\n"
+            ),
+        )
+        .unwrap();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("TOKEN", "dev", candidate).unwrap();
+        store.set("SWITCH", "dev", predicate).unwrap();
+        (
+            dir,
+            Config::load(&path).unwrap(),
+            [candidate, allowed, pattern, predicate],
+        )
+    }
+
+    #[test]
+    fn validation_responses_do_not_disclose_secret_or_constraint_values() {
+        let (_dir, config, secrets) = validation_project();
+
+        let status = do_status_with_config(
+            &config,
+            &StatusParams {
+                env: Some("dev".into()),
+            },
+        )
+        .unwrap();
+        let status_json = serde_json::to_string(&status).unwrap();
+        for secret_material in secrets {
+            assert!(!status_json.contains(secret_material), "{status_json}");
+        }
+        assert!(!status.validation_warnings[0].violations.is_empty());
+        assert_eq!(
+            status.cross_field_violations[0].code,
+            validate::ValidationCode::RequiredIf
+        );
+
+        let set_err = do_set_with_config(
+            &config,
+            SetParams {
+                key: "TOKEN".into(),
+                env: "dev".into(),
+                value: "set-candidate-sentinel".into(),
+                skip_validation: false,
+            },
+        )
+        .unwrap_err();
+        let set_message = set_err.to_string();
+        for secret_material in ["set-candidate-sentinel", secrets[1], secrets[2]] {
+            assert!(!set_message.contains(secret_material), "{set_message}");
+        }
+        let set_result_json = serde_json::to_string(&error_result(&set_err)).unwrap();
+        assert!(set_result_json.contains("violations"), "{set_result_json}");
+        for secret_material in ["set-candidate-sentinel", secrets[1], secrets[2]] {
+            assert!(
+                !set_result_json.contains(secret_material),
+                "{set_result_json}"
+            );
+        }
+
+        let deploy = do_deploy_with_config(
+            &config,
+            &DeployParams {
+                env: Some("dev".into()),
+                force: false,
+                dry_run: false,
+                prune: false,
+            },
+        )
+        .unwrap();
+        assert!(!deploy.success);
+        assert!(!deploy.message.contains(secrets[3]), "{}", deploy.message);
     }
 
     #[test]

@@ -5075,12 +5075,13 @@ secrets:
 fn set_rejects_invalid_value_format() {
     let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
     let config = project.config().unwrap();
+    let candidate = "not-a-url-sentinel";
     let err = cli::set::run(
         &config,
         &cli::set::SetOptions {
             key: "DATABASE_URL",
             env: "dev",
-            value: Some("not-a-url"),
+            value: Some(candidate),
             group: None,
             no_sync: true,
             strict: false,
@@ -5089,7 +5090,31 @@ fn set_rejects_invalid_value_format() {
         },
     )
     .unwrap_err();
-    assert!(err.to_string().contains("://"));
+    let message = err.to_string();
+    assert!(message.contains("value does not match the required format"));
+    assert!(!message.contains(candidate), "{message}");
+}
+
+#[test]
+fn import_rejects_invalid_values_without_disclosing_them() {
+    let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let candidate = "import-candidate-sentinel";
+    let path = project.root().join("invalid.env");
+    std::fs::write(&path, format!("DATABASE_URL={candidate}\n")).unwrap();
+
+    let err = cli::import::run(
+        &config,
+        &cli::import::ImportOptions {
+            path: &path,
+            env: "dev",
+            group: None,
+        },
+    )
+    .unwrap_err();
+    let message = err.to_string();
+    assert!(message.contains("value does not match the required format"));
+    assert!(!message.contains(candidate), "{message}");
 }
 
 #[test]
@@ -5110,7 +5135,7 @@ fn set_rejects_invalid_value_enum() {
         },
     )
     .unwrap_err();
-    assert!(err.to_string().contains("expected one of"));
+    assert!(err.to_string().contains("not an allowed option"));
 }
 
 #[test]
@@ -5131,7 +5156,7 @@ fn set_rejects_invalid_value_range() {
         },
     )
     .unwrap_err();
-    assert!(err.to_string().contains("outside range"));
+    assert!(err.to_string().contains("outside the configured range"));
 }
 
 #[test]
@@ -5167,7 +5192,8 @@ fn deploy_rejects_invalid_values_fail_fast() {
     let project = TestProject::with_store(VALIDATION_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
-    store.set("DATABASE_URL", "dev", "not-a-url").unwrap();
+    let candidate = "deploy-candidate-sentinel";
+    store.set("DATABASE_URL", "dev", candidate).unwrap();
     store.set("PORT", "dev", "99999").unwrap();
     store.set("NODE_ENV", "dev", "development").unwrap();
     store.set("ENABLE_CACHE", "dev", "true").unwrap();
@@ -5190,6 +5216,7 @@ fn deploy_rejects_invalid_values_fail_fast() {
     assert!(msg.contains("Validation failed"));
     assert!(msg.contains("DATABASE_URL"));
     assert!(msg.contains("PORT"));
+    assert!(!msg.contains(candidate), "{msg}");
     // NODE_ENV and ENABLE_CACHE are valid, should not appear
     assert!(!msg.contains("NODE_ENV"));
     assert!(!msg.contains("ENABLE_CACHE"));

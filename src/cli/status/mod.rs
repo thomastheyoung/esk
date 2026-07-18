@@ -26,6 +26,14 @@ pub fn run_with_runner(
 /// Emit the status dashboard as stable JSON without exposing secret values.
 pub fn run_json(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
     let dashboard = Dashboard::build(config, env)?;
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&dashboard_json(&dashboard, all))?
+    );
+    Ok(())
+}
+
+fn dashboard_json(dashboard: &Dashboard, all: bool) -> serde_json::Value {
     let entry = |e: &types::DeployEntry| {
         serde_json::json!({
             "key": e.key,
@@ -81,9 +89,11 @@ pub fn run_json(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
         "unset": dashboard.unset.iter().map(entry).collect::<Vec<_>>(),
         "validation_warnings": dashboard.validation_warnings.iter().map(|w| serde_json::json!({
             "key": w.key, "environment": w.env, "message": w.message,
+            "violations": w.violations,
         })).collect::<Vec<_>>(),
         "cross_field_violations": dashboard.cross_field_violations.iter().map(|v| serde_json::json!({
-            "key": v.key, "environment": v.env, "message": v.message,
+            "key": v.key(), "environment": v.env(), "message": v.message(),
+            "code": v.code(), "references": v.references(),
         })).collect::<Vec<_>>(),
         "empty_values": dashboard.empty_values.iter().map(|w| serde_json::json!({
             "key": w.key, "environment": w.env, "kind": w.kind,
@@ -107,8 +117,7 @@ pub fn run_json(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
             "command": s.command, "description": s.description,
         })).collect::<Vec<_>>(),
     });
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    output
 }
 
 // ---------------------------------------------------------------------------
@@ -122,6 +131,35 @@ mod tests {
     use crate::store::SecretStore;
     use crate::sync_tracker::SyncIndex;
     use chrono::Utc;
+
+    #[test]
+    fn status_json_and_next_steps_do_not_disclose_validation_values() {
+        let candidate = "candidate-sentinel";
+        let allowed = "allowed-sentinel";
+        let pattern = "^pattern-sentinel$";
+        let predicate = "predicate-sentinel";
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(
+            &path,
+            format!(
+                "project: demo\nenvironments: [dev]\nsecrets:\n  App:\n    TOKEN:\n      validate:\n        enum: [{allowed}]\n        pattern: '{pattern}'\n    REQUIRED:\n      validate:\n        required_if:\n          SWITCH: {predicate}\n    SWITCH: {{}}\n"
+            ),
+        )
+        .unwrap();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("TOKEN", "dev", candidate).unwrap();
+        store.set("SWITCH", "dev", predicate).unwrap();
+        let config = Config::load(&path).unwrap();
+
+        let dashboard = Dashboard::build(&config, Some("dev")).unwrap();
+        let output = super::dashboard_json(&dashboard, false).to_string();
+        for secret_material in [candidate, allowed, pattern, predicate] {
+            assert!(!output.contains(secret_material), "{output}");
+        }
+        assert!(output.contains("\"violations\""));
+        assert!(output.contains("\"required_if\""));
+    }
 
     #[test]
     fn relative_time_days() {

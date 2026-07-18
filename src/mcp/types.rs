@@ -1,5 +1,7 @@
 use serde::Serialize;
 
+use crate::validate::{ValidationCode, ValidationIssue};
+
 #[derive(Debug, Serialize)]
 pub struct GetResponse {
     pub key: String,
@@ -53,6 +55,7 @@ pub struct StatusResponse {
     pub deployed: usize,
     pub unset: usize,
     pub validation_warnings: Vec<StatusWarning>,
+    pub cross_field_violations: Vec<StatusCrossFieldViolation>,
     pub missing_required: Vec<StatusMissing>,
     pub coverage_gaps: Vec<StatusCoverageGap>,
     pub next_steps: Vec<StatusNextStep>,
@@ -68,6 +71,16 @@ pub struct EnvVersion {
 pub struct StatusWarning {
     pub key: String,
     pub env: String,
+    pub message: String,
+    pub violations: Vec<ValidationIssue>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct StatusCrossFieldViolation {
+    pub key: String,
+    pub env: String,
+    pub code: ValidationCode,
+    pub references: Vec<String>,
     pub message: String,
 }
 

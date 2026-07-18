@@ -106,10 +106,12 @@ impl Dashboard {
                     let composite = format!("{}:{}", secret.key, env_name);
                     if let Some(value) = all_secrets.get(&composite) {
                         if let Err(e) = crate::validate::validate_value(&secret.key, value, spec) {
+                            let message = e.message();
                             validation_warnings.push(ValidationWarning {
                                 key: secret.key.clone(),
                                 env: env_name.to_string(),
-                                message: e.message,
+                                message,
+                                violations: e.into_violations(),
                             });
                         }
                     }
@@ -290,8 +292,8 @@ impl Dashboard {
         // Cross-field violations
         for v in &cross_field_violations {
             next_steps.push(NextStep {
-                command: format!("esk set {} --env {}", v.key, v.env),
-                description: v.message.clone(),
+                command: format!("esk set {} --env {}", v.key(), v.env()),
+                description: v.message().to_string(),
             });
         }
 

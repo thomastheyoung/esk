@@ -246,8 +246,8 @@ impl Dashboard {
                 ));
                 for v in &self.cross_field_violations {
                     val_lines.push(ui::section_entry(
-                        &format!("{}:{}", v.key, v.env),
-                        &style(&v.message).dim().to_string(),
+                        &format!("{}:{}", v.key(), v.env()),
+                        &style(v.message()).dim().to_string(),
                         0,
                     ));
                 }

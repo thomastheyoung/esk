@@ -23,9 +23,8 @@ pub fn run(config: &Config, opts: &ImportOptions<'_>) -> Result<()> {
     for (key, value) in &values {
         if let Some((_, def)) = config.find_secret(key) {
             if let Some(ref spec) = def.validate {
-                crate::validate::validate_value(key, value, spec).map_err(|e| {
-                    anyhow::anyhow!("validation failed for {key}: {}", e.message)
-                })?;
+                crate::validate::validate_value(key, value, spec)
+                    .map_err(|e| anyhow::anyhow!("validation failed for {key}: {e}"))?;
             }
         }
     }
