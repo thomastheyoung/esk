@@ -42,6 +42,7 @@ impl SetReport {
 }
 
 pub fn run(config: &Config, opts: &SetOptions<'_>) -> Result<()> {
+    validate_set_inputs(opts)?;
     if opts.value.is_some() {
         cliclack::log::warning(
             "Value passed with --value is visible in shell history and process listings.",
@@ -80,6 +81,7 @@ pub fn run_with_runner(
     opts: &SetOptions<'_>,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
+    validate_set_inputs(opts)?;
     let key = opts.key;
     let env = opts.env;
     let value = opts.value;
@@ -247,5 +249,13 @@ pub fn run_with_runner(
         bail!("{remote_failures} remote(s) failed to push. Run `esk sync --env {env}` to retry.");
     }
 
+    Ok(())
+}
+
+fn validate_set_inputs(opts: &SetOptions<'_>) -> Result<()> {
+    crate::store::validate_key(opts.key)?;
+    if let Some(group) = opts.group {
+        config::validate_secret_group(group)?;
+    }
     Ok(())
 }

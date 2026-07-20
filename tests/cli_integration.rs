@@ -292,6 +292,34 @@ fn set_with_group_flag_existing_key_no_duplicate() {
     assert_eq!(content.matches("    SK:").count(), 1);
 }
 
+#[test]
+fn set_rejects_invalid_registration_inputs_without_mutating_config() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let config_path = project.root().join("esk.yaml");
+    let before = std::fs::read(&config_path).unwrap();
+
+    for (key, group) in [("BAD-KEY", "Imported"), ("VALID_KEY", "bad group")] {
+        let err = cli::set::run_with_runner(
+            &config,
+            &cli::set::SetOptions {
+                key,
+                env: "dev",
+                value: Some("value"),
+                group: Some(group),
+                no_sync: true,
+                strict: false,
+                skip_validation: false,
+                force: false,
+            },
+            &MockCommandRunner::new(),
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("invalid"));
+        assert_eq!(std::fs::read(&config_path).unwrap(), before);
+    }
+}
+
 // === delete ===
 
 #[test]
@@ -5139,6 +5167,54 @@ fn import_rejects_invalid_values_without_disclosing_them() {
     let message = err.to_string();
     assert!(message.contains("value does not match the required format"));
     assert!(!message.contains(candidate), "{message}");
+}
+
+#[test]
+fn import_rejects_invalid_group_without_mutating_config() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let config_path = project.root().join("esk.yaml");
+    let before = std::fs::read(&config_path).unwrap();
+    let path = project.root().join("values.env");
+    std::fs::write(&path, "IMPORTED_KEY=value\n").unwrap();
+
+    let err = cli::import::run(
+        &config,
+        &cli::import::ImportOptions {
+            path: &path,
+            env: "dev",
+            group: Some("bad group"),
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("invalid secret group"));
+    assert_eq!(std::fs::read(&config_path).unwrap(), before);
+}
+
+#[test]
+fn import_never_partially_registers_keys_for_an_unsupported_secrets_layout() {
+    let yaml = "project: testapp\nenvironments: [dev]\nsecrets: {}\n";
+    let project = TestProject::with_store(yaml).unwrap();
+    let config = project.config().unwrap();
+    let config_path = project.root().join("esk.yaml");
+    let before = std::fs::read(&config_path).unwrap();
+    let path = project.root().join("values.env");
+    std::fs::write(&path, "FIRST_KEY=one\nSECOND_KEY=two\n").unwrap();
+
+    let err = cli::import::run(
+        &config,
+        &cli::import::ImportOptions {
+            path: &path,
+            env: "dev",
+            group: Some("Imported"),
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("unsupported secrets layout"));
+    assert_eq!(std::fs::read(&config_path).unwrap(), before);
+    let store = project.store().unwrap();
+    assert!(store.get("FIRST_KEY", "dev").unwrap().is_none());
+    assert!(store.get("SECOND_KEY", "dev").unwrap().is_none());
 }
 
 #[test]

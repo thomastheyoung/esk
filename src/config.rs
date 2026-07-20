@@ -5,7 +5,9 @@ use std::path::{Path, PathBuf};
 use anyhow::{bail, Context, Result};
 use serde::{Deserialize, Serialize};
 
-use crate::store::{validate_app, validate_environment, validate_key, validate_project};
+use crate::store::{
+    validate_app, validate_environment, validate_identifier, validate_key, validate_project,
+};
 use crate::suggest;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum, Serialize, Deserialize)]
@@ -764,6 +766,12 @@ pub struct MissingRequirement {
     pub targets: Vec<String>,
 }
 
+/// Validate a secret group name before interpolating it into the
+/// comment-preserving YAML editor.
+pub fn validate_secret_group(group: &str) -> Result<()> {
+    validate_identifier(group, "secret group")
+}
+
 /// Normalize a project-relative output path while rejecting components that
 /// could change its meaning after it is joined to the project root.
 fn normalize_project_relative_output(output: &str) -> Result<PathBuf> {
@@ -1430,17 +1438,60 @@ impl std::fmt::Display for ResolvedTarget {
 /// comments and formatting. Uses string-based YAML insertion rather than
 /// serde round-tripping to avoid stripping comments.
 pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Result<()> {
+    add_secrets_to_config(config_path, &[key], group).map(|_| ())
+}
+
+/// Add several secret keys under one group as a single validated, atomic edit.
+///
+/// This intentionally supports only the block-style secrets section that the
+/// editor can recognize unambiguously. Callers must fall back to manual editing
+/// for inline, quoted, or otherwise unsupported layouts.
+pub fn add_secrets_to_config(config_path: &Path, keys: &[&str], group: &str) -> Result<usize> {
+    validate_secret_group(group)?;
+    let keys: BTreeSet<&str> = keys.iter().copied().collect();
+    for key in &keys {
+        validate_key(key)?;
+    }
+    if keys.is_empty() {
+        return Ok(0);
+    }
+
     let content = std::fs::read_to_string(config_path)
         .with_context(|| format!("failed to read {}", config_path.display()))?;
+    let (new_content, added) = edit_secret_declarations(&content, &keys, group)?;
+    if added == 0 {
+        return Ok(0);
+    }
+    validate_config_candidate(config_path, &new_content)?;
+    persist_config_candidate(config_path, &new_content)?;
+    Ok(added)
+}
 
+fn edit_secret_declarations(
+    content: &str,
+    keys: &BTreeSet<&str>,
+    group: &str,
+) -> Result<(String, usize)> {
     let lines: Vec<&str> = content.lines().collect();
 
-    // Find the `secrets:` top-level line
-    let secrets_idx = lines
+    let secrets_headers: Vec<usize> = lines
         .iter()
-        .position(|line| *line == "secrets:" || line.starts_with("secrets:"));
+        .enumerate()
+        .filter_map(|(index, line)| (line.trim_end() == "secrets:").then_some(index))
+        .collect();
+    if lines.iter().any(|line| {
+        let trimmed = line.trim_start();
+        !line.starts_with([' ', '\t', '#'])
+            && trimmed.starts_with("secrets:")
+            && line.trim_end() != "secrets:"
+    }) {
+        bail!("unsupported secrets layout: use a block-style secrets section");
+    }
+    if secrets_headers.len() > 1 {
+        bail!("unsupported secrets layout: multiple secrets sections");
+    }
 
-    let new_content = if let Some(secrets_idx) = secrets_idx {
+    let (new_content, added) = if let Some(&secrets_idx) = secrets_headers.first() {
         // Find the extent of the secrets section (next top-level key or EOF)
         let secrets_end = lines
             .iter()
@@ -1454,42 +1505,21 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
             })
             .map_or(lines.len(), |(i, _)| i);
 
-        // Look for the group within the secrets section
-        let group_line = format!("  {group}:");
-        let group_idx = lines
+        let group_headers = parse_secret_group_headers(&lines, secrets_idx + 1, secrets_end)?;
+        let group_idx = group_headers
             .iter()
-            .enumerate()
-            .skip(secrets_idx + 1)
-            .take(secrets_end - secrets_idx - 1)
-            .find(|(_, line)| line.trim_end() == group_line.trim_end())
-            .map(|(i, _)| i);
+            .find_map(|(name, index)| (name == group).then_some(*index));
 
         if let Some(group_idx) = group_idx {
-            // Check if key already exists in this group
-            let key_line = format!("    {key}:");
-            let group_end = lines
+            let group_end = group_headers
                 .iter()
-                .enumerate()
-                .skip(group_idx + 1)
-                .find(|(i, line)| {
-                    *i >= secrets_end
-                        || (!line.is_empty() && !line.starts_with("    ") && !line.starts_with('#'))
-                })
-                .map_or(lines.len(), |(i, _)| i);
-
-            let key_exists = lines
-                .iter()
-                .skip(group_idx + 1)
-                .take(group_end - group_idx - 1)
-                .any(|line| {
-                    line.starts_with(&key_line)
-                        && (line.len() == key_line.len()
-                            || line.as_bytes().get(key_line.len()) == Some(&b' ')
-                            || line.as_bytes().get(key_line.len()) == Some(&b'\n'))
-                });
-
-            if key_exists {
-                return Ok(()); // Already present, no-op
+                .map(|(_, index)| *index)
+                .find(|index| *index > group_idx)
+                .unwrap_or(secrets_end);
+            let existing = parse_secret_keys(&lines, group_idx + 1, group_end)?;
+            let additions: Vec<_> = keys.difference(&existing).copied().collect();
+            if additions.is_empty() {
+                return Ok((content.to_string(), 0));
             }
 
             // Insert after last line of this group
@@ -1497,7 +1527,9 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
             for line in &lines[..group_end] {
                 parts.push((*line).to_string());
             }
-            parts.push(format!("    {key}: {{}}"));
+            for key in &additions {
+                parts.push(format!("    {key}: {{}}"));
+            }
             for line in &lines[group_end..] {
                 parts.push((*line).to_string());
             }
@@ -1505,7 +1537,7 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
             if content.ends_with('\n') {
                 out.push('\n');
             }
-            out
+            (out, additions.len())
         } else {
             // Group doesn't exist — insert at end of secrets section
             let mut parts = Vec::new();
@@ -1513,7 +1545,9 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
                 parts.push((*line).to_string());
             }
             parts.push(format!("  {group}:"));
-            parts.push(format!("    {key}: {{}}"));
+            for key in keys {
+                parts.push(format!("    {key}: {{}}"));
+            }
             for line in &lines[secrets_end..] {
                 parts.push((*line).to_string());
             }
@@ -1521,27 +1555,96 @@ pub fn add_secret_to_config(config_path: &Path, key: &str, group: &str) -> Resul
             if content.ends_with('\n') {
                 out.push('\n');
             }
-            out
+            (out, keys.len())
         }
     } else {
         // No secrets section — append at end
-        let mut out = content.clone();
+        let mut out = content.to_string();
         if !out.ends_with('\n') {
             out.push('\n');
         }
-        let _ = writeln!(out, "secrets:\n  {group}:\n    {key}: {{}}");
+        let _ = writeln!(out, "secrets:\n  {group}:");
+        for key in keys {
+            let _ = writeln!(out, "    {key}: {{}}");
+        }
 
-        out
+        (out, keys.len())
     };
+    Ok((new_content, added))
+}
 
+fn parse_secret_group_headers(
+    lines: &[&str],
+    start: usize,
+    end: usize,
+) -> Result<Vec<(String, usize)>> {
+    let mut groups = Vec::new();
+    for (index, line) in lines.iter().enumerate().take(end).skip(start) {
+        if line.starts_with('\t') {
+            bail!("unsupported secrets layout: tab indentation");
+        }
+        if line.trim().is_empty() || line.trim_start().starts_with('#') || line.starts_with("    ")
+        {
+            continue;
+        }
+        let Some(name) = line
+            .strip_prefix("  ")
+            .and_then(|line| line.strip_suffix(':'))
+        else {
+            bail!("unsupported secrets layout near line {}", index + 1);
+        };
+        validate_secret_group(name)
+            .with_context(|| format!("unsupported secrets layout near line {}", index + 1))?;
+        groups.push((name.to_string(), index));
+    }
+    Ok(groups)
+}
+
+fn parse_secret_keys<'a>(
+    lines: &'a [&'a str],
+    start: usize,
+    end: usize,
+) -> Result<BTreeSet<&'a str>> {
+    let mut keys = BTreeSet::new();
+    for (index, line) in lines.iter().enumerate().take(end).skip(start) {
+        if line.trim().is_empty()
+            || line.trim_start().starts_with('#')
+            || line.starts_with("      ")
+        {
+            continue;
+        }
+        let Some((key, _)) = line
+            .strip_prefix("    ")
+            .and_then(|line| line.split_once(':'))
+        else {
+            bail!("unsupported secrets layout near line {}", index + 1);
+        };
+        validate_key(key)
+            .with_context(|| format!("unsupported secrets layout near line {}", index + 1))?;
+        keys.insert(key);
+    }
+    Ok(keys)
+}
+
+fn validate_config_candidate(config_path: &Path, content: &str) -> Result<()> {
+    let mut candidate: Config =
+        serde_saphyr::from_str(content).context("generated config edit is not valid YAML")?;
+    candidate.root = config_path
+        .parent()
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+    candidate
+        .validate()
+        .context("generated config edit does not pass config validation")
+}
+
+fn persist_config_candidate(config_path: &Path, content: &str) -> Result<()> {
     // Atomic write: temp file + rename
     let dir = config_path.parent().unwrap_or_else(|| Path::new("."));
     let tmp = tempfile::NamedTempFile::new_in(dir)
         .context("failed to create temp file for config write")?;
-    std::fs::write(tmp.path(), &new_content).context("failed to write temp config file")?;
+    std::fs::write(tmp.path(), content).context("failed to write temp config file")?;
     tmp.persist(config_path)
         .context("failed to persist config file")?;
-
     Ok(())
 }
 
@@ -2401,6 +2504,52 @@ targets:
         let content = std::fs::read_to_string(&path).unwrap();
         // Should only appear once
         assert_eq!(content.matches("    SK:").count(), 1);
+        assert_eq!(content, yaml);
+    }
+
+    #[test]
+    fn batch_secret_editor_preserves_comments_and_adds_sorted_unique_keys_once() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: x\nenvironments: [dev]\n# preserve this\nsecrets:\n  Stripe:\n    EXISTING: {}\n# preserve this too\n";
+        let path = write_yaml(dir.path(), yaml);
+        let added = add_secrets_to_config(&path, &["Z_KEY", "A_KEY", "Z_KEY"], "Stripe").unwrap();
+        assert_eq!(added, 2);
+        let content = std::fs::read_to_string(&path).unwrap();
+        assert!(content.contains("# preserve this\n"));
+        assert!(content.contains("# preserve this too\n"));
+        assert!(content.contains("    A_KEY: {}\n    Z_KEY: {}\n"));
+        let config = Config::load(&path).unwrap();
+        assert!(config.find_secret("EXISTING").is_some());
+        assert!(config.find_secret("A_KEY").is_some());
+        assert!(config.find_secret("Z_KEY").is_some());
+    }
+
+    #[test]
+    fn secret_editor_rejects_invalid_inputs_and_unsupported_layout_without_mutation() {
+        let cases = [
+            (
+                "project: x\nenvironments: [dev]\nsecrets:\n  Stripe:\n    OK: {}\n",
+                vec!["BAD-KEY"],
+                "Stripe",
+            ),
+            (
+                "project: x\nenvironments: [dev]\nsecrets:\n  Stripe:\n    OK: {}\n",
+                vec!["NEW_KEY"],
+                "bad group",
+            ),
+            (
+                "project: x\nenvironments: [dev]\nsecrets: {}\n",
+                vec!["NEW_KEY"],
+                "Stripe",
+            ),
+        ];
+        for (yaml, keys, group) in cases {
+            let dir = tempfile::tempdir().unwrap();
+            let path = write_yaml(dir.path(), yaml);
+            let before = std::fs::read(&path).unwrap();
+            assert!(add_secrets_to_config(&path, &keys, group).is_err());
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+        }
     }
 
     #[test]

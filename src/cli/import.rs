@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use crate::config::Config;
+use crate::config::{self, Config};
 use crate::store::{validate_key, SecretStore};
 
 pub struct ImportOptions<'a> {
@@ -13,6 +13,8 @@ pub struct ImportOptions<'a> {
 
 pub fn run(config: &Config, opts: &ImportOptions<'_>) -> Result<()> {
     config.validate_env(opts.env)?;
+    let group = opts.group.unwrap_or("Imported");
+    config::validate_secret_group(group)?;
     let contents = std::fs::read_to_string(opts.path)
         .with_context(|| format!("failed to read dotenv file {}", opts.path.display()))?;
     let values = parse_dotenv(&contents)?;
@@ -21,6 +23,7 @@ pub fn run(config: &Config, opts: &ImportOptions<'_>) -> Result<()> {
     }
 
     for (key, value) in &values {
+        validate_key(key)?;
         if let Some((_, def)) = config.find_secret(key) {
             if let Some(ref spec) = def.validate {
                 crate::validate::validate_value(key, value, spec)
@@ -29,15 +32,13 @@ pub fn run(config: &Config, opts: &ImportOptions<'_>) -> Result<()> {
         }
     }
 
-    let mut added = 0usize;
     let config_path = config.root.join("esk.yaml");
-    let group = opts.group.unwrap_or("Imported");
-    for key in values.keys() {
-        if config.find_secret(key).is_none() {
-            crate::config::add_secret_to_config(&config_path, key, group)?;
-            added += 1;
-        }
-    }
+    let keys_to_register: Vec<&str> = values
+        .keys()
+        .filter(|key| config.find_secret(key).is_none())
+        .map(String::as_str)
+        .collect();
+    let added = config::add_secrets_to_config(&config_path, &keys_to_register, group)?;
 
     let payload = SecretStore::open(&config.root)?.set_many(opts.env, &values)?;
     cliclack::log::success(format!(
