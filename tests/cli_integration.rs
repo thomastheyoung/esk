@@ -7628,16 +7628,16 @@ fn deploy_reports_failure_when_directory_occupies_artifact_path() {
     );
 }
 
-/// A symlinked artifact path must never be written through or clobbered.
+/// A symlinked artifact must not be clobbered, nor fail every deploy.
 ///
-/// esk refuses symlinked output paths (`resolve_project_output_path`), so a
-/// monorepo that points `.env.local` at a shared file gets a loud failure
-/// rather than a silent overwrite. Pinned here because treating path
-/// resolution errors as drift makes deploy attempt the write, and the refusal
-/// is what keeps the user's file intact.
+/// esk refuses symlinked output paths (`resolve_project_output_path`), which a
+/// monorepo pointing `.env.local` at a shared file relies on. The artifact
+/// audit must treat that refusal as "cannot tell" rather than as drift:
+/// calling it drift marks the group dirty on every run, and the deploy then
+/// fails on the same policy with nothing the user can do to clear it.
 #[cfg(unix)]
 #[test]
-fn deploy_refuses_to_write_through_symlinked_artifact() {
+fn deploy_leaves_symlinked_artifact_alone() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
     std::fs::create_dir_all(project.root().join("shared")).unwrap();
@@ -7671,11 +7671,19 @@ fn deploy_refuses_to_write_through_symlinked_artifact() {
     std::os::unix::fs::symlink("../shared/.env.real", &env_path).unwrap();
     let shared_before = std::fs::read(&shared).unwrap();
 
+    // esk has never written through a symlink, so the artifact audit must not
+    // turn that standing refusal into a per-run failure: the group stays
+    // whatever the store says it is, and the user's file is left alone.
     let result = cli::deploy::run(&config, &opts());
 
     assert!(
-        result.is_err(),
-        "esk must refuse to deploy through a symlinked artifact path"
+        result.is_ok(),
+        "a symlinked artifact must not make every deploy fail: {:?}",
+        result.err()
+    );
+    assert!(
+        cli::deploy::run(&config, &opts()).is_ok(),
+        "and it must stay quiet on subsequent runs"
     );
     assert!(
         std::fs::symlink_metadata(&env_path)
@@ -7688,5 +7696,38 @@ fn deploy_refuses_to_write_through_symlinked_artifact() {
         std::fs::read(&shared).unwrap(),
         shared_before,
         "the file the symlink points at must not be touched"
+    );
+}
+
+/// A dry run must describe its work in the conditional, never the past tense.
+///
+/// Regression guard: the summary printed `deployed N keys` before the "Dry run"
+/// banner, so anyone reading the top line saw a report of work that never
+/// happened.
+#[test]
+fn deploy_dry_run_summary_is_not_past_tense() {
+    assert_eq!(
+        console::strip_ansi_codes(&esk::ui::format_deploy_summary(
+            1,
+            1,
+            0,
+            0,
+            0,
+            esk::ui::SummaryMood::Planned
+        ))
+        .to_string(),
+        "would deploy 1 keys to 1 targets"
+    );
+    assert_eq!(
+        console::strip_ansi_codes(&esk::ui::format_deploy_summary(
+            1,
+            1,
+            0,
+            0,
+            0,
+            esk::ui::SummaryMood::Done
+        ))
+        .to_string(),
+        "deployed 1 keys to 1 targets"
     );
 }

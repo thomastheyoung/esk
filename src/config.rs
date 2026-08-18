@@ -1338,6 +1338,29 @@ impl Config {
     }
 
     /// Resolve the .env file path for an (app, env) pair.
+    /// The `.env` path for an app and environment, before output-policy checks.
+    ///
+    /// [`Config::resolve_dotenv_path`] refuses symlinks and non-file leaves
+    /// with one error, so it cannot answer questions *about* a rejected path.
+    /// This exposes the location so a caller can tell one refusal from another.
+    ///
+    /// For inspection only — never write through this path. Every write goes
+    /// via `resolve_dotenv_path` so the output policy is enforced in one place.
+    pub(crate) fn dotenv_path_unchecked(&self, app: &str, env: &str) -> Option<PathBuf> {
+        let dotenv_config = self.targets.dotenv.as_ref()?;
+        let app_config = self.apps.get(app)?;
+        let suffix = dotenv_config
+            .env_suffix
+            .get(env)
+            .cloned()
+            .unwrap_or_default();
+        let path = dotenv_config
+            .pattern
+            .replace("{app_path}", &app_config.path)
+            .replace("{env_suffix}", &suffix);
+        Some(self.root.join(path))
+    }
+
     pub fn resolve_dotenv_path(&self, app: &str, env: &str) -> Result<PathBuf> {
         let dotenv_config = self
             .targets

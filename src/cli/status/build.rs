@@ -4,6 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
+use crate::targets::{DeployTarget, SecretValue};
 use crate::sync_tracker::{SyncIndex, SyncStatus};
 
 use super::types::{
@@ -11,20 +12,24 @@ use super::types::{
     RemoteStatus, ValidationWarning,
 };
 
-/// Whether the file a filesystem target wrote is still present.
+/// Whether the file a filesystem target wrote still matches the store.
 ///
-/// `status` must not claim a secret is deployed when the artifact holding it
-/// was deleted, but it also must stay fast and offline, so only targets whose
-/// state is a local file are checked. Everything else answers `None` — esk
-/// genuinely cannot tell without a network round-trip.
+/// `status` must not call a secret deployed when the artifact holding it was
+/// deleted or edited, but it also has to stay fast and offline. Only targets
+/// whose state is a local file are checked; everything else answers `None`,
+/// because esk genuinely cannot tell without a network round-trip.
 ///
-/// Results are cached per `(app, env)`: one file backs every secret in a
-/// group, so re-reading it per secret would be wasted work.
-fn dotenv_artifact_present(
+/// The comparison is the same one `deploy` performs, so the two commands
+/// cannot disagree about whether an artifact is current. Results are cached per
+/// target group: one file backs every secret in the group, so re-reading it per
+/// secret would be wasted work.
+fn dotenv_artifact_matches(
     config: &Config,
     service: &str,
     app: Option<&str>,
     env: &str,
+    resolved: &[crate::config::ResolvedSecret],
+    all_secrets: &BTreeMap<String, String>,
     cache: &mut BTreeMap<(String, String, String), Option<bool>>,
 ) -> Option<bool> {
     if service != ".env" {
@@ -33,14 +38,45 @@ fn dotenv_artifact_present(
     let app = app?;
     // Keyed by service as well as app and env: only `.env` reaches this point
     // today, but a second filesystem target must not silently share an entry.
-    *cache
-        .entry((service.to_string(), app.to_string(), env.to_string()))
-        .or_insert_with(|| {
-            config
-                .resolve_dotenv_path(app, env)
-                .ok()
-                .map(|path| path.is_file())
-        })
+    let key = (service.to_string(), app.to_string(), env.to_string());
+    if let Some(cached) = cache.get(&key) {
+        return *cached;
+    }
+
+    // The artifact holds every secret configured for this group, so the check
+    // has to compare against the whole set rather than one key at a time.
+    let mut secrets: Vec<SecretValue> = Vec::new();
+    for secret in resolved {
+        for target in &secret.targets {
+            if target.service != service
+                || target.app.as_deref() != Some(app)
+                || target.environment != env
+            {
+                continue;
+            }
+            if let Some(value) = all_secrets.get(&format!("{}:{}", secret.key, env)) {
+                secrets.push(SecretValue {
+                    key: secret.key.clone(),
+                    value: zeroize::Zeroizing::new(value.clone()),
+                    group: secret.group.clone(),
+                });
+            }
+        }
+    }
+
+    let result = if secrets.is_empty() {
+        // Nothing stored for this group, so no artifact was ever written.
+        None
+    } else {
+        let target = crate::config::ResolvedTarget {
+            service: service.to_string(),
+            app: Some(app.to_string()),
+            environment: env.to_string(),
+        };
+        crate::targets::dotenv::DotenvTarget { config }.artifact_matches(&secrets, &target)
+    };
+    cache.insert(key, result);
+    result
 }
 
 impl Dashboard {
@@ -127,11 +163,13 @@ impl Dashboard {
                                 last_deployed_at: Some(rec.last_deployed_at.clone()),
                                 ..entry
                             });
-                        } else if dotenv_artifact_present(
+                        } else if dotenv_artifact_matches(
                             config,
                             &target.service,
                             target.app.as_deref(),
                             &target.environment,
+                            &resolved,
+                            all_secrets,
                             &mut artifact_state,
                         ) == Some(false)
                         {
@@ -536,6 +574,105 @@ secrets:
         assert!(
             dashboard.deployed.is_empty(),
             "a secret whose artifact was deleted is not deployed"
+        );
+        assert_eq!(dashboard.pending.len(), 1, "it needs redeploying");
+    }
+
+    /// The artifact is read once per group, not once per secret.
+    ///
+    /// A group's secrets all live in one file, so an uncached check would
+    /// re-read and re-render it for every key in the group.
+    #[test]
+    fn artifact_check_is_cached_per_group() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("esk.yaml"), DOTENV_YAML).unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("MY_SECRET", "dev", "val1").unwrap();
+        let config = Config::load(&dir.path().join("esk.yaml")).unwrap();
+        let resolved = config.resolve_secrets().unwrap();
+        let payload = store.payload().unwrap();
+
+        let mut cache = BTreeMap::new();
+        let first = dotenv_artifact_matches(
+            &config,
+            ".env",
+            Some("web"),
+            "dev",
+            &resolved,
+            &payload.secrets,
+            &mut cache,
+        );
+        assert_eq!(cache.len(), 1, "the first call populates the cache");
+
+        // Delete the file: a second call must return the cached answer rather
+        // than re-reading and reporting something different.
+        std::fs::remove_file(dir.path().join("apps/web/.env.local")).ok();
+        let second = dotenv_artifact_matches(
+            &config,
+            ".env",
+            Some("web"),
+            "dev",
+            &resolved,
+            &payload.secrets,
+            &mut cache,
+        );
+        assert_eq!(first, second, "the cached answer must be reused");
+        assert_eq!(cache.len(), 1, "and no second entry created");
+    }
+
+    /// An edited artifact must be caught too, not just a deleted one.
+    ///
+    /// Checking only for the file's presence would report a file full of wrong
+    /// values as sent — the same overclaiming this check exists to remove.
+    #[test]
+    fn edited_artifact_reclassifies_deployed_as_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("esk.yaml"), DOTENV_YAML).unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("MY_SECRET", "dev", "val1").unwrap();
+        let config = Config::load(&dir.path().join("esk.yaml")).unwrap();
+
+        let target = crate::config::ResolvedTarget {
+            service: ".env".to_string(),
+            app: Some("web".to_string()),
+            environment: "dev".to_string(),
+        };
+        let dotenv = crate::targets::dotenv::DotenvTarget { config: &config };
+        dotenv.deploy_batch(
+            &[SecretValue {
+                key: "MY_SECRET".to_string(),
+                value: zeroize::Zeroizing::new("val1".to_string()),
+                group: "General".to_string(),
+            }],
+            &target,
+        );
+        let index_path = dir.path().join(".esk/deploy-index.json");
+        let (mut index, _) = DeployIndex::load(&index_path);
+        index.record_success(
+            DeployIndex::tracker_key("MY_SECRET", ".env", Some("web"), "dev"),
+            target.to_string(),
+            DeployIndex::hash_value("val1", store.master_key()),
+        );
+        index.save().unwrap();
+
+        let env_path = dir.path().join("apps/web/.env.local");
+        let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            perms.set_mode(0o600);
+        }
+        #[cfg(not(unix))]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&env_path, perms).unwrap();
+        std::fs::write(&env_path, "MY_SECRET=TOTALLY_WRONG\n").unwrap();
+
+        let dashboard = Dashboard::build(&config, Some("dev")).unwrap();
+        assert!(
+            dashboard.deployed.is_empty(),
+            "a secret whose artifact holds a different value is not deployed"
         );
         assert_eq!(dashboard.pending.len(), 1, "it needs redeploying");
     }

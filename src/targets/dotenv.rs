@@ -77,13 +77,24 @@ impl DeployTarget for DotenvTarget<'_> {
     fn artifact_matches(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Option<bool> {
         let app = target.app.as_ref()?;
         let expected = render_dotenv_content(secrets).ok()?;
-        // Path resolution rejects a leaf that is not a regular file, so a
-        // directory sitting where the artifact belongs surfaces here rather
-        // than as a read error. That is still a definite mismatch: esk did not
-        // put it there, and regenerating fails loudly instead of reporting a
-        // target it never checked as current.
-        let Ok(path) = self.config.resolve_dotenv_path(app, &target.environment) else {
-            return Some(false);
+        // Path resolution enforces esk's output policy, and its refusals mean
+        // two different things here.
+        //
+        // A symlink is a configuration the user chose. esk has never written
+        // through one, so the group was previously skipped and stayed quiet;
+        // calling it drift would mark it dirty every run, and the deploy would
+        // then fail on the same policy with no way for the user to clear it.
+        // Report "cannot tell" and leave the decision to the store.
+        //
+        // Anything else — most importantly a directory sitting where the file
+        // belongs — is a state esk did not create, so it stays a mismatch and
+        // fails loudly rather than being reported as current.
+        let path = match self.config.resolve_dotenv_path(app, &target.environment) {
+            Ok(path) => path,
+            Err(_) if artifact_path_is_symlink(self.config, app, &target.environment) => {
+                return None
+            }
+            Err(_) => return Some(false),
         };
         // Compare bytes, not text. A hand-mangled file may not be valid UTF-8,
         // and `render_dotenv_content` always is, so decoding first would turn a
@@ -135,6 +146,17 @@ impl DeployTarget for DotenvTarget<'_> {
                 .collect(),
         }
     }
+}
+
+/// Whether the configured `.env` location is itself a symlink.
+///
+/// Used to tell a user's deliberate symlink apart from a path esk did not
+/// create, since output-path resolution rejects both with the same error.
+fn artifact_path_is_symlink(config: &crate::config::Config, app: &str, env: &str) -> bool {
+    config
+        .dotenv_path_unchecked(app, env)
+        .and_then(|path| std::fs::symlink_metadata(path).ok())
+        .is_some_and(|meta| meta.file_type().is_symlink())
 }
 
 /// Render the exact file contents `deploy_batch` would write for `secrets`.

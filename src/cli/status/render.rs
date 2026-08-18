@@ -211,7 +211,7 @@ impl Dashboard {
                     deploy_lines.push(format!(
                         "  {} {}  {}",
                         ui::Icon::Success,
-                        style(format!("{} deployed", self.deployed.len())).green(),
+                        style(format!("{} sent", self.deployed.len())).green(),
                         style("(--all to show)").dim()
                     ));
                 }
@@ -383,7 +383,7 @@ impl Dashboard {
                 cov_lines.push(ui::section_header(
                     ui::Icon::Warning,
                     &format!(
-                        "{} deployed but no longer in config",
+                        "{} previously sent, no longer in config",
                         self.target_orphans.len()
                     ),
                     ui::SectionColor::Yellow,
