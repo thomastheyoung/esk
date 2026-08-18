@@ -186,6 +186,30 @@ pub(crate) fn render_dotenv_content(secrets: &[SecretValue]) -> Result<String> {
 }
 
 impl DotenvTarget<'_> {
+    /// Compare the artifact on disk against what a deploy would write, reading
+    /// through any symlink in the path.
+    ///
+    /// [`DeployTarget::artifact_matches`] answers a question about *writing*,
+    /// so it declines on a symlinked path esk must never write through. A
+    /// reader is under no such restriction: following the link to check what is
+    /// there cannot damage it, and refusing to look would report an artifact
+    /// esk never inspected as current.
+    pub(crate) fn artifact_matches_readonly(
+        &self,
+        secrets: &[SecretValue],
+        target: &ResolvedTarget,
+    ) -> Option<bool> {
+        let app = target.app.as_ref()?;
+        let expected = render_dotenv_content(secrets).ok()?;
+        let path = self.config.dotenv_display_path(app, &target.environment)?;
+        match std::fs::read(&path) {
+            Ok(actual) => Some(actual == expected.as_bytes()),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Some(false),
+            // Present but unreadable: still a state esk did not create.
+            Err(_) => Some(false),
+        }
+    }
+
     fn write_dotenv_file(&self, app: &str, env: &str, secrets: &[SecretValue]) -> Result<()> {
         self.write_dotenv_file_inner(app, env, secrets, |_| {})
     }

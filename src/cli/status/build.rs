@@ -4,7 +4,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
-use crate::targets::{DeployTarget, SecretValue};
+use crate::targets::SecretValue;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
 
 use super::types::{
@@ -73,7 +73,7 @@ fn dotenv_artifact_matches(
             app: Some(app.to_string()),
             environment: env.to_string(),
         };
-        crate::targets::dotenv::DotenvTarget { config }.artifact_matches(&secrets, &target)
+        crate::targets::dotenv::DotenvTarget { config }.artifact_matches_readonly(&secrets, &target)
     };
     cache.insert(key, result);
     result
@@ -576,6 +576,56 @@ secrets:
             "a secret whose artifact was deleted is not deployed"
         );
         assert_eq!(dashboard.pending.len(), 1, "it needs redeploying");
+    }
+
+    /// A corrupted artifact behind a symlinked parent must still be caught.
+    ///
+    /// esk never *writes* through a symlink, but reading through one to see
+    /// what is there cannot damage it. Declining to look would report an
+    /// artifact esk never inspected as sent — and monorepos symlink app
+    /// directories routinely, so the blind spot would be common.
+    #[cfg(unix)]
+    #[test]
+    fn corrupted_artifact_behind_symlinked_parent_is_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("esk.yaml"), DOTENV_YAML).unwrap();
+        std::fs::create_dir_all(dir.path().join("packages_web")).unwrap();
+        std::fs::create_dir_all(dir.path().join("apps")).unwrap();
+        std::os::unix::fs::symlink("../packages_web", dir.path().join("apps/web")).unwrap();
+
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("MY_SECRET", "dev", "val1").unwrap();
+        let config = Config::load(&dir.path().join("esk.yaml")).unwrap();
+
+        // Write the artifact into the real directory and record the deploy.
+        let artifact = dir.path().join("packages_web/.env.local");
+        let content = crate::targets::dotenv::render_dotenv_content(&[SecretValue {
+            key: "MY_SECRET".to_string(),
+            value: zeroize::Zeroizing::new("val1".to_string()),
+            group: "General".to_string(),
+        }])
+        .unwrap();
+        std::fs::write(&artifact, &content).unwrap();
+        let index_path = dir.path().join(".esk/deploy-index.json");
+        let (mut index, _) = DeployIndex::load(&index_path);
+        index.record_success(
+            DeployIndex::tracker_key("MY_SECRET", ".env", Some("web"), "dev"),
+            ".env:web:dev".to_string(),
+            DeployIndex::hash_value("val1", store.master_key()),
+        );
+        index.save().unwrap();
+
+        let dashboard = Dashboard::build(&config, Some("dev")).unwrap();
+        assert_eq!(dashboard.deployed.len(), 1, "baseline: reported as sent");
+
+        std::fs::write(&artifact, "MY_SECRET=ATTACKER\n").unwrap();
+
+        let dashboard = Dashboard::build(&config, Some("dev")).unwrap();
+        assert!(
+            dashboard.deployed.is_empty(),
+            "a corrupted artifact behind a symlink is not sent"
+        );
+        assert_eq!(dashboard.pending.len(), 1);
     }
 
     /// The artifact is read once per group, not once per secret.

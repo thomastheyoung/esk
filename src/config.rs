@@ -1401,6 +1401,15 @@ impl Config {
     ///
     /// For inspection only — never write through this path. Every write goes
     /// via `resolve_dotenv_path` so the output policy is enforced in one place.
+    /// The `.env` path for an app and environment, without policy checks.
+    ///
+    /// For reading and display only. Every write goes through
+    /// [`Config::resolve_dotenv_path`], so the output policy stays enforced in
+    /// one place; a reader following a symlink cannot damage what it points at.
+    pub(crate) fn dotenv_display_path(&self, app: &str, env: &str) -> Option<PathBuf> {
+        Some(self.root.join(self.dotenv_pattern(app, env)?))
+    }
+
     fn dotenv_pattern(&self, app: &str, env: &str) -> Option<String> {
         let dotenv_config = self.targets.dotenv.as_ref()?;
         let app_config = self.apps.get(app)?;

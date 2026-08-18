@@ -76,6 +76,27 @@ pub enum Evidence {
     Unreadable(&'static str),
 }
 
+/// Which [`Evidence`] variant a target returned, without its contents.
+///
+/// Reported alongside a mismatched declaration so a maintainer can see what
+/// arrived, rather than only what was promised.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvidenceShape {
+    Values,
+    Names,
+    Unreadable,
+}
+
+impl Evidence {
+    const fn shape(&self) -> EvidenceShape {
+        match self {
+            Self::Values(_) => EvidenceShape::Values,
+            Self::Names { .. } => EvidenceShape::Names,
+            Self::Unreadable(_) => EvidenceShape::Unreadable,
+        }
+    }
+}
+
 /// Per-key verdict for a [`Fidelity::Value`] target.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ValueVerdict {
@@ -125,28 +146,47 @@ pub enum Findings {
     ///
     /// Separate from [`Findings::Unreachable`] because the response differs: a
     /// timeout is worth retrying, whereas this is a bug in the target's
-    /// implementation and needs fixing. Keeping the distinction in the type
-    /// rather than in a message is what lets a caller act on it.
-    Malformed { declared: Fidelity },
+    /// implementation and needs fixing. Both the declaration and what actually
+    /// arrived are carried, since the declaration alone cannot say whether the
+    /// target returned the wrong tier or nothing usable at all.
+    Malformed {
+        declared: Fidelity,
+        received: EvidenceShape,
+    },
+}
+
+/// What esk was able to establish about one scope.
+///
+/// Returned instead of a bare `bool` so a caller cannot ask "is this fine?"
+/// without seeing whether esk actually looked. A scope esk never read reports
+/// no drift, and that is honest but is not a pass; making the two cases
+/// separate variants means the compiler asks the second question for you.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Assessment {
+    /// esk read this scope back. `drifted` says what it found.
+    Resolved { drifted: bool },
+    /// esk did not establish this scope's state at all.
+    Unresolved,
 }
 
 impl Findings {
-    /// Whether esk actually established this scope's state.
-    ///
-    /// Ask this before trusting [`Findings::observed_drift`]: an unread scope
-    /// reports no drift because nothing was observed, not because it is
-    /// healthy. Requiring both questions keeps "could not look" from being
-    /// answered as "looks fine".
-    pub const fn is_resolved(&self) -> bool {
-        matches!(self, Self::Values { .. } | Self::Presence { .. })
+    /// What esk established about this scope.
+    pub fn assess(&self) -> Assessment {
+        if matches!(self, Self::Values { .. } | Self::Presence { .. }) {
+            Assessment::Resolved {
+                drifted: self.observed_drift(),
+            }
+        } else {
+            Assessment::Unresolved
+        }
     }
 
     /// Whether anything read back disagrees with the store.
     ///
-    /// Named for what it observed rather than for the scope's health: this is
-    /// `false` for a target esk could not reach, which is honest but is not a
-    /// pass. See [`Findings::is_resolved`].
-    pub fn observed_drift(&self) -> bool {
+    /// Private: `false` here means "nothing was observed to disagree", which is
+    /// not the same as "healthy" for a scope esk never read. Callers go through
+    /// [`Findings::assess`], which cannot express that confusion.
+    fn observed_drift(&self) -> bool {
         match self {
             Self::Values { verdicts, extra } => {
                 !extra.is_empty() || verdicts.values().any(|v| *v != ValueVerdict::Matches)
@@ -196,13 +236,10 @@ pub fn compare(
                     (key.clone(), verdict)
                 })
                 .collect();
-            // Key names come from the provider, so they are scrubbed too: a
-            // name that happens to contain a secret would otherwise reach a
-            // report through a channel the error path already guards.
             let extra = actual
                 .keys()
                 .filter(|key| !expected.contains_key(*key))
-                .map(|key| scrub(key, expected))
+                .map(|key| redact_exact(key, expected))
                 .collect();
             Findings::Values { verdicts, extra }
         }
@@ -221,7 +258,7 @@ pub fn compare(
             let extra = present
                 .iter()
                 .filter(|key| !expected.contains_key(*key))
-                .map(|key| scrub(key, expected))
+                .map(|key| redact_exact(key, expected))
                 .collect();
             Findings::Presence {
                 verdicts,
@@ -234,7 +271,24 @@ pub fn compare(
         (_, Evidence::Unreadable(reason)) => Findings::Unverifiable { reason },
         // The target declared more than it delivered. Never quietly downgrade
         // to a pass: this is a bug in the target, and it is reported as one.
-        (declared, _) => Findings::Malformed { declared },
+        (declared, evidence) => Findings::Malformed {
+            declared,
+            received: evidence.shape(),
+        },
+    }
+}
+
+/// Redact a provider-supplied key name that is itself a secret value.
+///
+/// Exact match, not substring: values like `dev`, `true`, or `1` are ordinary
+/// in a secret store and are substrings of ordinary key names, so substring
+/// redaction would shred the extras list — the operator's only clue about what
+/// the target is holding — on every run.
+fn redact_exact(key: &str, expected: &BTreeMap<String, Zeroizing<String>>) -> String {
+    if expected.values().any(|value| value.as_str() == key) {
+        "<redacted>".to_string()
+    } else {
+        key.to_string()
     }
 }
 
@@ -289,6 +343,8 @@ pub struct Tally {
     pub unreachable: usize,
     /// Returned evidence inconsistent with the fidelity it declared.
     pub malformed: usize,
+    /// Managed no keys, so nothing was verified either way.
+    pub skipped: usize,
 }
 
 impl Tally {
@@ -296,7 +352,12 @@ impl Tally {
     ///
     /// A run with unresolved scopes is inconclusive, never clean.
     pub const fn has_gaps(&self) -> bool {
-        self.unverifiable > 0 || self.unreachable > 0 || self.malformed > 0
+        self.unverifiable > 0 || self.unreachable > 0 || self.malformed > 0 || self.skipped > 0
+    }
+
+    /// Scopes esk actually read back and found consistent.
+    pub const fn verified(&self) -> usize {
+        self.value_clean + self.presence_clean
     }
 
     pub const fn drifted(&self) -> usize {
@@ -333,8 +394,9 @@ impl VerifyReport {
         let mut tally = Tally::default();
         for scope in &self.scopes {
             // A scope with nothing to check is not evidence of anything, so it
-            // must not inflate the verified count.
+            // is counted apart from the scopes esk actually verified.
             if scope.is_empty() {
+                tally.skipped += 1;
                 continue;
             }
             match &scope.findings {
@@ -368,7 +430,9 @@ impl VerifyReport {
         if tally.drifted() > 0 {
             return Outcome::Drift;
         }
-        if tally.unverifiable > 0 {
+        // Nothing verified is not the same as everything verified. A run made
+        // only of scopes esk could not or did not check must never read clean.
+        if tally.unverifiable > 0 || (tally.skipped > 0 && tally.verified() == 0) {
             return Outcome::CleanWithGaps;
         }
         Outcome::Clean
@@ -399,14 +463,14 @@ mod tests {
     fn matching_values_are_clean() {
         let want = expected(&[("A", "1"), ("B", "2")]);
         let findings = compare(Fidelity::Value, Ok(values(&[("A", "1"), ("B", "2")])), &want);
-        assert!(!findings.observed_drift());
+        assert_eq!(findings.assess(), Assessment::Resolved { drifted: false });
     }
 
     #[test]
     fn differing_value_is_drift() {
         let want = expected(&[("A", "1")]);
         let findings = compare(Fidelity::Value, Ok(values(&[("A", "wrong")])), &want);
-        assert!(findings.observed_drift());
+        assert_eq!(findings.assess(), Assessment::Resolved { drifted: true });
         let Findings::Values { verdicts, .. } = &findings else {
             panic!("expected value findings");
         };
@@ -435,7 +499,7 @@ mod tests {
             panic!("expected value findings");
         };
         assert_eq!(extra, &["STRAY".to_string()]);
-        assert!(findings.observed_drift());
+        assert_eq!(findings.assess(), Assessment::Resolved { drifted: true });
     }
 
     #[test]
@@ -463,9 +527,8 @@ mod tests {
             &want,
         );
         assert!(matches!(findings, Findings::Unreachable { .. }));
-        // An unreachable scope reports no drift, but must never be counted
-        // as clean either; that distinction lives in `Tally`.
-        assert!(!findings.observed_drift());
+        // The scope was never established, so the answer is not "no drift".
+        assert_eq!(findings.assess(), Assessment::Unresolved);
     }
 
     #[test]
@@ -496,7 +559,11 @@ mod tests {
             matches!(findings, Findings::Malformed { .. }),
             "an implementation bug must be distinguishable from an unreachable target"
         );
-        assert!(!findings.is_resolved(), "and must never count as resolved");
+        assert_eq!(
+            findings.assess(),
+            Assessment::Unresolved,
+            "and must never count as resolved"
+        );
     }
 
     #[test]
@@ -608,10 +675,10 @@ mod guard_tests {
         let findings = Findings::Unreachable {
             error: "timeout".to_string(),
         };
-        assert!(!findings.observed_drift(), "nothing was observed");
-        assert!(
-            !findings.is_resolved(),
-            "but the scope was never established, so it is not a pass"
+        assert_eq!(
+            findings.assess(),
+            Assessment::Unresolved,
+            "an unreached scope is not a pass, however little drift was seen"
         );
     }
 
@@ -632,6 +699,38 @@ mod guard_tests {
         assert!(
             !extra.iter().any(|key| key.contains("hunter2")),
             "extra was: {extra:?}"
+        );
+    }
+
+    /// A legitimate key name must survive redaction intact.
+    ///
+    /// Short values like `dev` or `true` are ordinary in a secret store and are
+    /// substrings of ordinary key names, so substring redaction would shred the
+    /// extras list that tells the operator what the target is holding.
+    #[test]
+    fn short_secret_value_does_not_mangle_unrelated_key_names() {
+        let want = expected(&[("STAGE", "API")]);
+        let actual = [
+            ("STAGE".to_string(), Zeroizing::new("API".to_string())),
+            (
+                "LEGACY_API_KEY".to_string(),
+                Zeroizing::new("x".to_string()),
+            ),
+            ("API".to_string(), Zeroizing::new("y".to_string())),
+        ]
+        .into_iter()
+        .collect();
+        let findings = compare(Fidelity::Value, Ok(Evidence::Values(actual)), &want);
+        let Findings::Values { extra, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert!(
+            extra.contains(&"LEGACY_API_KEY".to_string()),
+            "an unrelated key name must survive intact: {extra:?}"
+        );
+        assert!(
+            extra.contains(&"<redacted>".to_string()),
+            "a key name that IS the secret value is still redacted: {extra:?}"
         );
     }
 
@@ -662,6 +761,7 @@ mod guard_tests {
                 fidelity: Fidelity::Value,
                 findings: Findings::Malformed {
                     declared: Fidelity::Value,
+                    received: EvidenceShape::Names,
                 },
             }],
         };
@@ -696,5 +796,11 @@ mod empty_scope_tests {
             "a scope with no keys is vacuously consistent, not verified"
         );
         assert_eq!(tally.drifted(), 0);
+        assert_eq!(tally.skipped, 1, "it is counted as skipped, not dropped");
+        assert_ne!(
+            report.outcome(),
+            Outcome::Clean,
+            "a run that verified nothing must not report clean"
+        );
     }
 }
