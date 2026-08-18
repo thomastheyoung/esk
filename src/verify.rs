@@ -55,8 +55,12 @@ impl Fidelity {
 pub enum Evidence {
     /// Keys and values read back from the target.
     ///
-    /// Keys absent from this map are treated as missing from the target, so a
-    /// partial read must be reported as an error rather than a short map.
+    /// Keys absent from this map are treated as missing from the target, so an
+    /// implementation must return `Err` rather than a short map when it could
+    /// not enumerate everything — a paginated listing it did not exhaust, or a
+    /// read its credentials only partly permitted. A truncated map is reported
+    /// as drift the operator cannot act on, which is worse than admitting the
+    /// read failed.
     Values(BTreeMap<String, Zeroizing<String>>),
     /// Key names read back from the target, without values.
     ///
@@ -117,11 +121,32 @@ pub enum Findings {
     /// look" into "looks fine" is exactly the defect this module exists to
     /// prevent, so this can never be counted as a pass.
     Unreachable { error: String },
+    /// A target returned evidence that does not match the fidelity it declared.
+    ///
+    /// Separate from [`Findings::Unreachable`] because the response differs: a
+    /// timeout is worth retrying, whereas this is a bug in the target's
+    /// implementation and needs fixing. Keeping the distinction in the type
+    /// rather than in a message is what lets a caller act on it.
+    Malformed { declared: Fidelity },
 }
 
 impl Findings {
+    /// Whether esk actually established this scope's state.
+    ///
+    /// Ask this before trusting [`Findings::observed_drift`]: an unread scope
+    /// reports no drift because nothing was observed, not because it is
+    /// healthy. Requiring both questions keeps "could not look" from being
+    /// answered as "looks fine".
+    pub const fn is_resolved(&self) -> bool {
+        matches!(self, Self::Values { .. } | Self::Presence { .. })
+    }
+
     /// Whether anything read back disagrees with the store.
-    pub fn has_drift(&self) -> bool {
+    ///
+    /// Named for what it observed rather than for the scope's health: this is
+    /// `false` for a target esk could not reach, which is honest but is not a
+    /// pass. See [`Findings::is_resolved`].
+    pub fn observed_drift(&self) -> bool {
         match self {
             Self::Values { verdicts, extra } => {
                 !extra.is_empty() || verdicts.values().any(|v| *v != ValueVerdict::Matches)
@@ -129,7 +154,7 @@ impl Findings {
             Self::Presence {
                 verdicts, extra, ..
             } => !extra.is_empty() || verdicts.values().any(|v| *v != PresenceVerdict::Present),
-            Self::Unverifiable { .. } | Self::Unreachable { .. } => false,
+            Self::Unverifiable { .. } | Self::Unreachable { .. } | Self::Malformed { .. } => false,
         }
     }
 }
@@ -171,10 +196,13 @@ pub fn compare(
                     (key.clone(), verdict)
                 })
                 .collect();
+            // Key names come from the provider, so they are scrubbed too: a
+            // name that happens to contain a secret would otherwise reach a
+            // report through a channel the error path already guards.
             let extra = actual
                 .keys()
                 .filter(|key| !expected.contains_key(*key))
-                .cloned()
+                .map(|key| scrub(key, expected))
                 .collect();
             Findings::Values { verdicts, extra }
         }
@@ -193,23 +221,20 @@ pub fn compare(
             let extra = present
                 .iter()
                 .filter(|key| !expected.contains_key(*key))
-                .cloned()
+                .map(|key| scrub(key, expected))
                 .collect();
             Findings::Presence {
                 verdicts,
                 extra,
-                note,
+                // Never compared, but it is displayed, so it is scrubbed like
+                // any other provider-supplied text.
+                note: note.map(|note| scrub(&note, expected)),
             }
         }
         (_, Evidence::Unreadable(reason)) => Findings::Unverifiable { reason },
         // The target declared more than it delivered. Never quietly downgrade
-        // to a pass: this is a bug in the target, and it is reported loudly.
-        (declared, _) => Findings::Unreachable {
-            error: format!(
-                "target declared '{}' fidelity but returned different evidence (esk bug)",
-                declared.as_str()
-            ),
-        },
+        // to a pass: this is a bug in the target, and it is reported as one.
+        (declared, _) => Findings::Malformed { declared },
     }
 }
 
@@ -225,6 +250,22 @@ pub struct ScopeReport {
     pub env: String,
     pub fidelity: Fidelity,
     pub findings: Findings,
+}
+
+impl ScopeReport {
+    /// Whether this scope manages no keys at all.
+    ///
+    /// Such a scope is vacuously consistent with the store, which is not the
+    /// same as having been verified, so it is left out of the tally entirely.
+    fn is_empty(&self) -> bool {
+        match &self.findings {
+            Findings::Values { verdicts, extra } => verdicts.is_empty() && extra.is_empty(),
+            Findings::Presence {
+                verdicts, extra, ..
+            } => verdicts.is_empty() && extra.is_empty(),
+            _ => false,
+        }
+    }
 }
 
 /// Counts across a verification run.
@@ -246,6 +287,8 @@ pub struct Tally {
     pub unverifiable: usize,
     /// Could not be reached, or the read failed.
     pub unreachable: usize,
+    /// Returned evidence inconsistent with the fidelity it declared.
+    pub malformed: usize,
 }
 
 impl Tally {
@@ -253,7 +296,7 @@ impl Tally {
     ///
     /// A run with unresolved scopes is inconclusive, never clean.
     pub const fn has_gaps(&self) -> bool {
-        self.unverifiable > 0 || self.unreachable > 0
+        self.unverifiable > 0 || self.unreachable > 0 || self.malformed > 0
     }
 
     pub const fn drifted(&self) -> usize {
@@ -289,16 +332,21 @@ impl VerifyReport {
     pub fn tally(&self) -> Tally {
         let mut tally = Tally::default();
         for scope in &self.scopes {
+            // A scope with nothing to check is not evidence of anything, so it
+            // must not inflate the verified count.
+            if scope.is_empty() {
+                continue;
+            }
             match &scope.findings {
                 Findings::Values { .. } => {
-                    if scope.findings.has_drift() {
+                    if scope.findings.observed_drift() {
                         tally.value_drifted += 1;
                     } else {
                         tally.value_clean += 1;
                     }
                 }
                 Findings::Presence { .. } => {
-                    if scope.findings.has_drift() {
+                    if scope.findings.observed_drift() {
                         tally.presence_drifted += 1;
                     } else {
                         tally.presence_clean += 1;
@@ -306,6 +354,7 @@ impl VerifyReport {
                 }
                 Findings::Unverifiable { .. } => tally.unverifiable += 1,
                 Findings::Unreachable { .. } => tally.unreachable += 1,
+                Findings::Malformed { .. } => tally.malformed += 1,
             }
         }
         tally
@@ -313,7 +362,7 @@ impl VerifyReport {
 
     pub fn outcome(&self) -> Outcome {
         let tally = self.tally();
-        if tally.unreachable > 0 {
+        if tally.unreachable > 0 || tally.malformed > 0 {
             return Outcome::Inconclusive;
         }
         if tally.drifted() > 0 {
@@ -350,14 +399,14 @@ mod tests {
     fn matching_values_are_clean() {
         let want = expected(&[("A", "1"), ("B", "2")]);
         let findings = compare(Fidelity::Value, Ok(values(&[("A", "1"), ("B", "2")])), &want);
-        assert!(!findings.has_drift());
+        assert!(!findings.observed_drift());
     }
 
     #[test]
     fn differing_value_is_drift() {
         let want = expected(&[("A", "1")]);
         let findings = compare(Fidelity::Value, Ok(values(&[("A", "wrong")])), &want);
-        assert!(findings.has_drift());
+        assert!(findings.observed_drift());
         let Findings::Values { verdicts, .. } = &findings else {
             panic!("expected value findings");
         };
@@ -386,7 +435,7 @@ mod tests {
             panic!("expected value findings");
         };
         assert_eq!(extra, &["STRAY".to_string()]);
-        assert!(findings.has_drift());
+        assert!(findings.observed_drift());
     }
 
     #[test]
@@ -416,7 +465,7 @@ mod tests {
         assert!(matches!(findings, Findings::Unreachable { .. }));
         // An unreachable scope reports no drift, but must never be counted
         // as clean either; that distinction lives in `Tally`.
-        assert!(!findings.has_drift());
+        assert!(!findings.observed_drift());
     }
 
     #[test]
@@ -443,7 +492,11 @@ mod tests {
             note: None,
         };
         let findings = compare(Fidelity::Value, Ok(evidence), &want);
-        assert!(matches!(findings, Findings::Unreachable { .. }));
+        assert!(
+            matches!(findings, Findings::Malformed { .. }),
+            "an implementation bug must be distinguishable from an unreachable target"
+        );
+        assert!(!findings.is_resolved(), "and must never count as resolved");
     }
 
     #[test]
@@ -535,5 +588,113 @@ mod tests {
             tally.value_clean, 0,
             "presence evidence must never be tallied as value verification"
         );
+    }
+}
+
+#[cfg(test)]
+mod guard_tests {
+    use super::*;
+
+    fn expected(pairs: &[(&str, &str)]) -> BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    /// An unread scope must not look healthy to a caller.
+    #[test]
+    fn unreachable_is_not_resolved_even_though_no_drift_was_seen() {
+        let findings = Findings::Unreachable {
+            error: "timeout".to_string(),
+        };
+        assert!(!findings.observed_drift(), "nothing was observed");
+        assert!(
+            !findings.is_resolved(),
+            "but the scope was never established, so it is not a pass"
+        );
+    }
+
+    /// A provider key name is scrubbed like any other provider-supplied text.
+    #[test]
+    fn extra_key_name_cannot_leak_a_secret_value() {
+        let want = expected(&[("A", "hunter2")]);
+        let actual = [
+            ("A".to_string(), Zeroizing::new("hunter2".to_string())),
+            ("hunter2".to_string(), Zeroizing::new("x".to_string())),
+        ]
+        .into_iter()
+        .collect();
+        let findings = compare(Fidelity::Value, Ok(Evidence::Values(actual)), &want);
+        let Findings::Values { extra, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert!(
+            !extra.iter().any(|key| key.contains("hunter2")),
+            "extra was: {extra:?}"
+        );
+    }
+
+    /// The display-only note is scrubbed too: never compared is not never shown.
+    #[test]
+    fn presence_note_cannot_leak_a_secret_value() {
+        let want = expected(&[("A", "hunter2")]);
+        let evidence = Evidence::Names {
+            present: ["A".to_string()].into_iter().collect(),
+            note: Some("digest of hunter2".to_string()),
+        };
+        let findings = compare(Fidelity::Presence, Ok(evidence), &want);
+        let Findings::Presence { note, .. } = &findings else {
+            panic!("expected presence findings");
+        };
+        let note = note.as_deref().unwrap_or_default();
+        assert!(!note.contains("hunter2"), "note was: {note}");
+    }
+
+    /// A malformed response is inconclusive, never clean.
+    #[test]
+    fn malformed_evidence_makes_the_run_inconclusive() {
+        let report = VerifyReport {
+            scopes: vec![ScopeReport {
+                target: "t".to_string(),
+                app: None,
+                env: "dev".to_string(),
+                fidelity: Fidelity::Value,
+                findings: Findings::Malformed {
+                    declared: Fidelity::Value,
+                },
+            }],
+        };
+        assert_eq!(report.outcome(), Outcome::Inconclusive);
+        assert!(report.tally().has_gaps());
+    }
+}
+
+#[cfg(test)]
+mod empty_scope_tests {
+    use super::*;
+
+    /// A scope managing no keys must not be counted as verified.
+    #[test]
+    fn scope_with_nothing_to_check_does_not_inflate_the_verified_count() {
+        let report = VerifyReport {
+            scopes: vec![ScopeReport {
+                target: "t".to_string(),
+                app: None,
+                env: "dev".to_string(),
+                fidelity: Fidelity::Value,
+                findings: compare(
+                    Fidelity::Value,
+                    Ok(Evidence::Values(BTreeMap::new())),
+                    &BTreeMap::new(),
+                ),
+            }],
+        };
+        let tally = report.tally();
+        assert_eq!(
+            tally.value_clean, 0,
+            "a scope with no keys is vacuously consistent, not verified"
+        );
+        assert_eq!(tally.drifted(), 0);
     }
 }

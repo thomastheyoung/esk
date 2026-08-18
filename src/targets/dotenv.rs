@@ -14,7 +14,7 @@ use std::fmt::Write;
 use anyhow::{Context, Result};
 use tempfile::NamedTempFile;
 
-use crate::config::{Config, ResolvedTarget};
+use crate::config::{Config, OutputPathStatus, ResolvedTarget};
 use crate::targets::{DeployMode, DeployOutcome, DeployResult, DeployTarget, SecretValue};
 
 /// Format a value for safe inclusion in a .env file.
@@ -89,12 +89,12 @@ impl DeployTarget for DotenvTarget<'_> {
         // Anything else — most importantly a directory sitting where the file
         // belongs — is a state esk did not create, so it stays a mismatch and
         // fails loudly rather than being reported as current.
-        let path = match self.config.resolve_dotenv_path(app, &target.environment) {
-            Ok(path) => path,
-            Err(_) if artifact_path_is_symlink(self.config, app, &target.environment) => {
-                return None
-            }
-            Err(_) => return Some(false),
+        let Ok(path) = self.config.resolve_dotenv_path(app, &target.environment) else {
+            return match self.config.classify_dotenv_path(app, &target.environment) {
+                // A symlink anywhere in the path is the user's layout.
+                OutputPathStatus::TraversesSymlink => None,
+                _ => Some(false),
+            };
         };
         // Compare bytes, not text. A hand-mangled file may not be valid UTF-8,
         // and `render_dotenv_content` always is, so decoding first would turn a
@@ -146,17 +146,6 @@ impl DeployTarget for DotenvTarget<'_> {
                 .collect(),
         }
     }
-}
-
-/// Whether the configured `.env` location is itself a symlink.
-///
-/// Used to tell a user's deliberate symlink apart from a path esk did not
-/// create, since output-path resolution rejects both with the same error.
-fn artifact_path_is_symlink(config: &crate::config::Config, app: &str, env: &str) -> bool {
-    config
-        .dotenv_path_unchecked(app, env)
-        .and_then(|path| std::fs::symlink_metadata(path).ok())
-        .is_some_and(|meta| meta.file_type().is_symlink())
 }
 
 /// Render the exact file contents `deploy_batch` would write for `secrets`.

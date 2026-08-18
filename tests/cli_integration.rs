@@ -7699,6 +7699,56 @@ fn deploy_leaves_symlinked_artifact_alone() {
     );
 }
 
+/// A symlinked parent directory must not fail every deploy either.
+///
+/// Path resolution refuses a symlink at any component, not just the leaf, so a
+/// probe that inspects only the artifact file would miss the shape monorepos
+/// actually use (`apps/web -> packages/web`) and mark the group dirty forever.
+#[cfg(unix)]
+#[test]
+fn deploy_leaves_symlinked_parent_directory_alone() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    // Turn the app directory itself into a symlink, keeping the artifact.
+    let app_dir = project.root().join("apps/web");
+    let real_dir = project.root().join("packages_web");
+    std::fs::rename(&app_dir, &real_dir).unwrap();
+    std::os::unix::fs::symlink("../packages_web", &app_dir).unwrap();
+    let artifact = real_dir.join(".env.local");
+    let before = std::fs::read(&artifact).unwrap();
+
+    assert!(
+        cli::deploy::run(&config, &opts()).is_ok(),
+        "a symlinked app directory must not make every deploy fail"
+    );
+    assert!(
+        cli::deploy::run(&config, &opts()).is_ok(),
+        "and it must stay quiet on subsequent runs"
+    );
+    assert_eq!(
+        std::fs::read(&artifact).unwrap(),
+        before,
+        "the file behind the symlinked directory must not be touched"
+    );
+}
+
 /// A dry run must describe its work in the conditional, never the past tense.
 ///
 /// Regression guard: the summary printed `deployed N keys` before the "Dry run"

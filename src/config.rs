@@ -794,6 +794,21 @@ fn normalize_project_relative_output(output: &str) -> Result<PathBuf> {
     Ok(normalized)
 }
 
+/// The outcome of checking a project-relative output path against esk's policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputPathStatus {
+    /// esk may write here.
+    Usable,
+    /// Some component is a symlink. esk never writes through one, so this is a
+    /// layout the user chose rather than a state esk should try to repair.
+    TraversesSymlink,
+    /// Something that is not a regular file occupies the path, such as a
+    /// directory where the artifact belongs.
+    NotARegularFile,
+    /// The path is unusable for any other reason.
+    Rejected,
+}
+
 impl Config {
     /// Validate that `env` is a known environment, suggesting corrections if not.
     pub fn validate_env(&self, env: &str) -> Result<()> {
@@ -809,6 +824,19 @@ impl Config {
     /// checked without following symlinks, and an existing output must be a
     /// regular file. Callers that create parent directories must resolve again
     /// before writing, because filesystem topology can change after validation.
+    /// Why [`Config::resolve_project_output_path`] refused a path.
+    ///
+    /// Callers that must tell a user's deliberate layout apart from a state esk
+    /// did not create need more than an error string. Returning the reason from
+    /// the one function that enforces the policy keeps a second copy of that
+    /// policy from drifting away from it.
+    pub(crate) fn classify_output_path(&self, output: &str) -> OutputPathStatus {
+        let Ok(relative) = normalize_project_relative_output(output) else {
+            return OutputPathStatus::Rejected;
+        };
+        self.walk_output_path(&relative).0
+    }
+
     pub fn resolve_project_output_path(&self, output: &str) -> Result<PathBuf> {
         let relative = normalize_project_relative_output(output)?;
         let resolved = self.root.join(&relative);
@@ -820,6 +848,34 @@ impl Config {
             )
         })?;
 
+        // One walk, shared with `classify_output_path`, so the reason a path is
+        // refused can never disagree with whether it is refused.
+        match self.walk_output_path(&relative) {
+            (OutputPathStatus::Usable, _) => Ok(resolved),
+            (OutputPathStatus::TraversesSymlink, at) => bail!(
+                "project output '{}' traverses a symlink at {}",
+                output,
+                at.display()
+            ),
+            (OutputPathStatus::NotARegularFile, at) => {
+                if at == resolved {
+                    bail!("project output '{output}' is not a regular file")
+                }
+                bail!(
+                    "project output '{}' has a non-directory parent at {}",
+                    output,
+                    at.display()
+                )
+            }
+            (OutputPathStatus::Rejected, at) => {
+                bail!("failed to inspect {}", at.display())
+            }
+        }
+    }
+
+    /// Walk a normalized project-relative path, reporting the first component
+    /// that violates the output policy along with where it was found.
+    fn walk_output_path(&self, relative: &Path) -> (OutputPathStatus, PathBuf) {
         let components: Vec<_> = relative.components().collect();
         let mut current = self.root.clone();
         for (index, component) in components.iter().enumerate() {
@@ -827,33 +883,20 @@ impl Config {
             match std::fs::symlink_metadata(&current) {
                 Ok(metadata) => {
                     if metadata.file_type().is_symlink() {
-                        bail!(
-                            "project output '{}' traverses a symlink at {}",
-                            output,
-                            current.display()
-                        );
+                        return (OutputPathStatus::TraversesSymlink, current);
                     }
-                    if index + 1 == components.len() {
-                        if !metadata.is_file() {
-                            bail!("project output '{output}' is not a regular file");
-                        }
-                    } else if !metadata.is_dir() {
-                        bail!(
-                            "project output '{}' has a non-directory parent at {}",
-                            output,
-                            current.display()
-                        );
+                    let is_leaf = index + 1 == components.len();
+                    if (is_leaf && !metadata.is_file()) || (!is_leaf && !metadata.is_dir()) {
+                        return (OutputPathStatus::NotARegularFile, current);
                     }
                 }
+                // Nothing exists from here down. The path is still writable
+                // once the parent directories are created.
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-                Err(error) => {
-                    return Err(error)
-                        .with_context(|| format!("failed to inspect {}", current.display()));
-                }
+                Err(_) => return (OutputPathStatus::Rejected, current),
             }
         }
-
-        Ok(resolved)
+        (OutputPathStatus::Usable, self.root.join(relative))
     }
 
     /// Find `esk.yaml` from the current directory and load it.
@@ -1338,6 +1381,18 @@ impl Config {
     }
 
     /// Resolve the .env file path for an (app, env) pair.
+    /// Classify the `.env` output path for an app and environment.
+    ///
+    /// Uses the same walk as [`Config::resolve_project_output_path`], so a
+    /// caller asking "why was this refused?" can never disagree with the
+    /// function that did the refusing.
+    pub(crate) fn classify_dotenv_path(&self, app: &str, env: &str) -> OutputPathStatus {
+        let Some(pattern) = self.dotenv_pattern(app, env) else {
+            return OutputPathStatus::Rejected;
+        };
+        self.classify_output_path(&pattern)
+    }
+
     /// The `.env` path for an app and environment, before output-policy checks.
     ///
     /// [`Config::resolve_dotenv_path`] refuses symlinks and non-file leaves
@@ -1346,7 +1401,7 @@ impl Config {
     ///
     /// For inspection only — never write through this path. Every write goes
     /// via `resolve_dotenv_path` so the output policy is enforced in one place.
-    pub(crate) fn dotenv_path_unchecked(&self, app: &str, env: &str) -> Option<PathBuf> {
+    fn dotenv_pattern(&self, app: &str, env: &str) -> Option<String> {
         let dotenv_config = self.targets.dotenv.as_ref()?;
         let app_config = self.apps.get(app)?;
         let suffix = dotenv_config
@@ -1354,11 +1409,12 @@ impl Config {
             .get(env)
             .cloned()
             .unwrap_or_default();
-        let path = dotenv_config
-            .pattern
-            .replace("{app_path}", &app_config.path)
-            .replace("{env_suffix}", &suffix);
-        Some(self.root.join(path))
+        Some(
+            dotenv_config
+                .pattern
+                .replace("{app_path}", &app_config.path)
+                .replace("{env_suffix}", &suffix),
+        )
     }
 
     pub fn resolve_dotenv_path(&self, app: &str, env: &str) -> Result<PathBuf> {
@@ -2430,6 +2486,63 @@ targets:
         let config = Config::load(&path).unwrap();
         let result = config.resolve_dotenv_path("web", "dev");
         assert!(result.is_ok());
+    }
+
+    /// The refusal reason must agree with the refusal itself.
+    ///
+    /// `classify_output_path` exists so callers can tell a user's symlinked
+    /// layout apart from a path esk did not create. If it could disagree with
+    /// `resolve_project_output_path`, a caller would act on a reason that did
+    /// not apply — the duplicated-policy bug these share a walk to avoid.
+    #[test]
+    fn classification_agrees_with_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("apps/web")).unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+targets:
+  .env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix:
+      dev: ""
+"#;
+        let config = Config::load(&write_yaml(root, yaml)).unwrap();
+
+        // Nothing there yet: usable, and resolution succeeds.
+        assert_eq!(
+            config.classify_output_path("apps/web/.env.local"),
+            OutputPathStatus::Usable
+        );
+        assert!(config.resolve_project_output_path("apps/web/.env.local").is_ok());
+
+        // A directory where the file belongs: refused by both.
+        std::fs::create_dir(root.join("apps/web/.env.local")).unwrap();
+        assert_eq!(
+            config.classify_output_path("apps/web/.env.local"),
+            OutputPathStatus::NotARegularFile
+        );
+        assert!(config.resolve_project_output_path("apps/web/.env.local").is_err());
+        std::fs::remove_dir(root.join("apps/web/.env.local")).unwrap();
+
+        // A symlinked parent: refused by both, and classified as a symlink so a
+        // caller can leave the user's layout alone.
+        std::fs::create_dir_all(root.join("packages/web")).unwrap();
+        std::fs::remove_dir(root.join("apps/web")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../packages/web", root.join("apps/web")).unwrap();
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                config.classify_output_path("apps/web/.env.local"),
+                OutputPathStatus::TraversesSymlink
+            );
+            assert!(config.resolve_project_output_path("apps/web/.env.local").is_err());
+        }
     }
 
     #[test]
