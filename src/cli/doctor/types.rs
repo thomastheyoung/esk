@@ -60,8 +60,12 @@ pub(crate) struct Report {
 
 /// Counts of check outcomes across a report.
 ///
-/// Both the text and JSON paths derive their pass/warn/fail totals from this
-/// one type, so the two can never disagree about whether a run failed.
+/// Both the text and JSON paths total their checks through this one type so
+/// their verdicts stay in step. Note the invariant is upheld by callers, not
+/// by the type: live target/remote probes are computed outside `Report`, so a
+/// caller that folds them in must call [`Tally::add_health`]. Omitting it
+/// undercounts failures and reintroduces the exit-code divergence this type
+/// was added to close.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub(crate) struct Tally {
     pub(crate) pass: usize,

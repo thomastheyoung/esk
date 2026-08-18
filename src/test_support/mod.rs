@@ -23,6 +23,7 @@ enum QueuedResponse {
 pub struct MockCommandRunner {
     calls: Mutex<Vec<RecordedCall>>,
     responses: Mutex<Vec<QueuedResponse>>,
+    strict: bool,
 }
 
 impl MockCommandRunner {
@@ -30,7 +31,28 @@ impl MockCommandRunner {
         Self {
             calls: Mutex::new(Vec::new()),
             responses: Mutex::new(Vec::new()),
+            strict: false,
         }
+    }
+
+    /// Panic instead of inventing a success when the response queue is empty.
+    ///
+    /// The lenient default suits tests that only assert on recorded calls. Use
+    /// this whenever a test asserts an exact call count or indexes into
+    /// `calls`: an unqueued call would otherwise be served a synthetic success
+    /// with empty stdout, which parsers read as "no data" and tests read as
+    /// green. Strict mode turns that silent corruption into a named failure.
+    ///
+    /// Strictness is opt-in rather than automatic on first `push_*`. Queuing a
+    /// response does not imply the test cares about every later one: the
+    /// `deploy_prune_*` and `status_shows_target_orphans` tests deliberately
+    /// queue the deploy phase and let the prune phase's calls fall through,
+    /// asserting only that deletion was attempted. Inferring strictness from
+    /// queue use breaks all seven.
+    #[must_use]
+    pub fn strict(mut self) -> Self {
+        self.strict = true;
+        self
     }
 
     pub fn from_outputs(outputs: Vec<CommandOutput>) -> Self {
@@ -100,6 +122,11 @@ impl CommandRunner for MockCommandRunner {
             .lock()
             .expect("runner responses mutex poisoned");
         if responses.is_empty() {
+            assert!(
+                !self.strict,
+                "MockCommandRunner (strict): no queued response for `{program} {}`",
+                args.join(" ")
+            );
             return Ok(CommandOutput {
                 success: true,
                 stdout: Vec::new(),
@@ -165,5 +192,43 @@ impl ConfigFixture {
     /// Return the absolute path for a relative path under the fixture root.
     pub fn path(&self, relative: &str) -> PathBuf {
         self.dir.path().join(relative)
+    }
+}
+
+#[cfg(test)]
+mod strict_tests {
+    use super::*;
+
+    #[test]
+    fn lenient_mode_invents_success_when_queue_is_empty() {
+        // Documents the default behaviour that strict mode exists to guard
+        // against: an unqueued call is served a synthetic success.
+        let runner = MockCommandRunner::new();
+        let out = runner.run("wrangler", &["secret", "list"], CommandOpts::default());
+        let out = out.expect("lenient mode returns a synthetic success");
+        assert!(out.success);
+        assert!(out.stdout.is_empty());
+    }
+
+    #[test]
+    fn strict_mode_serves_queued_responses_normally() {
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(b"payload", b"");
+        let out = runner
+            .run("wrangler", &["secret", "list"], CommandOpts::default())
+            .expect("queued response is returned");
+        assert!(out.success);
+        assert_eq!(out.stdout, b"payload");
+    }
+
+    #[test]
+    #[should_panic(expected = "no queued response for `wrangler secret list`")]
+    fn strict_mode_panics_when_queue_is_exhausted() {
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(b"first", b"");
+        let _ = runner.run("wrangler", &["secret", "put"], CommandOpts::default());
+        // Second call has nothing queued: strict mode must name the offender
+        // rather than inventing a success.
+        let _ = runner.run("wrangler", &["secret", "list"], CommandOpts::default());
     }
 }

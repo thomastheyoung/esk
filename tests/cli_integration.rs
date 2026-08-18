@@ -7274,4 +7274,25 @@ fn doctor_json_process_exit_matches_text_on_target_health_failure() {
          json stdout: {}",
         String::from_utf8_lossy(&json.stdout)
     );
+
+    // The exit code is a coarse proxy: both paths could agree on "failed"
+    // while disagreeing on how many checks failed. Compare the counts too,
+    // since the shared arithmetic is the actual invariant under test.
+    let counts = |stderr: &[u8]| {
+        let text = String::from_utf8_lossy(stderr).to_string();
+        let i = text.rfind("passed,").expect("summary line on stderr");
+        let start = text[..i].rfind('\n').map_or(0, |n| n + 1);
+        let end = text[i..].find('\n').map_or(text.len(), |n| i + n);
+        text[start..end].trim().trim_start_matches(['✖', ' ']).to_string()
+    };
+    assert_eq!(
+        counts(&text.stderr),
+        counts(&json.stderr),
+        "doctor and doctor --json must report the same pass/warn/fail counts"
+    );
+
+    // The JSON document must stay parseable on the failure path: CI pipes
+    // stdout to `jq`, so the bail! diagnostic belongs on stderr only.
+    serde_json::from_slice::<serde_json::Value>(&json.stdout)
+        .expect("doctor --json stdout must remain valid JSON when checks fail");
 }

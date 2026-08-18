@@ -784,6 +784,7 @@ pub struct RecordedCall {
 pub struct MockCommandRunner {
     pub calls: Mutex<Vec<RecordedCall>>,
     pub responses: Mutex<Vec<Result<CommandOutput, String>>>,
+    strict: bool,
 }
 
 impl MockCommandRunner {
@@ -791,7 +792,28 @@ impl MockCommandRunner {
         Self {
             calls: Mutex::new(Vec::new()),
             responses: Mutex::new(Vec::new()),
+            strict: false,
         }
+    }
+
+    /// Panic instead of inventing a success when the response queue is empty.
+    ///
+    /// The lenient default suits tests that only assert on recorded calls. Use
+    /// this whenever a test asserts an exact call count or indexes into
+    /// `calls`: an unqueued call would otherwise be served a synthetic success
+    /// with empty stdout, which parsers read as "no data" and tests read as
+    /// green. Strict mode turns that silent corruption into a named failure.
+    ///
+    /// Strictness is opt-in rather than automatic on first `push_*`. Queuing a
+    /// response does not imply the test cares about every later one: the
+    /// `deploy_prune_*` and `status_shows_target_orphans` tests deliberately
+    /// queue the deploy phase and let the prune phase's calls fall through,
+    /// asserting only that deletion was attempted. Inferring strictness from
+    /// queue use breaks all seven.
+    #[must_use]
+    pub fn strict(mut self) -> Self {
+        self.strict = true;
+        self
     }
 
     pub fn with_success() -> Self {
@@ -837,6 +859,11 @@ impl CommandRunner for MockCommandRunner {
 
         let mut responses = self.responses.lock().unwrap();
         if responses.is_empty() {
+            assert!(
+                !self.strict,
+                "MockCommandRunner (strict): no queued response for `{program} {}`",
+                args.join(" ")
+            );
             Ok(CommandOutput {
                 success: true,
                 stdout: Vec::new(),
