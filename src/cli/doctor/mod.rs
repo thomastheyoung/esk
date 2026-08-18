@@ -260,11 +260,16 @@ secrets:
         let report = Report::build(dir.path());
 
         if let Section::Checked(checks) = &report.secrets_health {
-            let failed_check = checks.iter().find(|c| c.label == "Failed deploys").unwrap();
+            let failed_check = checks
+                .iter()
+                .find(|c| c.label == "Recorded deploy failures")
+                .unwrap();
             assert_eq!(failed_check.status, CheckStatus::Fail);
-            assert!(failed_check
-                .detail
-                .contains("1 deployment(s) in failed state"));
+            assert!(
+                failed_check.detail.contains("1 deploy(s) recorded as failed"),
+                "detail was: {}",
+                failed_check.detail
+            );
         } else {
             panic!("secrets_health should be Checked");
         }

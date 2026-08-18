@@ -209,6 +209,19 @@ pub trait DeployTarget: Send + Sync {
         false
     }
 
+    /// Whether this target's deployed artifact still matches `secrets`.
+    ///
+    /// `None` means the target cannot tell — no local artifact, or reading it
+    /// back would need a network round-trip. That is the honest default, and
+    /// it is what every target reports until it opts in: a target that stays
+    /// silent must never be mistaken for one that verified itself.
+    ///
+    /// `Some(false)` means the artifact is missing or no longer matches, so the
+    /// deploy plan must regenerate it even when the store is unchanged.
+    fn artifact_matches(&self, _secrets: &[SecretValue], _target: &ResolvedTarget) -> Option<bool> {
+        None
+    }
+
     /// Deploy a batch of secrets. Default implementation loops deploy_secret.
     fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         secrets

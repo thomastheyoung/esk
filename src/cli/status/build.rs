@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
@@ -10,6 +10,38 @@ use super::types::{
     CoverageGap, Dashboard, DeployEntry, EmptyValueWarning, NextStep, Orphan, RemoteState,
     RemoteStatus, ValidationWarning,
 };
+
+/// Whether the file a filesystem target wrote is still present.
+///
+/// `status` must not claim a secret is deployed when the artifact holding it
+/// was deleted, but it also must stay fast and offline, so only targets whose
+/// state is a local file are checked. Everything else answers `None` — esk
+/// genuinely cannot tell without a network round-trip.
+///
+/// Results are cached per `(app, env)`: one file backs every secret in a
+/// group, so re-reading it per secret would be wasted work.
+fn dotenv_artifact_present(
+    config: &Config,
+    service: &str,
+    app: Option<&str>,
+    env: &str,
+    cache: &mut BTreeMap<(String, String, String), Option<bool>>,
+) -> Option<bool> {
+    if service != ".env" {
+        return None;
+    }
+    let app = app?;
+    // Keyed by service as well as app and env: only `.env` reaches this point
+    // today, but a second filesystem target must not silently share an entry.
+    *cache
+        .entry((service.to_string(), app.to_string(), env.to_string()))
+        .or_insert_with(|| {
+            config
+                .resolve_dotenv_path(app, env)
+                .ok()
+                .map(|path| path.is_file())
+        })
+}
 
 impl Dashboard {
     pub(crate) fn build(config: &Config, env: Option<&str>) -> Result<Self> {
@@ -26,6 +58,11 @@ impl Dashboard {
         let target_names: Vec<&str> = config.target_names();
 
         let filtered_env = env.map(String::from);
+
+        // Artifact state per (app, env) for filesystem targets, resolved once
+        // per group rather than per secret. `None` means esk cannot tell.
+        let mut artifact_state: BTreeMap<(String, String, String), Option<bool>> =
+            BTreeMap::new();
 
         let envs: Vec<&str> = match env {
             Some(e) => vec![e],
@@ -86,6 +123,20 @@ impl Dashboard {
                                 ..entry
                             });
                         } else if current_hash != rec.value_hash {
+                            pending.push(DeployEntry {
+                                last_deployed_at: Some(rec.last_deployed_at.clone()),
+                                ..entry
+                            });
+                        } else if dotenv_artifact_present(
+                            config,
+                            &target.service,
+                            target.app.as_deref(),
+                            &target.environment,
+                            &mut artifact_state,
+                        ) == Some(false)
+                        {
+                            // The store is unchanged, but the file esk wrote is
+                            // gone or altered, so this is not deployed state.
                             pending.push(DeployEntry {
                                 last_deployed_at: Some(rec.last_deployed_at.clone()),
                                 ..entry
@@ -413,5 +464,79 @@ impl Dashboard {
             remote_states,
             next_steps,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::targets::{DeployTarget, SecretValue};
+
+    const DOTENV_YAML: &str = r"
+project: testapp
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+targets:
+  .env:
+    pattern: '{app_path}/.env{env_suffix}.local'
+    env_suffix:
+      dev: ''
+secrets:
+  General:
+    MY_SECRET:
+      description: test
+      targets:
+        .env: [web:dev]
+";
+
+    /// A deleted artifact must move its secret out of `deployed` and into
+    /// `pending`, rather than leaving a green check the store cannot support.
+    #[test]
+    fn missing_artifact_reclassifies_deployed_as_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("esk.yaml"), DOTENV_YAML).unwrap();
+        std::fs::create_dir_all(dir.path().join("apps/web")).unwrap();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("MY_SECRET", "dev", "val1").unwrap();
+        let config = Config::load(&dir.path().join("esk.yaml")).unwrap();
+
+        // Write the artifact and record the deploy exactly as a real run would.
+        let target = crate::config::ResolvedTarget {
+            service: ".env".to_string(),
+            app: Some("web".to_string()),
+            environment: "dev".to_string(),
+        };
+        let dotenv = crate::targets::dotenv::DotenvTarget { config: &config };
+        dotenv.deploy_batch(
+            &[SecretValue {
+                key: "MY_SECRET".to_string(),
+                value: zeroize::Zeroizing::new("val1".to_string()),
+                group: "General".to_string(),
+            }],
+            &target,
+        );
+        let index_path = dir.path().join(".esk/deploy-index.json");
+        let (mut index, _) = DeployIndex::load(&index_path);
+        index.record_success(
+            DeployIndex::tracker_key("MY_SECRET", ".env", Some("web"), "dev"),
+            target.to_string(),
+            DeployIndex::hash_value("val1", store.master_key()),
+        );
+        index.save().unwrap();
+
+        let dashboard = Dashboard::build(&config, Some("dev")).unwrap();
+        assert_eq!(dashboard.deployed.len(), 1, "baseline: reported as sent");
+        assert!(dashboard.pending.is_empty());
+
+        std::fs::remove_file(dir.path().join("apps/web/.env.local")).unwrap();
+
+        let dashboard = Dashboard::build(&config, Some("dev")).unwrap();
+        assert!(
+            dashboard.deployed.is_empty(),
+            "a secret whose artifact was deleted is not deployed"
+        );
+        assert_eq!(dashboard.pending.len(), 1, "it needs redeploying");
     }
 }

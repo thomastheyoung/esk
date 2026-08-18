@@ -43,6 +43,8 @@ pub(crate) struct PlanOutput {
     pub unset: Vec<super::report::DeployEntry>,
     pub skipped: Vec<super::report::DeployEntry>,
     pub unavailable_orphans: Vec<crate::orphan::TargetOrphan>,
+    /// Batch artifacts regenerated because they drifted, as `(label, env)`.
+    pub restored: Vec<(String, String)>,
 }
 
 impl PlanOutput {

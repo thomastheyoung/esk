@@ -161,7 +161,7 @@ impl EskMcpServer {
 
     #[tool(
         name = "esk_status",
-        description = "Show project deploy and sync status: pending/failed/deployed counts, validation warnings, missing required secrets, coverage gaps, and recommended next steps."
+        description = "Show project deploy and sync status: pending/failed/sent counts, validation warnings, missing required secrets, coverage gaps, and recommended next steps. Counts reflect what esk last sent; for targets esk cannot read back, they do not confirm the target's current contents."
     )]
     async fn status(&self, params: Parameters<StatusParams>) -> Result<CallToolResult, ErrorData> {
         match do_status(&params.0) {
@@ -172,7 +172,7 @@ impl EskMcpServer {
 
     #[tool(
         name = "esk_deploy",
-        description = "Deploy secrets to configured targets (env files, Cloudflare, Vercel, etc.). Skips secrets that haven't changed unless force=true."
+        description = "Deploy secrets to configured targets (env files, Cloudflare, Vercel, etc.). Skips secrets that haven't changed unless force=true, except that a generated file esk can read back is regenerated when it no longer matches the store."
     )]
     async fn deploy(&self, params: Parameters<DeployParams>) -> Result<CallToolResult, ErrorData> {
         match do_deploy(&params.0) {

@@ -35,7 +35,7 @@ impl Dashboard {
             )
         } else {
             let parts = ui::format_count_summary(&[
-                ("deployed", self.deployed.len()),
+                ("sent", self.deployed.len()),
                 ("pending", self.pending.len()),
                 ("failed", self.failed.len()),
                 ("unset", self.unset.len()),
@@ -46,7 +46,10 @@ impl Dashboard {
                 ("target orphans", self.target_orphans.len()),
             ]);
 
-            let all_deployed = self.failed.is_empty()
+            // "sent", not "deployed": the deploy index records what esk last
+            // transmitted, and for most targets esk cannot read the value back
+            // to confirm it arrived or is still there.
+            let all_sent = self.failed.is_empty()
                 && self.pending.is_empty()
                 && self.unset.is_empty()
                 && self.validation_warnings.is_empty()
@@ -55,9 +58,9 @@ impl Dashboard {
                 && self.missing_required.is_empty()
                 && self.target_orphans.is_empty();
 
-            if all_deployed {
+            if all_sent {
                 format!(
-                    "{} · {} · {}, all deployed",
+                    "{} · {} · {}, all sent",
                     style(&self.project).bold(),
                     style(format!("v{display_version}")).dim(),
                     style(format!(
@@ -142,10 +145,10 @@ impl Dashboard {
                 for group in groups.iter().take(shown) {
                     let targets = group.targets.join(", ");
                     let freshness = match &group.freshness {
-                        GroupedFreshness::NeverDeployed => "never deployed".to_string(),
+                        GroupedFreshness::NeverDeployed => "never sent".to_string(),
                         GroupedFreshness::Timestamp(ts) => {
                             let ago = ui::format_relative_time(ts);
-                            format!("last deployed {ago}")
+                            format!("last sent {ago}")
                         }
                     };
                     deploy_lines.push(ui::section_entry(
@@ -188,7 +191,7 @@ impl Dashboard {
                 if all {
                     deploy_lines.push(ui::section_header(
                         ui::Icon::Success,
-                        &format!("{} deployed", self.deployed.len()),
+                        &format!("{} sent", self.deployed.len()),
                         ui::SectionColor::Green,
                     ));
                     let groups = group_entries(&self.deployed, TimestampPick::Newest);

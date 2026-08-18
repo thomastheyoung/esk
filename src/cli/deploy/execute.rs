@@ -95,6 +95,7 @@ pub(crate) fn execute_deploy<'a>(
         unset: Vec::new(),
         pruned,
         unavailable_orphans: Vec::new(),
+        restored: Vec::new(),
         dry_run,
         verbose,
     })
@@ -105,19 +106,21 @@ pub(crate) fn build_report(mut exec_report: DeployReport, plan: PlanOutput) -> D
     exec_report.skipped = plan.skipped;
     exec_report.unset = plan.unset;
     exec_report.unavailable_orphans = plan.unavailable_orphans;
+    exec_report.restored = plan.restored;
     exec_report
 }
 
 /// Render post-execution output depending on animated vs sequential mode.
 pub(crate) fn render_report(report: &DeployReport, animated: bool) -> Result<()> {
     if animated {
+        report.render_restored()?;
         if !report.skipped.is_empty() {
             if report.verbose {
                 report.render_skipped()?;
             } else {
                 let skip_count = report.skipped.len();
                 cliclack::log::remark(format!(
-                    "{} targets up to date  {}",
+                    "{} targets unchanged since last deploy  {}",
                     style(skip_count).bold(),
                     style("(use --verbose to show)").dim()
                 ))?;
@@ -676,12 +679,15 @@ fn execute_animated<'a>(
 
     // Print summary line
     let env_keys = key_lines.iter().filter(|kl| kl.total_ops > 0).count();
+    // The animated renderer never runs for a dry run (see `execute_deploy`),
+    // so this summary always describes work that happened.
     let summary = ui::format_deploy_summary(
         env_keys,
         env_deployed,
         env_failed,
         env_unset_count,
         env_pruned,
+        ui::SummaryMood::Done,
     );
     let summary_icon = if env_failed > 0 {
         ui::Icon::Failure.to_string()

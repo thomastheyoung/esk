@@ -11,9 +11,7 @@
 
 **`ESK`** is an encrypted secrets manager that lets you define secrets once and deploy them to many targets.
 
-Its differentiator is drift detection: one Git-versioned source of truth can show
-which configured targets differ from their last recorded deploy before a deployment
-surprises you.
+Its differentiator is fan-out from one Git-versioned source of truth: define a secret once and deploy it everywhere it is needed. For targets esk writes itself, such as generated `.env` files, it reads the artifact back and repairs it when it no longer matches the store. For targets it cannot read back — most platform CLIs accept secrets without ever returning them — esk reports what it last sent rather than claiming to know the target's current state.
 
 It is built for builders shipping one application to multiple environments and platforms:
 
@@ -181,7 +179,7 @@ When you need cloud deploy targets or shared sync, add target/remote blocks. See
 | `esk delete <KEY> --env <ENV>` | Delete a secret (auto-sync/deploy by default) |
 | `esk list [--env <ENV>]`       | List secrets and deploy status                |
 | `esk deploy [--env <ENV>]`     | Deploy to configured targets                  |
-| `esk status [--env <ENV>]`     | Show drift/sync dashboard                     |
+| `esk status [--env <ENV>]`     | Show deploy and sync dashboard                |
 | `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state        |
 | `esk generate [<FORMAT>]`      | Generate code/config from secret definitions  |
 | `esk doctor`                   | Diagnose project health in one pass           |
@@ -322,7 +320,7 @@ cargo build --release --features mcp
 | `esk_set`      | Set a secret value (no auto-deploy)              |
 | `esk_delete`   | Delete a secret value (no auto-deploy)           |
 | `esk_list`     | List secrets with deploy status per environment  |
-| `esk_status`   | Project health: drift, warnings, next steps      |
+| `esk_status`   | Project health: pending work, warnings, next steps |
 | `esk_deploy`   | Deploy secrets to configured targets             |
 | `esk_generate` | Generate TypeScript declarations, Zod schemas, `.env.example` |
 

@@ -7296,3 +7296,397 @@ fn doctor_json_process_exit_matches_text_on_target_health_failure() {
     serde_json::from_slice::<serde_json::Value>(&json.stdout)
         .expect("doctor --json stdout must remain valid JSON when checks fail");
 }
+
+/// Deploy must restore a batch artifact that was deleted outside esk.
+///
+/// Regression guard: dirtiness used to be decided solely from the deploy
+/// index, which records what esk last *sent*. A deleted `.env` left the store
+/// unchanged, so the group was skipped, the file was never rewritten, and the
+/// run reported "up to date" — silent data loss recoverable only via `--force`.
+#[test]
+fn deploy_restores_deleted_batch_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    let original = std::fs::read_to_string(&env_path).unwrap();
+
+    std::fs::remove_file(&env_path).unwrap();
+    assert!(!env_path.is_file(), "precondition: artifact removed");
+
+    // A plain deploy — no --force — must bring it back.
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    assert!(env_path.is_file(), "deploy must restore the deleted artifact");
+    assert_eq!(
+        std::fs::read_to_string(&env_path).unwrap(),
+        original,
+        "restored artifact must match what a fresh deploy writes"
+    );
+}
+
+/// Deploy must repair an artifact whose contents were edited by hand.
+#[test]
+fn deploy_restores_corrupted_batch_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    let original = std::fs::read_to_string(&env_path).unwrap();
+
+    // The generated file is 0o400, so widen it before overwriting.
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    std::fs::write(&env_path, "MY_SECRET=WRONG-STALE-VALUE\n").unwrap();
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&env_path).unwrap(),
+        original,
+        "deploy must rewrite a hand-edited artifact back to canonical form"
+    );
+}
+
+/// A dry run must report artifact drift without writing anything.
+#[test]
+fn deploy_dry_run_does_not_restore_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let mut opts = cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+    cli::deploy::run(&config, &opts).unwrap();
+
+    let env_path = project.root().join("apps/web/.env.local");
+    std::fs::remove_file(&env_path).unwrap();
+
+    opts.dry_run = true;
+    cli::deploy::run(&config, &opts).unwrap();
+
+    assert!(
+        !env_path.is_file(),
+        "dry run must not write the artifact it reports as drifted"
+    );
+}
+
+/// Restoring is idempotent: a second deploy finds nothing to do.
+#[test]
+fn deploy_restore_is_idempotent() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    std::fs::remove_file(&env_path).unwrap();
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    // Mark the file so a rewrite is detectable without relying on filesystem
+    // timestamp granularity, which is too coarse on some platforms to
+    // distinguish two writes in the same test.
+    let restored = std::fs::read(&env_path).unwrap();
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    let mut marked = restored.clone();
+    marked.extend_from_slice(b"# sentinel\n");
+    std::fs::write(&env_path, &marked).unwrap();
+
+    // Deploying again sees drift (the sentinel) and rewrites once...
+    cli::deploy::run(&config, &opts()).unwrap();
+    assert_eq!(
+        std::fs::read(&env_path).unwrap(),
+        restored,
+        "the sentinel edit must be healed away"
+    );
+
+    // ...and a further deploy, with the artifact now matching, must not touch
+    // it: re-adding the sentinel proves only a real rewrite would remove it.
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o400);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(true);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    let before = std::fs::read(&env_path).unwrap();
+    cli::deploy::run(&config, &opts()).unwrap();
+    assert_eq!(
+        std::fs::read(&env_path).unwrap(),
+        before,
+        "a clean artifact must be left alone on the next deploy"
+    );
+}
+
+/// An artifact containing invalid UTF-8 must be detected and repaired.
+///
+/// Regression guard: comparing decoded text rather than bytes turned a
+/// definite mismatch into "cannot tell", leaving the corrupt file in place
+/// while the run reported everything up to date.
+#[test]
+fn deploy_restores_artifact_with_invalid_utf8() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    let original = std::fs::read(&env_path).unwrap();
+
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    std::fs::write(&env_path, b"MY_SECRET=\xff\xfe not utf8\n").unwrap();
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    assert_eq!(
+        std::fs::read(&env_path).unwrap(),
+        original,
+        "an artifact that is not valid UTF-8 must still be detected and rewritten"
+    );
+}
+
+/// An artifact esk cannot read back must never be reported as current.
+///
+/// Regression guard: mapping every non-`NotFound` IO error to "cannot tell"
+/// left a tampered file in place while the run said `up to date` — the same
+/// silent failure the artifact audit exists to prevent. esk owns this path and
+/// writes it owner-readable, so being unable to read it is a definite
+/// mismatch, not an unknown.
+#[cfg(unix)]
+#[test]
+fn deploy_restores_unreadable_artifact() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    let original = std::fs::read(&env_path).unwrap();
+
+    std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    assert_eq!(
+        std::fs::read(&env_path).unwrap(),
+        original,
+        "an unreadable artifact must be regenerated, not reported as current"
+    );
+}
+
+/// A directory where the artifact belongs must fail loudly, never silently.
+///
+/// esk cannot write through a directory, so the deploy is expected to fail —
+/// the point is that it reports the failure instead of claiming the target is
+/// up to date, which is what happened while path resolution errors were
+/// treated as "cannot tell".
+#[test]
+fn deploy_reports_failure_when_directory_occupies_artifact_path() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    std::fs::remove_file(&env_path).unwrap();
+    std::fs::create_dir(&env_path).unwrap();
+
+    let result = cli::deploy::run(&config, &opts());
+
+    assert!(
+        result.is_err(),
+        "a directory blocking the artifact path must surface as a deploy failure"
+    );
+}
+
+/// A symlinked artifact path must never be written through or clobbered.
+///
+/// esk refuses symlinked output paths (`resolve_project_output_path`), so a
+/// monorepo that points `.env.local` at a shared file gets a loud failure
+/// rather than a silent overwrite. Pinned here because treating path
+/// resolution errors as drift makes deploy attempt the write, and the refusal
+/// is what keeps the user's file intact.
+#[cfg(unix)]
+#[test]
+fn deploy_refuses_to_write_through_symlinked_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    std::fs::create_dir_all(project.root().join("shared")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    // Replace the generated file with a symlink to a shared location.
+    let env_path = project.root().join("apps/web/.env.local");
+    let shared = project.root().join("shared/.env.real");
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    std::fs::rename(&env_path, &shared).unwrap();
+    std::os::unix::fs::symlink("../shared/.env.real", &env_path).unwrap();
+    let shared_before = std::fs::read(&shared).unwrap();
+
+    let result = cli::deploy::run(&config, &opts());
+
+    assert!(
+        result.is_err(),
+        "esk must refuse to deploy through a symlinked artifact path"
+    );
+    assert!(
+        std::fs::symlink_metadata(&env_path)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the symlink itself must be left in place"
+    );
+    assert_eq!(
+        std::fs::read(&shared).unwrap(),
+        shared_before,
+        "the file the symlink points at must not be touched"
+    );
+}
