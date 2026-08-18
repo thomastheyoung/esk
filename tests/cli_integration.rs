@@ -7196,3 +7196,82 @@ fn doctor_with_store_orphans() {
     let result = cli::doctor::run_with_runner(project.root(), &OkRunner);
     assert!(result.is_ok());
 }
+
+/// `doctor --json` must agree with `doctor` on exit status.
+///
+/// Regression guard: the JSON path previously returned `Ok(())` unconditionally,
+/// so a CI gate using `--json` stayed green on a config the text path rejected.
+#[test]
+fn doctor_json_and_text_agree_on_failure_exit() {
+    let dir = tempfile::tempdir().unwrap();
+    // Only create esk.yaml, no .esk/ directory — same fixture as
+    // `doctor_missing_store_reports_failure`.
+    std::fs::write(dir.path().join("esk.yaml"), MINIMAL_CONFIG).unwrap();
+
+    let text = cli::doctor::run_with_runner(dir.path(), &OkRunner);
+    let json = cli::doctor::run_json(dir.path());
+
+    assert!(text.is_err(), "text path must fail on a missing store");
+    assert!(
+        json.is_err(),
+        "json path must fail wherever the text path fails"
+    );
+}
+
+/// The healthy case must agree too — the fix must not make `--json` fail
+/// on projects the text path accepts.
+#[test]
+fn doctor_json_and_text_agree_on_success_exit() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let deploy_idx = DeployIndex::new(&project.deploy_index_path());
+    deploy_idx.save().unwrap();
+    let sync_idx = SyncIndex::new(&project.sync_index_path());
+    sync_idx.save().unwrap();
+    let gitignore =
+        "store.key\ndeploy-index.json\nsync-index.json\nlock\nkey-provider\n".to_string();
+    std::fs::write(project.root().join(".esk/.gitignore"), gitignore).unwrap();
+
+    let text = cli::doctor::run_with_runner(project.root(), &OkRunner);
+    let json = cli::doctor::run_json(project.root());
+
+    assert!(text.is_ok(), "text path should pass a healthy project");
+    assert!(json.is_ok(), "json path should pass a healthy project");
+}
+
+/// Exit-code parity at the process level, which is what a CI gate observes.
+///
+/// Covers the case library-level tests cannot: a config that parses cleanly but
+/// whose target preflight fails. `run_json` takes no `CommandRunner`, so the
+/// probe is made to fail by emptying `PATH`.
+#[test]
+fn doctor_json_process_exit_matches_text_on_target_health_failure() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let deploy_idx = DeployIndex::new(&project.deploy_index_path());
+    deploy_idx.save().unwrap();
+    let sync_idx = SyncIndex::new(&project.sync_index_path());
+    sync_idx.save().unwrap();
+
+    let run = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_esk"))
+            .current_dir(project.root())
+            .env("PATH", "/nonexistent")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+
+    let text = run(&["doctor"]);
+    let json = run(&["doctor", "--json"]);
+
+    assert!(
+        !text.status.success(),
+        "text doctor should fail when the target CLI is unreachable"
+    );
+    assert_eq!(
+        text.status.code(),
+        json.status.code(),
+        "doctor --json must exit with the same code as doctor; \
+         json stdout: {}",
+        String::from_utf8_lossy(&json.stdout)
+    );
+}

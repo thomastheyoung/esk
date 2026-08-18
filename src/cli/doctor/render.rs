@@ -89,23 +89,17 @@ impl Report {
         }
 
         // --- Summary ---
-        let (mut pass, mut warn, mut fail) = count_checks(&self.structure);
-        count_section(&self.config, &mut pass, &mut warn, &mut fail);
-        count_section(&self.store_consistency, &mut pass, &mut warn, &mut fail);
-        count_section(&self.secrets_health, &mut pass, &mut warn, &mut fail);
+        let mut tally = self.tally();
+        tally.add_health(target_ok + remote_ok, target_fail + remote_fail);
 
-        // Include target/remote counts
-        pass += target_ok + remote_ok;
-        fail += target_fail + remote_fail;
+        let summary = tally.summary();
 
-        let summary = format!("{pass} passed, {warn} warnings, {fail} failures");
-
-        if fail > 0 {
+        if tally.has_failures() {
             cliclack::outro(style(&summary).red().bold().to_string())?;
             bail!("{summary}");
         }
 
-        let outro_style = if warn > 0 {
+        let outro_style = if tally.warn > 0 {
             style(&summary).yellow()
         } else {
             style(&summary).green()
@@ -185,25 +179,3 @@ fn check_icon(status: CheckStatus) -> ui::Icon {
     }
 }
 
-fn count_checks(checks: &[super::types::Check]) -> (usize, usize, usize) {
-    let mut pass = 0;
-    let mut warn = 0;
-    let mut fail = 0;
-    for c in checks {
-        match c.status {
-            CheckStatus::Pass => pass += 1,
-            CheckStatus::Warn => warn += 1,
-            CheckStatus::Fail => fail += 1,
-        }
-    }
-    (pass, warn, fail)
-}
-
-fn count_section(section: &Section, pass: &mut usize, warn: &mut usize, fail: &mut usize) {
-    if let Section::Checked(checks) = section {
-        let (p, w, f) = count_checks(checks);
-        *pass += p;
-        *warn += w;
-        *fail += f;
-    }
-}

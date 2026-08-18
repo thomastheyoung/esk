@@ -75,6 +75,19 @@ pub fn run_json(cwd: &Path) -> Result<()> {
         })).collect::<Vec<_>>(),
     });
     println!("{}", serde_json::to_string_pretty(&output)?);
+
+    // Exit status must agree with the text path (`Report::render`), so that a
+    // CI gate using `--json` cannot pass on a config the text path rejects.
+    let mut tally = report.tally();
+    let target_fail = target_health.iter().filter(|h| !h.status.is_ok()).count();
+    let remote_fail = remote_health.iter().filter(|h| !h.status.is_ok()).count();
+    tally.add_health(
+        target_health.len() - target_fail + (remote_health.len() - remote_fail),
+        target_fail + remote_fail,
+    );
+    if tally.has_failures() {
+        anyhow::bail!("{}", tally.summary());
+    }
     Ok(())
 }
 
