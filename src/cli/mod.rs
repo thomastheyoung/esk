@@ -13,6 +13,7 @@ pub mod run;
 pub mod set;
 pub mod status;
 pub mod sync;
+pub mod verify;
 
 use clap::{Parser, Subcommand};
 
@@ -175,6 +176,21 @@ pub enum Commands {
         #[arg(long)]
         env: Option<String>,
         /// Show all targets including deployed ones
+        #[arg(long)]
+        all: bool,
+        /// Emit a stable JSON report
+        #[arg(long)]
+        json: bool,
+    },
+    /// Read back what targets actually hold and compare against the store
+    Verify {
+        /// Filter by environment
+        #[arg(long)]
+        env: Option<String>,
+        /// Filter by target service
+        #[arg(long)]
+        target: Option<String>,
+        /// List every scope, including those that match
         #[arg(long)]
         all: bool,
         /// Emit a stable JSON report

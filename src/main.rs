@@ -165,6 +165,27 @@ fn run() -> Result<i32> {
                 esk::cli::list::run(&config, env.as_deref())?;
             }
         }
+        Commands::Verify {
+            env,
+            target,
+            all,
+            json,
+        } => {
+            let config = Config::find_and_load()?;
+            let opts = esk::cli::verify::VerifyOptions {
+                env: env.as_deref(),
+                target: target.as_deref(),
+                all: *all,
+            };
+            // Returns the exit code directly: verification has four outcomes,
+            // and collapsing them into ok/err would lose the distinction
+            // between "found drift" and "could not look".
+            return if *json {
+                esk::cli::verify::run_json(&config, &opts)
+            } else {
+                esk::cli::verify::run(&config, &opts)
+            };
+        }
         Commands::Status { env, all, json } => {
             let config = Config::find_and_load()?;
             if *json {

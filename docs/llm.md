@@ -112,6 +112,39 @@ Show deploy and sync status — which secrets need deploying and which remotes a
 | `--all` | Show all targets including already-deployed ones |
 | `--json` | Emit a stable JSON report (never includes secret values) |
 
+### `esk verify`
+
+Read back what targets actually hold and compare it against the store.
+
+`esk status` and `esk deploy` report from `.esk/deploy-index.json`, which records what esk *sent*. `esk verify` asks the targets themselves, so it is the only command that can detect a secret changed or deleted outside esk.
+
+What esk can prove differs per target, permanently, and the output always says which applies:
+
+| Fidelity | Meaning | Targets |
+|----------|---------|---------|
+| `value` | Values read back and compared exactly | convex, render, aws_lambda |
+| `presence` | Key names listed; values **not** checked | (none yet) |
+| `none` | Cannot be read back at all | every other target |
+
+A target that has not opted into read-back reports `none` rather than silently passing.
+
+| Flag | Description |
+|------|-------------|
+| `--env <ENV>` | Filter by environment |
+| `--target <TARGET>` | Filter by target service |
+| `--all` | List every scope, including those that match |
+| `--json` | Emit a stable JSON report (never includes secret values) |
+
+Exit codes distinguish outcomes that a pass/fail code would merge:
+
+| Code | Outcome | Meaning |
+|------|---------|---------|
+| 0 | `clean` / `clean_with_gaps` | No disagreement found. `clean_with_gaps` means some scopes cannot be read back. |
+| 3 | `drift` | A target disagrees with the store. |
+| 4 | `inconclusive` | A target could not be reached, so its state is unknown. |
+
+Verification is opt-in rather than part of `esk deploy`: it roughly doubles the external calls a deploy makes.
+
 ### `esk doctor`
 
 Diagnose project health. Checks project structure, config validity, store consistency, target/remote availability, and secrets health in one pass. Exits with code 1 if any failures are found.

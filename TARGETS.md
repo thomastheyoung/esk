@@ -6,28 +6,36 @@ For sync remotes (1Password, cloud files), see [REMOTES.md](REMOTES.md).
 
 ## Overview
 
-| Target                                    | Config key   | External CLI | Deploy mode | Requires app?             |
-| ----------------------------------------- | ------------ | ------------ | ----------- | ------------------------- |
-| [.env file](#env-file)                        | `.env`              | None         | Batch       | Yes                       |
-| [AWS Lambda](#aws-lambda)                     | `aws_lambda`        | `aws`        | Batch       | No                        |
-| [AWS SSM](#aws-ssm)                           | `aws_ssm`           | `aws`        | Individual  | No                        |
-| [Azure App Service](#azure-app-service)       | `azure_app_service` | `az`         | Individual  | Yes                       |
-| [CircleCI](#circleci)                         | `circleci`          | `circleci`   | Individual  | No                        |
-| [Cloudflare Workers](#cloudflare-workers)     | `cloudflare`        | `wrangler`   | Individual  | Yes (Workers); No (Pages) |
-| [Convex](#convex)                             | `convex`            | `npx`        | Individual  | No                        |
-| [Docker Swarm](#docker-swarm)                 | `docker`            | `docker`     | Individual  | No                        |
-| [Fly.io](#flyio)                              | `fly`               | `fly`        | Individual  | Yes                       |
-| [GCP Cloud Run](#gcp-cloud-run)               | `gcp_cloud_run`     | `gcloud`     | Individual  | Yes                       |
-| [GitHub Actions](#github-actions)             | `github`            | `gh`         | Individual  | No                        |
-| [GitLab CI](#gitlab-ci)                       | `gitlab`            | `glab`       | Individual  | No                        |
-| [Heroku](#heroku)                             | `heroku`            | `heroku`     | Individual  | Yes                       |
-| [Kubernetes](#kubernetes)                     | `kubernetes`        | `kubectl`    | Batch       | No                        |
-| [Netlify](#netlify)                           | `netlify`           | `netlify`    | Individual  | No                        |
-| [Railway](#railway)                           | `railway`           | `railway`    | Individual  | No                        |
-| [Render](#render)                             | `render`            | `curl`       | Individual  | Yes                       |
-| [Supabase](#supabase)                         | `supabase`          | `supabase`   | Individual  | No                        |
-| [Vercel](#vercel)                             | `vercel`            | `vercel`     | Individual  | No                        |
-| [Custom](#custom)                             | User-defined        | User-defined | Individual  | No                        |
+| Target                                    | Config key   | External CLI | Deploy mode | Requires app?             | Verification |
+| ----------------------------------------- | ------------ | ------------ | ----------- | ------------------------- | ------------ |
+| [.env file](#env-file)                        | `.env`              | None         | Batch       | Yes                       | None |
+| [AWS Lambda](#aws-lambda)                     | `aws_lambda`        | `aws`        | Batch       | No                        | Value |
+| [AWS SSM](#aws-ssm)                           | `aws_ssm`           | `aws`        | Individual  | No                        | None |
+| [Azure App Service](#azure-app-service)       | `azure_app_service` | `az`         | Individual  | Yes                       | None |
+| [CircleCI](#circleci)                         | `circleci`          | `circleci`   | Individual  | No                        | None |
+| [Cloudflare Workers](#cloudflare-workers)     | `cloudflare`        | `wrangler`   | Individual  | Yes (Workers); No (Pages) | None |
+| [Convex](#convex)                             | `convex`            | `npx`        | Individual  | No                        | Value |
+| [Docker Swarm](#docker-swarm)                 | `docker`            | `docker`     | Individual  | No                        | None (write-only) |
+| [Fly.io](#flyio)                              | `fly`               | `fly`        | Individual  | Yes                       | None |
+| [GCP Cloud Run](#gcp-cloud-run)               | `gcp_cloud_run`     | `gcloud`     | Individual  | Yes                       | None |
+| [GitHub Actions](#github-actions)             | `github`            | `gh`         | Individual  | No                        | None |
+| [GitLab CI](#gitlab-ci)                       | `gitlab`            | `glab`       | Individual  | No                        | None |
+| [Heroku](#heroku)                             | `heroku`            | `heroku`     | Individual  | Yes                       | None |
+| [Kubernetes](#kubernetes)                     | `kubernetes`        | `kubectl`    | Batch       | No                        | None |
+| [Netlify](#netlify)                           | `netlify`           | `netlify`    | Individual  | No                        | None |
+| [Railway](#railway)                           | `railway`           | `railway`    | Individual  | No                        | None |
+| [Render](#render)                             | `render`            | `curl`       | Individual  | Yes                       | Value |
+| [Supabase](#supabase)                         | `supabase`          | `supabase`   | Individual  | No                        | None |
+| [Vercel](#vercel)                             | `vercel`            | `vercel`     | Individual  | No                        | None |
+| [Custom](#custom)                             | User-defined        | User-defined | Individual  | No                        | None |
+
+**Verification** — what `esk verify` can prove a target actually holds. This is a permanent property of each service's API, not a roadmap:
+
+- **Value** — esk reads the stored values back and compares them exactly. Drift is detected precisely.
+- **Presence** — the service lists key names but never returns values. esk can confirm a key exists, never that it holds the right value.
+- **None** — the service offers no read-back, so esk cannot confirm anything about it. Docker Swarm secrets are write-only by design; other targets have simply not implemented read-back yet.
+
+`esk deploy` and `esk status` report from `.esk/deploy-index.json`, which records what esk *sent*. Only `esk verify` asks the target. A target marked `None` is never reported as verified — it is counted and displayed as a gap.
 
 **Deploy modes:**
 

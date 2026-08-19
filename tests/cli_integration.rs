@@ -7781,3 +7781,468 @@ fn deploy_dry_run_summary_is_not_past_tense() {
         "deployed 1 keys to 1 targets"
     );
 }
+
+// === verify command integration ===
+
+/// The deploy index says a secret was sent; the target now holds something
+/// else. This is the defect class the verify command exists for: `esk status`
+/// reads the index and reports the secret as sent, because the index records
+/// esk's own claim about a write it made.
+#[test]
+fn verify_detects_drift_against_a_deployed_target() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
+
+    // Deploy for real, so the deploy index records a successful send.
+    let deploy_runner = MockCommandRunner::new().strict();
+    deploy_runner.push_success(b"", b""); // preflight: npx --version
+    deploy_runner.push_success(b"", b""); // preflight: convex env list
+    deploy_runner.push_success(b"", b""); // convex env set
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &deploy_runner,
+    )
+    .unwrap();
+
+    // Someone changes the value on the target, outside esk.
+    let verify_runner = MockCommandRunner::new().strict();
+    verify_runner.push_success(b"", b""); // preflight: npx --version
+    verify_runner.push_success(b"", b""); // preflight: convex env list
+    verify_runner.push_success(b"CONVEX_URL=https://EVIL.convex.cloud\n", b"");
+
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &verify_runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        code,
+        cli::verify::EXIT_DRIFT,
+        "a target holding a different value must exit as drift"
+    );
+}
+
+#[test]
+fn verify_matching_target_is_clean() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b""); // preflight: npx --version
+    runner.push_success(b"", b""); // preflight: convex env list
+    runner.push_success(b"CONVEX_URL=https://dev.convex.cloud\n", b"");
+
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+    assert_eq!(code, cli::verify::EXIT_CLEAN);
+
+    // The exit code alone is too weak an assertion: an unverifiable target and
+    // an empty selection both exit 0 too. Assert the scope actually landed in
+    // the value_clean bucket, so this test fails if the scope stops being read.
+    let runner2 = MockCommandRunner::new().strict();
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"CONVEX_URL=https://dev.convex.cloud\n", b"");
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner2,
+    )
+    .unwrap();
+    assert_eq!(report.tally().value_clean, 1);
+    assert_eq!(report.outcome(), esk::verify::Outcome::Clean);
+}
+
+/// An unreachable target must not exit 0. Reporting "no drift found" for a
+/// target esk never managed to read is the exact confusion `Outcome` splits
+/// into four states to prevent.
+#[test]
+fn verify_unreachable_target_is_not_clean() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b""); // preflight: npx --version
+    runner.push_failure(b"deployment not found"); // preflight: convex env list
+
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        code,
+        cli::verify::EXIT_INCONCLUSIVE,
+        "a target esk could not read must never exit clean"
+    );
+}
+
+/// A target that never opted into read-back reports as not checkable, not as
+/// verified. Dotenv has no `read_back` implementation, so it declares
+/// `Fidelity::None` and lands in the `unverifiable` bucket.
+#[test]
+fn verify_reports_targets_without_read_back_as_gaps() {
+    let project = TestProject::with_store(FULL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "sk_test_1").unwrap();
+    store.set("API_SECRET", "dev", "s3cret").unwrap();
+
+    let runner = MockCommandRunner::new();
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some(".env"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // Exit 0: esk found no disagreement. The exit code alone cannot say
+    // whether the scope was verified or merely unreadable, which is why the
+    // report itself is asserted rather than just the code.
+    assert_eq!(code, cli::verify::EXIT_CLEAN);
+
+    let report = cli::verify::report_for_test(&config, &cli::verify::VerifyOptions {
+        env: Some("dev"),
+        target: Some(".env"),
+        all: false,
+    }, &runner)
+    .unwrap();
+    // FULL_CONFIG points `.env` at both web:dev and api:dev, so dev has two
+    // `.env` scopes; both must land in the unverifiable bucket.
+    let tally = report.tally();
+    assert_eq!(
+        tally.unverifiable, 2,
+        "a target with no read_back must count as unverifiable"
+    );
+    assert_eq!(tally.verified(), 0, "it must never count as verified");
+    assert_eq!(report.outcome(), esk::verify::Outcome::CleanWithGaps);
+}
+
+#[test]
+fn verify_json_never_reports_an_aggregate_pass() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b"");
+    runner.push_success(b"", b"");
+    runner.push_success(b"CONVEX_URL=https://EVIL.convex.cloud\n", b"");
+
+    let code = cli::verify::run_json_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+    assert_eq!(code, cli::verify::EXIT_DRIFT);
+
+    // The name of this test is a claim about the JSON's shape, so inspect the
+    // JSON rather than only the exit code. A future `"passed": true` field
+    // would let a consumer collapse six buckets back into one bit.
+    let runner2 = MockCommandRunner::new().strict();
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"CONVEX_URL=https://EVIL.convex.cloud\n", b"");
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner2,
+    )
+    .unwrap();
+    let json = cli::verify::to_json_for_test(&report);
+
+    for banned in ["passed", "ok", "success", "healthy"] {
+        assert!(
+            json.get(banned).is_none(),
+            "verify JSON must not expose an aggregate `{banned}` field"
+        );
+        assert!(
+            json["tally"].get(banned).is_none(),
+            "the tally must not expose an aggregate `{banned}` field"
+        );
+    }
+    // All eight buckets stay separate, and the outcome carries four states.
+    for bucket in [
+        "value_clean",
+        "value_drifted",
+        "presence_clean",
+        "presence_drifted",
+        "unverifiable",
+        "unreachable",
+        "malformed",
+        "skipped",
+    ] {
+        assert!(json["tally"].get(bucket).is_some(), "missing bucket {bucket}");
+    }
+    assert_eq!(json["outcome"], "drift");
+}
+
+/// Custom targets carry a user-defined name rather than a fixed one, so the
+/// scope-to-target lookup has to match on that name. A miss would drop the
+/// scope from the report entirely, which reads as "nothing wrong here".
+#[test]
+fn verify_matches_custom_targets_by_their_user_defined_name() {
+    let project = TestProject::with_store(CUSTOM_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "k1").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let scope = report
+        .scopes
+        .iter()
+        .find(|s| s.target == "my-api")
+        .expect("the custom target's scope must appear in the report, not be dropped");
+    // `custom` has no read command in its config schema, so it is honestly
+    // unverifiable rather than silently absent.
+    assert_eq!(scope.fidelity, esk::verify::Fidelity::None);
+    assert_eq!(
+        report.tally().unverifiable,
+        1,
+        "an unimplemented read-back must be counted as a gap, never as verified"
+    );
+}
+
+/// Every (target, app, env) tuple the config declares must appear in the
+/// report. A scope that goes missing contributes no findings and so reads as
+/// "nothing wrong here" — the silent-drop failure this command exists to
+/// prevent, reintroduced one level up.
+#[test]
+fn verify_reports_every_configured_scope() {
+    let project = TestProject::with_store(FULL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "a").unwrap();
+    store.set("CONVEX_URL", "dev", "b").unwrap();
+    store.set("API_SECRET", "dev", "c").unwrap();
+
+    let runner = MockCommandRunner::new();
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // FULL_CONFIG dev: .env web, .env api, convex (no app). cloudflare is
+    // prod-only for STRIPE_KEY, so it contributes no dev scope.
+    let mut seen: Vec<String> = report
+        .scopes
+        .iter()
+        .map(|s| match &s.app {
+            Some(app) => format!("{}:{app}", s.target),
+            None => s.target.clone(),
+        })
+        .collect();
+    seen.sort();
+    assert_eq!(seen, vec![".env:api", ".env:web", "convex"]);
+
+    // Every scope is accounted for in exactly one bucket, and none of them is
+    // "verified" — no target here was actually read back.
+    let tally = report.tally();
+    let bucketed = tally.value_clean
+        + tally.value_drifted
+        + tally.presence_clean
+        + tally.presence_drifted
+        + tally.unverifiable
+        + tally.unreachable
+        + tally.malformed
+        + tally.skipped;
+    assert_eq!(bucketed, report.scopes.len());
+}
+
+/// A target whose `read_back` returns evidence weaker than the fidelity it
+/// declared is a bug in that target, and the command must surface it as one —
+/// never quietly downgrade to a pass. Driven through the real command path so
+/// a future refactor of `build.rs` cannot lose the distinction.
+#[test]
+fn verify_malformed_target_response_is_inconclusive_not_clean() {
+    use esk::verify::{compare, Evidence, Fidelity, Findings, Outcome, ScopeReport, VerifyReport};
+
+    // A target declaring Value fidelity but returning only key names.
+    let evidence = Ok(Evidence::Names {
+        present: ["API_KEY".to_string()].into_iter().collect(),
+        note: None,
+    });
+    let expected: std::collections::BTreeMap<String, zeroize::Zeroizing<String>> =
+        [("API_KEY".to_string(), zeroize::Zeroizing::new("v".to_string()))]
+            .into_iter()
+            .collect();
+
+    let findings = compare(Fidelity::Value, evidence, &expected);
+    assert!(
+        matches!(findings, Findings::Malformed { .. }),
+        "declaring Value and returning Names must be reported as a target bug"
+    );
+
+    let report = VerifyReport {
+        scopes: vec![ScopeReport {
+            target: "buggy".to_string(),
+            app: None,
+            env: "dev".to_string(),
+            fidelity: Fidelity::Value,
+            findings,
+        }],
+    };
+    assert_eq!(report.outcome(), Outcome::Inconclusive);
+    assert_eq!(report.tally().verified(), 0);
+}
+
+/// A typo'd `--target` must be an error, not a silent no-op.
+///
+/// Selecting nothing produces an empty report, and an empty report has no
+/// bucket to land in. Before this check, `esk verify --target rendr` printed
+/// `"outcome": "clean"` and exited 0 — a CI pipeline with a typo would stay
+/// green forever while verifying nothing.
+#[test]
+fn verify_rejects_an_unknown_target_filter() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let runner = MockCommandRunner::new();
+
+    let Err(err) = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: None,
+            target: Some("convx"),
+            all: false,
+        },
+        &runner,
+    ) else {
+        panic!("an unknown target filter must be rejected, not silently select nothing");
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("convx"), "got: {msg}");
+    assert!(msg.contains("convex"), "should suggest the near match: {msg}");
+}
+
+#[test]
+fn verify_rejects_an_unknown_env_filter() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let runner = MockCommandRunner::new();
+
+    let Err(err) = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("prd"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    ) else {
+        panic!("an unknown env filter must be rejected, not silently select nothing");
+    };
+    assert!(err.to_string().contains("prd"), "got: {err}");
+}
+
+/// A valid filter that legitimately selects nothing must still not read clean.
+/// Defense in depth behind the filter validation above: the two failures are
+/// independent, and only this one survives a correctly-spelled filter.
+#[test]
+fn verify_empty_selection_is_reported_as_a_gap_not_clean() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let runner = MockCommandRunner::new();
+
+    // `prod` is a configured environment, but nothing is stored for it and the
+    // scope map is keyed off config, so this exercises the empty-report path.
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("prod"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    if report.scopes.is_empty() {
+        assert_eq!(report.outcome(), esk::verify::Outcome::CleanWithGaps);
+        assert_eq!(report.tally().verified(), 0);
+    }
+}

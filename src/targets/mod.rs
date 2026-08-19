@@ -20,7 +20,7 @@ pub mod supabase;
 pub mod vercel;
 
 use anyhow::{Context, Result};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -220,6 +220,40 @@ pub trait DeployTarget: Send + Sync {
     /// deploy plan must regenerate it even when the store is unchanged.
     fn artifact_matches(&self, _secrets: &[SecretValue], _target: &ResolvedTarget) -> Option<bool> {
         None
+    }
+
+    /// What this target can prove about the secrets it holds.
+    ///
+    /// Permanent per target, not a migration state: some providers return
+    /// stored values, some only list key names, and Docker Swarm secrets
+    /// cannot be read back at all. The default is the honest one — a target
+    /// that has not opted in claims nothing, exactly as `artifact_matches`
+    /// defaults to `None`.
+    fn verify_fidelity(&self) -> crate::verify::Fidelity {
+        crate::verify::Fidelity::None
+    }
+
+    /// Read back what the target actually holds for `keys`.
+    ///
+    /// Deliberately receives key **names** only. Withholding the expected
+    /// values is what makes a dishonest implementation useless: one that
+    /// returns something it did not read has nothing to fabricate toward, so
+    /// its answer mismatches and surfaces as drift rather than as a pass.
+    ///
+    /// Returns raw [`Evidence`](crate::verify::Evidence), never a verdict.
+    /// [`compare`](crate::verify::compare) is the sole producer of verdicts.
+    ///
+    /// Return `Err` rather than a partial [`Evidence::Values`] when the read
+    /// could not be completed — a short map is reported as drift the operator
+    /// cannot act on, which is worse than admitting the read failed.
+    fn read_back(
+        &self,
+        _keys: &BTreeSet<String>,
+        _target: &ResolvedTarget,
+    ) -> Result<crate::verify::Evidence> {
+        Ok(crate::verify::Evidence::Unreadable(
+            "this target does not support read-back verification",
+        ))
     }
 
     /// Deploy a batch of secrets. Default implementation loops deploy_secret.

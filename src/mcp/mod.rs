@@ -150,7 +150,7 @@ impl EskMcpServer {
 
     #[tool(
         name = "esk_list",
-        description = "List all secrets with their status per environment and deploy target. Returns structured JSON with deploy state (deployed/pending/failed/unset/not_targeted) for each secret×environment pair."
+        description = "List all secrets with their status per environment and deploy target. Returns structured JSON with deploy state (deployed/pending/failed/unset/not_targeted) for each secret×environment pair. Note: 'deployed' means esk successfully SENT the value to the target, recorded in its local deploy index — it is not a read-back confirmation that the target still holds it. Only `esk verify` queries targets directly, and only some targets support it."
     )]
     async fn list(&self, params: Parameters<ListParams>) -> Result<CallToolResult, ErrorData> {
         match do_list(&params.0) {

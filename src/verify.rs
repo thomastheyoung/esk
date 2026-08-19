@@ -423,6 +423,15 @@ impl VerifyReport {
     }
 
     pub fn outcome(&self) -> Outcome {
+        // A run containing no scopes at all establishes nothing. Every bucket
+        // is zero, so without this guard each check below falls through and an
+        // empty run reports `Clean` — a report that verified nothing claiming
+        // everything is fine. Checked first because there is nothing else to
+        // weigh.
+        if self.scopes.is_empty() {
+            return Outcome::CleanWithGaps;
+        }
+
         let tally = self.tally();
         if tally.unreachable > 0 || tally.malformed > 0 {
             return Outcome::Inconclusive;
@@ -802,5 +811,18 @@ mod empty_scope_tests {
             Outcome::Clean,
             "a run that verified nothing must not report clean"
         );
+    }
+
+    /// A report with no scopes must never read as clean.
+    ///
+    /// Every bucket is zero in an empty run, so each outcome check below the
+    /// drift test falls through. Without an explicit guard the run reports
+    /// `Clean` — a verification that looked at nothing claiming everything is
+    /// fine, which is the failure this whole module is built to prevent.
+    #[test]
+    fn an_empty_report_is_not_clean() {
+        let report = VerifyReport { scopes: Vec::new() };
+        assert_eq!(report.outcome(), Outcome::CleanWithGaps);
+        assert_eq!(report.tally().verified(), 0);
     }
 }
