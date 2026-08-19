@@ -11,23 +11,23 @@ For sync remotes (1Password, cloud files), see [REMOTES.md](REMOTES.md).
 | [.env file](#env-file)                        | `.env`              | None         | Batch       | Yes                       | Value |
 | [AWS Lambda](#aws-lambda)                     | `aws_lambda`        | `aws`        | Batch       | No                        | Value |
 | [AWS SSM](#aws-ssm)                           | `aws_ssm`           | `aws`        | Individual  | No                        | Value |
-| [Azure App Service](#azure-app-service)       | `azure_app_service` | `az`         | Individual  | Yes                       | None |
-| [CircleCI](#circleci)                         | `circleci`          | `circleci`   | Individual  | No                        | None |
-| [Cloudflare Workers](#cloudflare-workers)     | `cloudflare`        | `wrangler`   | Individual  | Yes (Workers); No (Pages) | None |
+| [Azure App Service](#azure-app-service)       | `azure_app_service` | `az`         | Individual  | Yes                       | Value |
+| [CircleCI](#circleci)                         | `circleci`          | `circleci`   | Individual  | No                        | Presence |
+| [Cloudflare Workers](#cloudflare-workers)     | `cloudflare`        | `wrangler`   | Individual  | Yes (Workers); No (Pages) | Presence |
 | [Convex](#convex)                             | `convex`            | `npx`        | Individual  | No                        | Value |
 | [Docker Swarm](#docker-swarm)                 | `docker`            | `docker`     | Individual  | No                        | None (write-only) |
-| [Fly.io](#flyio)                              | `fly`               | `fly`        | Individual  | Yes                       | None |
-| [GCP Cloud Run](#gcp-cloud-run)               | `gcp_cloud_run`     | `gcloud`     | Individual  | Yes                       | None |
-| [GitHub Actions](#github-actions)             | `github`            | `gh`         | Individual  | No                        | None |
-| [GitLab CI](#gitlab-ci)                       | `gitlab`            | `glab`       | Individual  | No                        | None |
+| [Fly.io](#flyio)                              | `fly`               | `fly`        | Individual  | Yes                       | Presence |
+| [GCP Cloud Run](#gcp-cloud-run)               | `gcp_cloud_run`     | `gcloud`     | Individual  | Yes                       | Value |
+| [GitHub Actions](#github-actions)             | `github`            | `gh`         | Individual  | No                        | Presence |
+| [GitLab CI](#gitlab-ci)                       | `gitlab`            | `glab`       | Individual  | No                        | Presence |
 | [Heroku](#heroku)                             | `heroku`            | `heroku`     | Individual  | Yes                       | Value |
 | [Kubernetes](#kubernetes)                     | `kubernetes`        | `kubectl`    | Batch       | No                        | Value |
-| [Netlify](#netlify)                           | `netlify`           | `netlify`    | Individual  | No                        | None |
-| [Railway](#railway)                           | `railway`           | `railway`    | Individual  | No                        | None |
+| [Netlify](#netlify)                           | `netlify`           | `netlify`    | Individual  | No                        | Value |
+| [Railway](#railway)                           | `railway`           | `railway`    | Individual  | No                        | Value |
 | [Render](#render)                             | `render`            | `curl`       | Individual  | Yes                       | Value |
-| [Supabase](#supabase)                         | `supabase`          | `supabase`   | Individual  | No                        | None |
-| [Vercel](#vercel)                             | `vercel`            | `vercel`     | Individual  | No                        | None |
-| [Custom](#custom)                             | User-defined        | User-defined | Individual  | No                        | None |
+| [Supabase](#supabase)                         | `supabase`          | `supabase`   | Individual  | No                        | Presence |
+| [Vercel](#vercel)                             | `vercel`            | `vercel`     | Individual  | No                        | Presence |
+| [Custom](#custom)                             | User-defined        | User-defined | Individual  | No                        | Value (with `read:`) |
 
 **Verification** — what `esk verify` can prove a target actually holds. This is a permanent property of each service's API, not a roadmap:
 

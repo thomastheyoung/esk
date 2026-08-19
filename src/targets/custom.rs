@@ -7,9 +7,13 @@
 //! Only individual deploy mode is supported. Batch mode is out of scope.
 
 use anyhow::{Context, Result};
+use zeroize::Zeroizing;
+
+use std::collections::BTreeSet;
 
 use crate::config::{CustomTargetConfig, ResolvedTarget};
 use crate::targets::{resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget};
+use crate::verify::{Evidence, Fidelity};
 
 pub struct CustomTarget<'a> {
     pub target_name: String,
@@ -54,6 +58,75 @@ impl DeployTarget for CustomTarget<'_> {
 
     fn deploy_mode(&self) -> DeployMode {
         DeployMode::Individual
+    }
+
+    /// `Value` only when the user configured a `read:` command.
+    ///
+    /// esk cannot invent a way to read a service it knows nothing about, so
+    /// the default stays `None` — an unconfigured custom target is reported
+    /// as an honest gap rather than silently passing.
+    fn verify_fidelity(&self) -> Fidelity {
+        if self.target_config.read.is_some() {
+            Fidelity::Value
+        } else {
+            Fidelity::None
+        }
+    }
+
+    /// Run the user's `read:` command and parse its `KEY=VALUE` output.
+    ///
+    /// `{{key}}` and `{{value}}` are deliberately *not* substituted here. The
+    /// command is expected to list the whole target in one invocation, and
+    /// interpolating an expected value into a read command would hand the
+    /// target the very thing withholding it is meant to prevent.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let Some(read) = &self.target_config.read else {
+            return Ok(Evidence::Unreadable(
+                "no `read:` command configured for this custom target",
+            ));
+        };
+
+        let args = build_args(&read.args, "", "", target, &self.target_config.env_flags);
+        let args_str: Vec<&str> = args.iter().map(String::as_str).collect();
+
+        let output = self
+            .runner
+            .run(&read.program, &args_str, CommandOpts::default())
+            .with_context(|| {
+                format!(
+                    "custom target '{}': read command '{}' failed to execute",
+                    self.target_name, read.program
+                )
+            })?;
+
+        // A failed read is an incomplete read, never an empty target: an empty
+        // map would report every managed key as missing.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!(
+                "custom target '{}': read failed: {}",
+                self.target_name,
+                stderr.trim()
+            );
+        }
+
+        // Only lines whose key is a valid secret key name are taken. A read
+        // command is a user's own script and may print progress or banner
+        // text, and a line like `Fetching secrets for env=dev` would otherwise
+        // become a phantom key reported as unmanaged drift on every run.
+        //
+        // Values are taken verbatim: a `read:` command must print the stored
+        // value unquoted, since esk cannot know which quoting convention an
+        // arbitrary script uses.
+        Ok(Evidence::Values(
+            String::from_utf8_lossy(&output.stdout)
+                .lines()
+                .filter_map(|line| line.trim_end_matches('\r').split_once('='))
+                .map(|(key, value)| (key.trim(), value))
+                .filter(|(key, _)| crate::store::validate_key(key).is_ok())
+                .map(|(key, value)| (key.to_string(), Zeroizing::new(value.to_string())))
+                .collect(),
+        ))
     }
 
     fn preflight(&self) -> Result<()> {
@@ -163,6 +236,7 @@ mod tests {
             },
             delete: None,
             preflight: None,
+            read: None,
             env_flags: BTreeMap::new(),
         }
     }
@@ -411,5 +485,166 @@ mod tests {
         };
         assert!(target.preflight().is_ok());
         assert!(runner.take_calls().is_empty());
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(pairs: &[(&str, &str)]) -> BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    fn with_read(mut cfg: CustomTargetConfig, args: Vec<&str>) -> CustomTargetConfig {
+        cfg.read = Some(CustomCommandConfig {
+            program: "my-tool".to_string(),
+            args: args.into_iter().map(String::from).collect(),
+            stdin: None,
+        });
+        cfg
+    }
+
+    /// Without a `read:` command esk has no way to look, and says so rather
+    /// than passing silently.
+    #[test]
+    fn custom_without_a_read_command_is_unverifiable() {
+        let cfg = make_target_config(vec!["set", "{{key}}"], None);
+        let runner = MockCommandRunner::new().strict();
+        let target = CustomTarget {
+            target_name: "my-api".to_string(),
+            target_config: &cfg,
+            runner: &runner,
+        };
+
+        assert_eq!(target.verify_fidelity(), Fidelity::None);
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["A"]), &make_resolved("my-api", None, "dev")),
+            &verify_expected(&[("A", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
+        assert!(matches!(
+            findings,
+            crate::verify::Findings::Unverifiable { .. }
+        ));
+        // No command was run: there was nothing to run.
+        assert!(runner.take_calls().is_empty());
+    }
+
+    #[test]
+    fn custom_with_a_read_command_returns_values() {
+        let cfg = with_read(
+            make_target_config(vec!["set", "{{key}}"], None),
+            vec!["list", "--env", "{{env}}"],
+        );
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(b"API_KEY=secret1\nDB_URL=postgres://x\n", b"");
+        let target = CustomTarget {
+            target_name: "my-api".to_string(),
+            target_config: &cfg,
+            runner: &runner,
+        };
+
+        assert_eq!(target.verify_fidelity(), Fidelity::Value);
+        let evidence = target
+            .read_back(
+                &verify_keys(&["API_KEY"]),
+                &make_resolved("my-api", None, "dev"),
+            )
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("a configured read command declares Value fidelity");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "secret1");
+
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "my-tool");
+        assert_eq!(calls[0].args, vec!["list", "--env", "dev"]);
+    }
+
+    #[test]
+    fn custom_read_back_surfaces_wrong_value_as_drift() {
+        let cfg = with_read(
+            make_target_config(vec!["set", "{{key}}"], None),
+            vec!["list"],
+        );
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(b"API_KEY=STALE\n", b"");
+        let target = CustomTarget {
+            target_name: "my-api".to_string(),
+            target_config: &cfg,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(
+                &verify_keys(&["API_KEY"]),
+                &make_resolved("my-api", None, "dev"),
+            ),
+            &verify_expected(&[("API_KEY", "current")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+    }
+
+    #[test]
+    fn custom_read_back_failure_is_unreachable_not_empty() {
+        let cfg = with_read(
+            make_target_config(vec!["set", "{{key}}"], None),
+            vec!["list"],
+        );
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"connection refused");
+        let target = CustomTarget {
+            target_name: "my-api".to_string(),
+            target_config: &cfg,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(
+                &verify_keys(&["API_KEY"]),
+                &make_resolved("my-api", None, "dev"),
+            ),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
+    }
+
+    /// A read command's output is a user script's stdout, which commonly
+    /// carries progress lines. Anything that is not a valid key name is not a
+    /// key, or it would be reported as unmanaged drift on every run.
+    #[test]
+    fn custom_read_back_ignores_banner_lines() {
+        let cfg = with_read(
+            make_target_config(vec!["set", "{{key}}"], None),
+            vec!["list"],
+        );
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(b"Fetching secrets for env=dev\nAPI_KEY=real\n", b"");
+        let target = CustomTarget {
+            target_name: "my-api".to_string(),
+            target_config: &cfg,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(
+                &verify_keys(&["API_KEY"]),
+                &make_resolved("my-api", None, "dev"),
+            )
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("expected values");
+        };
+        assert_eq!(values.len(), 1, "only the real key is a key");
+        assert_eq!(values["API_KEY"].as_str(), "real");
     }
 }

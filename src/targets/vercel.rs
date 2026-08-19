@@ -13,10 +13,13 @@
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeSet;
+
 use crate::config::{Config, ResolvedTarget, VercelTargetConfig};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct VercelTarget<'a> {
     pub config: &'a Config,
@@ -44,8 +47,7 @@ impl DeployTarget for VercelTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "vercel")
-            .context("Install with: npm install -g vercel")?;
+        check_command(self.runner, "vercel").context("Install with: npm install -g vercel")?;
         let output = self
             .runner
             .run("vercel", &["whoami"], CommandOpts::default())
@@ -74,6 +76,64 @@ impl DeployTarget for VercelTarget<'_> {
             )
             .with_context(|| format!("failed to run vercel env add for {key}"))?
             .check("vercel env add", key)
+    }
+
+    /// Presence only.
+    ///
+    /// `vercel env ls` lists names but never values, and the obvious
+    /// workaround does not work: `vercel env pull` writes a file (a surprising
+    /// side effect for a read-only command) and, more decisively, Vercel now
+    /// defaults new production, preview, and custom-environment variables to
+    /// `sensitive` — values that "cannot be viewed later in the dashboard or
+    /// with `vercel env ls`". A team can enforce that policy so it cannot be
+    /// opted out of. Exactly the variables esk deploys are the ones Vercel
+    /// will not return.
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Presence
+    }
+
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let vercel_env = self.resolve_env_name(&target.environment)?;
+
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["env", "ls", vercel_env, "--json"];
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run("vercel", &args, CommandOpts::default())
+            .context("failed to run vercel env ls")?;
+
+        // A failed listing is an incomplete read, never an empty project.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("vercel env ls failed: {stderr}");
+        }
+
+        // `--json` rather than the rendered table. The table's header row goes
+        // to stdout and its first token (`name`) is itself a valid key name,
+        // so it would be reported as an unmanaged extra on every run — drift
+        // that never clears and trains an operator to ignore the command.
+        //
+        // The response wraps its list in an object, and its `value` field is
+        // truncated for display and reads `Encrypted` for sensitive vars, so
+        // only the keys are taken.
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse vercel env ls JSON response")?;
+        let entries = json
+            .get("envs")
+            .and_then(|e| e.as_array())
+            .context("vercel env ls response had no envs array")?;
+
+        let present = entries
+            .iter()
+            .filter_map(|e| e.get("key")?.as_str().map(String::from))
+            .collect();
+
+        Ok(Evidence::Names {
+            present,
+            note: Some("vercel does not return values; presence only".to_string()),
+        })
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -182,7 +242,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install with: npm install -g vercel"));
+        assert!(err
+            .to_string()
+            .contains("Install with: npm install -g vercel"));
     }
 
     #[test]
@@ -356,5 +418,103 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
+    }
+
+    /// A `vercel env ls --json` response: a wrapped object, not a bare array.
+    fn env_ls_json(keys: &[&str]) -> Vec<u8> {
+        let envs: Vec<serde_json::Value> = keys
+            .iter()
+            .map(|k| serde_json::json!({ "key": k, "value": "Encrypted", "type": "encrypted" }))
+            .collect();
+        serde_json::to_vec(&serde_json::json!({ "envs": envs })).unwrap()
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::BTreeMap<String, zeroize::Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), zeroize::Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn vercel_read_back_lists_names_only() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.vercel.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&env_ls_json(&["API_KEY"]), b"");
+        let target = VercelTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target("dev"))
+            .unwrap();
+        let Evidence::Names { present, note } = evidence else {
+            panic!("vercel declares Fidelity::Presence, so it must return Names");
+        };
+        assert!(present.contains("API_KEY"));
+        // The response's own `value` field (truncated, or the literal
+        // "Encrypted" for sensitive vars) never enters the evidence.
+        assert!(!present.contains("Encrypted"));
+        assert!(
+            note.is_some(),
+            "the presence-only limitation is shown to the operator"
+        );
+    }
+
+    /// Vercel cannot return values for the variables esk deploys, so the
+    /// strongest claim is existence — never a value match.
+    #[test]
+    fn vercel_read_back_cannot_claim_a_value_matched() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.vercel.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&env_ls_json(&["API_KEY"]), b"");
+        let target = VercelTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        let crate::verify::Findings::Presence { verdicts, .. } = &findings else {
+            panic!("expected presence findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::PresenceVerdict::Present);
+    }
+
+    #[test]
+    fn vercel_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.vercel.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"Error: Not authorized");
+        let target = VercelTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
     }
 }

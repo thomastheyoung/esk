@@ -7931,19 +7931,20 @@ fn verify_unreachable_target_is_not_clean() {
 /// `Fidelity::None` and lands in the `unverifiable` bucket.
 #[test]
 fn verify_reports_targets_without_read_back_as_gaps() {
-    let project = TestProject::with_store(FULL_CONFIG).unwrap();
+    let project = TestProject::with_store(DOCKER_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
-    store.set("STRIPE_KEY", "prod", "sk_live_1").unwrap();
+    store.set("API_KEY", "dev", "v").unwrap();
 
-    // cloudflare has no read_back implementation, so it declares
-    // `Fidelity::None`. (`.env` used to serve as this example and no longer
-    // can — it reads its artifact back now.)
+    // Docker Swarm secrets are write-only by design — the one target that can
+    // never become verifiable, which is why it anchors this test. (`.env` and
+    // `cloudflare` each served here before gaining read-back.)
     let runner = MockCommandRunner::new();
-    runner.push_success(b"", b""); // preflight: wrangler --version
+    runner.push_success(b"", b""); // preflight: docker --version
+    runner.push_success(b"active", b""); // preflight: docker info (swarm state)
     let opts = cli::verify::VerifyOptions {
-        env: Some("prod"),
-        target: Some("cloudflare"),
+        env: Some("dev"),
+        target: Some("docker"),
         all: false,
     };
     let report = cli::verify::report_for_test(&config, &opts, &runner).unwrap();
@@ -7961,6 +7962,7 @@ fn verify_reports_targets_without_read_back_as_gaps() {
     // buckets are asserted above rather than only the code.
     let runner2 = MockCommandRunner::new();
     runner2.push_success(b"", b"");
+    runner2.push_success(b"active", b"");
     let code = cli::verify::run_with_runner(&config, &opts, &runner2).unwrap();
     assert_eq!(code, cli::verify::EXIT_CLEAN);
 }

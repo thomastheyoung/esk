@@ -298,14 +298,16 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    secrets.into_iter().fold(message.to_string(), |message, secret| {
-        let secret = secret.as_ref();
-        if secret.is_empty() {
-            message
-        } else {
-            message.replace(secret, "<redacted>")
-        }
-    })
+    secrets
+        .into_iter()
+        .fold(message.to_string(), |message, secret| {
+            let secret = secret.as_ref();
+            if secret.is_empty() {
+                message
+            } else {
+                message.replace(secret, "<redacted>")
+            }
+        })
 }
 
 /// Resolve env_flags for a given environment into split parts.
@@ -334,8 +336,7 @@ pub fn aws_base_args(region: Option<&str>, profile: Option<&str>) -> Vec<String>
 
 /// Run AWS CLI preflight: check `aws` is installed and authenticated.
 pub fn aws_preflight(runner: &dyn CommandRunner, base_args: &[String]) -> Result<()> {
-    check_command(runner, "aws")
-        .context("Install from: https://aws.amazon.com/cli/")?;
+    check_command(runner, "aws").context("Install from: https://aws.amazon.com/cli/")?;
     let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
     args.extend(base_args.iter().map(String::as_str));
     let output = runner

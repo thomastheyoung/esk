@@ -13,10 +13,13 @@
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeSet;
+
 use crate::config::{Config, GithubTargetConfig, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct GithubTarget<'a> {
     pub config: &'a Config,
@@ -34,8 +37,7 @@ impl DeployTarget for GithubTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "gh")
-            .context("Install from: https://cli.github.com/")?;
+        check_command(self.runner, "gh").context("Install from: https://cli.github.com/")?;
         let output = self
             .runner
             .run("gh", &["auth", "status"], CommandOpts::default())
@@ -66,6 +68,47 @@ impl DeployTarget for GithubTarget<'_> {
             )
             .with_context(|| format!("failed to run gh secret set for {key}"))?
             .check("gh secret set", key)
+    }
+
+    /// Presence, permanently. `gh secret list` exposes name, visibility, and
+    /// `updatedAt` — never a value. GitHub secrets are write-only by design.
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Presence
+    }
+
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["secret", "list", "--json", "name"];
+        if let Some(repo) = &self.target_config.repo {
+            args.push("-R");
+            args.push(repo);
+        }
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run("gh", &args, CommandOpts::default())
+            .context("failed to run gh secret list")?;
+
+        // A failed listing is an incomplete read, never an empty repository.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("gh secret list failed: {stderr}");
+        }
+
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse gh secret list JSON response")?;
+        let entries = json
+            .as_array()
+            .context("gh secret list response was not a JSON array")?;
+
+        Ok(Evidence::Names {
+            present: entries
+                .iter()
+                .filter_map(|e| e.get("name")?.as_str().map(String::from))
+                .collect(),
+            note: None,
+        })
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -187,7 +230,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install from: https://cli.github.com/"));
+        assert!(err
+            .to_string()
+            .contains("Install from: https://cli.github.com/"));
     }
 
     #[test]
@@ -356,5 +401,126 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::BTreeMap<String, zeroize::Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), zeroize::Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    fn secret_list_json(names: &[&str]) -> Vec<u8> {
+        let items: Vec<serde_json::Value> = names
+            .iter()
+            .map(|n| serde_json::json!({ "name": n }))
+            .collect();
+        serde_json::to_vec(&items).unwrap()
+    }
+
+    #[test]
+    fn github_read_back_lists_secret_names() {
+        let fixture = make_config(true);
+        let config = fixture.config();
+        let target_config = config.targets.github.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_list_json(&["API_KEY"]), b"");
+        let target = GithubTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target("dev"))
+            .unwrap();
+        let Evidence::Names { present, .. } = evidence else {
+            panic!("github declares Fidelity::Presence, so it must return Names");
+        };
+        assert!(present.contains("API_KEY"));
+
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "gh");
+        assert_eq!(
+            calls[0].args,
+            vec!["secret", "list", "--json", "name", "-R", "owner/repo"]
+        );
+    }
+
+    /// GitHub secrets are write-only. Even with a value in the store, the
+    /// strongest available claim is that the key exists.
+    #[test]
+    fn github_read_back_cannot_claim_a_value_matched() {
+        let fixture = make_config(false);
+        let config = fixture.config();
+        let target_config = config.targets.github.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_list_json(&["API_KEY"]), b"");
+        let target = GithubTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        let crate::verify::Findings::Presence { verdicts, .. } = &findings else {
+            panic!("expected presence findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::PresenceVerdict::Present);
+    }
+
+    #[test]
+    fn github_read_back_missing_key_is_drift() {
+        let fixture = make_config(false);
+        let config = fixture.config();
+        let target_config = config.targets.github.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_list_json(&["OTHER"]), b"");
+        let target = GithubTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+    }
+
+    #[test]
+    fn github_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config(false);
+        let config = fixture.config();
+        let target_config = config.targets.github.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"HTTP 401: Bad credentials");
+        let target = GithubTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
     }
 }

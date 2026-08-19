@@ -85,8 +85,7 @@ impl DeployTarget for ConvexTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "npx")
-            .context("Install Node.js to get npx")?;
+        check_command(self.runner, "npx").context("Install Node.js to get npx")?;
         let (cwd, env_vars) = self.resolve_deployment_context()?;
         let output = self
             .runner
@@ -320,10 +319,7 @@ targets:
         let calls = runner.take_calls();
         assert_eq!(calls[0].program, "npx");
         assert_eq!(calls[0].args, vec!["convex", "env", "set", "MY_KEY"]);
-        assert_eq!(
-            calls[0].cwd.as_ref().unwrap(),
-            &fixture.path("apps/api")
-        );
+        assert_eq!(calls[0].cwd.as_ref().unwrap(), &fixture.path("apps/api"));
         // Value is passed via stdin, not in args
         assert_eq!(calls[0].stdin.as_deref(), Some(b"my_value".as_slice()));
         assert!(!calls[0].args.iter().any(|a| a.contains("my_value")));
@@ -676,7 +672,10 @@ targets:
         let crate::verify::Findings::Unreachable { error } = &findings else {
             panic!("expected unreachable findings");
         };
-        assert!(!error.contains("hunter2"), "provider error leaked a secret: {error}");
+        assert!(
+            !error.contains("hunter2"),
+            "provider error leaked a secret: {error}"
+        );
         assert!(error.contains("<redacted>"));
     }
 
@@ -736,8 +735,7 @@ targets:
         )]
         .into_iter()
         .collect();
-        let findings =
-            crate::verify::compare(Fidelity::Value, Ok(Evidence::Values(parsed)), &want);
+        let findings = crate::verify::compare(Fidelity::Value, Ok(Evidence::Values(parsed)), &want);
         assert_eq!(
             findings.assess(),
             crate::verify::Assessment::Resolved { drifted: true },

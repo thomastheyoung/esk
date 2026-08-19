@@ -122,9 +122,9 @@ What esk can prove differs per target, permanently, and the output always says w
 
 | Fidelity | Meaning | Targets |
 |----------|---------|---------|
-| `value` | Values read back and compared exactly | .env, aws_lambda, aws_ssm, convex, heroku, kubernetes, render |
-| `presence` | Key names listed; values **not** checked | (none yet) |
-| `none` | Cannot be read back at all | every other target |
+| `value` | Values read back and compared exactly | .env, aws_lambda, aws_ssm, azure_app_service, convex, gcp_cloud_run, heroku, kubernetes, netlify, railway, render, custom (with `read:`) |
+| `presence` | Key names listed; values **not** checked | circleci, cloudflare, fly, github, gitlab, supabase, vercel |
+| `none` | Cannot be read back at all | docker (write-only), cloudflare Pages, custom without `read:` |
 
 A target that has not opted into read-back reports `none` rather than silently passing.
 

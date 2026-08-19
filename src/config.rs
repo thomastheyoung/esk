@@ -366,6 +366,13 @@ pub struct CustomTargetConfig {
     pub delete: Option<CustomCommandConfig>,
     #[serde(default)]
     pub preflight: Option<CustomCommandConfig>,
+    /// Optional command that prints the target's current `KEY=VALUE` lines.
+    ///
+    /// Without it a custom target is unverifiable, which is the honest
+    /// default: esk cannot invent a way to read a service it knows nothing
+    /// about. Supplying it opts the target into value-fidelity verification.
+    #[serde(default)]
+    pub read: Option<CustomCommandConfig>,
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }
@@ -573,7 +580,9 @@ pub(crate) enum TypedTargetConfig {
     Render(RenderTargetConfig),
     Custom {
         name: String,
-        config: CustomTargetConfig,
+        /// Boxed to keep the enum small. `CustomTargetConfig` carries four
+        /// command configs, so inline it would set the size of every variant.
+        config: Box<CustomTargetConfig>,
     },
 }
 
@@ -987,6 +996,28 @@ impl Config {
             if custom.deploy.program.is_empty() {
                 bail!("custom target '{name}' has an empty deploy program");
             }
+            if let Some(read) = &custom.read {
+                if read.program.is_empty() {
+                    bail!("custom target '{name}' has an empty read program");
+                }
+                // A read command never receives a value — there is no expected
+                // value to give it, by design. A `{{value}}` placeholder can
+                // only expand to nothing, so it is a mistake worth naming
+                // rather than silently substituting away.
+                if read.args.iter().any(|a| a.contains("{{value}}")) {
+                    bail!(
+                        "custom target '{name}': read command uses {{{{value}}}}, which is \
+                         never substituted. Verification withholds expected values from \
+                         targets on purpose; remove the placeholder."
+                    );
+                }
+                if read.stdin.is_some() {
+                    bail!(
+                        "custom target '{name}': read commands do not support stdin. \
+                         Remove the `stdin:` field."
+                    );
+                }
+            }
         }
         self.validate_remotes()?;
 
@@ -1250,7 +1281,7 @@ impl Config {
         for (name, cfg) in &self.targets.custom {
             self.typed_targets.push(TypedTargetConfig::Custom {
                 name: name.clone(),
-                config: cfg.clone(),
+                config: Box::new(cfg.clone()),
             });
         }
     }
@@ -2527,7 +2558,9 @@ targets:
             config.classify_output_path("apps/web/.env.local"),
             OutputPathStatus::Usable
         );
-        assert!(config.resolve_project_output_path("apps/web/.env.local").is_ok());
+        assert!(config
+            .resolve_project_output_path("apps/web/.env.local")
+            .is_ok());
 
         // A directory where the file belongs: refused by both.
         std::fs::create_dir(root.join("apps/web/.env.local")).unwrap();
@@ -2535,7 +2568,9 @@ targets:
             config.classify_output_path("apps/web/.env.local"),
             OutputPathStatus::NotARegularFile
         );
-        assert!(config.resolve_project_output_path("apps/web/.env.local").is_err());
+        assert!(config
+            .resolve_project_output_path("apps/web/.env.local")
+            .is_err());
         std::fs::remove_dir(root.join("apps/web/.env.local")).unwrap();
 
         // A symlinked parent: refused by both, and classified as a symlink so a
@@ -2550,7 +2585,9 @@ targets:
                 config.classify_output_path("apps/web/.env.local"),
                 OutputPathStatus::TraversesSymlink
             );
-            assert!(config.resolve_project_output_path("apps/web/.env.local").is_err());
+            assert!(config
+                .resolve_project_output_path("apps/web/.env.local")
+                .is_err());
         }
     }
 
@@ -3551,5 +3588,91 @@ remotes:
             TypedRemoteConfig::CloudFile { name, .. } if name == "dropbox"
         ));
         assert!(matches!(&config.typed_remotes[2], TypedRemoteConfig::S3(_)));
+    }
+
+    #[test]
+    fn custom_read_rejects_value_placeholder() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST"]
+      read:
+        program: curl
+        args: ["list", "{{value}}"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("never substituted"), "error was: {msg}");
+    }
+
+    #[test]
+    fn custom_read_rejects_empty_program() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST"]
+      read:
+        program: ""
+        args: ["list"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("empty read program"));
+    }
+
+    #[test]
+    fn custom_read_rejects_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST"]
+      read:
+        program: curl
+        args: ["list"]
+        stdin: "something"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("do not support stdin"));
+    }
+
+    #[test]
+    fn custom_read_accepts_a_valid_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST"]
+      read:
+        program: curl
+        args: ["list", "--env", "{{env}}"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        assert!(config.targets.custom["my-api"].read.is_some());
     }
 }

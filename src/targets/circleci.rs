@@ -12,10 +12,13 @@
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeSet;
+
 use crate::config::{CircleciTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct CircleciTarget<'a> {
     pub config: &'a Config,
@@ -56,6 +59,61 @@ impl DeployTarget for CircleciTarget<'_> {
             )
             .with_context(|| format!("failed to run circleci context store-secret for {key}"))?
             .check("circleci context store-secret", key)
+    }
+
+    /// Presence, permanently. CircleCI's docs are explicit that "variable
+    /// values are never returned by the API once set".
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Presence
+    }
+
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let org_id = &self.target_config.org_id;
+        let context = &self.target_config.context_name;
+
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        // `--org-id` matches the deploy's own flag: addressing the org
+        // positionally would have the CLI read it as the context name, so the
+        // read and the write would not refer to the same context.
+        let mut args: Vec<&str> = vec![
+            "context", "secret", "list", "--org-id", org_id, context, "--json",
+        ];
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run("circleci", &args, CommandOpts::default())
+            .context("failed to run circleci context secret list")?;
+
+        // A failed listing is an incomplete read, never an empty context.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("circleci context secret list failed: {stderr}");
+        }
+
+        // `--json` rather than the rendered table. The table is styled on a
+        // TTY, its header's first token is itself a valid key name, and its
+        // empty case prints to stderr — each of which turns decoration into a
+        // phantom key reported as drift, on every run, forever.
+        //
+        // The `truncated_value` field these records carry is deliberately
+        // ignored: it is truncated, so comparing it could only ever produce
+        // false verdicts. Presence is all CircleCI can prove.
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse circleci context secret list JSON response")?;
+        let entries = json
+            .as_array()
+            .context("circleci secret list response was not a JSON array")?;
+
+        let present = entries
+            .iter()
+            .filter_map(|e| e.get("variable")?.as_str().map(String::from))
+            .collect();
+
+        Ok(Evidence::Names {
+            present,
+            note: None,
+        })
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -131,7 +189,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install from: https://circleci.com"));
+        assert!(err
+            .to_string()
+            .contains("Install from: https://circleci.com"));
     }
 
     #[test]
@@ -295,5 +355,106 @@ targets:
             .delete_secret("KEY", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("not found"));
+    }
+
+    /// A `circleci context secret list --json` response.
+    fn secret_list_json(names: &[&str]) -> Vec<u8> {
+        let items: Vec<serde_json::Value> = names
+            .iter()
+            .map(|n| serde_json::json!({ "variable": n, "truncated_value": "xxxx" }))
+            .collect();
+        serde_json::to_vec(&items).unwrap()
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::BTreeMap<String, zeroize::Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), zeroize::Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn circleci_read_back_lists_names_only() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.circleci.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_list_json(&["API_KEY", "DB_URL"]), b"");
+        let target = CircleciTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target("dev"))
+            .unwrap();
+        let Evidence::Names { present, .. } = evidence else {
+            panic!("circleci declares Fidelity::Presence, so it must return Names");
+        };
+        assert!(present.contains("API_KEY"));
+        assert!(present.contains("DB_URL"));
+        // The response's `truncated_value` field never enters the evidence:
+        // presence evidence carries no values at all.
+        assert!(!present.contains("xxxx"));
+
+        let calls = runner.take_calls();
+        assert!(
+            calls[0].args.contains(&"--org-id".to_string()),
+            "the org must be passed as a flag, matching the deploy; as a \
+             positional the CLI would read it as the context name"
+        );
+        assert!(calls[0].args.contains(&"--json".to_string()));
+    }
+
+    #[test]
+    fn circleci_read_back_missing_key_is_drift() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.circleci.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_list_json(&["OTHER"]), b"");
+        let target = CircleciTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+    }
+
+    #[test]
+    fn circleci_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.circleci.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"context not found");
+        let target = CircleciTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
     }
 }
