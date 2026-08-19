@@ -827,12 +827,6 @@ impl Config {
         Ok(())
     }
 
-    /// Resolve a generated local output path safely beneath the project root.
-    ///
-    /// The input is normalized as a relative path, existing components are
-    /// checked without following symlinks, and an existing output must be a
-    /// regular file. Callers that create parent directories must resolve again
-    /// before writing, because filesystem topology can change after validation.
     /// Why [`Config::resolve_project_output_path`] refused a path.
     ///
     /// Callers that must tell a user's deliberate layout apart from a state esk
@@ -846,6 +840,12 @@ impl Config {
         self.walk_output_path(&relative).0
     }
 
+    /// Resolve a generated local output path safely beneath the project root.
+    ///
+    /// The input is normalized as a relative path, existing components are
+    /// checked without following symlinks, and an existing output must be a
+    /// regular file. Callers that create parent directories must resolve again
+    /// before writing, because filesystem topology can change after validation.
     pub fn resolve_project_output_path(&self, output: &str) -> Result<PathBuf> {
         let relative = normalize_project_relative_output(output)?;
         let resolved = self.root.join(&relative);
@@ -1411,7 +1411,6 @@ impl Config {
             .collect()
     }
 
-    /// Resolve the .env file path for an (app, env) pair.
     /// Classify the `.env` output path for an app and environment.
     ///
     /// Uses the same walk as [`Config::resolve_project_output_path`], so a
@@ -1424,19 +1423,16 @@ impl Config {
         self.classify_output_path(&pattern)
     }
 
-    /// The `.env` path for an app and environment, before output-policy checks.
+    /// The `.env` path for an app and environment, without policy checks.
     ///
     /// [`Config::resolve_dotenv_path`] refuses symlinks and non-file leaves
     /// with one error, so it cannot answer questions *about* a rejected path.
     /// This exposes the location so a caller can tell one refusal from another.
     ///
-    /// For inspection only — never write through this path. Every write goes
-    /// via `resolve_dotenv_path` so the output policy is enforced in one place.
-    /// The `.env` path for an app and environment, without policy checks.
-    ///
-    /// For reading and display only. Every write goes through
-    /// [`Config::resolve_dotenv_path`], so the output policy stays enforced in
-    /// one place; a reader following a symlink cannot damage what it points at.
+    /// For reading and display only — never write through this path. Every
+    /// write goes through [`Config::resolve_dotenv_path`], so the output policy
+    /// stays enforced in one place; a reader following a symlink cannot damage
+    /// what it points at.
     pub(crate) fn dotenv_display_path(&self, app: &str, env: &str) -> Option<PathBuf> {
         Some(self.root.join(self.dotenv_pattern(app, env)?))
     }
@@ -1457,6 +1453,13 @@ impl Config {
         )
     }
 
+    /// Resolve the `.env` file path for an (app, env) pair, enforcing the
+    /// project output policy.
+    ///
+    /// This is the only path esk writes a `.env` through: it refuses a leaf
+    /// that is not a regular file and any component that is a symlink. Use
+    /// [`Config::dotenv_display_path`] to inspect a location without those
+    /// checks.
     pub fn resolve_dotenv_path(&self, app: &str, env: &str) -> Result<PathBuf> {
         let dotenv_config = self
             .targets

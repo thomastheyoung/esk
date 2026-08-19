@@ -59,20 +59,14 @@ impl ConvexTarget<'_> {
 /// Parse the `KEY=VALUE` lines `convex env list` prints.
 ///
 /// A value may itself contain `=`, so the split is on the first one only.
-/// Lines without `=` are not variables — `convex` prints status text on
-/// stderr, but a future version printing a header to stdout must not become a
-/// phantom key that reports as drift.
-fn parse_env_list(stdout: &[u8]) -> BTreeMap<String, Zeroizing<String>> {
-    String::from_utf8_lossy(stdout)
-        .lines()
-        .filter_map(|line| line.split_once('='))
-        .map(|(key, value)| {
-            (
-                key.trim().to_string(),
-                Zeroizing::new(value.trim_end_matches('\r').to_string()),
-            )
-        })
-        .collect()
+///
+/// Delegates to the shared parser so the multiline hazard is handled in one
+/// place: a line without `=` is either status text or the continuation of a
+/// value this grammar cannot represent, and answering anyway would truncate
+/// the value and turn its remaining lines into phantom keys carrying
+/// fragments of the secret's plaintext.
+fn parse_env_list(stdout: &[u8]) -> Result<BTreeMap<String, Zeroizing<String>>> {
+    crate::targets::parse_kv_read_back(stdout, "convex")
 }
 
 impl DeployTarget for ConvexTarget<'_> {
@@ -164,7 +158,7 @@ impl DeployTarget for ConvexTarget<'_> {
             anyhow::bail!("convex env list failed: {stderr}");
         }
 
-        Ok(Evidence::Values(parse_env_list(&output.stdout)))
+        Ok(Evidence::Values(parse_env_list(&output.stdout)?))
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -683,16 +677,24 @@ targets:
     fn convex_read_back_splits_on_first_equals_only() {
         // Values legitimately contain '='; base64 padding and connection
         // strings both do. Splitting on the last one would corrupt them.
-        let parsed = parse_env_list(b"URL=postgres://u:p@h/db?x=1\nPAD=YWJj==\n");
+        let parsed = parse_env_list(b"URL=postgres://u:p@h/db?x=1\nPAD=YWJj==\n").unwrap();
         assert_eq!(parsed["URL"].as_str(), "postgres://u:p@h/db?x=1");
         assert_eq!(parsed["PAD"].as_str(), "YWJj==");
     }
 
+    /// A line with no `=` makes the whole read unusable, not merely noisy.
+    ///
+    /// It is indistinguishable from the continuation of a multiline value, and
+    /// esk cannot tell a banner apart from a fragment of a secret. Skipping it
+    /// would silently truncate that secret and report permanent false drift,
+    /// so the read is refused instead.
     #[test]
-    fn convex_read_back_ignores_lines_without_a_separator() {
-        let parsed = parse_env_list(b"Environment variables:\nA=1\n");
-        assert_eq!(parsed.len(), 1);
-        assert_eq!(parsed["A"].as_str(), "1");
+    fn convex_read_back_refuses_lines_without_a_separator() {
+        let err = parse_env_list(b"Environment variables:\nA=1\n").unwrap_err();
+        assert!(
+            err.to_string().contains("no '=' separator"),
+            "error was: {err}"
+        );
     }
 
     #[test]
@@ -715,19 +717,18 @@ targets:
     }
 
     #[test]
-    fn convex_read_back_multiline_value_cannot_report_a_false_match() {
-        // If a provider ever prints a value across multiple lines, the value
-        // is truncated at the newline and continuation lines may appear as
-        // phantom keys. That is noisy, but it fails toward drift, never toward
-        // a false match — which is the property that matters. Pinned here so a
-        // future "be lenient about continuation lines" change cannot quietly
-        // turn a truncated read into a pass.
-        let parsed = parse_env_list(b"PEM=-----BEGIN KEY-----\nabc123\n-----END KEY-----\n");
-        assert_eq!(
-            parsed["PEM"].as_str(),
-            "-----BEGIN KEY-----",
-            "a multi-line value is truncated at the newline"
-        );
+    fn convex_read_back_multiline_value_is_unresolved_not_false_drift() {
+        // A multiline value has no representation in a KEY=VALUE listing. The
+        // old behaviour truncated it and let the continuation lines through as
+        // phantom keys — which failed toward drift rather than a false match,
+        // but reported drift the operator could never clear, and printed
+        // fragments of the secret's own plaintext in the `extra` list, since
+        // `redact_exact` only matches a whole value.
+        //
+        // Refusing the read is the honest outcome: esk did not establish this
+        // scope's state, and `Unresolved` says exactly that.
+        let err =
+            parse_env_list(b"PEM=-----BEGIN KEY-----\nabc123\n-----END KEY-----\n").unwrap_err();
 
         let want: BTreeMap<String, Zeroizing<String>> = [(
             "PEM".to_string(),
@@ -735,11 +736,11 @@ targets:
         )]
         .into_iter()
         .collect();
-        let findings = crate::verify::compare(Fidelity::Value, Ok(Evidence::Values(parsed)), &want);
+        let findings = crate::verify::compare(Fidelity::Value, Err(err), &want);
         assert_eq!(
             findings.assess(),
-            crate::verify::Assessment::Resolved { drifted: true },
-            "a truncated read must surface as drift, never as a match"
+            crate::verify::Assessment::Unresolved,
+            "an unrepresentable value must be admitted as unread, never guessed at"
         );
     }
 }

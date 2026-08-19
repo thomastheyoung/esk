@@ -351,7 +351,7 @@ fn do_list_with_config(config: &Config, params: &ListParams) -> anyhow::Result<L
             };
 
             environments.push(ListSecretEnv {
-                env: env_name.to_string(),
+                env: env_name.clone(),
                 has_value,
                 status,
             });

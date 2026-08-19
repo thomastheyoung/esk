@@ -1171,6 +1171,9 @@ targets:
       preflight:
         program: curl
         args: ["--fail", "-s", "https://api.example.com/health"]
+      read:
+        program: curl
+        args: ["--fail", "-s", "https://api.example.com/secrets?env={{env}}"]
       env_flags:
         prod: "--header X-Env:production"
 ```
@@ -1180,6 +1183,7 @@ targets:
 | `deploy`    | Yes      | Command to run for each secret. Must have `program` and `args`.                    |
 | `delete`    | No       | Command to run when pruning orphaned secrets. Same structure as `deploy`.          |
 | `preflight` | No       | Command to run before any deploys to check service availability. Same structure.   |
+| `read`      | No       | Command that prints the target's current values, enabling `esk verify`.            |
 | `env_flags` | No       | Map of environment name to extra CLI flags appended to deploy and delete commands. |
 
 Each command block (`deploy`, `delete`, `preflight`) has:
@@ -1202,6 +1206,25 @@ Variables are substituted in `args` and `stdin` at deploy time:
 | `{{app}}`   | App name, or empty string if the secret has none |
 
 > **Security note**: Prefer `stdin` for `{{value}}` rather than putting it in `args`. Values in args are visible in process listings (`ps aux`). esk warns at deploy time if `{{value}}` appears in deploy args.
+
+### The `read:` command
+
+Without `read:`, a custom target is unverifiable — `esk verify` reports it as a gap rather than as passing, because esk cannot invent a way to query a service it knows nothing about. Supplying `read:` opts the target into value-fidelity verification.
+
+`{{key}}` and `{{value}}` are **not** substituted in a read command. The command is expected to list the whole target in one invocation, and interpolating an expected value into it would hand the target the very thing esk withholds to keep verification honest. Config validation rejects a `read:` block that uses `{{value}}` or sets `stdin`.
+
+**Output contract** — the command must print *only* `KEY=VALUE` lines on stdout, one per line:
+
+```
+API_KEY=abc123
+DATABASE_URL=postgres://user:pass@host/db
+```
+
+- The value is taken verbatim after the first `=`, so values may contain `=`.
+- Send progress and banner text to **stderr**. A line on stdout with no `=` makes esk refuse the whole read.
+- Lines whose left side is not a valid secret key name (`[A-Za-z_][A-Za-z0-9_]*`) are ignored.
+
+esk refuses rather than guesses because the `KEY=VALUE` grammar cannot represent a value containing a newline. A multiline secret would otherwise be truncated at its first newline — reporting drift that redeploying never clears — and its remaining lines would surface as phantom keys carrying fragments of the secret's own plaintext. If your secrets contain newlines, this format cannot verify them; leave `read:` unset so the target reports as an honest gap.
 
 ### Naming rules
 

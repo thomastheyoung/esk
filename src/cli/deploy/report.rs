@@ -63,12 +63,23 @@ impl DeployReport {
     /// Kept distinct from `deployed`: the store did not change, so the value
     /// was already correct. What changed is the artifact, and saying so tells
     /// the user something was wrong on disk rather than in their secrets.
+    ///
+    /// A dry run reports the drift in the future tense. The audit that finds it
+    /// runs during planning, so `restored` is populated whether or not anything
+    /// was written — and "regenerated" for a file still sitting corrupt on disk
+    /// is a false report, the same one `SummaryMood` exists to prevent for the
+    /// deploy summary.
     pub fn render_restored(&self) -> Result<()> {
+        let detail = if self.dry_run {
+            "artifact drifted — would regenerate"
+        } else {
+            "artifact drifted — regenerated"
+        };
         for (target, env) in &self.restored {
             cliclack::log::warning(format!(
                 "{}  {}",
                 style(format!("{target}:{env}")).bold(),
-                style("artifact drifted — regenerated").dim()
+                style(detail).dim()
             ))?;
         }
         Ok(())

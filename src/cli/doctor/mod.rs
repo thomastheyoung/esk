@@ -140,7 +140,7 @@ secrets:
         let dir = setup_healthy_project();
         let report = Report::build(dir.path());
 
-        assert!(report.project.as_deref() == Some("testapp"));
+        assert_eq!(report.project.as_deref(), Some("testapp"));
 
         // All structure checks should pass
         for check in &report.structure {

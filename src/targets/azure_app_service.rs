@@ -15,7 +15,7 @@
 use anyhow::{Context, Result};
 use zeroize::Zeroizing;
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::{AzureAppServiceTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
@@ -174,16 +174,28 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
             .as_array()
             .context("az appsettings list response was not a JSON array")?;
 
-        Ok(Evidence::Values(
-            entries
-                .iter()
-                .filter_map(|e| {
-                    let name = e.get("name")?.as_str()?;
-                    let value = e.get("value")?.as_str()?;
-                    Some((name.to_string(), Zeroizing::new(value.to_string())))
-                })
-                .collect(),
-        ))
+        // An entry esk cannot decode is an incomplete read, not an absent key.
+        // Dropping it would make `compare` report the setting as missing from
+        // the app — drift the operator cannot act on, since Azure does hold it.
+        // Key Vault references and settings mid-update both serialize with a
+        // null value, so this is a real shape, not a hypothetical one.
+        // `netlify` makes the same call for the same reason.
+        let mut values = BTreeMap::new();
+        for entry in entries {
+            let name = entry
+                .get("name")
+                .and_then(|n| n.as_str())
+                .context("az appsettings list returned an entry with no string 'name'")?;
+            let value = entry
+                .get("value")
+                .and_then(|v| v.as_str())
+                .with_context(|| {
+                    format!("az appsettings list returned a non-string value for '{name}'")
+                })?;
+            values.insert(name.to_string(), Zeroizing::new(value.to_string()));
+        }
+
+        Ok(Evidence::Values(values))
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {

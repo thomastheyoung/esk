@@ -7,7 +7,6 @@
 //! Only individual deploy mode is supported. Batch mode is out of scope.
 
 use anyhow::{Context, Result};
-use zeroize::Zeroizing;
 
 use std::collections::BTreeSet;
 
@@ -110,23 +109,24 @@ impl DeployTarget for CustomTarget<'_> {
             );
         }
 
-        // Only lines whose key is a valid secret key name are taken. A read
-        // command is a user's own script and may print progress or banner
-        // text, and a line like `Fetching secrets for env=dev` would otherwise
-        // become a phantom key reported as unmanaged drift on every run.
-        //
         // Values are taken verbatim: a `read:` command must print the stored
         // value unquoted, since esk cannot know which quoting convention an
-        // arbitrary script uses.
-        Ok(Evidence::Values(
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .filter_map(|line| line.trim_end_matches('\r').split_once('='))
-                .map(|(key, value)| (key.trim(), value))
-                .filter(|(key, _)| crate::store::validate_key(key).is_ok())
-                .map(|(key, value)| (key.to_string(), Zeroizing::new(value.to_string())))
-                .collect(),
-        ))
+        // arbitrary script uses. It must also print *only* `KEY=VALUE` lines —
+        // the shared parser refuses anything else rather than guessing.
+        //
+        // A previous version skipped lines whose key failed `validate_key`, to
+        // tolerate banner text like `Fetching secrets for env=dev`. That filter
+        // could not tell a banner from the continuation of a multiline secret,
+        // so it silently truncated such values and emitted their remaining
+        // lines as phantom keys — which `verify` prints in the `extra` list,
+        // leaking fragments of the plaintext. Refusing is the honest answer;
+        // a `read:` command that prints banners must send them to stderr.
+        let values = crate::targets::parse_kv_read_back(
+            &output.stdout,
+            &format!("custom target '{}'", self.target_name),
+        )?;
+
+        Ok(Evidence::Values(values))
     }
 
     fn preflight(&self) -> Result<()> {
@@ -223,6 +223,7 @@ mod tests {
     use crate::config::CustomCommandConfig;
     use crate::test_support::MockCommandRunner;
     use std::collections::BTreeMap;
+    use zeroize::Zeroizing;
 
     fn make_target_config(
         deploy_args: Vec<&str>,
@@ -646,5 +647,53 @@ mod tests {
         };
         assert_eq!(values.len(), 1, "only the real key is a key");
         assert_eq!(values["API_KEY"].as_str(), "real");
+    }
+
+    /// A line with no `=` makes the read unusable rather than merely noisy.
+    ///
+    /// esk cannot tell a separator-less banner from the continuation of a
+    /// multiline secret. Skipping it would truncate that secret — reporting
+    /// drift the operator can never clear — and emit its remaining lines as
+    /// phantom keys carrying fragments of the plaintext, which `verify` prints
+    /// verbatim because `redact_exact` only matches a whole value.
+    #[test]
+    fn custom_read_back_refuses_output_it_cannot_represent() {
+        let cfg = with_read(
+            make_target_config(vec!["set", "{{key}}"], None),
+            vec!["list"],
+        );
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(b"PEM=-----BEGIN KEY-----\nabc123\n-----END KEY-----\n", b"");
+        let target = CustomTarget {
+            target_name: "my-api".to_string(),
+            target_config: &cfg,
+            runner: &runner,
+        };
+
+        // `Evidence` deliberately has no `Debug` — it carries secret values —
+        // so the error is destructured rather than unwrapped.
+        let Err(err) = target.read_back(
+            &verify_keys(&["PEM"]),
+            &make_resolved("my-api", None, "dev"),
+        ) else {
+            panic!("output the grammar cannot represent must not parse");
+        };
+        assert!(
+            err.to_string().contains("no '=' separator"),
+            "error was: {err}"
+        );
+
+        // And the refusal must reach the report as "not established", never as
+        // a verdict about the value.
+        let findings = crate::verify::compare(
+            Fidelity::Value,
+            Err(err),
+            &verify_expected(&[("PEM", "-----BEGIN KEY-----\nabc123\n-----END KEY-----")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Unresolved,
+            "a value the grammar cannot carry must not produce a verdict"
+        );
     }
 }

@@ -60,7 +60,7 @@ impl InitReport {
         Self::render_file(&self.sync_index, &sync_index_path)?;
 
         if self.gitignore_updated {
-            cliclack::log::success(format!("Updated {}", style(gitignore_path.display()).dim(),))?;
+            cliclack::log::success(format!("Updated {}", style(gitignore_path.display()).dim()))?;
         }
 
         cliclack::outro(format!(

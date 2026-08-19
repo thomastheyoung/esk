@@ -93,56 +93,84 @@ impl DeployTarget for GitlabTarget<'_> {
         /// which is reported as an incomplete read rather than truncated.
         const PER_PAGE: &str = "100";
 
+        /// GitLab's listing is paginated; walk it to exhaustion rather than
+        /// bailing on the first full page. A project with 100+ variables is
+        /// unremarkable — the count is project-wide, not esk-managed only —
+        /// and stopping at page one made every such project permanently
+        /// unverifiable. `render` already follows its cursor the same way.
+        const MAX_PAGES: usize = 100;
+
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec!["variable", "list", "-F", "json", "--per-page", PER_PAGE];
-        args.extend(flag_parts.iter().map(String::as_str));
+        let per_page: usize = PER_PAGE.parse().unwrap_or(usize::MAX);
 
-        let output = self
-            .runner
-            .run("glab", &args, CommandOpts::default())
-            .context("failed to run glab variable list")?;
+        let mut present = std::collections::BTreeSet::new();
 
-        // A failed listing is an incomplete read, never an empty project.
-        if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("glab variable list failed: {stderr}");
-        }
+        for page in 1..=MAX_PAGES {
+            let page_str = page.to_string();
+            let mut args: Vec<&str> = vec![
+                "variable",
+                "list",
+                "-F",
+                "json",
+                "--per-page",
+                PER_PAGE,
+                "--page",
+                &page_str,
+            ];
+            args.extend(flag_parts.iter().map(String::as_str));
 
-        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
-            .context("failed to parse glab variable list JSON response")?;
-        let entries = json
-            .as_array()
-            .context("glab variable list response was not a JSON array")?;
+            let output = self
+                .runner
+                .run("glab", &args, CommandOpts::default())
+                .context("failed to run glab variable list")?;
 
-        // A full page may mean more variables exist that this listing does not
-        // show. Rather than return a short set — which would report the
-        // unlisted keys as missing — admit the read was incomplete.
-        if entries.len() >= PER_PAGE.parse::<usize>().unwrap_or(usize::MAX) {
-            anyhow::bail!(
-                "glab returned a full page of {PER_PAGE} variables; the listing may be \
-                 truncated and esk cannot confirm the rest"
+            // A failed listing is an incomplete read, never an empty project.
+            if !output.success {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                anyhow::bail!("glab variable list failed: {stderr}");
+            }
+
+            let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+                .context("failed to parse glab variable list JSON response")?;
+            let entries = json
+                .as_array()
+                .context("glab variable list response was not a JSON array")?;
+
+            let entry_count = entries.len();
+
+            present.extend(
+                entries
+                    .iter()
+                    .filter(|e| {
+                        // `*` is GitLab's all-environments scope and applies here too.
+                        match e.get("environment_scope").and_then(|s| s.as_str()) {
+                            Some(scope) => scope == "*" || scope == target.environment,
+                            // An entry whose scope esk cannot read is not
+                            // evidence that the key is present here. Assuming it
+                            // in-scope would hide a missing key, which is the
+                            // drift-concealing direction.
+                            None => false,
+                        }
+                    })
+                    .filter_map(|e| e.get("key")?.as_str().map(String::from)),
             );
+
+            // A short page is the last page.
+            if entry_count < per_page {
+                return Ok(Evidence::Names {
+                    present,
+                    note: None,
+                });
+            }
         }
 
-        let present = entries
-            .iter()
-            .filter(|e| {
-                // `*` is GitLab's all-environments scope and applies here too.
-                match e.get("environment_scope").and_then(|s| s.as_str()) {
-                    Some(scope) => scope == "*" || scope == target.environment,
-                    // An entry whose scope esk cannot read is not evidence that
-                    // the key is present here. Assuming it in-scope would hide
-                    // a missing key, which is the drift-concealing direction.
-                    None => false,
-                }
-            })
-            .filter_map(|e| e.get("key")?.as_str().map(String::from))
-            .collect();
-
-        Ok(Evidence::Names {
-            present,
-            note: None,
-        })
+        // Every page was full. The listing may still be truncated, and a short
+        // set would report the unlisted keys as missing, so admit the read was
+        // incomplete instead.
+        anyhow::bail!(
+            "glab variable list did not terminate after {MAX_PAGES} pages of {PER_PAGE}; \
+             esk cannot confirm the rest"
+        )
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -517,11 +545,15 @@ targets:
         );
     }
 
-    /// glab pages at 20 by default and silently drops the rest. A full page
-    /// means the listing may be incomplete, and a short set would report every
-    /// unlisted key as missing from GitLab.
+    /// A full page means more variables may follow, so the listing is walked
+    /// to exhaustion.
+    ///
+    /// The count is project-wide — every CI/CD variable in the project, not
+    /// just the ones esk manages — so 100+ is unremarkable. Bailing on the
+    /// first full page made every such project permanently unverifiable, which
+    /// is a self-inflicted `Unresolved` rather than a real read failure.
     #[test]
-    fn gitlab_read_back_full_page_is_an_incomplete_read() {
+    fn gitlab_read_back_follows_pages_to_exhaustion() {
         let fixture = make_config();
         let config = fixture.config();
         let target_config = config.targets.gitlab.as_ref().unwrap();
@@ -534,7 +566,58 @@ targets:
             .collect();
 
         let runner = MockCommandRunner::new().strict();
+        // A full first page, then a short second page ending the walk.
         runner.push_success(&variable_list_json(&refs), b"");
+        runner.push_success(&variable_list_json(&[("LAST_KEY", "dev")]), b"");
+        let target = GitlabTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["KEY_000"]), &make_target("dev")),
+            &verify_expected(&[("KEY_000", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true },
+            "the walk completes; LAST_KEY is unmanaged here, which is drift"
+        );
+
+        let calls = runner.take_calls();
+        assert_eq!(calls.len(), 2, "both pages were requested");
+        assert!(
+            calls[0].args.windows(2).any(|w| w == ["--page", "1"]),
+            "first call asks for page 1: {:?}",
+            calls[0].args
+        );
+        assert!(
+            calls[1].args.windows(2).any(|w| w == ["--page", "2"]),
+            "second call asks for page 2: {:?}",
+            calls[1].args
+        );
+    }
+
+    /// A listing that is full on every page is still an incomplete read.
+    #[test]
+    fn gitlab_read_back_bails_when_every_page_is_full() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.gitlab.as_ref().unwrap();
+        let entries: Vec<(String, String)> = (0..100)
+            .map(|i| (format!("KEY_{i:03}"), "dev".to_string()))
+            .collect();
+        let refs: Vec<(&str, &str)> = entries
+            .iter()
+            .map(|(k, s)| (k.as_str(), s.as_str()))
+            .collect();
+
+        let runner = MockCommandRunner::new();
+        for _ in 0..101 {
+            runner.push_success(&variable_list_json(&refs), b"");
+        }
         let target = GitlabTarget {
             config,
             target_config,
@@ -549,7 +632,7 @@ targets:
         assert_eq!(
             findings.assess(),
             crate::verify::Assessment::Unresolved,
-            "a possibly-truncated listing must not be reported as complete"
+            "a listing that never terminates must not be reported as complete"
         );
     }
 

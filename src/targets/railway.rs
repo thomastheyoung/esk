@@ -12,7 +12,6 @@
 //! the target project/service from the linked context (no explicit app flag needed).
 
 use anyhow::{Context, Result};
-use zeroize::Zeroizing;
 
 use std::collections::BTreeSet;
 
@@ -94,13 +93,13 @@ impl DeployTarget for RailwayTarget<'_> {
             anyhow::bail!("railway variables failed: {stderr}");
         }
 
-        Ok(Evidence::Values(
-            String::from_utf8_lossy(&output.stdout)
-                .lines()
-                .filter_map(|line| line.trim_end_matches('\r').split_once('='))
-                .map(|(key, value)| (key.trim().to_string(), Zeroizing::new(value.to_string())))
-                .collect(),
-        ))
+        // Shared parser: it refuses to answer when the output contains a line
+        // the KEY=VALUE grammar cannot represent, rather than truncating a
+        // multiline value and emitting its continuation lines as phantom keys.
+        Ok(Evidence::Values(crate::targets::parse_kv_read_back(
+            &output.stdout,
+            "railway",
+        )?))
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -120,6 +119,7 @@ mod tests {
     use super::*;
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
+    use zeroize::Zeroizing;
 
     fn make_config() -> ConfigFixture {
         let yaml = r#"

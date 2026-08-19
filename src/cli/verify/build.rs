@@ -90,6 +90,18 @@ pub(super) fn build(
     let candidates = target_candidates(config, runner);
     let mut report = VerifyReport { scopes: Vec::new() };
 
+    // Preflight is a property of the target, not of the scope: it checks that a
+    // CLI is installed and authenticated, which cannot differ between two
+    // (app, env) pairs of the same service. Running it per scope would shell
+    // out once per pair — a config with three apps across three environments
+    // would run `wrangler whoami` nine times for one answer. Memoized per
+    // target so the cost matches every other consumer's.
+    //
+    // The failure is cached alongside the success, so a target whose CLI is not
+    // authenticated reports the same actionable message on each of its scopes
+    // rather than re-paying for it.
+    let mut preflight_results: BTreeMap<String, Result<(), String>> = BTreeMap::new();
+
     for ((service, app, env), Scope { expected, unset }) in scopes {
         let Some(candidate) = candidates.iter().find(|c| c.target.name() == service) else {
             // Configured as a secret's target but not as a configured target.
@@ -122,9 +134,13 @@ pub(super) fn build(
         // Preflight before reading: without it, an unauthenticated CLI's error
         // arrives as an opaque read failure rather than as the actionable
         // "run `wrangler login`" message preflight produces.
-        let evidence = match target.preflight() {
+        let preflight = preflight_results
+            .entry(service.clone())
+            .or_insert_with(|| target.preflight().map_err(|error| format!("{error:#}")));
+
+        let evidence = match preflight {
             Ok(()) => target.read_back(&keys, &resolved_target),
-            Err(error) => Err(error),
+            Err(error) => Err(anyhow::anyhow!(error.clone())),
         };
 
         report.scopes.push(ScopeReport {

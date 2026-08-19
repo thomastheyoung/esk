@@ -288,6 +288,66 @@ pub fn validate_stdin_kv_value(key: &str, value: &str, target_name: &str) -> Res
     Ok(())
 }
 
+/// Parse the `KEY=VALUE` lines a CLI prints, refusing to guess when the output
+/// contains something the line grammar cannot represent.
+///
+/// The grammar is line-oriented, so a value containing a newline has no
+/// representation in it: the value truncates at the first newline and each
+/// continuation line is re-read as a record of its own. Both failures are
+/// silent and permanent — the truncated value reports `Differs` on every run,
+/// and a continuation line containing `=` becomes a phantom key reported as
+/// unmanaged drift. Worse, that phantom key is a *fragment* of the secret's
+/// own plaintext, and [`crate::verify`]'s redaction only matches whole values,
+/// so the fragment is printed verbatim in the report.
+///
+/// The guard is the separator-less line. Well-formed output from these CLIs is
+/// entirely `KEY=VALUE` records, so a non-empty line without `=` is either a
+/// banner or the continuation of a value the grammar cannot carry. esk cannot
+/// tell which, and answering anyway is what produces the fabricated verdict —
+/// so the read is reported incomplete instead, per the
+/// [`DeployTarget::read_back`] contract that `Err` beats a wrong map.
+///
+/// Keys are trimmed on both sides; values are taken verbatim apart from a
+/// trailing `\r`, since leading and trailing whitespace can be part of a
+/// secret and this parser must not silently alter it.
+pub fn parse_kv_read_back(
+    stdout: &[u8],
+    target_name: &str,
+) -> Result<BTreeMap<String, zeroize::Zeroizing<String>>> {
+    let text = String::from_utf8_lossy(stdout);
+    let mut values = BTreeMap::new();
+
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            anyhow::bail!(
+                "{target_name}: read-back output has a line with no '=' separator. The \
+                 KEY=VALUE listing cannot represent a value containing newlines, so esk \
+                 cannot tell a banner line from the tail of a multiline secret and will \
+                 not guess; this scope cannot be verified."
+            );
+        };
+        let key = key.trim();
+        // A line whose left side is not a legal key name is banner text that
+        // happens to contain `=`, such as `Fetching secrets for env=dev`.
+        // Admitting it would report a phantom key as unmanaged drift on every
+        // run. Unlike a separator-less line, this one cannot be the tail of a
+        // multiline secret in any dangerous way: the check is on the *key*
+        // side, so a value's continuation only reaches here if it looks like a
+        // real assignment, and that case is caught by the `=`-less lines that
+        // must accompany it.
+        if crate::store::validate_key(key).is_err() {
+            continue;
+        }
+        values.insert(key.to_string(), zeroize::Zeroizing::new(value.to_string()));
+    }
+
+    Ok(values)
+}
+
 /// Replace known secret values before an error is shown or persisted.
 ///
 /// Command failures can echo arguments even when the command runner itself does

@@ -124,7 +124,7 @@ impl Dashboard {
                         .unwrap_or_default();
                     deploy_lines.push(ui::section_entry(
                         &format!("{}:{}", entry.key, entry.env),
-                        &format!("→ {}  {}{}", entry.target, style(freshness).dim(), err_text,),
+                        &format!("→ {}  {}{}", entry.target, style(freshness).dim(), err_text),
                         deploy_label_width,
                     ));
                 }
