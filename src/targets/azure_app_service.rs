@@ -13,11 +13,15 @@
 //! a resource group.
 
 use anyhow::{Context, Result};
+use zeroize::Zeroizing;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::{AzureAppServiceTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct AzureAppServiceTarget<'a> {
     pub config: &'a Config,
@@ -66,8 +70,9 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "az")
-            .context("Install from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli")?;
+        check_command(self.runner, "az").context(
+            "Install from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli",
+        )?;
         let base = self.base_args();
         let mut args: Vec<&str> = vec!["account", "show"];
         args.extend(base.iter().map(String::as_str));
@@ -115,6 +120,82 @@ impl DeployTarget for AzureAppServiceTarget<'_> {
             .with_context(|| format!("failed to run az webapp config appsettings set for {key}"))?;
 
         output.check("az webapp config appsettings set", key)
+    }
+
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Value
+    }
+
+    /// Read back via `az webapp config appsettings list`.
+    ///
+    /// Azure redacts values in the output of `set` and `delete` and documents
+    /// `list` as the way to view them, so this is the only un-redacted read.
+    /// The same `--slot` the deploy uses is passed, or the read would compare
+    /// against the production slot's settings after deploying to a staging one.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let azure_app = self.resolve_app(target)?;
+        let rg = &self.target_config.resource_group;
+        let base = self.base_args();
+
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec![
+            "webapp",
+            "config",
+            "appsettings",
+            "list",
+            "--name",
+            azure_app,
+            "--resource-group",
+            rg,
+            "--output",
+            "json",
+        ];
+        if let Some(slot) = self.resolve_slot(&target.environment) {
+            args.push("--slot");
+            args.push(slot);
+        }
+        args.extend(base.iter().map(String::as_str));
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run("az", &args, CommandOpts::default())
+            .context("failed to run az webapp config appsettings list")?;
+
+        // A failed listing is an incomplete read, never an empty app.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("az webapp config appsettings list failed: {stderr}");
+        }
+
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse az appsettings list JSON response")?;
+        let entries = json
+            .as_array()
+            .context("az appsettings list response was not a JSON array")?;
+
+        // An entry esk cannot decode is an incomplete read, not an absent key.
+        // Dropping it would make `compare` report the setting as missing from
+        // the app — drift the operator cannot act on, since Azure does hold it.
+        // Key Vault references and settings mid-update both serialize with a
+        // null value, so this is a real shape, not a hypothetical one.
+        // `netlify` makes the same call for the same reason.
+        let mut values = BTreeMap::new();
+        for entry in entries {
+            let name = entry
+                .get("name")
+                .and_then(|n| n.as_str())
+                .context("az appsettings list returned an entry with no string 'name'")?;
+            let value = entry
+                .get("value")
+                .and_then(|v| v.as_str())
+                .with_context(|| {
+                    format!("az appsettings list returned a non-string value for '{name}'")
+                })?;
+            values.insert(name.to_string(), Zeroizing::new(value.to_string()));
+        }
+
+        Ok(Evidence::Values(values))
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -257,7 +338,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install from: https://learn.microsoft.com"));
+        assert!(err
+            .to_string()
+            .contains("Install from: https://learn.microsoft.com"));
     }
 
     #[test]
@@ -454,5 +537,98 @@ targets:
             .deploy_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("auth error"));
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    fn appsettings_json(pairs: &[(&str, &str)]) -> Vec<u8> {
+        let items: Vec<serde_json::Value> = pairs
+            .iter()
+            .map(|(n, v)| serde_json::json!({ "name": n, "value": v, "slotSetting": false }))
+            .collect();
+        serde_json::to_vec(&items).unwrap()
+    }
+
+    #[test]
+    fn azure_read_back_returns_appsettings_values() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.azure_app_service.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&appsettings_json(&[("API_KEY", "secret1")]), b"");
+        let target = AzureAppServiceTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev"))
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("azure declares Fidelity::Value, so it must return Values");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "secret1");
+
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "az");
+        assert!(calls[0].args.contains(&"list".to_string()));
+        assert!(calls[0].args.contains(&"my-azure-webapp".to_string()));
+    }
+
+    #[test]
+    fn azure_read_back_surfaces_wrong_value_as_drift() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.azure_app_service.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&appsettings_json(&[("API_KEY", "STALE")]), b"");
+        let target = AzureAppServiceTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "current")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+    }
+
+    #[test]
+    fn azure_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.azure_app_service.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"ResourceNotFound");
+        let target = AzureAppServiceTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
     }
 }

@@ -14,11 +14,14 @@
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeSet;
+
 use crate::config::{Config, FlyTargetConfig, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, validate_stdin_kv_value, CommandOpts, CommandRunner,
     DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct FlyTarget<'a> {
     pub config: &'a Config,
@@ -82,6 +85,67 @@ impl DeployTarget for FlyTarget<'_> {
             )
             .with_context(|| format!("failed to run fly secrets import for {key}"))?
             .check("fly secrets import", key)
+    }
+
+    /// Presence only. Fly's docs are explicit: "the actual value of the secret
+    /// is only available to the application."
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Presence
+    }
+
+    /// List secret names via `fly secrets list --json`.
+    ///
+    /// Fly returns a **digest** of each value. It is carried in the display-only
+    /// `note` and is never compared: esk's own hashes are HMAC-keyed, so
+    /// equality with any provider digest is impossible by construction, and
+    /// Fly does not document its algorithm in any case. Returning it as
+    /// evidence of a value match would be a fabricated verdict — the type
+    /// system forbids it here, since `Evidence::Names` can only yield
+    /// `PresenceVerdict`.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let fly_app = self.resolve_app(target)?;
+
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["secrets", "list", "-a", fly_app, "--json"];
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run("fly", &args, CommandOpts::default())
+            .context("failed to run fly secrets list")?;
+
+        // A failed listing is an incomplete read, never an empty app.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("fly secrets list failed for {fly_app}: {stderr}");
+        }
+
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse fly secrets list JSON response")?;
+        let entries = json
+            .as_array()
+            .context("fly secrets list response was not a JSON array")?;
+
+        let present: std::collections::BTreeSet<String> = entries
+            .iter()
+            .filter_map(|e| e.get("Name")?.as_str().map(String::from))
+            .collect();
+
+        // A secret can be set but not yet live on the machines. That is worth
+        // telling the operator, and it is a fact about deployment state rather
+        // than about any value, so it belongs in the note.
+        let staged = entries
+            .iter()
+            .filter(|e| {
+                e.get("Digest")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(str::is_empty)
+            })
+            .count();
+        let note = (staged > 0)
+            .then(|| format!("{staged} secret(s) staged but not yet deployed to machines"));
+
+        Ok(Evidence::Names { present, note })
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -388,5 +452,132 @@ targets:
             .deploy_secret("KEY", "val", &make_target(Some("web"), "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("deploy error"));
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::BTreeMap<String, zeroize::Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), zeroize::Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    fn secrets_list_json(entries: &[(&str, &str)]) -> Vec<u8> {
+        let items: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(name, digest)| serde_json::json!({ "Name": name, "Digest": digest }))
+            .collect();
+        serde_json::to_vec(&items).unwrap()
+    }
+
+    /// Fly returns a digest of each value. It must never become a verdict:
+    /// esk's own hashes are HMAC-keyed, so no provider digest can ever equal
+    /// one, and Fly does not document its algorithm. The type system enforces
+    /// this — `Evidence::Names` can only produce `PresenceVerdict`.
+    #[test]
+    fn fly_read_back_never_compares_the_provider_digest() {
+        let fixture = make_fixture();
+        let config = fixture.config();
+        let target_config = config.targets.fly.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secrets_list_json(&[("API_KEY", "abc123digest")]), b"");
+        let target = FlyTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "the_real_value")]),
+        );
+        let crate::verify::Findings::Presence { verdicts, .. } = &findings else {
+            panic!("fly declares Fidelity::Presence, so it must yield presence findings");
+        };
+        assert_eq!(
+            verdicts["API_KEY"],
+            crate::verify::PresenceVerdict::Present,
+            "the key exists; the digest proves nothing about the value"
+        );
+    }
+
+    /// A staged-but-undeployed secret is a fact about deployment state, not
+    /// about a value, so it is surfaced as a display-only note.
+    #[test]
+    fn fly_read_back_notes_staged_secrets() {
+        let fixture = make_fixture();
+        let config = fixture.config();
+        let target_config = config.targets.fly.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(
+            &secrets_list_json(&[("API_KEY", ""), ("OTHER", "digest")]),
+            b"",
+        );
+        let target = FlyTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev"))
+            .unwrap();
+        let Evidence::Names { present, note } = evidence else {
+            panic!("expected names");
+        };
+        assert!(present.contains("API_KEY"));
+        let note = note.expect("a staged secret must be surfaced");
+        assert!(note.contains("staged"), "got: {note}");
+    }
+
+    #[test]
+    fn fly_read_back_missing_key_is_drift() {
+        let fixture = make_fixture();
+        let config = fixture.config();
+        let target_config = config.targets.fly.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secrets_list_json(&[("SOMETHING_ELSE", "d")]), b"");
+        let target = FlyTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+    }
+
+    #[test]
+    fn fly_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_fixture();
+        let config = fixture.config();
+        let target_config = config.targets.fly.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"Could not find App");
+        let target = FlyTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
     }
 }

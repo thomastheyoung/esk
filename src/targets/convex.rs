@@ -13,14 +13,17 @@
 //! variable is read from the project's Convex config file and injected into
 //! the command environment.
 
-use std::path::PathBuf;
-
 use anyhow::{Context, Result};
+use zeroize::Zeroizing;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::PathBuf;
 
 use crate::config::{Config, ConvexTargetConfig, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct ConvexTarget<'a> {
     pub config: &'a Config,
@@ -53,6 +56,19 @@ impl ConvexTarget<'_> {
     }
 }
 
+/// Parse the `KEY=VALUE` lines `convex env list` prints.
+///
+/// A value may itself contain `=`, so the split is on the first one only.
+///
+/// Delegates to the shared parser so the multiline hazard is handled in one
+/// place: a line without `=` is either status text or the continuation of a
+/// value this grammar cannot represent, and answering anyway would truncate
+/// the value and turn its remaining lines into phantom keys carrying
+/// fragments of the secret's plaintext.
+fn parse_env_list(stdout: &[u8]) -> Result<BTreeMap<String, Zeroizing<String>>> {
+    crate::targets::parse_kv_read_back(stdout, "convex")
+}
+
 impl DeployTarget for ConvexTarget<'_> {
     fn name(&self) -> &'static str {
         "convex"
@@ -63,8 +79,7 @@ impl DeployTarget for ConvexTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "npx")
-            .context("Install Node.js to get npx")?;
+        check_command(self.runner, "npx").context("Install Node.js to get npx")?;
         let (cwd, env_vars) = self.resolve_deployment_context()?;
         let output = self
             .runner
@@ -104,6 +119,46 @@ impl DeployTarget for ConvexTarget<'_> {
             )
             .with_context(|| format!("failed to run convex env set for {key}"))?
             .check("convex env set", key)
+    }
+
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Value
+    }
+
+    /// Read back via `convex env list`, the same command preflight already runs.
+    ///
+    /// `keys` is unused because the listing is unconditional: convex has no
+    /// per-key read, and asking for the whole map costs one call rather than
+    /// one per secret. [`compare`](crate::verify::compare) narrows the result
+    /// to the managed keys.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let (cwd, env_vars) = self.resolve_deployment_context()?;
+
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["convex", "env", "list"];
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run(
+                "npx",
+                &args,
+                CommandOpts {
+                    cwd: Some(cwd),
+                    env: env_vars,
+                    ..Default::default()
+                },
+            )
+            .context("failed to run convex env list")?;
+
+        // A failed listing is an incomplete read, never an empty target: an
+        // empty map here would be reported as every managed key missing.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("convex env list failed: {stderr}");
+        }
+
+        Ok(Evidence::Values(parse_env_list(&output.stdout)?))
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -258,10 +313,7 @@ targets:
         let calls = runner.take_calls();
         assert_eq!(calls[0].program, "npx");
         assert_eq!(calls[0].args, vec!["convex", "env", "set", "MY_KEY"]);
-        assert_eq!(
-            calls[0].cwd.as_ref().unwrap(),
-            &fixture.path("apps/api")
-        );
+        assert_eq!(calls[0].cwd.as_ref().unwrap(), &fixture.path("apps/api"));
         // Value is passed via stdin, not in args
         assert_eq!(calls[0].stdin.as_deref(), Some(b"my_value".as_slice()));
         assert!(!calls[0].args.iter().any(|a| a.contains("my_value")));
@@ -454,5 +506,241 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("deploy error"));
+    }
+
+    /// Helper: the key-name set a verifier is handed. Values never appear here.
+    fn keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn expected(pairs: &[(&str, &str)]) -> BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    fn read_back_runner(stdout: &[u8]) -> MockCommandRunner {
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(stdout, b"");
+        runner
+    }
+
+    #[test]
+    fn convex_read_back_returns_listed_values() {
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
+        let target_config = config.targets.convex.as_ref().unwrap();
+        let runner = read_back_runner(b"API_KEY=secret1\nDB_URL=postgres://x\n");
+        let target = ConvexTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&keys(&["API_KEY", "DB_URL"]), &make_target("dev"))
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("convex declares Fidelity::Value, so it must return Values");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "secret1");
+        assert_eq!(values["DB_URL"].as_str(), "postgres://x");
+
+        let calls = runner.take_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "npx");
+        assert_eq!(calls[0].args, vec!["convex", "env", "list"]);
+    }
+
+    #[test]
+    fn convex_read_back_surfaces_wrong_value_as_drift() {
+        // The negative case: the provider holds a stale value. A happy-path
+        // test cannot distinguish a working verifier from one that echoes back
+        // whatever it was asked about, so this is the test that has teeth.
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
+        let target_config = config.targets.convex.as_ref().unwrap();
+        let runner = read_back_runner(b"API_KEY=STALE_VALUE\n");
+        let target = ConvexTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let want = expected(&[("API_KEY", "current_value")]);
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&keys(&["API_KEY"]), &make_target("dev")),
+            &want,
+        );
+
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+        let crate::verify::Findings::Values { verdicts, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::ValueVerdict::Differs);
+    }
+
+    #[test]
+    fn convex_read_back_missing_key_is_not_a_match() {
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
+        let target_config = config.targets.convex.as_ref().unwrap();
+        let runner = read_back_runner(b"OTHER=x\n");
+        let target = ConvexTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let want = expected(&[("API_KEY", "v")]);
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&keys(&["API_KEY"]), &make_target("dev")),
+            &want,
+        );
+        let crate::verify::Findings::Values { verdicts, extra } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::ValueVerdict::Missing);
+        assert_eq!(extra, &["OTHER".to_string()]);
+    }
+
+    #[test]
+    fn convex_read_back_failure_is_unreachable_not_empty() {
+        // A failed listing must never degrade into "the target holds nothing",
+        // which would report every managed key as missing — drift the operator
+        // would chase instead of the real problem, an unreadable deployment.
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
+        let target_config = config.targets.convex.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"deployment not found");
+        let target = ConvexTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let want = expected(&[("API_KEY", "v")]);
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&keys(&["API_KEY"]), &make_target("dev")),
+            &want,
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
+        assert!(matches!(
+            findings,
+            crate::verify::Findings::Unreachable { .. }
+        ));
+    }
+
+    #[test]
+    fn convex_read_back_error_does_not_echo_secret_values() {
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
+        let target_config = config.targets.convex.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"rejected value hunter2");
+        let target = ConvexTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let want = expected(&[("API_KEY", "hunter2")]);
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&keys(&["API_KEY"]), &make_target("dev")),
+            &want,
+        );
+        let crate::verify::Findings::Unreachable { error } = &findings else {
+            panic!("expected unreachable findings");
+        };
+        assert!(
+            !error.contains("hunter2"),
+            "provider error leaked a secret: {error}"
+        );
+        assert!(error.contains("<redacted>"));
+    }
+
+    #[test]
+    fn convex_read_back_splits_on_first_equals_only() {
+        // Values legitimately contain '='; base64 padding and connection
+        // strings both do. Splitting on the last one would corrupt them.
+        let parsed = parse_env_list(b"URL=postgres://u:p@h/db?x=1\nPAD=YWJj==\n").unwrap();
+        assert_eq!(parsed["URL"].as_str(), "postgres://u:p@h/db?x=1");
+        assert_eq!(parsed["PAD"].as_str(), "YWJj==");
+    }
+
+    /// A line with no `=` makes the whole read unusable, not merely noisy.
+    ///
+    /// It is indistinguishable from the continuation of a multiline value, and
+    /// esk cannot tell a banner apart from a fragment of a secret. Skipping it
+    /// would silently truncate that secret and report permanent false drift,
+    /// so the read is refused instead.
+    #[test]
+    fn convex_read_back_refuses_lines_without_a_separator() {
+        let err = parse_env_list(b"Environment variables:\nA=1\n").unwrap_err();
+        assert!(
+            err.to_string().contains("no '=' separator"),
+            "error was: {err}"
+        );
+    }
+
+    #[test]
+    fn convex_read_back_applies_env_flags() {
+        let fixture = make_fixture(None);
+        fixture.create_dir_all("apps/api").unwrap();
+        let config = fixture.config();
+        let target_config = config.targets.convex.as_ref().unwrap();
+        let runner = read_back_runner(b"A=1\n");
+        let target = ConvexTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+        target
+            .read_back(&keys(&["A"]), &make_target("prod"))
+            .unwrap();
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].args, vec!["convex", "env", "list", "--prod"]);
+    }
+
+    #[test]
+    fn convex_read_back_multiline_value_is_unresolved_not_false_drift() {
+        // A multiline value has no representation in a KEY=VALUE listing. The
+        // old behaviour truncated it and let the continuation lines through as
+        // phantom keys — which failed toward drift rather than a false match,
+        // but reported drift the operator could never clear, and printed
+        // fragments of the secret's own plaintext in the `extra` list, since
+        // `redact_exact` only matches a whole value.
+        //
+        // Refusing the read is the honest outcome: esk did not establish this
+        // scope's state, and `Unresolved` says exactly that.
+        let err =
+            parse_env_list(b"PEM=-----BEGIN KEY-----\nabc123\n-----END KEY-----\n").unwrap_err();
+
+        let want: BTreeMap<String, Zeroizing<String>> = [(
+            "PEM".to_string(),
+            Zeroizing::new("-----BEGIN KEY-----\nabc123\n-----END KEY-----".to_string()),
+        )]
+        .into_iter()
+        .collect();
+        let findings = crate::verify::compare(Fidelity::Value, Err(err), &want);
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Unresolved,
+            "an unrepresentable value must be admitted as unread, never guessed at"
+        );
     }
 }

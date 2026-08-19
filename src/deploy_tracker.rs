@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
-use serde::{Deserialize, Serialize};
 use hmac::{Hmac, Mac};
+use serde::{Deserialize, Serialize};
 use sha2::Sha256;
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -185,7 +185,11 @@ impl DeployIndex {
         let mut mac = Hmac::<Sha256>::new_from_slice(&signing_key)
             .expect("HMAC accepts keys of every non-empty length");
         mac.update(value.as_bytes());
-        format!("{}{}", Self::HASH_PREFIX, hex::encode(mac.finalize().into_bytes()))
+        format!(
+            "{}{}",
+            Self::HASH_PREFIX,
+            hex::encode(mac.finalize().into_bytes())
+        )
     }
 }
 

@@ -150,7 +150,7 @@ impl EskMcpServer {
 
     #[tool(
         name = "esk_list",
-        description = "List all secrets with their status per environment and deploy target. Returns structured JSON with deploy state (deployed/pending/failed/unset/not_targeted) for each secret×environment pair."
+        description = "List all secrets with their status per environment and deploy target. Returns structured JSON with deploy state (deployed/pending/failed/unset/not_targeted) for each secret×environment pair. Note: 'deployed' means esk successfully SENT the value to the target, recorded in its local deploy index — it is not a read-back confirmation that the target still holds it. Only `esk verify` queries targets directly, and only some targets support it."
     )]
     async fn list(&self, params: Parameters<ListParams>) -> Result<CallToolResult, ErrorData> {
         match do_list(&params.0) {
@@ -161,7 +161,7 @@ impl EskMcpServer {
 
     #[tool(
         name = "esk_status",
-        description = "Show project deploy and sync status: pending/failed/deployed counts, validation warnings, missing required secrets, coverage gaps, and recommended next steps."
+        description = "Show project deploy and sync status: pending/failed/sent counts, validation warnings, missing required secrets, coverage gaps, and recommended next steps. Counts reflect what esk last sent; for targets esk cannot read back, they do not confirm the target's current contents."
     )]
     async fn status(&self, params: Parameters<StatusParams>) -> Result<CallToolResult, ErrorData> {
         match do_status(&params.0) {
@@ -172,7 +172,7 @@ impl EskMcpServer {
 
     #[tool(
         name = "esk_deploy",
-        description = "Deploy secrets to configured targets (env files, Cloudflare, Vercel, etc.). Skips secrets that haven't changed unless force=true."
+        description = "Deploy secrets to configured targets (env files, Cloudflare, Vercel, etc.). Skips secrets that haven't changed unless force=true, except that a generated file esk can read back is regenerated when it no longer matches the store."
     )]
     async fn deploy(&self, params: Parameters<DeployParams>) -> Result<CallToolResult, ErrorData> {
         match do_deploy(&params.0) {
@@ -351,7 +351,7 @@ fn do_list_with_config(config: &Config, params: &ListParams) -> anyhow::Result<L
             };
 
             environments.push(ListSecretEnv {
-                env: env_name.to_string(),
+                env: env_name.clone(),
                 has_value,
                 status,
             });

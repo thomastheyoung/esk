@@ -139,6 +139,12 @@ pub fn run_json(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
         "skipped": report.skipped.iter().map(entry).collect::<Vec<_>>(),
         "unset": report.unset.iter().map(entry).collect::<Vec<_>>(),
         "pruned": report.pruned.iter().map(entry).collect::<Vec<_>>(),
+        // Distinct from "deployed": the store was unchanged and the artifact
+        // had drifted, which is what a CI drift check needs to see.
+        "restored": report.restored.iter().map(|(target, env)| serde_json::json!({
+            "target": target,
+            "env": env,
+        })).collect::<Vec<_>>(),
         "unavailable_orphans": report.unavailable_orphans.iter().map(orphan).collect::<Vec<_>>(),
     });
     println!("{}", serde_json::to_string_pretty(&output)?);
@@ -178,6 +184,7 @@ fn build_report(
             unset: Vec::new(),
             pruned: Vec::new(),
             unavailable_orphans: Vec::new(),
+            restored: Vec::new(),
             dry_run: opts.dry_run,
             verbose: opts.verbose,
         });
@@ -209,6 +216,10 @@ fn build_report(
             unset: plan_output.unset,
             pruned: Vec::new(),
             unavailable_orphans: plan_output.unavailable_orphans,
+            // Carry the plan's findings rather than dropping them: a healed
+            // group currently always produces work, but relying on that keeps
+            // the reporting layer one refactor away from silently skipping it.
+            restored: plan_output.restored,
             dry_run: opts.dry_run,
             verbose: opts.verbose,
         };

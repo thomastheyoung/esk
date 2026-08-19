@@ -366,6 +366,13 @@ pub struct CustomTargetConfig {
     pub delete: Option<CustomCommandConfig>,
     #[serde(default)]
     pub preflight: Option<CustomCommandConfig>,
+    /// Optional command that prints the target's current `KEY=VALUE` lines.
+    ///
+    /// Without it a custom target is unverifiable, which is the honest
+    /// default: esk cannot invent a way to read a service it knows nothing
+    /// about. Supplying it opts the target into value-fidelity verification.
+    #[serde(default)]
+    pub read: Option<CustomCommandConfig>,
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }
@@ -573,7 +580,9 @@ pub(crate) enum TypedTargetConfig {
     Render(RenderTargetConfig),
     Custom {
         name: String,
-        config: CustomTargetConfig,
+        /// Boxed to keep the enum small. `CustomTargetConfig` carries four
+        /// command configs, so inline it would set the size of every variant.
+        config: Box<CustomTargetConfig>,
     },
 }
 
@@ -794,6 +803,21 @@ fn normalize_project_relative_output(output: &str) -> Result<PathBuf> {
     Ok(normalized)
 }
 
+/// The outcome of checking a project-relative output path against esk's policy.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum OutputPathStatus {
+    /// esk may write here.
+    Usable,
+    /// Some component is a symlink. esk never writes through one, so this is a
+    /// layout the user chose rather than a state esk should try to repair.
+    TraversesSymlink,
+    /// Something that is not a regular file occupies the path, such as a
+    /// directory where the artifact belongs.
+    NotARegularFile,
+    /// The path is unusable for any other reason.
+    Rejected,
+}
+
 impl Config {
     /// Validate that `env` is a known environment, suggesting corrections if not.
     pub fn validate_env(&self, env: &str) -> Result<()> {
@@ -801,6 +825,19 @@ impl Config {
             bail!("{}", crate::suggest::unknown_env(env, &self.environments));
         }
         Ok(())
+    }
+
+    /// Why [`Config::resolve_project_output_path`] refused a path.
+    ///
+    /// Callers that must tell a user's deliberate layout apart from a state esk
+    /// did not create need more than an error string. Returning the reason from
+    /// the one function that enforces the policy keeps a second copy of that
+    /// policy from drifting away from it.
+    pub(crate) fn classify_output_path(&self, output: &str) -> OutputPathStatus {
+        let Ok(relative) = normalize_project_relative_output(output) else {
+            return OutputPathStatus::Rejected;
+        };
+        self.walk_output_path(&relative).0
     }
 
     /// Resolve a generated local output path safely beneath the project root.
@@ -820,6 +857,34 @@ impl Config {
             )
         })?;
 
+        // One walk, shared with `classify_output_path`, so the reason a path is
+        // refused can never disagree with whether it is refused.
+        match self.walk_output_path(&relative) {
+            (OutputPathStatus::Usable, _) => Ok(resolved),
+            (OutputPathStatus::TraversesSymlink, at) => bail!(
+                "project output '{}' traverses a symlink at {}",
+                output,
+                at.display()
+            ),
+            (OutputPathStatus::NotARegularFile, at) => {
+                if at == resolved {
+                    bail!("project output '{output}' is not a regular file")
+                }
+                bail!(
+                    "project output '{}' has a non-directory parent at {}",
+                    output,
+                    at.display()
+                )
+            }
+            (OutputPathStatus::Rejected, at) => {
+                bail!("failed to inspect {}", at.display())
+            }
+        }
+    }
+
+    /// Walk a normalized project-relative path, reporting the first component
+    /// that violates the output policy along with where it was found.
+    fn walk_output_path(&self, relative: &Path) -> (OutputPathStatus, PathBuf) {
         let components: Vec<_> = relative.components().collect();
         let mut current = self.root.clone();
         for (index, component) in components.iter().enumerate() {
@@ -827,33 +892,20 @@ impl Config {
             match std::fs::symlink_metadata(&current) {
                 Ok(metadata) => {
                     if metadata.file_type().is_symlink() {
-                        bail!(
-                            "project output '{}' traverses a symlink at {}",
-                            output,
-                            current.display()
-                        );
+                        return (OutputPathStatus::TraversesSymlink, current);
                     }
-                    if index + 1 == components.len() {
-                        if !metadata.is_file() {
-                            bail!("project output '{output}' is not a regular file");
-                        }
-                    } else if !metadata.is_dir() {
-                        bail!(
-                            "project output '{}' has a non-directory parent at {}",
-                            output,
-                            current.display()
-                        );
+                    let is_leaf = index + 1 == components.len();
+                    if (is_leaf && !metadata.is_file()) || (!is_leaf && !metadata.is_dir()) {
+                        return (OutputPathStatus::NotARegularFile, current);
                     }
                 }
+                // Nothing exists from here down. The path is still writable
+                // once the parent directories are created.
                 Err(error) if error.kind() == std::io::ErrorKind::NotFound => break,
-                Err(error) => {
-                    return Err(error)
-                        .with_context(|| format!("failed to inspect {}", current.display()));
-                }
+                Err(_) => return (OutputPathStatus::Rejected, current),
             }
         }
-
-        Ok(resolved)
+        (OutputPathStatus::Usable, self.root.join(relative))
     }
 
     /// Find `esk.yaml` from the current directory and load it.
@@ -943,6 +995,28 @@ impl Config {
             }
             if custom.deploy.program.is_empty() {
                 bail!("custom target '{name}' has an empty deploy program");
+            }
+            if let Some(read) = &custom.read {
+                if read.program.is_empty() {
+                    bail!("custom target '{name}' has an empty read program");
+                }
+                // A read command never receives a value — there is no expected
+                // value to give it, by design. A `{{value}}` placeholder can
+                // only expand to nothing, so it is a mistake worth naming
+                // rather than silently substituting away.
+                if read.args.iter().any(|a| a.contains("{{value}}")) {
+                    bail!(
+                        "custom target '{name}': read command uses {{{{value}}}}, which is \
+                         never substituted. Verification withholds expected values from \
+                         targets on purpose; remove the placeholder."
+                    );
+                }
+                if read.stdin.is_some() {
+                    bail!(
+                        "custom target '{name}': read commands do not support stdin. \
+                         Remove the `stdin:` field."
+                    );
+                }
             }
         }
         self.validate_remotes()?;
@@ -1207,7 +1281,7 @@ impl Config {
         for (name, cfg) in &self.targets.custom {
             self.typed_targets.push(TypedTargetConfig::Custom {
                 name: name.clone(),
-                config: cfg.clone(),
+                config: Box::new(cfg.clone()),
             });
         }
     }
@@ -1337,7 +1411,55 @@ impl Config {
             .collect()
     }
 
-    /// Resolve the .env file path for an (app, env) pair.
+    /// Classify the `.env` output path for an app and environment.
+    ///
+    /// Uses the same walk as [`Config::resolve_project_output_path`], so a
+    /// caller asking "why was this refused?" can never disagree with the
+    /// function that did the refusing.
+    pub(crate) fn classify_dotenv_path(&self, app: &str, env: &str) -> OutputPathStatus {
+        let Some(pattern) = self.dotenv_pattern(app, env) else {
+            return OutputPathStatus::Rejected;
+        };
+        self.classify_output_path(&pattern)
+    }
+
+    /// The `.env` path for an app and environment, without policy checks.
+    ///
+    /// [`Config::resolve_dotenv_path`] refuses symlinks and non-file leaves
+    /// with one error, so it cannot answer questions *about* a rejected path.
+    /// This exposes the location so a caller can tell one refusal from another.
+    ///
+    /// For reading and display only — never write through this path. Every
+    /// write goes through [`Config::resolve_dotenv_path`], so the output policy
+    /// stays enforced in one place; a reader following a symlink cannot damage
+    /// what it points at.
+    pub(crate) fn dotenv_display_path(&self, app: &str, env: &str) -> Option<PathBuf> {
+        Some(self.root.join(self.dotenv_pattern(app, env)?))
+    }
+
+    fn dotenv_pattern(&self, app: &str, env: &str) -> Option<String> {
+        let dotenv_config = self.targets.dotenv.as_ref()?;
+        let app_config = self.apps.get(app)?;
+        let suffix = dotenv_config
+            .env_suffix
+            .get(env)
+            .cloned()
+            .unwrap_or_default();
+        Some(
+            dotenv_config
+                .pattern
+                .replace("{app_path}", &app_config.path)
+                .replace("{env_suffix}", &suffix),
+        )
+    }
+
+    /// Resolve the `.env` file path for an (app, env) pair, enforcing the
+    /// project output policy.
+    ///
+    /// This is the only path esk writes a `.env` through: it refuses a leaf
+    /// that is not a regular file and any component that is a symlink. Use
+    /// [`Config::dotenv_display_path`] to inspect a location without those
+    /// checks.
     pub fn resolve_dotenv_path(&self, app: &str, env: &str) -> Result<PathBuf> {
         let dotenv_config = self
             .targets
@@ -2409,6 +2531,69 @@ targets:
         assert!(result.is_ok());
     }
 
+    /// The refusal reason must agree with the refusal itself.
+    ///
+    /// `classify_output_path` exists so callers can tell a user's symlinked
+    /// layout apart from a path esk did not create. If it could disagree with
+    /// `resolve_project_output_path`, a caller would act on a reason that did
+    /// not apply — the duplicated-policy bug these share a walk to avoid.
+    #[test]
+    fn classification_agrees_with_resolution() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("apps/web")).unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+apps:
+  web:
+    path: apps/web
+targets:
+  .env:
+    pattern: "{app_path}/.env{env_suffix}.local"
+    env_suffix:
+      dev: ""
+"#;
+        let config = Config::load(&write_yaml(root, yaml)).unwrap();
+
+        // Nothing there yet: usable, and resolution succeeds.
+        assert_eq!(
+            config.classify_output_path("apps/web/.env.local"),
+            OutputPathStatus::Usable
+        );
+        assert!(config
+            .resolve_project_output_path("apps/web/.env.local")
+            .is_ok());
+
+        // A directory where the file belongs: refused by both.
+        std::fs::create_dir(root.join("apps/web/.env.local")).unwrap();
+        assert_eq!(
+            config.classify_output_path("apps/web/.env.local"),
+            OutputPathStatus::NotARegularFile
+        );
+        assert!(config
+            .resolve_project_output_path("apps/web/.env.local")
+            .is_err());
+        std::fs::remove_dir(root.join("apps/web/.env.local")).unwrap();
+
+        // A symlinked parent: refused by both, and classified as a symlink so a
+        // caller can leave the user's layout alone.
+        std::fs::create_dir_all(root.join("packages/web")).unwrap();
+        std::fs::remove_dir(root.join("apps/web")).unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink("../packages/web", root.join("apps/web")).unwrap();
+        #[cfg(unix)]
+        {
+            assert_eq!(
+                config.classify_output_path("apps/web/.env.local"),
+                OutputPathStatus::TraversesSymlink
+            );
+            assert!(config
+                .resolve_project_output_path("apps/web/.env.local")
+                .is_err());
+        }
+    }
+
     #[test]
     #[cfg(unix)]
     fn resolve_dotenv_path_rejects_symlink_escape() {
@@ -3406,5 +3591,91 @@ remotes:
             TypedRemoteConfig::CloudFile { name, .. } if name == "dropbox"
         ));
         assert!(matches!(&config.typed_remotes[2], TypedRemoteConfig::S3(_)));
+    }
+
+    #[test]
+    fn custom_read_rejects_value_placeholder() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST"]
+      read:
+        program: curl
+        args: ["list", "{{value}}"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("never substituted"), "error was: {msg}");
+    }
+
+    #[test]
+    fn custom_read_rejects_empty_program() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST"]
+      read:
+        program: ""
+        args: ["list"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("empty read program"));
+    }
+
+    #[test]
+    fn custom_read_rejects_stdin() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST"]
+      read:
+        program: curl
+        args: ["list"]
+        stdin: "something"
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let err = Config::load(&path).unwrap_err();
+        assert!(err.to_string().contains("do not support stdin"));
+    }
+
+    #[test]
+    fn custom_read_accepts_a_valid_command() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: x
+environments: [dev]
+targets:
+  custom:
+    my-api:
+      deploy:
+        program: curl
+        args: ["-X", "POST"]
+      read:
+        program: curl
+        args: ["list", "--env", "{{env}}"]
+"#;
+        let path = write_yaml(dir.path(), yaml);
+        let config = Config::load(&path).unwrap();
+        assert!(config.targets.custom["my-api"].read.is_some());
     }
 }

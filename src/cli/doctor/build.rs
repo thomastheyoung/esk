@@ -1,6 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 
+/// Label for the recorded-deploy-failure check.
+///
+/// Named because the check can only ever report failures esk itself wrote to
+/// the deploy index — it cannot discover a deploy that failed elsewhere. The
+/// constant also keeps the label from being used as an ad-hoc identifier in
+/// two places that could drift apart.
+const RECORDED_DEPLOY_FAILURES: &str = "Recorded deploy failures";
+
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::{KeyProvider, SecretStore, StorePayload};
@@ -379,11 +387,11 @@ fn build_secrets_health(config: &Config, payload: &StorePayload) -> Vec<Check> {
 
     if failed_count > 0 {
         checks.push(Check::fail(
-            "Failed deploys",
-            format!("{failed_count} deployment(s) in failed state"),
+            RECORDED_DEPLOY_FAILURES,
+            format!("{failed_count} deploy(s) recorded as failed"),
         ));
     } else {
-        checks.push(Check::pass("Failed deploys", "none"));
+        checks.push(Check::pass(RECORDED_DEPLOY_FAILURES, "none recorded"));
     }
 
     // 2. Missing required secrets
@@ -489,7 +497,7 @@ fn build_secrets_health(config: &Config, payload: &StorePayload) -> Vec<Check> {
         ));
     }
     if failed_sync_count == 0 && stale_count == 0 && !remote_names.is_empty() {
-        checks.push(Check::pass("Remote sync", "all remotes up to date"));
+        checks.push(Check::pass("Remote sync", "no unpushed local changes"));
     }
 
     // 6. Target orphans
@@ -557,7 +565,7 @@ fn build_suggestions(
     // Secrets health
     if let Section::Checked(checks) = secrets_health {
         for check in checks {
-            if check.status == CheckStatus::Fail && check.label == "Failed deploys" {
+            if check.status == CheckStatus::Fail && check.label == RECORDED_DEPLOY_FAILURES {
                 suggestions.push(Suggestion {
                     command: "esk deploy".into(),
                     reason: "retry failed deployments".into(),

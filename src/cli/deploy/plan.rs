@@ -4,7 +4,7 @@ use std::io::IsTerminal;
 
 use zeroize::Zeroizing;
 
-use crate::config::{Config, ResolvedSecret};
+use crate::config::{Config, ResolvedSecret, ResolvedTarget};
 use crate::deploy_tracker::DeployIndex;
 use crate::store::StorePayload;
 use crate::targets::{DeployMode, DeployTarget, SecretValue};
@@ -14,6 +14,50 @@ use super::report::DeployEntry;
 use super::types::{BatchGroup, EnvWorkPlan, PlanOutput, PRUNE_THRESHOLD};
 use super::DeployOptions;
 
+/// Collect every stored secret and tombstoned key belonging to one batch group.
+///
+/// Batch targets regenerate their whole artifact, so both the deploy plan and
+/// the artifact audit need the group's complete secret set — not just the keys
+/// that changed. Sharing one collector keeps the set esk verifies identical to
+/// the set it would write.
+fn collect_batch_secrets(
+    resolved: &[ResolvedSecret],
+    payload: &StorePayload,
+    target_name: &str,
+    app: Option<&String>,
+    group_env: &str,
+) -> (Vec<SecretValue>, BTreeSet<String>) {
+    let mut secrets = Vec::new();
+    let mut tombstoned = BTreeSet::new();
+    for secret in resolved {
+        for target in &secret.targets {
+            if target.service != target_name
+                || target.app.as_ref() != app
+                || target.environment != group_env
+            {
+                continue;
+            }
+            let composite = format!("{}:{}", secret.key, group_env);
+            if payload.tombstones.contains_key(&composite) {
+                tombstoned.insert(secret.key.clone());
+            }
+            if let Some(value) = payload.secrets.get(&composite) {
+                secrets.push(SecretValue {
+                    key: secret.key.clone(),
+                    value: Zeroizing::new(value.clone()),
+                    group: secret.group.clone(),
+                });
+            }
+        }
+    }
+    (secrets, tombstoned)
+}
+
+// Eight parameters, each a distinct input to planning: store payload, master
+// key, deploy history, resolved config, live targets, target map, and options.
+// No subset groups meaningfully behind a new type, and bundling them would
+// hide the data flow this function exists to make explicit. The signature is
+// unchanged from before the artifact audit was added.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn plan_deploy<'a>(
     config: &Config,
@@ -246,6 +290,9 @@ pub(crate) fn plan_deploy<'a>(
 
     // Track batch-mode dirty target groups: (target_name, app, env)
     let mut batch_dirty: BTreeSet<(String, Option<String>, String)> = BTreeSet::new();
+    // Groups made dirty by artifact drift rather than by a store change; these
+    // are reported as restored instead of deployed.
+    let mut healed: BTreeSet<(String, Option<String>, String)> = BTreeSet::new();
     // Individual-mode work items: (key, value, target)
     let mut individual_work: Vec<(String, Zeroizing<String>, crate::config::ResolvedTarget)> =
         Vec::new();
@@ -439,6 +486,70 @@ pub(crate) fn plan_deploy<'a>(
         }
     }
 
+    // -----------------------------------------------------------------------
+    // Audit the skip decision against the artifacts themselves
+    // -----------------------------------------------------------------------
+    //
+    // Dirtiness above is decided purely from the deploy index, which records
+    // what esk last *sent*. That cannot see an artifact deleted or edited
+    // afterwards, so a batch group whose store values are unchanged would be
+    // skipped and its file never restored. Ask each batch target whether its
+    // artifact still matches; targets that cannot tell answer `None` and are
+    // left exactly as the index classified them.
+    //
+    // `--force` already marks every group dirty, so there is nothing to audit.
+    if !force {
+        let mut candidates: BTreeSet<(String, Option<String>, String)> = BTreeSet::new();
+        for secret in resolved {
+            for target in &secret.targets {
+                if !matches!(
+                    target_map.get(target.service.as_str()),
+                    Some((_, DeployMode::Batch))
+                ) {
+                    continue;
+                }
+                if let Some(filter_env) = env {
+                    if target.environment != filter_env {
+                        continue;
+                    }
+                }
+                let group = (
+                    target.service.clone(),
+                    target.app.clone(),
+                    target.environment.clone(),
+                );
+                if !batch_dirty.contains(&group) {
+                    candidates.insert(group);
+                }
+            }
+        }
+
+        for group in candidates {
+            let (target_name, app, group_env) = &group;
+            let Some((target_idx, _)) = target_map.get(target_name.as_str()).copied() else {
+                continue;
+            };
+            let secrets_for_group =
+                collect_batch_secrets(resolved, payload, target_name, app.as_ref(), group_env).0;
+            // A group with no stored values was never materialised; healing it
+            // would create a file rather than restore one.
+            if secrets_for_group.is_empty() {
+                continue;
+            }
+            let resolved_target = ResolvedTarget {
+                service: target_name.clone(),
+                app: app.clone(),
+                environment: group_env.clone(),
+            };
+            if deploy_targets[target_idx].artifact_matches(&secrets_for_group, &resolved_target)
+                == Some(false)
+            {
+                batch_dirty.insert(group.clone());
+                healed.insert(group);
+            }
+        }
+    }
+
     // Count skipped batch secrets (those in non-dirty batch target groups)
     for secret in resolved {
         for target in &secret.targets {
@@ -477,28 +588,8 @@ pub(crate) fn plan_deploy<'a>(
     // Insert batch groups
     for (target_name, app, target_env) in &batch_dirty {
         let (target_idx, _) = target_map[target_name.as_str()];
-        let mut secrets_for_batch: Vec<SecretValue> = Vec::new();
-        let mut tombstoned_keys: BTreeSet<String> = BTreeSet::new();
-        for secret in resolved {
-            for target in &secret.targets {
-                if target.service == *target_name
-                    && target.app.as_ref() == app.as_ref()
-                    && target.environment == *target_env
-                {
-                    let composite = format!("{}:{}", secret.key, target_env);
-                    if payload.tombstones.contains_key(&composite) {
-                        tombstoned_keys.insert(secret.key.clone());
-                    }
-                    if let Some(value) = payload.secrets.get(&composite) {
-                        secrets_for_batch.push(SecretValue {
-                            key: secret.key.clone(),
-                            value: Zeroizing::new(value.clone()),
-                            group: secret.group.clone(),
-                        });
-                    }
-                }
-            }
-        }
+        let (secrets_for_batch, tombstoned_keys) =
+            collect_batch_secrets(resolved, payload, target_name, app.as_ref(), target_env);
         let plan = env_plans.entry(target_env.clone()).or_default();
         plan.batch_groups.push(BatchGroup {
             target_name: target_name.clone(),
@@ -542,10 +633,21 @@ pub(crate) fn plan_deploy<'a>(
         env_plans.entry(entry.env.clone()).or_default();
     }
 
+    let restored_labels = healed
+        .iter()
+        .map(|(target_name, app, group_env)| {
+            (
+                crate::config::format_target_label(target_name, app.as_deref()),
+                group_env.clone(),
+            )
+        })
+        .collect();
+
     Ok(PlanOutput {
         env_plans,
         unset,
         skipped,
         unavailable_orphans,
+        restored: restored_labels,
     })
 }

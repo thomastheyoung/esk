@@ -12,10 +12,13 @@
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeSet;
+
 use crate::config::{CloudflareMode, CloudflareTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct CloudflareTarget<'a> {
     pub config: &'a Config,
@@ -84,8 +87,7 @@ impl DeployTarget for CloudflareTarget<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        check_command(self.runner, "wrangler")
-            .context("Install with: npm install -g wrangler")?;
+        check_command(self.runner, "wrangler").context("Install with: npm install -g wrangler")?;
         let output = self
             .runner
             .run("wrangler", &["whoami"], CommandOpts::default())
@@ -128,6 +130,80 @@ impl DeployTarget for CloudflareTarget<'_> {
             )
             .with_context(|| format!("failed to run wrangler secret put for {key}"))?
             .check("wrangler secret put", key)
+    }
+
+    /// Presence, permanently. `wrangler secret list` returns each secret's
+    /// name and type and nothing else — no value, and no digest either.
+    /// Cloudflare cannot tell esk whether a stored value is correct.
+    fn verify_fidelity(&self) -> Fidelity {
+        match self.target_config.mode {
+            CloudflareMode::Pages => Fidelity::None,
+            CloudflareMode::Workers => Fidelity::Presence,
+        }
+    }
+
+    /// List secret names via `wrangler secret list`.
+    ///
+    /// Returns [`Evidence::Names`], so [`compare`](crate::verify::compare) can
+    /// only produce [`PresenceVerdict`](crate::verify::PresenceVerdict) — a
+    /// type with no "matches" variant. This target cannot claim a value is
+    /// correct even if its implementation were wrong.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        // Pages secrets have no list command; only Workers do.
+        if self.target_config.mode == CloudflareMode::Pages {
+            return Ok(Evidence::Unreadable(
+                "wrangler has no secret list command for Pages projects",
+            ));
+        }
+
+        let app = target
+            .app
+            .as_deref()
+            .context("cloudflare target requires an app")?;
+        let app_config = self
+            .config
+            .apps
+            .get(app)
+            .with_context(|| format!("unknown app '{app}'"))?;
+        let app_path = self.config.root.join(&app_config.path);
+
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["secret", "list", "--format", "json"];
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run(
+                "wrangler",
+                &args,
+                CommandOpts {
+                    cwd: Some(app_path),
+                    ..Default::default()
+                },
+            )
+            .context("failed to run wrangler secret list")?;
+
+        // A failed listing is an incomplete read, never an empty Worker.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("wrangler secret list failed: {stderr}");
+        }
+
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse wrangler secret list JSON response")?;
+        let entries = json
+            .as_array()
+            .context("wrangler secret list response was not a JSON array")?;
+
+        Ok(Evidence::Names {
+            present: entries
+                .iter()
+                .filter_map(|e| e.get("name")?.as_str().map(String::from))
+                .collect(),
+            // Nothing to display: the listing carries no digest or partial
+            // value that could tell an operator anything more.
+            note: None,
+        })
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -262,7 +338,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install with: npm install -g wrangler"));
+        assert!(err
+            .to_string()
+            .contains("Install with: npm install -g wrangler"));
     }
 
     #[test]
@@ -616,5 +694,183 @@ targets:
             .deploy_secret("KEY", "val", &make_target(None, "dev"))
             .unwrap_err();
         assert!(err.to_string().contains("pages_project is required"));
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::BTreeMap<String, zeroize::Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), zeroize::Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    fn secret_list_json(names: &[&str]) -> Vec<u8> {
+        let items: Vec<serde_json::Value> = names
+            .iter()
+            .map(|n| serde_json::json!({ "name": n, "type": "secret_text" }))
+            .collect();
+        serde_json::to_vec(&items).unwrap()
+    }
+
+    #[test]
+    fn cloudflare_read_back_lists_secret_names() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_list_json(&["API_KEY", "DB_URL"]), b"");
+        let target = CloudflareTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev"))
+            .unwrap();
+        let Evidence::Names { present, note } = evidence else {
+            panic!("cloudflare declares Fidelity::Presence, so it must return Names");
+        };
+        assert!(present.contains("API_KEY"));
+        assert!(present.contains("DB_URL"));
+        // wrangler returns no digest or partial value, so there is nothing to
+        // show an operator beyond the names themselves.
+        assert!(note.is_none());
+
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].program, "wrangler");
+        assert_eq!(calls[0].args, vec!["secret", "list", "--format", "json"]);
+    }
+
+    /// The structural guarantee: a presence target cannot report that a value
+    /// matched, because `PresenceVerdict` has no such variant. Even when the
+    /// store's value is wrong, the strongest claim available is `Present`.
+    #[test]
+    fn cloudflare_read_back_cannot_claim_a_value_matched() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_list_json(&["API_KEY"]), b"");
+        let target = CloudflareTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "whatever_the_store_holds")]),
+        );
+        let crate::verify::Findings::Presence { verdicts, .. } = &findings else {
+            panic!("expected presence findings");
+        };
+        assert_eq!(
+            verdicts["API_KEY"],
+            crate::verify::PresenceVerdict::Present,
+            "the key exists; its value was never checked and cannot be claimed"
+        );
+    }
+
+    /// The negative case for a presence target: a key esk deployed that is no
+    /// longer on the Worker.
+    #[test]
+    fn cloudflare_read_back_missing_key_is_drift() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_list_json(&["SOMETHING_ELSE"]), b"");
+        let target = CloudflareTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+        let crate::verify::Findings::Presence {
+            verdicts, extra, ..
+        } = &findings
+        else {
+            panic!("expected presence findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::PresenceVerdict::Missing);
+        assert_eq!(extra, &["SOMETHING_ELSE".to_string()]);
+    }
+
+    #[test]
+    fn cloudflare_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"Authentication error");
+        let target = CloudflareTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
+    }
+
+    /// Pages has no secret-list command, so it is the one target whose
+    /// fidelity is conditional. Pinned so a refactor cannot silently let Pages
+    /// claim presence it cannot demonstrate.
+    #[test]
+    fn cloudflare_pages_mode_is_unverifiable() {
+        let yaml = r"
+project: x
+environments: [dev, prod]
+apps:
+  web:
+    path: apps/web
+targets:
+  cloudflare:
+    mode: pages
+    project_names:
+      web: my-pages-project
+";
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let config = fixture.config();
+        let target_config = config.targets.cloudflare.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        let target = CloudflareTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        assert_eq!(target.verify_fidelity(), Fidelity::None);
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert!(matches!(
+            findings,
+            crate::verify::Findings::Unverifiable { .. }
+        ));
+        // Nothing was run: there is no command to run.
+        assert!(runner.take_calls().is_empty());
     }
 }

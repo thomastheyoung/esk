@@ -20,7 +20,7 @@ pub mod supabase;
 pub mod vercel;
 
 use anyhow::{Context, Result};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io::IsTerminal;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
@@ -209,6 +209,53 @@ pub trait DeployTarget: Send + Sync {
         false
     }
 
+    /// Whether this target's deployed artifact still matches `secrets`.
+    ///
+    /// `None` means the target cannot tell — no local artifact, or reading it
+    /// back would need a network round-trip. That is the honest default, and
+    /// it is what every target reports until it opts in: a target that stays
+    /// silent must never be mistaken for one that verified itself.
+    ///
+    /// `Some(false)` means the artifact is missing or no longer matches, so the
+    /// deploy plan must regenerate it even when the store is unchanged.
+    fn artifact_matches(&self, _secrets: &[SecretValue], _target: &ResolvedTarget) -> Option<bool> {
+        None
+    }
+
+    /// What this target can prove about the secrets it holds.
+    ///
+    /// Permanent per target, not a migration state: some providers return
+    /// stored values, some only list key names, and Docker Swarm secrets
+    /// cannot be read back at all. The default is the honest one — a target
+    /// that has not opted in claims nothing, exactly as `artifact_matches`
+    /// defaults to `None`.
+    fn verify_fidelity(&self) -> crate::verify::Fidelity {
+        crate::verify::Fidelity::None
+    }
+
+    /// Read back what the target actually holds for `keys`.
+    ///
+    /// Deliberately receives key **names** only. Withholding the expected
+    /// values is what makes a dishonest implementation useless: one that
+    /// returns something it did not read has nothing to fabricate toward, so
+    /// its answer mismatches and surfaces as drift rather than as a pass.
+    ///
+    /// Returns raw [`Evidence`](crate::verify::Evidence), never a verdict.
+    /// [`compare`](crate::verify::compare) is the sole producer of verdicts.
+    ///
+    /// Return `Err` rather than a partial [`Evidence::Values`] when the read
+    /// could not be completed — a short map is reported as drift the operator
+    /// cannot act on, which is worse than admitting the read failed.
+    fn read_back(
+        &self,
+        _keys: &BTreeSet<String>,
+        _target: &ResolvedTarget,
+    ) -> Result<crate::verify::Evidence> {
+        Ok(crate::verify::Evidence::Unreadable(
+            "this target does not support read-back verification",
+        ))
+    }
+
     /// Deploy a batch of secrets. Default implementation loops deploy_secret.
     fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         secrets
@@ -241,6 +288,66 @@ pub fn validate_stdin_kv_value(key: &str, value: &str, target_name: &str) -> Res
     Ok(())
 }
 
+/// Parse the `KEY=VALUE` lines a CLI prints, refusing to guess when the output
+/// contains something the line grammar cannot represent.
+///
+/// The grammar is line-oriented, so a value containing a newline has no
+/// representation in it: the value truncates at the first newline and each
+/// continuation line is re-read as a record of its own. Both failures are
+/// silent and permanent — the truncated value reports `Differs` on every run,
+/// and a continuation line containing `=` becomes a phantom key reported as
+/// unmanaged drift. Worse, that phantom key is a *fragment* of the secret's
+/// own plaintext, and [`crate::verify`]'s redaction only matches whole values,
+/// so the fragment is printed verbatim in the report.
+///
+/// The guard is the separator-less line. Well-formed output from these CLIs is
+/// entirely `KEY=VALUE` records, so a non-empty line without `=` is either a
+/// banner or the continuation of a value the grammar cannot carry. esk cannot
+/// tell which, and answering anyway is what produces the fabricated verdict —
+/// so the read is reported incomplete instead, per the
+/// [`DeployTarget::read_back`] contract that `Err` beats a wrong map.
+///
+/// Keys are trimmed on both sides; values are taken verbatim apart from a
+/// trailing `\r`, since leading and trailing whitespace can be part of a
+/// secret and this parser must not silently alter it.
+pub fn parse_kv_read_back(
+    stdout: &[u8],
+    target_name: &str,
+) -> Result<BTreeMap<String, zeroize::Zeroizing<String>>> {
+    let text = String::from_utf8_lossy(stdout);
+    let mut values = BTreeMap::new();
+
+    for line in text.lines() {
+        let line = line.trim_end_matches('\r');
+        if line.trim().is_empty() {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            anyhow::bail!(
+                "{target_name}: read-back output has a line with no '=' separator. The \
+                 KEY=VALUE listing cannot represent a value containing newlines, so esk \
+                 cannot tell a banner line from the tail of a multiline secret and will \
+                 not guess; this scope cannot be verified."
+            );
+        };
+        let key = key.trim();
+        // A line whose left side is not a legal key name is banner text that
+        // happens to contain `=`, such as `Fetching secrets for env=dev`.
+        // Admitting it would report a phantom key as unmanaged drift on every
+        // run. Unlike a separator-less line, this one cannot be the tail of a
+        // multiline secret in any dangerous way: the check is on the *key*
+        // side, so a value's continuation only reaches here if it looks like a
+        // real assignment, and that case is caught by the `=`-less lines that
+        // must accompany it.
+        if crate::store::validate_key(key).is_err() {
+            continue;
+        }
+        values.insert(key.to_string(), zeroize::Zeroizing::new(value.to_string()));
+    }
+
+    Ok(values)
+}
+
 /// Replace known secret values before an error is shown or persisted.
 ///
 /// Command failures can echo arguments even when the command runner itself does
@@ -251,14 +358,16 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
-    secrets.into_iter().fold(message.to_string(), |message, secret| {
-        let secret = secret.as_ref();
-        if secret.is_empty() {
-            message
-        } else {
-            message.replace(secret, "<redacted>")
-        }
-    })
+    secrets
+        .into_iter()
+        .fold(message.to_string(), |message, secret| {
+            let secret = secret.as_ref();
+            if secret.is_empty() {
+                message
+            } else {
+                message.replace(secret, "<redacted>")
+            }
+        })
 }
 
 /// Resolve env_flags for a given environment into split parts.
@@ -287,8 +396,7 @@ pub fn aws_base_args(region: Option<&str>, profile: Option<&str>) -> Vec<String>
 
 /// Run AWS CLI preflight: check `aws` is installed and authenticated.
 pub fn aws_preflight(runner: &dyn CommandRunner, base_args: &[String]) -> Result<()> {
-    check_command(runner, "aws")
-        .context("Install from: https://aws.amazon.com/cli/")?;
+    check_command(runner, "aws").context("Install from: https://aws.amazon.com/cli/")?;
     let mut args: Vec<&str> = vec!["sts", "get-caller-identity"];
     args.extend(base_args.iter().map(String::as_str));
     let output = runner

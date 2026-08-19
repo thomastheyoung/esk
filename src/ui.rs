@@ -90,18 +90,36 @@ pub fn format_count_summary(counts: &[(&str, usize)]) -> String {
         .join(", ")
 }
 
+/// Whether a deploy summary describes work already done or work merely planned.
+///
+/// A dry run must not report in the past tense: saying "deployed" for changes
+/// that were never written is a false report, however loudly a later banner
+/// says otherwise.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SummaryMood {
+    /// The deploy ran.
+    Done,
+    /// A dry run: nothing was written.
+    Planned,
+}
+
 /// Builds a deploy summary like "deployed 6 keys to 7 targets" or
-/// "deployed 6 keys to 7 targets, 2 failed".
+/// "would deploy 6 keys to 7 targets, 2 failed".
 pub fn format_deploy_summary(
     keys: usize,
     deployed: usize,
     failed: usize,
     unset: usize,
     pruned: usize,
+    mood: SummaryMood,
 ) -> String {
     let keys_str = style(format!("{keys} keys")).bold();
     let targets_str = style(format!("{deployed} targets")).bold();
-    let base = format!("deployed {keys_str} to {targets_str}");
+    let verb = match mood {
+        SummaryMood::Done => "deployed",
+        SummaryMood::Planned => "would deploy",
+    };
+    let base = format!("{verb} {keys_str} to {targets_str}");
     let suffix = format_count_summary(&[("failed", failed), ("unset", unset), ("pruned", pruned)]);
     if suffix.is_empty() {
         base

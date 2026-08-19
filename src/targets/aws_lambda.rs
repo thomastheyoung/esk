@@ -17,15 +17,17 @@
 //! Commands: `aws lambda get-function-configuration` /
 //!           `aws lambda update-function-configuration`.
 
-use std::collections::BTreeMap;
-
 use anyhow::{Context, Result};
+use zeroize::Zeroizing;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::{AwsLambdaTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
     resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployOutcome, DeployResult,
     DeployTarget, SecretValue,
 };
+use crate::verify::{Evidence, Fidelity};
 
 /// Maximum number of read-merge-write retries on `ResourceConflictException`.
 const MAX_CONFLICT_RETRIES: usize = 2;
@@ -187,6 +189,33 @@ impl DeployTarget for AwsLambdaTarget<'_> {
     fn deploy_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
         // Batch target — deploy_batch is the primary method
         Ok(())
+    }
+
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Value
+    }
+
+    /// Read back via the same `get-function-configuration` call every deploy
+    /// already makes, so verification adds no new API surface.
+    ///
+    /// `keys` is unused: Lambda returns the function's whole variable map in
+    /// one call and has no per-key read.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let function_name = self.resolve_function_name(&target.environment)?;
+        let env_flags = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+
+        // `read_env_vars` returns `Err` on a failed or unparseable response, so
+        // a failed read can never be mistaken for an empty function. A function
+        // with no `Environment` block does read back as empty, which is honest:
+        // it genuinely holds none of these keys, and `compare` reports them as
+        // missing — real drift, not a false pass.
+        let (vars, _revision_id) = self.read_env_vars(function_name, &env_flags)?;
+
+        Ok(Evidence::Values(
+            vars.into_iter()
+                .map(|(key, value)| (key, Zeroizing::new(value)))
+                .collect(),
+        ))
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -736,5 +765,152 @@ targets:
         // Both get and update should have --no-paginate
         assert!(calls[0].args.contains(&"--no-paginate".to_string()));
         assert!(calls[1].args.contains(&"--no-paginate".to_string()));
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(pairs: &[(&str, &str)]) -> BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn aws_lambda_read_back_returns_function_env_vars() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.aws_lambda.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_output(get_config_response(
+            &[("API_KEY", "secret1"), ("NODE_ENV", "production")],
+            "rev-1",
+        ));
+        let target = AwsLambdaTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target("dev"))
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("aws_lambda declares Fidelity::Value, so it must return Values");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "secret1");
+
+        let calls = runner.take_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "aws");
+        assert!(calls[0]
+            .args
+            .contains(&"get-function-configuration".to_string()));
+        assert!(calls[0].args.contains(&"myapp-dev".to_string()));
+    }
+
+    #[test]
+    fn aws_lambda_read_back_surfaces_wrong_value_as_drift() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.aws_lambda.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_output(get_config_response(&[("API_KEY", "STALE")], "rev-1"));
+        let target = AwsLambdaTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "current")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+        let crate::verify::Findings::Values { verdicts, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::ValueVerdict::Differs);
+    }
+
+    #[test]
+    fn aws_lambda_read_back_reports_unmanaged_vars_as_extra() {
+        // Lambda functions legitimately carry vars esk does not manage. They
+        // are surfaced, not silently ignored, because an unexpected key on a
+        // target is exactly what a leaked or hand-edited deploy looks like.
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.aws_lambda.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_output(get_config_response(
+            &[("API_KEY", "v"), ("NODE_ENV", "production")],
+            "rev-1",
+        ));
+        let target = AwsLambdaTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        let crate::verify::Findings::Values { extra, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(extra, &["NODE_ENV".to_string()]);
+    }
+
+    #[test]
+    fn aws_lambda_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.aws_lambda.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"AccessDeniedException");
+        let target = AwsLambdaTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
+        assert!(matches!(
+            findings,
+            crate::verify::Findings::Unreachable { .. }
+        ));
+    }
+
+    #[test]
+    fn aws_lambda_read_back_applies_env_flags() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.aws_lambda.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_output(get_config_response(&[("A", "1")], "rev-1"));
+        let target = AwsLambdaTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+        target
+            .read_back(&verify_keys(&["A"]), &make_target("prod"))
+            .unwrap();
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"--no-paginate".to_string()));
+        assert!(calls[0].args.contains(&"myapp-prod".to_string()));
     }
 }

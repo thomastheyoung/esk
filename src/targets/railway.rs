@@ -13,10 +13,13 @@
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeSet;
+
 use crate::config::{Config, RailwayTargetConfig, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct RailwayTarget<'a> {
     pub config: &'a Config,
@@ -64,6 +67,41 @@ impl DeployTarget for RailwayTarget<'_> {
             .check("railway variables set", key)
     }
 
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Value
+    }
+
+    /// Read back via `railway variables --kv`, which prints `KEY=VALUE` lines.
+    ///
+    /// The read relies on the same linked project the deploy does: esk writes
+    /// via `railway variables set` without an explicit service or environment
+    /// flag, so the read must not add one either, or the two would address
+    /// different scopes.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["variables", "--kv"];
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run("railway", &args, CommandOpts::default())
+            .context("failed to run railway variables")?;
+
+        // A failed listing is an incomplete read, never an empty project.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("railway variables failed: {stderr}");
+        }
+
+        // Shared parser: it refuses to answer when the output contains a line
+        // the KEY=VALUE grammar cannot represent, rather than truncating a
+        // multiline value and emitting its continuation lines as phantom keys.
+        Ok(Evidence::Values(crate::targets::parse_kv_read_back(
+            &output.stdout,
+            "railway",
+        )?))
+    }
+
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["variables", "delete", key];
@@ -81,6 +119,7 @@ mod tests {
     use super::*;
     use crate::targets::CommandOutput;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
+    use zeroize::Zeroizing;
 
     fn make_config() -> ConfigFixture {
         let yaml = r#"
@@ -168,7 +207,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install from: https://docs.railway.app"));
+        assert!(err
+            .to_string()
+            .contains("Install from: https://docs.railway.app"));
     }
 
     #[test]
@@ -314,5 +355,93 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("api error"));
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    #[test]
+    fn railway_read_back_parses_kv_lines() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.railway.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(
+            b"API_KEY=secret1\nDATABASE_URL=postgres://u:p@h/db?x=1\n",
+            b"",
+        );
+        let target = RailwayTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target("dev"))
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("railway declares Fidelity::Value, so it must return Values");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "secret1");
+        // Values containing `=` must survive: split on the first one only.
+        assert_eq!(values["DATABASE_URL"].as_str(), "postgres://u:p@h/db?x=1");
+
+        let calls = runner.take_calls();
+        assert_eq!(calls[0].args, vec!["variables", "--kv"]);
+    }
+
+    #[test]
+    fn railway_read_back_surfaces_wrong_value_as_drift() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.railway.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(b"API_KEY=STALE\n", b"");
+        let target = RailwayTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "current")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+    }
+
+    #[test]
+    fn railway_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.railway.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"No linked project");
+        let target = RailwayTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
     }
 }

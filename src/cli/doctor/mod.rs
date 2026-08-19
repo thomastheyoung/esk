@@ -75,6 +75,19 @@ pub fn run_json(cwd: &Path) -> Result<()> {
         })).collect::<Vec<_>>(),
     });
     println!("{}", serde_json::to_string_pretty(&output)?);
+
+    // Exit status must agree with the text path (`Report::render`), so that a
+    // CI gate using `--json` cannot pass on a config the text path rejects.
+    let mut tally = report.tally();
+    let target_fail = target_health.iter().filter(|h| !h.status.is_ok()).count();
+    let remote_fail = remote_health.iter().filter(|h| !h.status.is_ok()).count();
+    tally.add_health(
+        target_health.len() - target_fail + (remote_health.len() - remote_fail),
+        target_fail + remote_fail,
+    );
+    if tally.has_failures() {
+        anyhow::bail!("{}", tally.summary());
+    }
     Ok(())
 }
 
@@ -127,7 +140,7 @@ secrets:
         let dir = setup_healthy_project();
         let report = Report::build(dir.path());
 
-        assert!(report.project.as_deref() == Some("testapp"));
+        assert_eq!(report.project.as_deref(), Some("testapp"));
 
         // All structure checks should pass
         for check in &report.structure {
@@ -247,11 +260,18 @@ secrets:
         let report = Report::build(dir.path());
 
         if let Section::Checked(checks) = &report.secrets_health {
-            let failed_check = checks.iter().find(|c| c.label == "Failed deploys").unwrap();
+            let failed_check = checks
+                .iter()
+                .find(|c| c.label == "Recorded deploy failures")
+                .unwrap();
             assert_eq!(failed_check.status, CheckStatus::Fail);
-            assert!(failed_check
-                .detail
-                .contains("1 deployment(s) in failed state"));
+            assert!(
+                failed_check
+                    .detail
+                    .contains("1 deploy(s) recorded as failed"),
+                "detail was: {}",
+                failed_check.detail
+            );
         } else {
             panic!("secrets_health should be Checked");
         }

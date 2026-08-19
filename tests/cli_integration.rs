@@ -7196,3 +7196,1306 @@ fn doctor_with_store_orphans() {
     let result = cli::doctor::run_with_runner(project.root(), &OkRunner);
     assert!(result.is_ok());
 }
+
+/// `doctor --json` must agree with `doctor` on exit status.
+///
+/// Regression guard: the JSON path previously returned `Ok(())` unconditionally,
+/// so a CI gate using `--json` stayed green on a config the text path rejected.
+#[test]
+fn doctor_json_and_text_agree_on_failure_exit() {
+    let dir = tempfile::tempdir().unwrap();
+    // Only create esk.yaml, no .esk/ directory — same fixture as
+    // `doctor_missing_store_reports_failure`.
+    std::fs::write(dir.path().join("esk.yaml"), MINIMAL_CONFIG).unwrap();
+
+    let text = cli::doctor::run_with_runner(dir.path(), &OkRunner);
+    let json = cli::doctor::run_json(dir.path());
+
+    assert!(text.is_err(), "text path must fail on a missing store");
+    assert!(
+        json.is_err(),
+        "json path must fail wherever the text path fails"
+    );
+}
+
+/// The healthy case must agree too — the fix must not make `--json` fail
+/// on projects the text path accepts.
+#[test]
+fn doctor_json_and_text_agree_on_success_exit() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let deploy_idx = DeployIndex::new(&project.deploy_index_path());
+    deploy_idx.save().unwrap();
+    let sync_idx = SyncIndex::new(&project.sync_index_path());
+    sync_idx.save().unwrap();
+    let gitignore =
+        "store.key\ndeploy-index.json\nsync-index.json\nlock\nkey-provider\n".to_string();
+    std::fs::write(project.root().join(".esk/.gitignore"), gitignore).unwrap();
+
+    let text = cli::doctor::run_with_runner(project.root(), &OkRunner);
+    let json = cli::doctor::run_json(project.root());
+
+    assert!(text.is_ok(), "text path should pass a healthy project");
+    assert!(json.is_ok(), "json path should pass a healthy project");
+}
+
+/// Exit-code parity at the process level, which is what a CI gate observes.
+///
+/// Covers the case library-level tests cannot: a config that parses cleanly but
+/// whose target preflight fails. `run_json` takes no `CommandRunner`, so the
+/// probe is made to fail by emptying `PATH`.
+#[test]
+fn doctor_json_process_exit_matches_text_on_target_health_failure() {
+    let project = TestProject::with_store(CLOUDFLARE_CONFIG).unwrap();
+    let deploy_idx = DeployIndex::new(&project.deploy_index_path());
+    deploy_idx.save().unwrap();
+    let sync_idx = SyncIndex::new(&project.sync_index_path());
+    sync_idx.save().unwrap();
+
+    let run = |args: &[&str]| {
+        std::process::Command::new(env!("CARGO_BIN_EXE_esk"))
+            .current_dir(project.root())
+            .env("PATH", "/nonexistent")
+            .args(args)
+            .output()
+            .unwrap()
+    };
+
+    let text = run(&["doctor"]);
+    let json = run(&["doctor", "--json"]);
+
+    assert!(
+        !text.status.success(),
+        "text doctor should fail when the target CLI is unreachable"
+    );
+    assert_eq!(
+        text.status.code(),
+        json.status.code(),
+        "doctor --json must exit with the same code as doctor; \
+         json stdout: {}",
+        String::from_utf8_lossy(&json.stdout)
+    );
+
+    // The exit code is a coarse proxy: both paths could agree on "failed"
+    // while disagreeing on how many checks failed. Compare the counts too,
+    // since the shared arithmetic is the actual invariant under test.
+    let counts = |stderr: &[u8]| {
+        let text = String::from_utf8_lossy(stderr).to_string();
+        let i = text.rfind("passed,").expect("summary line on stderr");
+        let start = text[..i].rfind('\n').map_or(0, |n| n + 1);
+        let end = text[i..].find('\n').map_or(text.len(), |n| i + n);
+        text[start..end]
+            .trim()
+            .trim_start_matches(['✖', ' '])
+            .to_string()
+    };
+    assert_eq!(
+        counts(&text.stderr),
+        counts(&json.stderr),
+        "doctor and doctor --json must report the same pass/warn/fail counts"
+    );
+
+    // The JSON document must stay parseable on the failure path: CI pipes
+    // stdout to `jq`, so the bail! diagnostic belongs on stderr only.
+    serde_json::from_slice::<serde_json::Value>(&json.stdout)
+        .expect("doctor --json stdout must remain valid JSON when checks fail");
+}
+
+/// Deploy must restore a batch artifact that was deleted outside esk.
+///
+/// Regression guard: dirtiness used to be decided solely from the deploy
+/// index, which records what esk last *sent*. A deleted `.env` left the store
+/// unchanged, so the group was skipped, the file was never rewritten, and the
+/// run reported "up to date" — silent data loss recoverable only via `--force`.
+#[test]
+fn deploy_restores_deleted_batch_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    let original = std::fs::read_to_string(&env_path).unwrap();
+
+    std::fs::remove_file(&env_path).unwrap();
+    assert!(!env_path.is_file(), "precondition: artifact removed");
+
+    // A plain deploy — no --force — must bring it back.
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    assert!(
+        env_path.is_file(),
+        "deploy must restore the deleted artifact"
+    );
+    assert_eq!(
+        std::fs::read_to_string(&env_path).unwrap(),
+        original,
+        "restored artifact must match what a fresh deploy writes"
+    );
+}
+
+/// Deploy must repair an artifact whose contents were edited by hand.
+#[test]
+fn deploy_restores_corrupted_batch_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    let original = std::fs::read_to_string(&env_path).unwrap();
+
+    // The generated file is 0o400, so widen it before overwriting.
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    std::fs::write(&env_path, "MY_SECRET=WRONG-STALE-VALUE\n").unwrap();
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    assert_eq!(
+        std::fs::read_to_string(&env_path).unwrap(),
+        original,
+        "deploy must rewrite a hand-edited artifact back to canonical form"
+    );
+}
+
+/// A dry run must report artifact drift without writing anything.
+#[test]
+fn deploy_dry_run_does_not_restore_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let mut opts = cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+    cli::deploy::run(&config, &opts).unwrap();
+
+    let env_path = project.root().join("apps/web/.env.local");
+    std::fs::remove_file(&env_path).unwrap();
+
+    opts.dry_run = true;
+    cli::deploy::run(&config, &opts).unwrap();
+
+    assert!(
+        !env_path.is_file(),
+        "dry run must not write the artifact it reports as drifted"
+    );
+}
+
+/// Restoring is idempotent: a second deploy finds nothing to do.
+#[test]
+fn deploy_restore_is_idempotent() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    std::fs::remove_file(&env_path).unwrap();
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    // Mark the file so a rewrite is detectable without relying on filesystem
+    // timestamp granularity, which is too coarse on some platforms to
+    // distinguish two writes in the same test.
+    let restored = std::fs::read(&env_path).unwrap();
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    let mut marked = restored.clone();
+    marked.extend_from_slice(b"# sentinel\n");
+    std::fs::write(&env_path, &marked).unwrap();
+
+    // Deploying again sees drift (the sentinel) and rewrites once...
+    cli::deploy::run(&config, &opts()).unwrap();
+    assert_eq!(
+        std::fs::read(&env_path).unwrap(),
+        restored,
+        "the sentinel edit must be healed away"
+    );
+
+    // ...and a further deploy, with the artifact now matching, must not touch
+    // it: re-adding the sentinel proves only a real rewrite would remove it.
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o400);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(true);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    let before = std::fs::read(&env_path).unwrap();
+    cli::deploy::run(&config, &opts()).unwrap();
+    assert_eq!(
+        std::fs::read(&env_path).unwrap(),
+        before,
+        "a clean artifact must be left alone on the next deploy"
+    );
+}
+
+/// An artifact containing invalid UTF-8 must be detected and repaired.
+///
+/// Regression guard: comparing decoded text rather than bytes turned a
+/// definite mismatch into "cannot tell", leaving the corrupt file in place
+/// while the run reported everything up to date.
+#[test]
+fn deploy_restores_artifact_with_invalid_utf8() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    let original = std::fs::read(&env_path).unwrap();
+
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    std::fs::write(&env_path, b"MY_SECRET=\xff\xfe not utf8\n").unwrap();
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    assert_eq!(
+        std::fs::read(&env_path).unwrap(),
+        original,
+        "an artifact that is not valid UTF-8 must still be detected and rewritten"
+    );
+}
+
+/// An artifact esk cannot read back must never be reported as current.
+///
+/// Regression guard: mapping every non-`NotFound` IO error to "cannot tell"
+/// left a tampered file in place while the run said `up to date` — the same
+/// silent failure the artifact audit exists to prevent. esk owns this path and
+/// writes it owner-readable, so being unable to read it is a definite
+/// mismatch, not an unknown.
+#[cfg(unix)]
+#[test]
+fn deploy_restores_unreadable_artifact() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+    let original = std::fs::read(&env_path).unwrap();
+
+    std::fs::set_permissions(&env_path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    assert_eq!(
+        std::fs::read(&env_path).unwrap(),
+        original,
+        "an unreadable artifact must be regenerated, not reported as current"
+    );
+}
+
+/// A directory where the artifact belongs must fail loudly, never silently.
+///
+/// esk cannot write through a directory, so the deploy is expected to fail —
+/// the point is that it reports the failure instead of claiming the target is
+/// up to date, which is what happened while path resolution errors were
+/// treated as "cannot tell".
+#[test]
+fn deploy_reports_failure_when_directory_occupies_artifact_path() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+    let env_path = project.root().join("apps/web/.env.local");
+
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    #[cfg(not(unix))]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    std::fs::remove_file(&env_path).unwrap();
+    std::fs::create_dir(&env_path).unwrap();
+
+    let result = cli::deploy::run(&config, &opts());
+
+    assert!(
+        result.is_err(),
+        "a directory blocking the artifact path must surface as a deploy failure"
+    );
+}
+
+/// A symlinked artifact must not be clobbered, nor fail every deploy.
+///
+/// esk refuses symlinked output paths (`resolve_project_output_path`), which a
+/// monorepo pointing `.env.local` at a shared file relies on. The artifact
+/// audit must treat that refusal as "cannot tell" rather than as drift:
+/// calling it drift marks the group dirty on every run, and the deploy then
+/// fails on the same policy with nothing the user can do to clear it.
+#[cfg(unix)]
+#[test]
+fn deploy_leaves_symlinked_artifact_alone() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    std::fs::create_dir_all(project.root().join("shared")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    // Replace the generated file with a symlink to a shared location.
+    let env_path = project.root().join("apps/web/.env.local");
+    let shared = project.root().join("shared/.env.real");
+    let mut perms = std::fs::metadata(&env_path).unwrap().permissions();
+    {
+        use std::os::unix::fs::PermissionsExt;
+        perms.set_mode(0o600);
+    }
+    std::fs::set_permissions(&env_path, perms).unwrap();
+    std::fs::rename(&env_path, &shared).unwrap();
+    std::os::unix::fs::symlink("../shared/.env.real", &env_path).unwrap();
+    let shared_before = std::fs::read(&shared).unwrap();
+
+    // esk has never written through a symlink, so the artifact audit must not
+    // turn that standing refusal into a per-run failure: the group stays
+    // whatever the store says it is, and the user's file is left alone.
+    let result = cli::deploy::run(&config, &opts());
+
+    assert!(
+        result.is_ok(),
+        "a symlinked artifact must not make every deploy fail: {:?}",
+        result.err()
+    );
+    assert!(
+        cli::deploy::run(&config, &opts()).is_ok(),
+        "and it must stay quiet on subsequent runs"
+    );
+    assert!(
+        std::fs::symlink_metadata(&env_path)
+            .unwrap()
+            .file_type()
+            .is_symlink(),
+        "the symlink itself must be left in place"
+    );
+    assert_eq!(
+        std::fs::read(&shared).unwrap(),
+        shared_before,
+        "the file the symlink points at must not be touched"
+    );
+}
+
+/// A symlinked parent directory must not fail every deploy either.
+///
+/// Path resolution refuses a symlink at any component, not just the leaf, so a
+/// probe that inspects only the artifact file would miss the shape monorepos
+/// actually use (`apps/web -> packages/web`) and mark the group dirty forever.
+#[cfg(unix)]
+#[test]
+fn deploy_leaves_symlinked_parent_directory_alone() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    std::fs::create_dir_all(project.root().join("apps/web")).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+
+    let opts = || cli::deploy::DeployOptions {
+        env: Some("dev"),
+        force: false,
+        dry_run: false,
+        verbose: false,
+        skip_validation: false,
+        strict: false,
+        allow_empty: false,
+        prune: false,
+    };
+
+    cli::deploy::run(&config, &opts()).unwrap();
+
+    // Turn the app directory itself into a symlink, keeping the artifact.
+    let app_dir = project.root().join("apps/web");
+    let real_dir = project.root().join("packages_web");
+    std::fs::rename(&app_dir, &real_dir).unwrap();
+    std::os::unix::fs::symlink("../packages_web", &app_dir).unwrap();
+    let artifact = real_dir.join(".env.local");
+    let before = std::fs::read(&artifact).unwrap();
+
+    assert!(
+        cli::deploy::run(&config, &opts()).is_ok(),
+        "a symlinked app directory must not make every deploy fail"
+    );
+    assert!(
+        cli::deploy::run(&config, &opts()).is_ok(),
+        "and it must stay quiet on subsequent runs"
+    );
+    assert_eq!(
+        std::fs::read(&artifact).unwrap(),
+        before,
+        "the file behind the symlinked directory must not be touched"
+    );
+}
+
+/// A dry run must describe its work in the conditional, never the past tense.
+///
+/// Regression guard: the summary printed `deployed N keys` before the "Dry run"
+/// banner, so anyone reading the top line saw a report of work that never
+/// happened.
+#[test]
+fn deploy_dry_run_summary_is_not_past_tense() {
+    assert_eq!(
+        console::strip_ansi_codes(&esk::ui::format_deploy_summary(
+            1,
+            1,
+            0,
+            0,
+            0,
+            esk::ui::SummaryMood::Planned
+        ))
+        .to_string(),
+        "would deploy 1 keys to 1 targets"
+    );
+    assert_eq!(
+        console::strip_ansi_codes(&esk::ui::format_deploy_summary(
+            1,
+            1,
+            0,
+            0,
+            0,
+            esk::ui::SummaryMood::Done
+        ))
+        .to_string(),
+        "deployed 1 keys to 1 targets"
+    );
+}
+
+// === verify command integration ===
+
+/// The deploy index says a secret was sent; the target now holds something
+/// else. This is the defect class the verify command exists for: `esk status`
+/// reads the index and reports the secret as sent, because the index records
+/// esk's own claim about a write it made.
+#[test]
+fn verify_detects_drift_against_a_deployed_target() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
+
+    // Deploy for real, so the deploy index records a successful send.
+    let deploy_runner = MockCommandRunner::new().strict();
+    deploy_runner.push_success(b"", b""); // preflight: npx --version
+    deploy_runner.push_success(b"", b""); // preflight: convex env list
+    deploy_runner.push_success(b"", b""); // convex env set
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &deploy_runner,
+    )
+    .unwrap();
+
+    // Someone changes the value on the target, outside esk.
+    let verify_runner = MockCommandRunner::new().strict();
+    verify_runner.push_success(b"", b""); // preflight: npx --version
+    verify_runner.push_success(b"", b""); // preflight: convex env list
+    verify_runner.push_success(b"CONVEX_URL=https://EVIL.convex.cloud\n", b"");
+
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &verify_runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        code,
+        cli::verify::EXIT_DRIFT,
+        "a target holding a different value must exit as drift"
+    );
+}
+
+#[test]
+fn verify_matching_target_is_clean() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b""); // preflight: npx --version
+    runner.push_success(b"", b""); // preflight: convex env list
+    runner.push_success(b"CONVEX_URL=https://dev.convex.cloud\n", b"");
+
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+    assert_eq!(code, cli::verify::EXIT_CLEAN);
+
+    // The exit code alone is too weak an assertion: an unverifiable target and
+    // an empty selection both exit 0 too. Assert the scope actually landed in
+    // the value_clean bucket, so this test fails if the scope stops being read.
+    let runner2 = MockCommandRunner::new().strict();
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"CONVEX_URL=https://dev.convex.cloud\n", b"");
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner2,
+    )
+    .unwrap();
+    assert_eq!(report.tally().value_clean, 1);
+    assert_eq!(report.outcome(), esk::verify::Outcome::Clean);
+}
+
+/// An unreachable target must not exit 0. Reporting "no drift found" for a
+/// target esk never managed to read is the exact confusion `Outcome` splits
+/// into four states to prevent.
+#[test]
+fn verify_unreachable_target_is_not_clean() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b""); // preflight: npx --version
+    runner.push_failure(b"deployment not found"); // preflight: convex env list
+
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(
+        code,
+        cli::verify::EXIT_INCONCLUSIVE,
+        "a target esk could not read must never exit clean"
+    );
+}
+
+/// A target that never opted into read-back reports as not checkable, not as
+/// verified. Dotenv has no `read_back` implementation, so it declares
+/// `Fidelity::None` and lands in the `unverifiable` bucket.
+#[test]
+fn verify_reports_targets_without_read_back_as_gaps() {
+    let project = TestProject::with_store(DOCKER_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "v").unwrap();
+
+    // Docker Swarm secrets are write-only by design — the one target that can
+    // never become verifiable, which is why it anchors this test. (`.env` and
+    // `cloudflare` each served here before gaining read-back.)
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight: docker --version
+    runner.push_success(b"active", b""); // preflight: docker info (swarm state)
+    let opts = cli::verify::VerifyOptions {
+        env: Some("dev"),
+        target: Some("docker"),
+        all: false,
+    };
+    let report = cli::verify::report_for_test(&config, &opts, &runner).unwrap();
+
+    let tally = report.tally();
+    assert_eq!(
+        tally.unverifiable, 1,
+        "a target with no read_back must count as unverifiable"
+    );
+    assert_eq!(tally.verified(), 0, "it must never count as verified");
+    assert_eq!(report.outcome(), esk::verify::Outcome::CleanWithGaps);
+
+    // Exit 0: esk found no disagreement. The exit code alone cannot say
+    // whether the scope was verified or merely unreadable, which is why the
+    // buckets are asserted above rather than only the code.
+    let runner2 = MockCommandRunner::new();
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"active", b"");
+    let code = cli::verify::run_with_runner(&config, &opts, &runner2).unwrap();
+    assert_eq!(code, cli::verify::EXIT_CLEAN);
+}
+
+#[test]
+fn verify_json_never_reports_an_aggregate_pass() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    std::fs::create_dir_all(project.root().join("apps/api")).unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("CONVEX_URL", "dev", "https://dev.convex.cloud")
+        .unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b"");
+    runner.push_success(b"", b"");
+    runner.push_success(b"CONVEX_URL=https://EVIL.convex.cloud\n", b"");
+
+    let code = cli::verify::run_json_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+    assert_eq!(code, cli::verify::EXIT_DRIFT);
+
+    // The name of this test is a claim about the JSON's shape, so inspect the
+    // JSON rather than only the exit code. A future `"passed": true` field
+    // would let a consumer collapse six buckets back into one bit.
+    let runner2 = MockCommandRunner::new().strict();
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"", b"");
+    runner2.push_success(b"CONVEX_URL=https://EVIL.convex.cloud\n", b"");
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner2,
+    )
+    .unwrap();
+    let json = cli::verify::to_json_for_test(&report);
+
+    for banned in ["passed", "ok", "success", "healthy"] {
+        assert!(
+            json.get(banned).is_none(),
+            "verify JSON must not expose an aggregate `{banned}` field"
+        );
+        assert!(
+            json["tally"].get(banned).is_none(),
+            "the tally must not expose an aggregate `{banned}` field"
+        );
+    }
+    // All eight buckets stay separate, and the outcome carries four states.
+    for bucket in [
+        "value_clean",
+        "value_drifted",
+        "presence_clean",
+        "presence_drifted",
+        "unverifiable",
+        "unreachable",
+        "malformed",
+        "skipped",
+    ] {
+        assert!(
+            json["tally"].get(bucket).is_some(),
+            "missing bucket {bucket}"
+        );
+    }
+    assert_eq!(json["outcome"], "drift");
+}
+
+/// Custom targets carry a user-defined name rather than a fixed one, so the
+/// scope-to-target lookup has to match on that name. A miss would drop the
+/// scope from the report entirely, which reads as "nothing wrong here".
+#[test]
+fn verify_matches_custom_targets_by_their_user_defined_name() {
+    let project = TestProject::with_store(CUSTOM_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "k1").unwrap();
+
+    let runner = MockCommandRunner::new();
+    runner.push_success(b"", b""); // preflight
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let scope = report
+        .scopes
+        .iter()
+        .find(|s| s.target == "my-api")
+        .expect("the custom target's scope must appear in the report, not be dropped");
+    // `custom` has no read command in its config schema, so it is honestly
+    // unverifiable rather than silently absent.
+    assert_eq!(scope.fidelity, esk::verify::Fidelity::None);
+    assert_eq!(
+        report.tally().unverifiable,
+        1,
+        "an unimplemented read-back must be counted as a gap, never as verified"
+    );
+}
+
+/// Every (target, app, env) tuple the config declares must appear in the
+/// report. A scope that goes missing contributes no findings and so reads as
+/// "nothing wrong here" — the silent-drop failure this command exists to
+/// prevent, reintroduced one level up.
+#[test]
+fn verify_reports_every_configured_scope() {
+    let project = TestProject::with_store(FULL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("STRIPE_KEY", "dev", "a").unwrap();
+    store.set("CONVEX_URL", "dev", "b").unwrap();
+    store.set("API_SECRET", "dev", "c").unwrap();
+
+    let runner = MockCommandRunner::new();
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // FULL_CONFIG dev: .env web, .env api, convex (no app). cloudflare is
+    // prod-only for STRIPE_KEY, so it contributes no dev scope.
+    let mut seen: Vec<String> = report
+        .scopes
+        .iter()
+        .map(|s| match &s.app {
+            Some(app) => format!("{}:{app}", s.target),
+            None => s.target.clone(),
+        })
+        .collect();
+    seen.sort();
+    assert_eq!(seen, vec![".env:api", ".env:web", "convex"]);
+
+    // Every scope is accounted for in exactly one bucket, and none of them is
+    // "verified" — no target here was actually read back.
+    let tally = report.tally();
+    let bucketed = tally.value_clean
+        + tally.value_drifted
+        + tally.presence_clean
+        + tally.presence_drifted
+        + tally.unverifiable
+        + tally.unreachable
+        + tally.malformed
+        + tally.skipped;
+    assert_eq!(bucketed, report.scopes.len());
+}
+
+/// A target whose `read_back` returns evidence weaker than the fidelity it
+/// declared is a bug in that target, and the command must surface it as one —
+/// never quietly downgrade to a pass. Driven through the real command path so
+/// a future refactor of `build.rs` cannot lose the distinction.
+#[test]
+fn verify_malformed_target_response_is_inconclusive_not_clean() {
+    use esk::verify::{compare, Evidence, Fidelity, Findings, Outcome, ScopeReport, VerifyReport};
+
+    // A target declaring Value fidelity but returning only key names.
+    let evidence = Ok(Evidence::Names {
+        present: ["API_KEY".to_string()].into_iter().collect(),
+        note: None,
+    });
+    let expected: std::collections::BTreeMap<String, zeroize::Zeroizing<String>> = [(
+        "API_KEY".to_string(),
+        zeroize::Zeroizing::new("v".to_string()),
+    )]
+    .into_iter()
+    .collect();
+
+    let findings = compare(Fidelity::Value, evidence, &expected);
+    assert!(
+        matches!(findings, Findings::Malformed { .. }),
+        "declaring Value and returning Names must be reported as a target bug"
+    );
+
+    let report = VerifyReport {
+        scopes: vec![ScopeReport {
+            target: "buggy".to_string(),
+            app: None,
+            env: "dev".to_string(),
+            fidelity: Fidelity::Value,
+            findings,
+            unset: Vec::new(),
+        }],
+    };
+    assert_eq!(report.outcome(), Outcome::Inconclusive);
+    assert_eq!(report.tally().verified(), 0);
+}
+
+/// A typo'd `--target` must be an error, not a silent no-op.
+///
+/// Selecting nothing produces an empty report, and an empty report has no
+/// bucket to land in. Before this check, `esk verify --target rendr` printed
+/// `"outcome": "clean"` and exited 0 — a CI pipeline with a typo would stay
+/// green forever while verifying nothing.
+#[test]
+fn verify_rejects_an_unknown_target_filter() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let runner = MockCommandRunner::new();
+
+    let Err(err) = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: None,
+            target: Some("convx"),
+            all: false,
+        },
+        &runner,
+    ) else {
+        panic!("an unknown target filter must be rejected, not silently select nothing");
+    };
+    let msg = err.to_string();
+    assert!(msg.contains("convx"), "got: {msg}");
+    assert!(
+        msg.contains("convex"),
+        "should suggest the near match: {msg}"
+    );
+}
+
+#[test]
+fn verify_rejects_an_unknown_env_filter() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let runner = MockCommandRunner::new();
+
+    let Err(err) = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("prd"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    ) else {
+        panic!("an unknown env filter must be rejected, not silently select nothing");
+    };
+    assert!(err.to_string().contains("prd"), "got: {err}");
+}
+
+/// A valid filter that legitimately selects nothing must still not read clean.
+/// Defense in depth behind the filter validation above: the two failures are
+/// independent, and only this one survives a correctly-spelled filter.
+#[test]
+fn verify_empty_selection_is_reported_as_a_gap_not_clean() {
+    let project = TestProject::with_store(CONVEX_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let runner = MockCommandRunner::new();
+
+    // `prod` is a configured environment, but nothing is stored for it and the
+    // scope map is keyed off config, so this exercises the empty-report path.
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("prod"),
+            target: None,
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    if report.scopes.is_empty() {
+        assert_eq!(report.outcome(), esk::verify::Outcome::CleanWithGaps);
+        assert_eq!(report.tally().verified(), 0);
+    }
+}
+
+/// The scenario that motivated read-back verification, end to end: deploy a
+/// `.env`, delete it, and confirm `esk verify` reports drift. `esk status`
+/// reads the deploy index, which still records a successful send.
+#[test]
+fn verify_detects_a_deleted_dotenv_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("MY_SECRET", "dev", "postgres://localhost")
+        .unwrap();
+
+    let runner = MockCommandRunner::new();
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let artifact = config.root.join("apps/web/.env.local");
+    assert!(artifact.exists(), "deploy should have written the artifact");
+    std::fs::remove_file(&artifact).unwrap();
+
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some(".env"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+    assert_eq!(
+        code,
+        cli::verify::EXIT_DRIFT,
+        "a deleted artifact must be reported as drift, not as deployed"
+    );
+}
+
+/// A `.env` whose value was edited by hand must read as drift, and the key
+/// that changed must be named — not just a scope-level "something differs".
+#[test]
+fn verify_detects_an_edited_dotenv_value() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store
+        .set("MY_SECRET", "dev", "postgres://localhost")
+        .unwrap();
+
+    let runner = MockCommandRunner::new();
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // esk writes the artifact read-only, so tampering replaces the file.
+    let artifact = config.root.join("apps/web/.env.local");
+    let edited = std::fs::read_to_string(&artifact)
+        .unwrap()
+        .replace("postgres://localhost", "postgres://ATTACKER");
+    std::fs::remove_file(&artifact).unwrap();
+    std::fs::write(&artifact, edited).unwrap();
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some(".env"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(report.outcome(), esk::verify::Outcome::Drift);
+    assert_eq!(report.tally().value_drifted, 1);
+    let scope = &report.scopes[0];
+    let esk::verify::Findings::Values { verdicts, .. } = &scope.findings else {
+        panic!("expected value findings");
+    };
+    assert_eq!(
+        verdicts["MY_SECRET"],
+        esk::verify::ValueVerdict::Differs,
+        "the drifted key must be named"
+    );
+}
+
+/// A Tier 2 target end to end: heroku needs a new CLI call to verify, unlike
+/// the Tier 1 targets that reuse a read the deploy already made.
+#[test]
+fn verify_detects_drift_on_a_heroku_target() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "correct_value").unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b""); // preflight: heroku --version
+    runner.push_success(b"user@example.com", b""); // preflight: auth:whoami
+                                                   // The app holds a different value than the store.
+    runner.push_success(br#"{"API_KEY":"CHANGED_BY_HAND"}"#, b"");
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some("heroku"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(report.outcome(), esk::verify::Outcome::Drift);
+    assert_eq!(report.tally().value_drifted, 1);
+    let esk::verify::Findings::Values { verdicts, .. } = &report.scopes[0].findings else {
+        panic!("expected value findings");
+    };
+    assert_eq!(verdicts["API_KEY"], esk::verify::ValueVerdict::Differs);
+}
+
+/// An unauthenticated CLI must surface as unreachable, not as drift: esk did
+/// not read the target, so it cannot say anything about what it holds.
+#[test]
+fn verify_failed_preflight_is_unreachable_not_drift() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "v").unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b""); // heroku --version
+    runner.push_failure(b"not logged in"); // auth:whoami fails
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some("heroku"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(report.outcome(), esk::verify::Outcome::Inconclusive);
+    assert_eq!(report.tally().unreachable, 1);
+    assert_eq!(
+        report.tally().verified(),
+        0,
+        "a target esk could not authenticate to must never count as verified"
+    );
+}
+
+/// A key declared in config but never given a value must be surfaced, and the
+/// run must not report `Clean`.
+///
+/// esk holds no value to compare, so the key gets no verdict — inventing one
+/// would be the fabrication this module prevents. But silence would let a
+/// scope esk only partly knows about read as fully verified, and a
+/// declared-but-never-deployed key is exactly what verification is run to find.
+#[test]
+fn verify_surfaces_declared_but_unset_keys() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    // ENV_ONLY_CONFIG declares MY_SECRET and OTHER_SECRET for web:dev.
+    store.set("MY_SECRET", "dev", "v").unwrap();
+
+    let runner = MockCommandRunner::new();
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some(".env"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let scope = &report.scopes[0];
+    assert_eq!(
+        scope.unset,
+        vec!["OTHER_SECRET".to_string()],
+        "a declared key with no stored value must be reported, not dropped"
+    );
+    // The deployed key still verified correctly.
+    let esk::verify::Findings::Values { verdicts, .. } = &scope.findings else {
+        panic!("expected value findings");
+    };
+    assert_eq!(verdicts["MY_SECRET"], esk::verify::ValueVerdict::Matches);
+
+    // But the run is not clean: esk does not know this scope's whole state.
+    assert_ne!(
+        report.outcome(),
+        esk::verify::Outcome::Clean,
+        "a scope with unset keys must not report as fully verified"
+    );
+    assert_eq!(report.tally().value_clean, 0);
+    assert_eq!(report.tally().skipped, 1);
+}

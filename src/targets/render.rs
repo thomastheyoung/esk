@@ -12,11 +12,15 @@
 //! to avoid exposing them in process argument lists.
 
 use anyhow::{Context, Result};
+use zeroize::Zeroizing;
+
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::{Config, RenderTargetConfig, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 const BASE_URL: &str = "https://api.render.com/v1";
 
@@ -83,6 +87,53 @@ fn build_curl_config(method: &str, url: &str, api_key: &str, body: Option<&str>)
         let _ = writeln!(config, "data = \"{}\"", curl_config_escape(body));
     }
     config
+}
+
+/// One page of Render's env-var listing.
+///
+/// `entry_count` is the number of entries the page carried, which is not the
+/// same as `values.len()`: entries with no `value` are dropped. Pagination must
+/// be decided from `entry_count`, since a full page that parses to fewer values
+/// would otherwise look like the last page and truncate the listing.
+struct Page {
+    entry_count: usize,
+    values: BTreeMap<String, Zeroizing<String>>,
+}
+
+/// Parse the env-var list response into keys and values.
+///
+/// Render returns a JSON array of `{"envVar": {"key", "value"}, "cursor"}`
+/// wrappers. Entries that are not plain env vars — a secret *file*, whose
+/// content lives under a different field — carry no `value`, so they are
+/// reported as absent rather than as an empty-string mismatch.
+fn parse_env_var_list(stdout: &[u8]) -> Result<Page> {
+    let json: serde_json::Value =
+        serde_json::from_slice(stdout).context("failed to parse render env-vars JSON response")?;
+
+    let entries = json
+        .as_array()
+        .context("render env-vars response was not a JSON array")?;
+
+    Ok(Page {
+        // The raw count, before the filter below can shrink it.
+        entry_count: entries.len(),
+        values: entries
+            .iter()
+            .filter_map(|entry| entry.get("envVar"))
+            .filter_map(|env_var| {
+                let key = env_var.get("key")?.as_str()?;
+                let value = env_var.get("value")?.as_str()?;
+                Some((key.to_string(), Zeroizing::new(value.to_string())))
+            })
+            .collect(),
+    })
+}
+
+/// The cursor of the last entry in a page, used to request the next one.
+fn last_cursor(stdout: &[u8]) -> Option<String> {
+    let json: serde_json::Value = serde_json::from_slice(stdout).ok()?;
+    let cursor = json.as_array()?.last()?.get("cursor")?.as_str()?;
+    Some(cursor.to_string())
 }
 
 /// Check curl output and return a descriptive error on failure.
@@ -196,6 +247,80 @@ impl DeployTarget for RenderTarget<'_> {
             .with_context(|| format!("failed to run curl for render deploy {key}"))?;
 
         check_curl_output(&output, "deploy", key)
+    }
+
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Value
+    }
+
+    /// Read back via `GET /services/{id}/env-vars`, the same request preflight
+    /// already makes and discards.
+    ///
+    /// The listing is paginated. `limit=100` is Render's maximum page size, and
+    /// a full page means there may be more: rather than return a short map —
+    /// which `compare` would report as keys missing from the service — this
+    /// follows the cursor until a partial page arrives.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        const PAGE_SIZE: usize = 100;
+        // Bounds the loop if a provider ever returns a non-advancing cursor.
+        const MAX_PAGES: usize = 100;
+
+        let service_id = self.resolve_service_id(target)?;
+        let api_key = self.api_key()?;
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+
+        let mut all = BTreeMap::new();
+        let mut cursor: Option<String> = None;
+
+        for _ in 0..MAX_PAGES {
+            let url = match &cursor {
+                Some(cursor) => format!(
+                    "{BASE_URL}/services/{service_id}/env-vars?limit={PAGE_SIZE}&cursor={cursor}"
+                ),
+                None => format!("{BASE_URL}/services/{service_id}/env-vars?limit={PAGE_SIZE}"),
+            };
+            let config_str = build_curl_config("GET", &url, &api_key, None);
+
+            let mut args: Vec<&str> = vec!["--config", "-", "--silent", "--fail-with-body"];
+            args.extend(flag_parts.iter().map(String::as_str));
+
+            let output = self
+                .runner
+                .run(
+                    "curl",
+                    &args,
+                    CommandOpts {
+                        stdin: Some(config_str.into_bytes()),
+                        ..Default::default()
+                    },
+                )
+                .context("failed to run curl for render read-back")?;
+
+            // A failed page is an incomplete read, not an empty service.
+            check_curl_output(&output, "read-back", service_id)?;
+
+            let page = parse_env_var_list(&output.stdout)?;
+            // Fullness comes from the raw entry count, never from the parsed
+            // map: entries without a value are dropped, so a full page can
+            // parse to fewer values and would otherwise end the loop early.
+            let entry_count = page.entry_count;
+            all.extend(page.values);
+
+            if entry_count < PAGE_SIZE {
+                return Ok(Evidence::Values(all));
+            }
+
+            cursor = last_cursor(&output.stdout);
+            if cursor.is_none() {
+                // A full page with no cursor to continue from: the listing may
+                // be truncated and there is no way to finish it.
+                anyhow::bail!(
+                    "render returned a full page of env vars with no cursor to continue from"
+                );
+            }
+        }
+
+        anyhow::bail!("render env-vars listing did not terminate after {MAX_PAGES} pages")
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -606,5 +731,267 @@ targets:
         let err = target.api_key().unwrap_err();
         assert!(err.to_string().contains("contains control characters"));
         std::env::remove_var(env_name);
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(pairs: &[(&str, &str)]) -> BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    /// Build a Render env-vars list page.
+    fn env_var_page(entries: &[(&str, &str)]) -> Vec<u8> {
+        let items: Vec<serde_json::Value> = entries
+            .iter()
+            .enumerate()
+            .map(|(i, (k, v))| {
+                serde_json::json!({
+                    "envVar": { "key": k, "value": v },
+                    "cursor": format!("c{i}"),
+                })
+            })
+            .collect();
+        serde_json::to_vec(&items).unwrap()
+    }
+
+    #[test]
+    fn render_read_back_returns_listed_values() {
+        let fixture = make_config("RENDER_KEY_RB1");
+        std::env::set_var("RENDER_KEY_RB1", "rnd_test");
+        let config = fixture.config();
+        let target_config = config.targets.render.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&env_var_page(&[("API_KEY", "secret1")]), b"");
+        let target = RenderTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev"))
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("render declares Fidelity::Value, so it must return Values");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "secret1");
+
+        let calls = runner.take_calls();
+        assert_eq!(calls.len(), 1);
+        let stdin = String::from_utf8(calls[0].stdin.clone().unwrap()).unwrap();
+        assert!(stdin.contains("request = \"GET\""));
+        assert!(stdin.contains("srv-abc123def456/env-vars"));
+        std::env::remove_var("RENDER_KEY_RB1");
+    }
+
+    #[test]
+    fn render_read_back_surfaces_wrong_value_as_drift() {
+        let fixture = make_config("RENDER_KEY_RB2");
+        std::env::set_var("RENDER_KEY_RB2", "rnd_test");
+        let config = fixture.config();
+        let target_config = config.targets.render.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&env_var_page(&[("API_KEY", "STALE")]), b"");
+        let target = RenderTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "current")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+        let crate::verify::Findings::Values { verdicts, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::ValueVerdict::Differs);
+        std::env::remove_var("RENDER_KEY_RB2");
+    }
+
+    #[test]
+    fn render_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config("RENDER_KEY_RB3");
+        std::env::set_var("RENDER_KEY_RB3", "rnd_test");
+        let config = fixture.config();
+        let target_config = config.targets.render.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"503 Service Unavailable");
+        let target = RenderTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target(Some("web"), "dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
+        std::env::remove_var("RENDER_KEY_RB3");
+    }
+
+    #[test]
+    fn render_read_back_follows_pagination_cursor() {
+        // A full page means there may be more. Returning only the first page
+        // would report every later key as missing from the service — drift the
+        // operator would chase on secrets that are in fact correct.
+        let fixture = make_config("RENDER_KEY_RB4");
+        std::env::set_var("RENDER_KEY_RB4", "rnd_test");
+        let config = fixture.config();
+        let target_config = config.targets.render.as_ref().unwrap();
+
+        let full_page: Vec<(String, String)> = (0..100)
+            .map(|i| (format!("KEY_{i:03}"), format!("v{i}")))
+            .collect();
+        let page_refs: Vec<(&str, &str)> = full_page
+            .iter()
+            .map(|(k, v)| (k.as_str(), v.as_str()))
+            .collect();
+
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&env_var_page(&page_refs), b"");
+        runner.push_success(&env_var_page(&[("LAST_KEY", "final")]), b"");
+        let target = RenderTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(
+                &verify_keys(&["LAST_KEY"]),
+                &make_target(Some("web"), "dev"),
+            )
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("expected values");
+        };
+        assert_eq!(values.len(), 101);
+        assert_eq!(values["LAST_KEY"].as_str(), "final");
+
+        let calls = runner.take_calls();
+        assert_eq!(
+            calls.len(),
+            2,
+            "a full page must be followed by another request"
+        );
+        let second = String::from_utf8(calls[1].stdin.clone().unwrap()).unwrap();
+        assert!(
+            second.contains("cursor=c99"),
+            "second page must resume from the last cursor: {second}"
+        );
+        std::env::remove_var("RENDER_KEY_RB4");
+    }
+
+    #[test]
+    fn render_read_back_full_page_without_cursor_is_unreachable() {
+        let fixture = make_config("RENDER_KEY_RB5");
+        std::env::set_var("RENDER_KEY_RB5", "rnd_test");
+        let config = fixture.config();
+        let target_config = config.targets.render.as_ref().unwrap();
+
+        // A full page whose entries carry no cursor cannot be continued.
+        let items: Vec<serde_json::Value> = (0..100)
+            .map(|i| serde_json::json!({ "envVar": { "key": format!("K{i}"), "value": "v" } }))
+            .collect();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&serde_json::to_vec(&items).unwrap(), b"");
+        let target = RenderTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        // Matched rather than `unwrap_err`: `Evidence` intentionally has no
+        // `Debug` impl, since one would format secret values into panics.
+        let Err(err) = target.read_back(&verify_keys(&["K0"]), &make_target(Some("web"), "dev"))
+        else {
+            panic!("a full page with no cursor must not be reported as a complete read");
+        };
+        assert!(err.to_string().contains("no cursor"), "got: {err}");
+        std::env::remove_var("RENDER_KEY_RB5");
+    }
+
+    #[test]
+    fn render_read_back_skips_entries_without_a_value() {
+        // Secret *files* appear in the same listing but carry no `value`.
+        // Treating them as empty strings would invent a mismatch.
+        let items = serde_json::json!([
+            { "envVar": { "key": "REAL", "value": "v" }, "cursor": "c0" },
+            { "envVar": { "key": "FILE_ONLY" }, "cursor": "c1" },
+        ]);
+        let parsed = parse_env_var_list(&serde_json::to_vec(&items).unwrap()).unwrap();
+        assert_eq!(parsed.values.len(), 1);
+        assert_eq!(parsed.values["REAL"].as_str(), "v");
+        // The dropped entry still counts toward the page's fullness.
+        assert_eq!(parsed.entry_count, 2);
+    }
+
+    #[test]
+    fn render_read_back_unparseable_response_is_an_error() {
+        assert!(parse_env_var_list(b"not json").is_err());
+        assert!(parse_env_var_list(b"{}").is_err());
+    }
+
+    #[test]
+    fn render_read_back_full_page_containing_a_secret_file_still_paginates() {
+        // `parse_env_var_list` drops entries with no `value` (secret files), so
+        // a FULL page of 100 entries can parse to 99. Deciding "last page" from
+        // the parsed count would stop early and silently truncate the listing —
+        // every later key would then be reported as missing from the service.
+        let fixture = make_config("RENDER_KEY_RB6");
+        std::env::set_var("RENDER_KEY_RB6", "rnd_test");
+        let config = fixture.config();
+        let target_config = config.targets.render.as_ref().unwrap();
+
+        // 99 normal vars + 1 secret file = 100 raw entries, 99 parsed.
+        let mut items: Vec<serde_json::Value> = (0..99)
+            .map(|i| {
+                serde_json::json!({
+                    "envVar": { "key": format!("KEY_{i:03}"), "value": "v" },
+                    "cursor": format!("c{i}"),
+                })
+            })
+            .collect();
+        items.push(serde_json::json!({
+            "envVar": { "key": "SECRET_FILE" },
+            "cursor": "c99",
+        }));
+
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&serde_json::to_vec(&items).unwrap(), b"");
+        runner.push_success(&env_var_page(&[("LAST_KEY", "final")]), b"");
+        let target = RenderTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(
+                &verify_keys(&["LAST_KEY"]),
+                &make_target(Some("web"), "dev"),
+            )
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("expected values")
+        };
+        assert!(
+            values.contains_key("LAST_KEY"),
+            "a full raw page must be followed, even when parsing drops an entry"
+        );
+        std::env::remove_var("RENDER_KEY_RB6");
     }
 }

@@ -495,8 +495,8 @@ fn scoped_composite_secrets(
 
 #[cfg(test)]
 mod tests {
-    use proptest::prelude::*;
     use super::*;
+    use proptest::prelude::*;
 
     fn make_payload(secrets: &[(&str, &str)], version: u64) -> StorePayload {
         let mut map = BTreeMap::new();

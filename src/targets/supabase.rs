@@ -15,11 +15,14 @@
 
 use anyhow::{Context, Result};
 
+use std::collections::BTreeSet;
+
 use crate::config::{Config, ResolvedTarget, SupabaseTargetConfig};
 use crate::targets::{
     check_command, resolve_env_flags, validate_stdin_kv_value, CommandOpts, CommandRunner,
     DeployMode, DeployTarget,
 };
+use crate::verify::{Evidence, Fidelity};
 
 pub struct SupabaseTarget<'a> {
     pub config: &'a Config,
@@ -77,6 +80,63 @@ impl DeployTarget for SupabaseTarget<'_> {
             )
             .with_context(|| format!("failed to run supabase secrets set for {key}"))?
             .check("supabase secrets set", key)
+    }
+
+    /// Presence only. Supabase returns each secret's name and a digest of its
+    /// value; the value itself never comes back.
+    ///
+    /// The digest is not compared and not displayed. esk's own hashes are
+    /// HMAC-keyed, so no provider digest can ever equal one, and Supabase does
+    /// not document how it computes this one — a number an operator cannot
+    /// act on is noise, not evidence.
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Presence
+    }
+
+    /// List secret names via `supabase secrets list --output json`.
+    ///
+    /// JSON rather than the rendered `NAME | DIGEST` table: a table's header
+    /// and separator rows are indistinguishable from data without assuming a
+    /// layout, and a phantom row becomes an unmanaged key reported as drift on
+    /// every run.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let project_ref = &self.target_config.project_ref;
+
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec![
+            "secrets",
+            "list",
+            "--project-ref",
+            project_ref,
+            "--output",
+            "json",
+        ];
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run("supabase", &args, CommandOpts::default())
+            .context("failed to run supabase secrets list")?;
+
+        // A failed listing is an incomplete read, never an empty project.
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("supabase secrets list failed: {stderr}");
+        }
+
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse supabase secrets list JSON response")?;
+        let entries = json
+            .as_array()
+            .context("supabase secrets list response was not a JSON array")?;
+
+        Ok(Evidence::Names {
+            present: entries
+                .iter()
+                .filter_map(|e| e.get("name")?.as_str().map(String::from))
+                .collect(),
+            note: None,
+        })
     }
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
@@ -190,7 +250,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install from: https://supabase.com"));
+        assert!(err
+            .to_string()
+            .contains("Install from: https://supabase.com"));
     }
 
     #[test]
@@ -360,5 +422,101 @@ targets:
             .deploy_secret("KEY", "val", &make_target("dev"))
             .unwrap_err();
         assert!(err.to_string().contains("api error"));
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(
+        pairs: &[(&str, &str)],
+    ) -> std::collections::BTreeMap<String, zeroize::Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), zeroize::Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    fn secrets_list_json(entries: &[(&str, &str)]) -> Vec<u8> {
+        let items: Vec<serde_json::Value> = entries
+            .iter()
+            .map(|(name, digest)| serde_json::json!({ "name": name, "digest": digest }))
+            .collect();
+        serde_json::to_vec(&items).unwrap()
+    }
+
+    /// The digest Supabase returns must never become a verdict: esk's hashes
+    /// are HMAC-keyed, so no provider digest can ever match one.
+    #[test]
+    fn supabase_read_back_never_compares_the_digest() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.supabase.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secrets_list_json(&[("API_KEY", "abc123")]), b"");
+        let target = SupabaseTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "the_real_value")]),
+        );
+        let crate::verify::Findings::Presence { verdicts, .. } = &findings else {
+            panic!("supabase declares Fidelity::Presence");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::PresenceVerdict::Present);
+
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"--output".to_string()));
+        assert!(calls[0].args.contains(&"json".to_string()));
+    }
+
+    #[test]
+    fn supabase_read_back_missing_key_is_drift() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.supabase.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secrets_list_json(&[("OTHER", "d")]), b"");
+        let target = SupabaseTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+    }
+
+    #[test]
+    fn supabase_read_back_failure_is_unreachable_not_empty() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.supabase.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"project not found");
+        let target = SupabaseTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
     }
 }

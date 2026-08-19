@@ -23,3 +23,4 @@ pub mod targets;
 pub mod test_support;
 pub mod ui;
 pub mod validate;
+pub mod verify;

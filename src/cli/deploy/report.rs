@@ -30,6 +30,8 @@ pub(crate) struct DeployReport {
     pub unset: Vec<DeployEntry>,
     pub pruned: Vec<DeployEntry>,
     pub unavailable_orphans: Vec<crate::orphan::TargetOrphan>,
+    /// Batch artifacts regenerated because they drifted, as `(label, env)`.
+    pub restored: Vec<(String, String)>,
     pub dry_run: bool,
     pub verbose: bool,
 }
@@ -56,7 +58,35 @@ impl DeployReport {
             .chain(&self.pruned)
     }
 
+    /// Report artifacts regenerated because they drifted from the store.
+    ///
+    /// Kept distinct from `deployed`: the store did not change, so the value
+    /// was already correct. What changed is the artifact, and saying so tells
+    /// the user something was wrong on disk rather than in their secrets.
+    ///
+    /// A dry run reports the drift in the future tense. The audit that finds it
+    /// runs during planning, so `restored` is populated whether or not anything
+    /// was written — and "regenerated" for a file still sitting corrupt on disk
+    /// is a false report, the same one `SummaryMood` exists to prevent for the
+    /// deploy summary.
+    pub fn render_restored(&self) -> Result<()> {
+        let detail = if self.dry_run {
+            "artifact drifted — would regenerate"
+        } else {
+            "artifact drifted — regenerated"
+        };
+        for (target, env) in &self.restored {
+            cliclack::log::warning(format!(
+                "{}  {}",
+                style(format!("{target}:{env}")).bold(),
+                style(detail).dim()
+            ))?;
+        }
+        Ok(())
+    }
+
     pub fn render(&self) -> Result<()> {
+        self.render_restored()?;
         if self.is_empty() {
             cliclack::log::info("Nothing to deploy.")?;
         } else {
@@ -149,8 +179,19 @@ impl DeployReport {
 
             for (env_name, mut lines) in env_map {
                 let es = env_status.get(&env_name).unwrap();
-                let status_summary =
-                    ui::format_deploy_summary(es.keys, es.deployed, es.failed, es.unset, es.pruned);
+                let mood = if self.dry_run {
+                    ui::SummaryMood::Planned
+                } else {
+                    ui::SummaryMood::Done
+                };
+                let status_summary = ui::format_deploy_summary(
+                    es.keys,
+                    es.deployed,
+                    es.failed,
+                    es.unset,
+                    es.pruned,
+                    mood,
+                );
 
                 lines.push(String::new());
                 let status_icon = if es.failed > 0 {
@@ -178,12 +219,15 @@ impl DeployReport {
                             ));
                     }
                     for (env_name, lines) in skip_map {
-                        cliclack::note(format!("{env_name} (up to date)"), lines.join("\n"))?;
+                        cliclack::note(
+                            format!("{env_name} (no changes to send)"),
+                            lines.join("\n"),
+                        )?;
                     }
                 } else {
                     let skip_count = self.skipped.len();
                     cliclack::log::remark(format!(
-                        "{} targets up to date  {}",
+                        "{} targets unchanged since last deploy  {}",
                         style(skip_count).bold(),
                         style("(use --verbose to show)").dim()
                     ))?;
@@ -218,7 +262,7 @@ impl DeployReport {
                 ));
         }
         for (env_name, lines) in skip_map {
-            cliclack::note(format!("{env_name} (up to date)"), lines.join("\n"))?;
+            cliclack::note(format!("{env_name} (no changes to send)"), lines.join("\n"))?;
         }
         Ok(())
     }

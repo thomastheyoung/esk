@@ -13,16 +13,19 @@
 //! (RFC 1123: lowercase alphanumeric and hyphens, max 253 chars). Supports
 //! `--context` for multi-cluster setups.
 
-use std::fmt::Write;
-
 use anyhow::{bail, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
+use zeroize::Zeroizing;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
 
 use crate::config::{Config, KubernetesTargetConfig, ResolvedTarget};
 use crate::targets::{
     check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployOutcome,
     DeployResult, DeployTarget, SecretValue,
 };
+use crate::verify::{Evidence, Fidelity};
 
 /// Validate a Kubernetes resource name or namespace.
 ///
@@ -129,6 +132,75 @@ impl DeployTarget for KubernetesTarget<'_> {
     fn deploy_secret(&self, _key: &str, _value: &str, _target: &ResolvedTarget) -> Result<()> {
         // Batch target — deploy_batch is the primary method
         Ok(())
+    }
+
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Value
+    }
+
+    /// Read back via `kubectl get secret <name> -n <ns> -o json`.
+    ///
+    /// The `data` map is base64-encoded by the Kubernetes API, which is the
+    /// same encoding [`Self::generate_manifest`] writes, so decoding here is
+    /// the exact inverse of the deploy.
+    ///
+    /// `keys` is unused: one Secret object holds every key esk manages for
+    /// this scope, and it arrives in a single request.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let ns = self.resolve_namespace(&target.environment)?;
+        let name = self.secret_name();
+
+        let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
+        let mut args: Vec<&str> = vec!["get", "secret", &name, "-n", ns, "-o", "json"];
+        if let Some(ctx) = self.target_config.context.get(&target.environment) {
+            args.push("--context");
+            args.push(ctx);
+        }
+        args.extend(flag_parts.iter().map(String::as_str));
+
+        let output = self
+            .runner
+            .run("kubectl", &args, CommandOpts::default())
+            .context("failed to run kubectl get secret")?;
+
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            // A deleted Secret is the state this check exists to catch, so it
+            // is reported as an empty read — every managed key comes back
+            // missing — rather than as an unreadable cluster.
+            if stderr.contains("NotFound") || stderr.contains("not found") {
+                return Ok(Evidence::Values(BTreeMap::new()));
+            }
+            anyhow::bail!("kubectl get secret failed for {name}: {stderr}");
+        }
+
+        let json: serde_json::Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse kubectl get secret JSON response")?;
+
+        // An existing Secret with no `data` holds no keys, which is a valid
+        // empty read rather than a parse failure.
+        let Some(data) = json.get("data").and_then(|d| d.as_object()) else {
+            return Ok(Evidence::Values(BTreeMap::new()));
+        };
+
+        let mut values = BTreeMap::new();
+        for (key, encoded) in data {
+            let encoded = encoded
+                .as_str()
+                .with_context(|| format!("secret data for '{key}' was not a string"))?;
+            let decoded = BASE64
+                .decode(encoded)
+                .with_context(|| format!("secret data for '{key}' was not valid base64"))?;
+            // Lossy decode: a value written outside esk may not be UTF-8, and
+            // failing the whole read would hide the keys that are fine. A
+            // mangled value still mismatches, which is the honest outcome.
+            values.insert(
+                key.clone(),
+                Zeroizing::new(String::from_utf8_lossy(&decoded).into_owned()),
+            );
+        }
+
+        Ok(Evidence::Values(values))
     }
 
     fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
@@ -301,7 +373,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install from: https://kubernetes.io"));
+        assert!(err
+            .to_string()
+            .contains("Install from: https://kubernetes.io"));
     }
 
     #[test]
@@ -507,5 +581,243 @@ targets:
         };
         let results = target.deploy_batch(&[], &make_target("dev"));
         assert!(results.is_empty());
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(pairs: &[(&str, &str)]) -> BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    /// A `kubectl get secret -o json` response with base64-encoded data.
+    fn secret_json(pairs: &[(&str, &str)]) -> Vec<u8> {
+        let data: serde_json::Map<String, serde_json::Value> = pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), serde_json::json!(BASE64.encode(v))))
+            .collect();
+        serde_json::to_vec(&serde_json::json!({
+            "apiVersion": "v1",
+            "kind": "Secret",
+            "data": data,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn kubernetes_read_back_decodes_base64_data() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_json(&[("API_KEY", "secret1")]), b"");
+        let target = KubernetesTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &make_target("dev"))
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("kubernetes declares Fidelity::Value, so it must return Values");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "secret1");
+
+        let calls = runner.take_calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "kubectl");
+        assert_eq!(
+            calls[0].args,
+            vec![
+                "get",
+                "secret",
+                "myapp-secrets",
+                "-n",
+                "myapp-dev",
+                "-o",
+                "json"
+            ]
+        );
+    }
+
+    /// The round trip that matters: whatever `generate_manifest` encodes, the
+    /// reader must decode identically, or every deploy reports false drift.
+    #[test]
+    fn kubernetes_read_back_round_trips_the_manifest_encoding() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        let target = KubernetesTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let awkward = [
+            ("PLAIN", "simple"),
+            ("SPACES", "hello world"),
+            ("NEWLINES", "line1\nline2"),
+            ("UNICODE", "café ☕"),
+            ("EQUALS", "a=b=c"),
+            ("EMPTY", ""),
+        ];
+        let secrets: Vec<SecretValue> = awkward
+            .iter()
+            .map(|(k, v)| SecretValue {
+                key: (*k).to_string(),
+                value: Zeroizing::new((*v).to_string()),
+                group: "G".to_string(),
+            })
+            .collect();
+
+        // Encode exactly as a deploy would, then feed it back as the cluster's
+        // response so the two halves are checked against each other.
+        let manifest = target
+            .generate_manifest(&secrets, &make_target("dev"))
+            .unwrap();
+        let encoded: Vec<(String, String)> = manifest
+            .lines()
+            .skip_while(|l| !l.starts_with("data:"))
+            .skip(1)
+            // Split on the colon, not on ": ": an empty value encodes to an
+            // empty string, so its line ends with the separator and no value.
+            .filter_map(|l| l.trim().split_once(':'))
+            .map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))
+            .collect();
+        let data: serde_json::Map<String, serde_json::Value> = encoded
+            .iter()
+            .map(|(k, v)| (k.clone(), serde_json::json!(v)))
+            .collect();
+        runner.push_success(
+            &serde_json::to_vec(&serde_json::json!({ "data": data })).unwrap(),
+            b"",
+        );
+
+        let evidence = target
+            .read_back(&verify_keys(&["PLAIN"]), &make_target("dev"))
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("expected values");
+        };
+        for (key, value) in awkward {
+            assert_eq!(
+                values.get(key).map(|v| v.as_str()),
+                Some(value),
+                "{key} did not survive a manifest write/read round trip"
+            );
+        }
+    }
+
+    #[test]
+    fn kubernetes_read_back_surfaces_wrong_value_as_drift() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_json(&[("API_KEY", "STALE")]), b"");
+        let target = KubernetesTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "current")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+        let crate::verify::Findings::Values { verdicts, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::ValueVerdict::Differs);
+    }
+
+    /// A deleted Secret is exactly the drift this command exists to catch, so
+    /// it must name the missing keys rather than report an unreadable cluster.
+    #[test]
+    fn kubernetes_read_back_deleted_secret_reports_missing_keys() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"Error from server (NotFound): secrets \"myapp-secrets\" not found");
+        let target = KubernetesTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+        let crate::verify::Findings::Values { verdicts, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::ValueVerdict::Missing);
+    }
+
+    /// Any other failure is an unreadable cluster, not an absent Secret.
+    /// Collapsing the two would report drift on a scope esk never read.
+    #[test]
+    fn kubernetes_read_back_other_failure_is_unreachable() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_failure(b"Unable to connect to the server: dial tcp: i/o timeout");
+        let target = KubernetesTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &make_target("dev")),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(findings.assess(), crate::verify::Assessment::Unresolved);
+        assert!(matches!(
+            findings,
+            crate::verify::Findings::Unreachable { .. }
+        ));
+    }
+
+    #[test]
+    fn kubernetes_read_back_applies_context_and_env_flags() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let runner = MockCommandRunner::new().strict();
+        runner.push_success(&secret_json(&[("A", "1")]), b"");
+        let target = KubernetesTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+        target
+            .read_back(&verify_keys(&["A"]), &make_target("prod"))
+            .unwrap();
+        let calls = runner.take_calls();
+        assert!(calls[0].args.contains(&"--context".to_string()));
+        assert!(calls[0].args.contains(&"prod-cluster".to_string()));
+        assert!(calls[0].args.contains(&"myapp-prod".to_string()));
     }
 }
