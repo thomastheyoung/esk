@@ -185,12 +185,8 @@ fn exec_batch_group(
         }
     } else {
         for result in &batch_results {
-            let tracker_key = DeployIndex::tracker_key(
-                &result.key,
-                &bg.target_name,
-                bg.app.as_deref(),
-                env_name,
-            );
+            let tracker_key =
+                DeployIndex::tracker_key(&result.key, &bg.target_name, bg.app.as_deref(), env_name);
             let composite = format!("{}:{}", result.key, env_name);
             let value = payload_secrets
                 .get(&composite)
@@ -392,7 +388,8 @@ fn execute_animated<'a>(
         for bg in &plan.batch_groups {
             let results = &results;
             let deploy_target = &deploy_targets[bg.target_idx];
-            let target_display = crate::config::format_target_label(&bg.target_name, bg.app.as_deref());
+            let target_display =
+                crate::config::format_target_label(&bg.target_name, bg.app.as_deref());
 
             s.spawn(move || {
                 let outcome = exec_batch_group(

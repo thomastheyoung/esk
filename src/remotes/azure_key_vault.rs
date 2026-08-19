@@ -70,8 +70,9 @@ impl SyncRemote for AzureKeyVaultRemote<'_> {
     }
 
     fn preflight(&self) -> Result<()> {
-        crate::targets::check_command(self.runner, "az")
-            .context("Install from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli")?;
+        crate::targets::check_command(self.runner, "az").context(
+            "Install from: https://learn.microsoft.com/en-us/cli/azure/install-azure-cli",
+        )?;
 
         let output = self
             .runner

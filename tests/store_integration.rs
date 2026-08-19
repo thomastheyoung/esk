@@ -53,7 +53,10 @@ fn cli_reopens_store_with_esk_store_key_without_key_file() {
         "stderr: {}",
         String::from_utf8_lossy(&output.stderr)
     );
-    assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), "value-from-ci");
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout).trim(),
+        "value-from-ci"
+    );
 
     let rotate = std::process::Command::new(env!("CARGO_BIN_EXE_esk"))
         .current_dir(project.root())

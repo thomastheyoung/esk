@@ -1,11 +1,11 @@
 pub mod delete;
-pub mod diff;
 pub mod deploy;
+pub mod diff;
 pub mod doctor;
 pub mod generate;
 pub mod get;
-pub mod init;
 pub mod import;
+pub mod init;
 pub mod key;
 pub mod list;
 pub mod llm_context;

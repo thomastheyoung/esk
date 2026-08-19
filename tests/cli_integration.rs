@@ -7283,7 +7283,10 @@ fn doctor_json_process_exit_matches_text_on_target_health_failure() {
         let i = text.rfind("passed,").expect("summary line on stderr");
         let start = text[..i].rfind('\n').map_or(0, |n| n + 1);
         let end = text[i..].find('\n').map_or(text.len(), |n| i + n);
-        text[start..end].trim().trim_start_matches(['✖', ' ']).to_string()
+        text[start..end]
+            .trim()
+            .trim_start_matches(['✖', ' '])
+            .to_string()
     };
     assert_eq!(
         counts(&text.stderr),
@@ -7332,7 +7335,10 @@ fn deploy_restores_deleted_batch_artifact() {
     // A plain deploy — no --force — must bring it back.
     cli::deploy::run(&config, &opts()).unwrap();
 
-    assert!(env_path.is_file(), "deploy must restore the deleted artifact");
+    assert!(
+        env_path.is_file(),
+        "deploy must restore the deleted artifact"
+    );
     assert_eq!(
         std::fs::read_to_string(&env_path).unwrap(),
         original,
@@ -8034,7 +8040,10 @@ fn verify_json_never_reports_an_aggregate_pass() {
         "malformed",
         "skipped",
     ] {
-        assert!(json["tally"].get(bucket).is_some(), "missing bucket {bucket}");
+        assert!(
+            json["tally"].get(bucket).is_some(),
+            "missing bucket {bucket}"
+        );
     }
     assert_eq!(json["outcome"], "drift");
 }
@@ -8143,10 +8152,12 @@ fn verify_malformed_target_response_is_inconclusive_not_clean() {
         present: ["API_KEY".to_string()].into_iter().collect(),
         note: None,
     });
-    let expected: std::collections::BTreeMap<String, zeroize::Zeroizing<String>> =
-        [("API_KEY".to_string(), zeroize::Zeroizing::new("v".to_string()))]
-            .into_iter()
-            .collect();
+    let expected: std::collections::BTreeMap<String, zeroize::Zeroizing<String>> = [(
+        "API_KEY".to_string(),
+        zeroize::Zeroizing::new("v".to_string()),
+    )]
+    .into_iter()
+    .collect();
 
     let findings = compare(Fidelity::Value, evidence, &expected);
     assert!(
@@ -8193,7 +8204,10 @@ fn verify_rejects_an_unknown_target_filter() {
     };
     let msg = err.to_string();
     assert!(msg.contains("convx"), "got: {msg}");
-    assert!(msg.contains("convex"), "should suggest the near match: {msg}");
+    assert!(
+        msg.contains("convex"),
+        "should suggest the near match: {msg}"
+    );
 }
 
 #[test]
@@ -8252,7 +8266,9 @@ fn verify_detects_a_deleted_dotenv_artifact() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
-    store.set("MY_SECRET", "dev", "postgres://localhost").unwrap();
+    store
+        .set("MY_SECRET", "dev", "postgres://localhost")
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     cli::deploy::run_with_runner(
@@ -8299,7 +8315,9 @@ fn verify_detects_an_edited_dotenv_value() {
     let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
-    store.set("MY_SECRET", "dev", "postgres://localhost").unwrap();
+    store
+        .set("MY_SECRET", "dev", "postgres://localhost")
+        .unwrap();
 
     let runner = MockCommandRunner::new();
     cli::deploy::run_with_runner(
@@ -8362,7 +8380,7 @@ fn verify_detects_drift_on_a_heroku_target() {
     let runner = MockCommandRunner::new().strict();
     runner.push_success(b"", b""); // preflight: heroku --version
     runner.push_success(b"user@example.com", b""); // preflight: auth:whoami
-    // The app holds a different value than the store.
+                                                   // The app holds a different value than the store.
     runner.push_success(br#"{"API_KEY":"CHANGED_BY_HAND"}"#, b"");
 
     let report = cli::verify::report_for_test(

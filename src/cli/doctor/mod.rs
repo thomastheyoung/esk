@@ -266,7 +266,9 @@ secrets:
                 .unwrap();
             assert_eq!(failed_check.status, CheckStatus::Fail);
             assert!(
-                failed_check.detail.contains("1 deploy(s) recorded as failed"),
+                failed_check
+                    .detail
+                    .contains("1 deploy(s) recorded as failed"),
                 "detail was: {}",
                 failed_check.detail
             );

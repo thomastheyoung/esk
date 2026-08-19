@@ -178,4 +178,3 @@ fn check_icon(status: CheckStatus) -> ui::Icon {
         CheckStatus::Fail => ui::Icon::Failure,
     }
 }
-

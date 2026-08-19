@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use crate::config::Config;
 use crate::deploy_tracker::{DeployIndex, DeployStatus};
 use crate::store::SecretStore;
-use crate::targets::SecretValue;
 use crate::sync_tracker::{SyncIndex, SyncStatus};
+use crate::targets::SecretValue;
 
 use super::types::{
     CoverageGap, Dashboard, DeployEntry, EmptyValueWarning, NextStep, Orphan, RemoteState,
@@ -97,8 +97,7 @@ impl Dashboard {
 
         // Artifact state per (app, env) for filesystem targets, resolved once
         // per group rather than per secret. `None` means esk cannot tell.
-        let mut artifact_state: BTreeMap<(String, String, String), Option<bool>> =
-            BTreeMap::new();
+        let mut artifact_state: BTreeMap<(String, String, String), Option<bool>> = BTreeMap::new();
 
         let envs: Vec<&str> = match env {
             Some(e) => vec![e],

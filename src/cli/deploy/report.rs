@@ -185,7 +185,12 @@ impl DeployReport {
                     ui::SummaryMood::Done
                 };
                 let status_summary = ui::format_deploy_summary(
-                    es.keys, es.deployed, es.failed, es.unset, es.pruned, mood,
+                    es.keys,
+                    es.deployed,
+                    es.failed,
+                    es.unset,
+                    es.pruned,
+                    mood,
                 );
 
                 lines.push(String::new());
@@ -214,7 +219,10 @@ impl DeployReport {
                             ));
                     }
                     for (env_name, lines) in skip_map {
-                        cliclack::note(format!("{env_name} (no changes to send)"), lines.join("\n"))?;
+                        cliclack::note(
+                            format!("{env_name} (no changes to send)"),
+                            lines.join("\n"),
+                        )?;
                     }
                 } else {
                     let skip_count = self.skipped.len();

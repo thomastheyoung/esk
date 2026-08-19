@@ -502,7 +502,10 @@ pub(crate) fn plan_deploy<'a>(
         let mut candidates: BTreeSet<(String, Option<String>, String)> = BTreeSet::new();
         for secret in resolved {
             for target in &secret.targets {
-                if !matches!(target_map.get(target.service.as_str()), Some((_, DeployMode::Batch))) {
+                if !matches!(
+                    target_map.get(target.service.as_str()),
+                    Some((_, DeployMode::Batch))
+                ) {
                     continue;
                 }
                 if let Some(filter_env) = env {
@@ -526,14 +529,8 @@ pub(crate) fn plan_deploy<'a>(
             let Some((target_idx, _)) = target_map.get(target_name.as_str()).copied() else {
                 continue;
             };
-            let secrets_for_group = collect_batch_secrets(
-                resolved,
-                payload,
-                target_name,
-                app.as_ref(),
-                group_env,
-            )
-            .0;
+            let secrets_for_group =
+                collect_batch_secrets(resolved, payload, target_name, app.as_ref(), group_env).0;
             // A group with no stored values was never materialised; healing it
             // would create a file rather than restore one.
             if secrets_for_group.is_empty() {

@@ -210,7 +210,9 @@ targets:
             runner: &runner,
         };
         let err = target.preflight().unwrap_err();
-        assert!(err.to_string().contains("Install from: https://docs.docker.com"));
+        assert!(err
+            .to_string()
+            .contains("Install from: https://docs.docker.com"));
     }
 
     #[test]
