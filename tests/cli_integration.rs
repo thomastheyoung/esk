@@ -7934,41 +7934,35 @@ fn verify_reports_targets_without_read_back_as_gaps() {
     let project = TestProject::with_store(FULL_CONFIG).unwrap();
     let config = project.config().unwrap();
     let store = project.store().unwrap();
-    store.set("STRIPE_KEY", "dev", "sk_test_1").unwrap();
-    store.set("API_SECRET", "dev", "s3cret").unwrap();
+    store.set("STRIPE_KEY", "prod", "sk_live_1").unwrap();
 
+    // cloudflare has no read_back implementation, so it declares
+    // `Fidelity::None`. (`.env` used to serve as this example and no longer
+    // can — it reads its artifact back now.)
     let runner = MockCommandRunner::new();
-    let code = cli::verify::run_with_runner(
-        &config,
-        &cli::verify::VerifyOptions {
-            env: Some("dev"),
-            target: Some(".env"),
-            all: false,
-        },
-        &runner,
-    )
-    .unwrap();
-
-    // Exit 0: esk found no disagreement. The exit code alone cannot say
-    // whether the scope was verified or merely unreadable, which is why the
-    // report itself is asserted rather than just the code.
-    assert_eq!(code, cli::verify::EXIT_CLEAN);
-
-    let report = cli::verify::report_for_test(&config, &cli::verify::VerifyOptions {
-        env: Some("dev"),
-        target: Some(".env"),
+    runner.push_success(b"", b""); // preflight: wrangler --version
+    let opts = cli::verify::VerifyOptions {
+        env: Some("prod"),
+        target: Some("cloudflare"),
         all: false,
-    }, &runner)
-    .unwrap();
-    // FULL_CONFIG points `.env` at both web:dev and api:dev, so dev has two
-    // `.env` scopes; both must land in the unverifiable bucket.
+    };
+    let report = cli::verify::report_for_test(&config, &opts, &runner).unwrap();
+
     let tally = report.tally();
     assert_eq!(
-        tally.unverifiable, 2,
+        tally.unverifiable, 1,
         "a target with no read_back must count as unverifiable"
     );
     assert_eq!(tally.verified(), 0, "it must never count as verified");
     assert_eq!(report.outcome(), esk::verify::Outcome::CleanWithGaps);
+
+    // Exit 0: esk found no disagreement. The exit code alone cannot say
+    // whether the scope was verified or merely unreadable, which is why the
+    // buckets are asserted above rather than only the code.
+    let runner2 = MockCommandRunner::new();
+    runner2.push_success(b"", b"");
+    let code = cli::verify::run_with_runner(&config, &opts, &runner2).unwrap();
+    assert_eq!(code, cli::verify::EXIT_CLEAN);
 }
 
 #[test]
@@ -8165,6 +8159,7 @@ fn verify_malformed_target_response_is_inconclusive_not_clean() {
             env: "dev".to_string(),
             fidelity: Fidelity::Value,
             findings,
+            unset: Vec::new(),
         }],
     };
     assert_eq!(report.outcome(), Outcome::Inconclusive);
@@ -8245,4 +8240,242 @@ fn verify_empty_selection_is_reported_as_a_gap_not_clean() {
         assert_eq!(report.outcome(), esk::verify::Outcome::CleanWithGaps);
         assert_eq!(report.tally().verified(), 0);
     }
+}
+
+/// The scenario that motivated read-back verification, end to end: deploy a
+/// `.env`, delete it, and confirm `esk verify` reports drift. `esk status`
+/// reads the deploy index, which still records a successful send.
+#[test]
+fn verify_detects_a_deleted_dotenv_artifact() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "postgres://localhost").unwrap();
+
+    let runner = MockCommandRunner::new();
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let artifact = config.root.join("apps/web/.env.local");
+    assert!(artifact.exists(), "deploy should have written the artifact");
+    std::fs::remove_file(&artifact).unwrap();
+
+    let code = cli::verify::run_with_runner(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some(".env"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+    assert_eq!(
+        code,
+        cli::verify::EXIT_DRIFT,
+        "a deleted artifact must be reported as drift, not as deployed"
+    );
+}
+
+/// A `.env` whose value was edited by hand must read as drift, and the key
+/// that changed must be named — not just a scope-level "something differs".
+#[test]
+fn verify_detects_an_edited_dotenv_value() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "postgres://localhost").unwrap();
+
+    let runner = MockCommandRunner::new();
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    // esk writes the artifact read-only, so tampering replaces the file.
+    let artifact = config.root.join("apps/web/.env.local");
+    let edited = std::fs::read_to_string(&artifact)
+        .unwrap()
+        .replace("postgres://localhost", "postgres://ATTACKER");
+    std::fs::remove_file(&artifact).unwrap();
+    std::fs::write(&artifact, edited).unwrap();
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some(".env"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(report.outcome(), esk::verify::Outcome::Drift);
+    assert_eq!(report.tally().value_drifted, 1);
+    let scope = &report.scopes[0];
+    let esk::verify::Findings::Values { verdicts, .. } = &scope.findings else {
+        panic!("expected value findings");
+    };
+    assert_eq!(
+        verdicts["MY_SECRET"],
+        esk::verify::ValueVerdict::Differs,
+        "the drifted key must be named"
+    );
+}
+
+/// A Tier 2 target end to end: heroku needs a new CLI call to verify, unlike
+/// the Tier 1 targets that reuse a read the deploy already made.
+#[test]
+fn verify_detects_drift_on_a_heroku_target() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "correct_value").unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b""); // preflight: heroku --version
+    runner.push_success(b"user@example.com", b""); // preflight: auth:whoami
+    // The app holds a different value than the store.
+    runner.push_success(br#"{"API_KEY":"CHANGED_BY_HAND"}"#, b"");
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some("heroku"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(report.outcome(), esk::verify::Outcome::Drift);
+    assert_eq!(report.tally().value_drifted, 1);
+    let esk::verify::Findings::Values { verdicts, .. } = &report.scopes[0].findings else {
+        panic!("expected value findings");
+    };
+    assert_eq!(verdicts["API_KEY"], esk::verify::ValueVerdict::Differs);
+}
+
+/// An unauthenticated CLI must surface as unreachable, not as drift: esk did
+/// not read the target, so it cannot say anything about what it holds.
+#[test]
+fn verify_failed_preflight_is_unreachable_not_drift() {
+    let project = TestProject::with_store(HEROKU_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("API_KEY", "dev", "v").unwrap();
+
+    let runner = MockCommandRunner::new().strict();
+    runner.push_success(b"", b""); // heroku --version
+    runner.push_failure(b"not logged in"); // auth:whoami fails
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some("heroku"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    assert_eq!(report.outcome(), esk::verify::Outcome::Inconclusive);
+    assert_eq!(report.tally().unreachable, 1);
+    assert_eq!(
+        report.tally().verified(),
+        0,
+        "a target esk could not authenticate to must never count as verified"
+    );
+}
+
+/// A key declared in config but never given a value must be surfaced, and the
+/// run must not report `Clean`.
+///
+/// esk holds no value to compare, so the key gets no verdict — inventing one
+/// would be the fabrication this module prevents. But silence would let a
+/// scope esk only partly knows about read as fully verified, and a
+/// declared-but-never-deployed key is exactly what verification is run to find.
+#[test]
+fn verify_surfaces_declared_but_unset_keys() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    // ENV_ONLY_CONFIG declares MY_SECRET and OTHER_SECRET for web:dev.
+    store.set("MY_SECRET", "dev", "v").unwrap();
+
+    let runner = MockCommandRunner::new();
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let report = cli::verify::report_for_test(
+        &config,
+        &cli::verify::VerifyOptions {
+            env: Some("dev"),
+            target: Some(".env"),
+            all: false,
+        },
+        &runner,
+    )
+    .unwrap();
+
+    let scope = &report.scopes[0];
+    assert_eq!(
+        scope.unset,
+        vec!["OTHER_SECRET".to_string()],
+        "a declared key with no stored value must be reported, not dropped"
+    );
+    // The deployed key still verified correctly.
+    let esk::verify::Findings::Values { verdicts, .. } = &scope.findings else {
+        panic!("expected value findings");
+    };
+    assert_eq!(verdicts["MY_SECRET"], esk::verify::ValueVerdict::Matches);
+
+    // But the run is not clean: esk does not know this scope's whole state.
+    assert_ne!(
+        report.outcome(),
+        esk::verify::Outcome::Clean,
+        "a scope with unset keys must not report as fully verified"
+    );
+    assert_eq!(report.tally().value_clean, 0);
+    assert_eq!(report.tally().skipped, 1);
 }

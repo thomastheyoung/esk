@@ -10,8 +10,15 @@ use crate::verify::{compare, Findings, ScopeReport, VerifyReport};
 
 use super::VerifyOptions;
 
-/// One (target, app, env) tuple and the keys esk believes it holds there.
+/// One (target, app, env) tuple.
 type ScopeKey = (String, Option<String>, String);
+
+/// What esk expects a scope to hold, and what it declares but has no value for.
+#[derive(Default)]
+struct Scope {
+    expected: BTreeMap<String, Zeroizing<String>>,
+    unset: Vec<String>,
+}
 
 /// Build the report by reading every configured scope back.
 ///
@@ -49,7 +56,7 @@ pub(super) fn build(
     // config and the store only: what the deploy index claims esk sent is
     // deliberately not an input, since the index is the very artifact whose
     // honesty this command exists to check.
-    let mut scopes: BTreeMap<ScopeKey, BTreeMap<String, Zeroizing<String>>> = BTreeMap::new();
+    let mut scopes: BTreeMap<ScopeKey, Scope> = BTreeMap::new();
     for secret in &resolved {
         for target in &secret.targets {
             if !matches_filter(target, opts) {
@@ -62,11 +69,20 @@ pub(super) fn build(
                     target.environment.clone(),
                 ))
                 .or_default();
-            if let Some(value) = payload
+            match payload
                 .secrets
                 .get(&format!("{}:{}", secret.key, target.environment))
             {
-                entry.insert(secret.key.clone(), Zeroizing::new(value.clone()));
+                Some(value) => {
+                    entry
+                        .expected
+                        .insert(secret.key.clone(), Zeroizing::new(value.clone()));
+                }
+                // Declared here but never given a value. There is nothing to
+                // compare, so it gets no verdict — but it is recorded, because
+                // dropping it silently would let a scope esk only partly knows
+                // about report as fully verified.
+                None => entry.unset.push(secret.key.clone()),
             }
         }
     }
@@ -74,7 +90,7 @@ pub(super) fn build(
     let candidates = target_candidates(config, runner);
     let mut report = VerifyReport { scopes: Vec::new() };
 
-    for ((service, app, env), expected) in scopes {
+    for ((service, app, env), Scope { expected, unset }) in scopes {
         let Some(candidate) = candidates.iter().find(|c| c.target.name() == service) else {
             // Configured as a secret's target but not as a configured target.
             // `config` validation rejects this, so reaching it means the two
@@ -87,6 +103,7 @@ pub(super) fn build(
                 findings: Findings::Unreachable {
                     error: format!("'{service}' is not a configured target"),
                 },
+                unset,
             });
             continue;
         };
@@ -116,6 +133,7 @@ pub(super) fn build(
             env,
             fidelity,
             findings: compare(fidelity, evidence, &expected),
+            unset,
         });
     }
 

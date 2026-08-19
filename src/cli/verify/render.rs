@@ -42,17 +42,38 @@ pub(super) fn render(report: &VerifyReport, all: bool) -> Result<()> {
             tally.verified(),
             plural(tally.verified()),
         ),
-        Outcome::CleanWithGaps => format!(
-            "{} no drift found, but {} scope{} could not be checked",
-            style("○").yellow(),
-            unresolved_count(&tally),
-            plural(unresolved_count(&tally)),
-        ),
+        // Names the gap in the vocabulary of the bucket it came from. A run
+        // whose only gap is unset keys never "could not be checked" — esk read
+        // it fine and simply has no value to compare — and saying so with a
+        // count of zero reads as a bug.
+        Outcome::CleanWithGaps => {
+            let unreadable = tally.unverifiable + tally.unreachable + tally.malformed;
+            if unreadable > 0 {
+                format!(
+                    "{} no drift found, but {unreadable} scope{} could not be checked",
+                    style("○").yellow(),
+                    plural(unreadable),
+                )
+            } else {
+                format!(
+                    "{} no drift found, but {} scope{} {} not fully verified",
+                    style("○").yellow(),
+                    tally.skipped,
+                    plural(tally.skipped),
+                    if tally.skipped == 1 { "was" } else { "were" },
+                )
+            }
+        }
         Outcome::Drift => format!(
-            "{} {} scope{} disagree with the store",
+            "{} {} scope{} {} with the store",
             style("✖").red(),
             tally.drifted(),
             plural(tally.drifted()),
+            if tally.drifted() == 1 {
+                "disagrees"
+            } else {
+                "disagree"
+            },
         ),
         Outcome::Inconclusive => format!(
             "{} could not determine the state of {} scope{}",
@@ -73,15 +94,6 @@ fn plural(n: usize) -> &'static str {
     }
 }
 
-/// Scopes esk did not establish the state of.
-///
-/// Excludes `skipped`, which counts scopes that manage no keys: those are
-/// described as "nothing to check" in the summary, and calling the same scopes
-/// "could not be checked" in the outro would give one bucket two meanings.
-fn unresolved_count(tally: &Tally) -> usize {
-    tally.unverifiable + tally.unreachable + tally.malformed
-}
-
 /// Name every non-empty bucket. Buckets are never summed into one figure.
 fn summary_line(tally: &Tally) -> String {
     let parts: Vec<String> = [
@@ -92,7 +104,7 @@ fn summary_line(tally: &Tally) -> String {
         ("write-only", tally.unverifiable),
         ("unreachable", tally.unreachable),
         ("malformed", tally.malformed),
-        ("nothing to check", tally.skipped),
+        ("not fully verified", tally.skipped),
     ]
     .into_iter()
     .filter(|(_, count)| *count > 0)
@@ -116,6 +128,20 @@ fn scope_label(scope: &ScopeReport) -> String {
 fn render_scope(scope: &ScopeReport, all: bool) -> Result<()> {
     let label = scope_label(scope);
 
+    // Declared but never given a value. Shown before the findings because it
+    // is a fact about the store rather than about the target, and because a
+    // scope carrying these is not one esk fully verified.
+    if !scope.unset.is_empty() {
+        let mut lines = vec![format!("{label}  declared but never set")];
+        for key in &scope.unset {
+            lines.push(format!(
+                "  {} {key} — no value in the store",
+                style("○").dim()
+            ));
+        }
+        cliclack::log::warning(lines.join("\n"))?;
+    }
+
     match &scope.findings {
         Findings::Values { verdicts, extra } => {
             let bad: Vec<&String> = verdicts
@@ -124,7 +150,11 @@ fn render_scope(scope: &ScopeReport, all: bool) -> Result<()> {
                 .map(|(k, _)| k)
                 .collect();
             if bad.is_empty() && extra.is_empty() {
-                if all {
+                // Also shown when the scope carries unset keys, even without
+                // `--all`: the warning above says what esk could not account
+                // for, and without this line the keys it *did* verify are
+                // invisible, making a mostly-healthy scope look untouched.
+                if all || !scope.unset.is_empty() {
                     cliclack::log::success(format!(
                         "{label}  {} key{} read back and matching",
                         verdicts.len(),
@@ -262,6 +292,7 @@ fn scope_json(scope: &ScopeReport) -> serde_json::Value {
         "app": scope.app,
         "environment": scope.env,
         "fidelity": scope.fidelity.as_str(),
+        "unset_keys": scope.unset,
     });
 
     // Never emits a value, only a verdict about one.

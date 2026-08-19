@@ -8,14 +8,16 @@
 //! by omitting the key from the next write. Values containing newlines are
 //! rejected by `validate_dotenv_value` before formatting.
 
-use std::collections::BTreeMap;
-use std::fmt::Write;
-
 use anyhow::{Context, Result};
 use tempfile::NamedTempFile;
+use zeroize::Zeroizing;
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::fmt::Write;
 
 use crate::config::{Config, OutputPathStatus, ResolvedTarget};
 use crate::targets::{DeployMode, DeployOutcome, DeployResult, DeployTarget, SecretValue};
+use crate::verify::{Evidence, Fidelity};
 
 /// Format a value for safe inclusion in a .env file.
 ///
@@ -118,6 +120,65 @@ impl DeployTarget for DotenvTarget<'_> {
         }
     }
 
+    fn verify_fidelity(&self) -> Fidelity {
+        Fidelity::Value
+    }
+
+    /// Read the generated file back and return the values it holds.
+    ///
+    /// The cheapest read-back esk has — a local file, no network — and the one
+    /// where out-of-band edits are most likely, since the artifact sits in the
+    /// developer's working tree.
+    ///
+    /// Follows symlinks, unlike [`DeployTarget::artifact_matches`]: that
+    /// method answers a question about *writing*, which esk refuses to do
+    /// through a link. Reading through one cannot damage it, and declining to
+    /// look would leave an artifact esk never inspected reported as current.
+    ///
+    /// A missing file is reported as an empty read, so every managed key comes
+    /// back `Missing` — the truth, since the file is not there. A file that
+    /// exists but cannot be read is an error instead: esk did not observe
+    /// those keys and must not claim they are absent.
+    ///
+    /// Following a symlink can therefore surface key *names* from outside the
+    /// project in the `extra` list. Values never leave this function, and the
+    /// link is the user's own configuration.
+    fn read_back(&self, _keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence> {
+        let app = target.app.as_ref().context(".env target requires an app")?;
+        let path = self
+            .config
+            .dotenv_display_path(app, &target.environment)
+            .with_context(|| format!("no .env path configured for '{app}'"))?;
+
+        let contents = match std::fs::read(&path) {
+            Ok(contents) => contents,
+            // A deleted artifact is the state this check exists to catch, and
+            // esk did observe its absence: the file holds none of the managed
+            // keys, so reporting them missing is a fact.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Evidence::Values(BTreeMap::new()))
+            }
+            // Present but unreadable is a different state, and collapsing it
+            // into the one above fabricates a verdict: esk never saw these
+            // keys, so it cannot report them absent. `Missing` would send the
+            // operator to redeploy, which fails on the same permissions and
+            // explains nothing. The `io` error names the real problem.
+            Err(e) => return Err(e).with_context(|| format!("failed to read {}", path.display())),
+        };
+
+        // Lossy decode rather than an error: a hand-mangled file may not be
+        // valid UTF-8, and refusing to read it would report a corrupt artifact
+        // as unverifiable. Any mangled key still fails to match its stored
+        // value, which is the outcome the operator needs to see.
+        let text = String::from_utf8_lossy(&contents);
+        Ok(Evidence::Values(
+            text.lines()
+                .filter_map(parse_env_line)
+                .map(|(key, value)| (key, Zeroizing::new(value)))
+                .collect(),
+        ))
+    }
+
     fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
         let Some(app) = &target.app else {
             return secrets
@@ -146,6 +207,54 @@ impl DeployTarget for DotenvTarget<'_> {
                 .collect(),
         }
     }
+}
+
+/// Parse one `KEY=VALUE` line back into its key and unescaped value.
+///
+/// The exact inverse of [`format_env_value`]: a quoted value is unwrapped and
+/// its `\\` and `\"` escapes undone. Reading with a looser grammar than the
+/// one that wrote the file would report false drift on every value containing
+/// a space or `#`, since those are written quoted.
+///
+/// Returns `None` for comments, blank lines, and anything without a separator.
+fn parse_env_line(line: &str) -> Option<(String, String)> {
+    let line = line.trim_end_matches('\r');
+    let trimmed = line.trim_start();
+    if trimmed.is_empty() || trimmed.starts_with('#') {
+        return None;
+    }
+    // Split on the first `=`; values legitimately contain more.
+    let (key, raw) = line.split_once('=')?;
+    let key = key.trim();
+    if key.is_empty() {
+        return None;
+    }
+
+    let value = match raw.strip_prefix('"').and_then(|v| v.strip_suffix('"')) {
+        // Scan once rather than chaining `replace` calls. For text this
+        // module wrote the two agree, since `format_env_value` escapes every
+        // backslash before every quote and the pair-wise replace can never
+        // leave a stray one behind. Scanning is kept because it does not
+        // depend on that coupling: it stays correct for a hand-edited file
+        // and for any future change to the writer's escaping.
+        Some(inner) => {
+            let mut out = String::with_capacity(inner.len());
+            let mut chars = inner.chars();
+            while let Some(c) = chars.next() {
+                if c == '\\' {
+                    match chars.next() {
+                        Some(next) => out.push(next),
+                        None => out.push('\\'),
+                    }
+                } else {
+                    out.push(c);
+                }
+            }
+            out
+        }
+        None => raw.to_string(),
+    };
+    Some((key.to_string(), value))
 }
 
 /// Render the exact file contents `deploy_batch` would write for `secrets`.
@@ -270,6 +379,7 @@ mod tests {
     use crate::config::Config;
     use crate::targets::SecretValue;
     use crate::test_support::ConfigFixture;
+    use std::os::unix::fs::PermissionsExt;
 
     const DOTENV_YAML: &str = r#"
 project: testapp
@@ -549,5 +659,361 @@ targets:
         let results = target.deploy_batch(&secrets, &make_target(Some("web"), "dev"));
         assert!(!results[0].outcome.is_success());
         assert!(results[0].outcome.error_message().is_some());
+    }
+
+    fn verify_keys(names: &[&str]) -> BTreeSet<String> {
+        names.iter().map(|n| (*n).to_string()).collect()
+    }
+
+    fn verify_expected(pairs: &[(&str, &str)]) -> BTreeMap<String, Zeroizing<String>> {
+        pairs
+            .iter()
+            .map(|(k, v)| ((*k).to_string(), Zeroizing::new((*v).to_string())))
+            .collect()
+    }
+
+    /// The property that matters most: whatever the writer writes, the reader
+    /// must read back byte-identically. A reader with a looser grammar than
+    /// `format_env_value` reports false drift on correct files — noise the
+    /// operator learns to ignore, which is how a real drift gets missed.
+    #[test]
+    fn dotenv_read_back_round_trips_every_value_the_writer_quotes() {
+        let awkward = [
+            ("PLAIN", "simple"),
+            ("WITH_SPACE", "hello world"),
+            ("WITH_HASH", "value#notacomment"),
+            ("WITH_QUOTE", "say \"hi\""),
+            ("WITH_BACKSLASH", r"C:\path\to"),
+            ("BACKSLASH_THEN_QUOTE", r"trail\"),
+            ("LEADING_EQUALS", "=starts"),
+            ("EMPTY", ""),
+            ("EQUALS_INSIDE", "a=b=c"),
+            ("URL", "postgres://u:p@h/db?x=1"),
+            ("BASE64_PAD", "YWJjZA=="),
+        ];
+        let secrets: Vec<SecretValue> = awkward
+            .iter()
+            .map(|(k, v)| make_secret(k, v, "G"))
+            .collect();
+
+        let rendered = render_dotenv_content(&secrets).unwrap();
+        let parsed: BTreeMap<String, String> =
+            rendered.lines().filter_map(parse_env_line).collect();
+
+        for (key, value) in awkward {
+            assert_eq!(
+                parsed.get(key).map(String::as_str),
+                Some(value),
+                "value for {key} did not survive a write/read round trip"
+            );
+        }
+        // The header comment lines must not become phantom keys.
+        assert_eq!(parsed.len(), awkward.len());
+    }
+
+    #[test]
+    fn dotenv_read_back_returns_the_files_values() {
+        let fixture = make_fixture();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
+        let target = DotenvTarget { config };
+        let resolved = make_target(Some("web"), "dev");
+
+        let secrets = vec![
+            make_secret("API_KEY", "secret1", "G"),
+            make_secret("DB_URL", "postgres://x", "G"),
+        ];
+        target.deploy_batch(&secrets, &resolved);
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY", "DB_URL"]), &resolved)
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!(".env declares Fidelity::Value, so it must return Values");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "secret1");
+        assert_eq!(values["DB_URL"].as_str(), "postgres://x");
+    }
+
+    /// The negative case. A happy-path test cannot tell a working reader from
+    /// one that echoes back the store.
+    #[test]
+    fn dotenv_read_back_surfaces_an_edited_value_as_drift() {
+        let fixture = make_fixture();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
+        let target = DotenvTarget { config };
+        let resolved = make_target(Some("web"), "dev");
+
+        target.deploy_batch(&[make_secret("API_KEY", "correct", "G")], &resolved);
+
+        // Someone edits the file by hand. esk writes it mode 0o400, so an
+        // in-place write fails — tampering means replacing the file, which is
+        // what an editor's save does anyway.
+        let path = config.dotenv_display_path("web", "dev").unwrap();
+        let edited = std::fs::read_to_string(&path)
+            .unwrap()
+            .replace("correct", "TAMPERED");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, edited).unwrap();
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &resolved),
+            &verify_expected(&[("API_KEY", "correct")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true }
+        );
+        let crate::verify::Findings::Values { verdicts, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::ValueVerdict::Differs);
+    }
+
+    /// A deleted artifact is the case that made this whole feature necessary:
+    /// the deploy index still says the secret was sent.
+    #[test]
+    fn dotenv_read_back_reports_a_deleted_file_as_missing_keys() {
+        let fixture = make_fixture();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
+        let target = DotenvTarget { config };
+        let resolved = make_target(Some("web"), "dev");
+
+        target.deploy_batch(&[make_secret("API_KEY", "v", "G")], &resolved);
+        let path = config.dotenv_display_path("web", "dev").unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &resolved),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true },
+            "a deleted artifact must read as drift, not as verified"
+        );
+        let crate::verify::Findings::Values { verdicts, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(verdicts["API_KEY"], crate::verify::ValueVerdict::Missing);
+    }
+
+    #[test]
+    fn dotenv_read_back_reports_a_hand_added_key_as_extra() {
+        let fixture = make_fixture();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
+        let target = DotenvTarget { config };
+        let resolved = make_target(Some("web"), "dev");
+
+        target.deploy_batch(&[make_secret("API_KEY", "v", "G")], &resolved);
+        let path = config.dotenv_display_path("web", "dev").unwrap();
+        let mut contents = std::fs::read_to_string(&path).unwrap();
+        contents.push_str("SNUCK_IN=surprise\n");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::write(&path, contents).unwrap();
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &resolved),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        let crate::verify::Findings::Values { extra, .. } = &findings else {
+            panic!("expected value findings");
+        };
+        assert_eq!(extra, &["SNUCK_IN".to_string()]);
+    }
+
+    #[test]
+    fn dotenv_read_back_follows_a_symlinked_path() {
+        // `artifact_matches` declines on a symlink because it answers a
+        // question about writing. Reading through one is safe, and refusing
+        // would report an artifact esk never looked at as current.
+        let fixture = make_fixture();
+        fixture.create_dir_all("apps/web").unwrap();
+        fixture.create_dir_all("elsewhere").unwrap();
+        let config = fixture.config();
+        let target = DotenvTarget { config };
+        let resolved = make_target(Some("web"), "dev");
+
+        let real = config.root.join("elsewhere/.env.real");
+        std::fs::write(&real, "API_KEY=linked\n").unwrap();
+        let link = config.dotenv_display_path("web", "dev").unwrap();
+        let _ = std::fs::remove_file(&link);
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+
+        let evidence = target
+            .read_back(&verify_keys(&["API_KEY"]), &resolved)
+            .unwrap();
+        let Evidence::Values(values) = evidence else {
+            panic!("expected values");
+        };
+        assert_eq!(values["API_KEY"].as_str(), "linked");
+    }
+
+    /// Hand-edited files are not constrained by `format_env_value`'s grammar.
+    /// A lone backslash before a quote — escaping the writer never emits,
+    /// because it always doubles backslashes first — must still unescape the
+    /// way a dotenv reader would, rather than by pair-wise substitution.
+    #[test]
+    fn dotenv_read_back_unescapes_hand_written_sequences() {
+        // `"a\"b"` — one backslash escaping the quote, as a human would type.
+        assert_eq!(
+            parse_env_line(r#"K="a\"b""#),
+            Some(("K".to_string(), r#"a"b"#.to_string()))
+        );
+        // A backslash with nothing after it inside the quotes is kept as a
+        // literal, rather than swallowing the closing quote or being dropped.
+        assert_eq!(
+            parse_env_line(r#"K="ends\""#),
+            Some(("K".to_string(), "ends\\".to_string()))
+        );
+        // Two backslashes escaping one quote: the writer's own form.
+        assert_eq!(
+            parse_env_line(r#"K="a\\b""#),
+            Some(("K".to_string(), r"a\b".to_string()))
+        );
+        // A backslash before an ordinary character. This is the one input
+        // where a pair-wise `replace` chain disagrees with scanning: it would
+        // leave `\a`, keeping an escape character the reader already consumed.
+        // Scanning drops the backslash, matching how dotenv readers behave.
+        assert_eq!(
+            parse_env_line(r#"K="\a""#),
+            Some(("K".to_string(), "a".to_string()))
+        );
+    }
+
+    #[test]
+    fn dotenv_read_back_ignores_comments_and_blank_lines() {
+        assert_eq!(parse_env_line("# a comment"), None);
+        assert_eq!(parse_env_line("   # indented comment"), None);
+        assert_eq!(parse_env_line(""), None);
+        assert_eq!(parse_env_line("   "), None);
+        assert_eq!(parse_env_line("no_separator_here"), None);
+        assert_eq!(parse_env_line("=novalue"), None);
+    }
+
+    /// An indented comment that also contains `=` must stay a comment.
+    ///
+    /// Without this the comment check can be made to look at the untrimmed
+    /// line and every test still passes, because the plain indented comment
+    /// above has no `=` and returns `None` for the wrong reason.
+    #[test]
+    fn dotenv_read_back_ignores_an_indented_comment_containing_equals() {
+        assert_eq!(parse_env_line("  # note: a=b is fine"), None);
+        assert_eq!(parse_env_line("\t# tabbed=comment"), None);
+    }
+
+    /// A CRLF file must not leave `\r` glued to the end of every value.
+    ///
+    /// esk writes LF, but a Windows editor or a `git` checkout with
+    /// `core.autocrlf` rewrites the artifact, and a trailing `\r` would make
+    /// every single value mismatch — a whole scope of false drift.
+    #[test]
+    fn dotenv_read_back_strips_carriage_returns_from_crlf_files() {
+        assert_eq!(
+            parse_env_line("KEY=value\r"),
+            Some(("KEY".to_string(), "value".to_string()))
+        );
+        // Also inside quotes, where the `\r` would land within the value.
+        assert_eq!(
+            parse_env_line("KEY=\"has space\"\r"),
+            Some(("KEY".to_string(), "has space".to_string()))
+        );
+    }
+
+    /// Whitespace around a key must not become part of the key name.
+    ///
+    /// A key read as `" API_KEY"` matches nothing in the store, so it is
+    /// reported both as the managed key missing and as an unmanaged extra —
+    /// two wrong findings from one stray space.
+    #[test]
+    fn dotenv_read_back_trims_whitespace_around_keys() {
+        assert_eq!(
+            parse_env_line("  API_KEY=v"),
+            Some(("API_KEY".to_string(), "v".to_string()))
+        );
+        assert_eq!(
+            parse_env_line("API_KEY =v"),
+            Some(("API_KEY".to_string(), "v".to_string()))
+        );
+    }
+
+    #[test]
+    fn dotenv_read_back_requires_an_app() {
+        let fixture = make_fixture();
+        let target = DotenvTarget {
+            config: fixture.config(),
+        };
+        let Err(err) = target.read_back(&verify_keys(&["A"]), &make_target(None, "dev")) else {
+            panic!("a target with no app cannot resolve a path and must not report an empty read");
+        };
+        assert!(err.to_string().contains("requires an app"));
+    }
+
+    /// A file esk cannot read must not be reported as a file esk knows to be
+    /// empty. `Missing` is a claim about a key esk never observed.
+    #[test]
+    fn dotenv_read_back_unreadable_file_is_unreachable_not_missing() {
+        let fixture = make_fixture();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
+        let target = DotenvTarget { config };
+        let resolved = make_target(Some("web"), "dev");
+
+        target.deploy_batch(&[make_secret("API_KEY", "v", "G")], &resolved);
+        let path = config.dotenv_display_path("web", "dev").unwrap();
+        // The file is present and holds exactly the right content.
+        std::fs::set_permissions(&path, PermissionsExt::from_mode(0o000)).unwrap();
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &resolved),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+
+        // Restore before asserting so a failure cannot leave the tempdir
+        // undeletable.
+        std::fs::set_permissions(&path, PermissionsExt::from_mode(0o600)).unwrap();
+
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Unresolved,
+            "an unreadable artifact must be unresolved, not drift"
+        );
+        assert!(
+            matches!(findings, crate::verify::Findings::Unreachable { .. }),
+            "esk did not observe these keys and must not claim they are absent"
+        );
+    }
+
+    /// The companion to the test above: a *deleted* file is genuinely observed
+    /// to hold nothing, so it stays drift. The two must not collapse together.
+    #[test]
+    fn dotenv_read_back_distinguishes_deleted_from_unreadable() {
+        let fixture = make_fixture();
+        fixture.create_dir_all("apps/web").unwrap();
+        let config = fixture.config();
+        let target = DotenvTarget { config };
+        let resolved = make_target(Some("web"), "dev");
+
+        target.deploy_batch(&[make_secret("API_KEY", "v", "G")], &resolved);
+        let path = config.dotenv_display_path("web", "dev").unwrap();
+        std::fs::remove_file(&path).unwrap();
+
+        let findings = crate::verify::compare(
+            target.verify_fidelity(),
+            target.read_back(&verify_keys(&["API_KEY"]), &resolved),
+            &verify_expected(&[("API_KEY", "v")]),
+        );
+        assert_eq!(
+            findings.assess(),
+            crate::verify::Assessment::Resolved { drifted: true },
+            "a deleted artifact is observed to hold nothing, so it is drift"
+        );
     }
 }

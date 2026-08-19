@@ -304,6 +304,15 @@ pub struct ScopeReport {
     pub env: String,
     pub fidelity: Fidelity,
     pub findings: Findings,
+    /// Keys this scope declares that the store holds no value for.
+    ///
+    /// Carried apart from [`Findings`] because there is nothing to compare:
+    /// inventing a verdict for a key esk has no expected value for would be
+    /// exactly the fabrication this module prevents. They are still reported,
+    /// because a declared-but-never-deployed key is one of the things an
+    /// operator runs verification to discover, and a scope carrying them must
+    /// not read as fully verified.
+    pub unset: Vec<String>,
 }
 
 impl ScopeReport {
@@ -319,6 +328,14 @@ impl ScopeReport {
             } => verdicts.is_empty() && extra.is_empty(),
             _ => false,
         }
+    }
+
+    /// Whether this scope was fully verified, with nothing left unaccounted.
+    ///
+    /// A scope holding unset keys was read back correctly for the keys esk had
+    /// values for, but it is not a scope about which esk knows everything.
+    const fn has_unset(&self) -> bool {
+        !self.unset.is_empty()
     }
 }
 
@@ -403,6 +420,11 @@ impl VerifyReport {
                 Findings::Values { .. } => {
                     if scope.findings.observed_drift() {
                         tally.value_drifted += 1;
+                    } else if scope.has_unset() {
+                        // Read back and matching, but the scope also declares
+                        // keys esk holds no value for. Counting it clean would
+                        // claim esk knows the whole scope's state.
+                        tally.skipped += 1;
                     } else {
                         tally.value_clean += 1;
                     }
@@ -410,6 +432,8 @@ impl VerifyReport {
                 Findings::Presence { .. } => {
                     if scope.findings.observed_drift() {
                         tally.presence_drifted += 1;
+                    } else if scope.has_unset() {
+                        tally.skipped += 1;
                     } else {
                         tally.presence_clean += 1;
                     }
@@ -471,7 +495,11 @@ mod tests {
     #[test]
     fn matching_values_are_clean() {
         let want = expected(&[("A", "1"), ("B", "2")]);
-        let findings = compare(Fidelity::Value, Ok(values(&[("A", "1"), ("B", "2")])), &want);
+        let findings = compare(
+            Fidelity::Value,
+            Ok(values(&[("A", "1"), ("B", "2")])),
+            &want,
+        );
         assert_eq!(findings.assess(), Assessment::Resolved { drifted: false });
     }
 
@@ -593,6 +621,7 @@ mod tests {
             env: "dev".to_string(),
             fidelity,
             findings,
+            unset: Vec::new(),
         }
     }
 
@@ -772,6 +801,7 @@ mod guard_tests {
                     declared: Fidelity::Value,
                     received: EvidenceShape::Names,
                 },
+                unset: Vec::new(),
             }],
         };
         assert_eq!(report.outcome(), Outcome::Inconclusive);
@@ -797,6 +827,7 @@ mod empty_scope_tests {
                     Ok(Evidence::Values(BTreeMap::new())),
                     &BTreeMap::new(),
                 ),
+                unset: Vec::new(),
             }],
         };
         let tally = report.tally();
