@@ -168,13 +168,13 @@ fn vault_isolation_checks(config: &Config, runner: &dyn CommandRunner) -> Vec<Ch
         )
     }];
 
-    // `op` warns that a title matching several items resolves to an arbitrary
-    // one, so esk could read one copy and write another.
+    // A duplicated ownership tag leaves no safe item ID to select. Operational
+    // reads and writes fail closed on the same condition.
     if composition.duplicate_owned > 0 {
         checks.push(Check::fail(
             "Item ambiguity",
             format!(
-                "{} esk item title(s) match more than one item in vault '{}' — op cannot tell them apart; delete the duplicates",
+                "{} esk ownership tag(s) match more than one item in vault '{}' — delete the duplicate or remove its esk tag",
                 composition.duplicate_owned, composition.vault
             ),
         ));

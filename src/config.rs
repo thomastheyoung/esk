@@ -391,9 +391,9 @@ pub struct CustomCommandConfig {
 pub struct OnePasswordRemoteConfig {
     pub vault: String,
     pub item_pattern: String,
-    /// Marks items as esk-owned. Prepended to every resolved item title, and
-    /// used by `esk doctor` to tell esk items apart from the rest of the vault.
-    /// Set to "" to opt out (existing items keep their unprefixed titles).
+    /// Visual marker prepended to every resolved item title. Ownership is
+    /// enforced separately with the `esk/{project}/{environment}` item tag.
+    /// Set to "" to keep titles unprefixed.
     ///
     /// The default gear says "machine-written" — in a vault where every item is
     /// a secret, provenance is the useful signal, not another key glyph. It also

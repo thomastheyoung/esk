@@ -310,7 +310,7 @@ remotes:                           # Sync remotes (esk sync)
   1password:
     vault: Engineering
     item_pattern: "esk/{project}/{environment}"   # must contain {environment} or {Environment}
-    prefix: "⚙"                                   # default; marks esk-owned items, "" to opt out
+    prefix: "⚙"                                   # visual marker; defaults to ⚙, "" to opt out
   dropbox:
     type: cloud_file
     path: ~/Dropbox/secrets/{project}

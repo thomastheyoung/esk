@@ -200,7 +200,7 @@ remotes:
   1password:
     vault: Engineering
     item_pattern: "esk/{project}/{environment}" # must contain {environment} or {Environment}
-    prefix: "⚙"                                 # marks esk-owned items; "" to opt out
+    prefix: "⚙"                                 # visual marker; "" to opt out
     # Resolves to: ⚙ esk/myapp/dev
 
   # Cloud file storage (Dropbox, Google Drive, OneDrive, etc.)
