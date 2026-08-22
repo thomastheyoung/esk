@@ -126,7 +126,7 @@ impl Report {
 /// `op` session it inherits can still reach one. A vault containing only esk
 /// items — ideally reached by a service account scoped to it — is the only
 /// enforcement that survives a bug in esk, so doctor names the gap.
-fn vault_isolation_checks(config: &Config, runner: &dyn CommandRunner) -> Vec<Check> {
+pub(super) fn vault_isolation_checks(config: &Config, runner: &dyn CommandRunner) -> Vec<Check> {
     let op_config = match config.try_onepassword_remote_config() {
         None => return Vec::new(),
         Some(Ok(cfg)) => cfg,
