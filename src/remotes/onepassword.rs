@@ -268,28 +268,11 @@ impl<'a> OnePasswordRemote<'a> {
 
     /// Resolve the 1Password item name for an environment.
     fn item_name(&self, env: &str) -> String {
-        // Capitalize first letter of env for {Environment} pattern
-        let env_capitalized = {
-            let mut chars = env.chars();
-            match chars.next() {
-                Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
-                None => String::new(),
-            }
-        };
-
-        let resolved = self
-            .remote_config
-            .item_pattern
-            .replace("{project}", &self.config.project)
-            .replace("{Environment}", &env_capitalized)
-            .replace("{environment}", env);
-
-        let prefix = self.remote_config.prefix.trim();
-        if prefix.is_empty() {
-            resolved
-        } else {
-            format!("{prefix} {resolved}")
-        }
+        crate::config::resolve_onepassword_item_title(
+            &self.remote_config,
+            &self.config.project,
+            env,
+        )
     }
 
     /// Get a 1Password item, returning None if it doesn't exist.

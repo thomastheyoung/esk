@@ -114,7 +114,7 @@ op item list --tags esk/myapp/dev
 
 esk verifies the exact returned tag itself because 1Password tag filters also include nested tags. It resolves the item ID before reading fields, so an unrelated item with the same title is neither read nor edited. Editing by ID also makes duplicate titles harmless.
 
-`item_pattern` must contain `{environment}` or `{Environment}` so each environment also has a distinct, recognizable title. The tag and stable item ID remain the enforcement boundary.
+`item_pattern` must contain `{environment}` or `{Environment}` so each environment also has a distinct, recognizable title. esk renders every configured title during config loading and rejects duplicates using 1Password's case-insensitive comparison; `dev` and `Dev` therefore cannot collapse onto one title. The tag and stable item ID remain the enforcement boundary.
 
 `esk doctor` counts items with an exact configured ownership tag. If more than one item carries the same tag, doctor fails and normal sync operations refuse to read either item.
 

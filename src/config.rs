@@ -408,25 +408,63 @@ fn default_onepassword_prefix() -> String {
 
 /// Require that resolved 1Password item titles vary per environment.
 ///
-/// The title is what esk's access guard authorizes, so a pattern with no
-/// placeholders resolves every environment to one fixed string — which can be
-/// the title of an item already in the vault. esk would then treat someone
-/// else's item as its own and overwrite its fields. Requiring `{environment}`
-/// or `{Environment}` keeps titles machine-generated and per-environment, so
-/// this cannot happen by accident.
-fn validate_onepassword_item_pattern(cfg: &OnePasswordRemoteConfig) -> Result<()> {
+/// Ownership tags and stable IDs provide the access boundary, but duplicate
+/// titles remain misleading to humans and unsafe for any manual `op` command.
+/// Resolve the exact configured title for every environment and compare it the
+/// same case-insensitive way 1Password does.
+pub(crate) fn resolve_onepassword_item_title(
+    cfg: &OnePasswordRemoteConfig,
+    project: &str,
+    env: &str,
+) -> String {
+    let env_capitalized = {
+        let mut chars = env.chars();
+        match chars.next() {
+            Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+            None => String::new(),
+        }
+    };
+    let resolved = cfg
+        .item_pattern
+        .replace("{project}", project)
+        .replace("{Environment}", &env_capitalized)
+        .replace("{environment}", env);
+    let prefix = cfg.prefix.trim();
+    if prefix.is_empty() {
+        resolved
+    } else {
+        format!("{prefix} {resolved}")
+    }
+}
+
+fn validate_onepassword_item_pattern(
+    cfg: &OnePasswordRemoteConfig,
+    project: &str,
+    environments: &[String],
+) -> Result<()> {
     let has_env_placeholder =
         cfg.item_pattern.contains("{environment}") || cfg.item_pattern.contains("{Environment}");
-    if has_env_placeholder {
-        return Ok(());
+    if !has_env_placeholder {
+        anyhow::bail!(
+            "1password item_pattern '{}' must contain '{{environment}}' or '{{Environment}}'.\n\
+             Without it every environment resolves to the same item title.",
+            cfg.item_pattern
+        );
     }
-    anyhow::bail!(
-        "1password item_pattern '{}' must contain '{{environment}}' or '{{Environment}}'.\n\
-         Without it every environment resolves to the same item title, which can \
-         collide with an unrelated item already in the vault — esk would then \
-         read and overwrite that item.",
-        cfg.item_pattern
-    )
+
+    let mut resolved: BTreeMap<String, &str> = BTreeMap::new();
+    for env in environments {
+        let title = resolve_onepassword_item_title(cfg, project, env);
+        let folded = title.to_lowercase();
+        if let Some(previous) = resolved.insert(folded, env) {
+            anyhow::bail!(
+                "1password item_pattern resolves environments '{previous}' and '{env}' \
+                 to the same case-insensitive title {title:?}; each environment must \
+                 have a distinct 1Password item title"
+            );
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1206,7 +1244,7 @@ impl Config {
                 "1password" => {
                     let cfg: OnePasswordRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid 1password remote config")?;
-                    validate_onepassword_item_pattern(&cfg)?;
+                    validate_onepassword_item_pattern(&cfg, &self.project, &self.environments)?;
                     self.typed_remotes.push(TypedRemoteConfig::OnePassword(cfg));
                 }
                 "aws_secrets_manager" => {
@@ -2112,8 +2150,8 @@ secrets:
 
     #[test]
     fn onepassword_item_pattern_must_vary_by_environment() {
-        // A pattern with no environment placeholder resolves every env to one
-        // fixed title, which can be an item already in the vault.
+        // A pattern with no environment placeholder gives every env the same
+        // human-facing title even though ownership tags remain distinct.
         let dir = tempfile::tempdir().unwrap();
         let yaml = r"
 project: myapp
@@ -2144,6 +2182,39 @@ remotes:
                 "pattern {pattern:?} should be accepted"
             );
         }
+    }
+
+    #[test]
+    fn onepassword_titles_must_be_case_insensitively_unique() {
+        for pattern in ["{environment}", "{Environment}"] {
+            let dir = tempfile::tempdir().unwrap();
+            let yaml = format!(
+                "project: myapp\nenvironments: [dev, Dev]\nremotes:\n  1password:\n    vault: V\n    item_pattern: \"{pattern}\"\n"
+            );
+            let path = dir.path().join("esk.yaml");
+            std::fs::write(&path, yaml).unwrap();
+            let err = Config::load(&path).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("case-insensitive title"), "got: {msg}");
+            assert!(msg.contains("'dev' and 'Dev'"), "got: {msg}");
+        }
+    }
+
+    #[test]
+    fn onepassword_titles_reject_duplicate_environment_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev, dev]
+remotes:
+  1password:
+    vault: V
+    item_pattern: "{project}/{environment}"
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = Config::load(&path).unwrap_err();
+        assert!(format!("{err:#}").contains("case-insensitive title"));
     }
 
     #[test]
