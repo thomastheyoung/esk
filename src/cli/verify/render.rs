@@ -163,7 +163,7 @@ fn render_scope(scope: &ScopeReport, all: bool) -> Result<()> {
                 }
                 return Ok(());
             }
-            let mut lines = vec![format!("{label}")];
+            let mut lines = vec![label.clone()];
             for (key, verdict) in verdicts {
                 // Values are never printed, only the verdict about them.
                 let note = match verdict {
