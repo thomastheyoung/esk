@@ -38,6 +38,7 @@ impl Report {
         let mut target_fail = 0usize;
         let mut remote_ok = 0usize;
         let mut remote_fail = 0usize;
+        let mut vault_checks: Vec<Check> = Vec::new();
 
         if let Some(ref cfg) = config {
             if !cfg.typed_targets.is_empty() {
@@ -58,6 +59,11 @@ impl Report {
                         HealthStatus::Ok(_) => remote_ok += 1,
                         HealthStatus::Failed(_) => remote_fail += 1,
                     }
+                }
+
+                vault_checks = vault_isolation_checks(cfg, runner);
+                if !vault_checks.is_empty() {
+                    render_checked_section(&term, &bar, "1Password", &vault_checks)?;
                 }
             }
         }
@@ -91,6 +97,10 @@ impl Report {
         // --- Summary ---
         let mut tally = self.tally();
         tally.add_health(target_ok + remote_ok, target_fail + remote_fail);
+        // Vault isolation is computed live, so it is not part of `Report` and
+        // must be folded in here — otherwise the warning prints but the summary
+        // line and exit code ignore it.
+        tally.add_checks(&vault_checks);
 
         let summary = tally.summary();
 
@@ -108,6 +118,76 @@ impl Report {
 
         Ok(())
     }
+}
+
+/// Checks on the configured 1Password vault. Empty unless 1Password is set up.
+///
+/// esk's in-process guard stops esk from *asking* for a foreign item, but the
+/// `op` session it inherits can still reach one. A vault containing only esk
+/// items — ideally reached by a service account scoped to it — is the only
+/// enforcement that survives a bug in esk, so doctor names the gap.
+fn vault_isolation_checks(config: &Config, runner: &dyn CommandRunner) -> Vec<Check> {
+    let op_config = match config.try_onepassword_remote_config() {
+        None => return Vec::new(),
+        Some(Ok(cfg)) => cfg,
+        Some(Err(e)) => {
+            return vec![Check::fail(
+                "Vault isolation",
+                format!("1password remote config is malformed: {e}"),
+            )]
+        }
+    };
+    let remote = crate::remotes::onepassword::OnePasswordRemote::new(config, op_config, runner);
+    let composition = match remote.vault_composition() {
+        Ok(c) => c,
+        Err(e) => {
+            // Don't fall silent: an unreadable vault reads as "all clear" to
+            // anyone scanning the output, which is the opposite of the truth.
+            return vec![Check::warn(
+                "Vault isolation",
+                format!("could not determine: {}", root_cause(&e)),
+            )];
+        }
+    };
+
+    let mut checks = vec![if composition.is_isolated() {
+        Check::pass(
+            "Vault isolation",
+            format!(
+                "vault '{}' holds only esk items ({})",
+                composition.vault, composition.esk_owned
+            ),
+        )
+    } else {
+        Check::warn(
+            "Vault isolation",
+            format!(
+                "vault '{}' holds {} item(s) esk does not own — a dedicated vault limits what esk's 1Password session can reach",
+                composition.vault, composition.foreign
+            ),
+        )
+    }];
+
+    // `op` warns that a title matching several items resolves to an arbitrary
+    // one, so esk could read one copy and write another.
+    if composition.duplicate_owned > 0 {
+        checks.push(Check::fail(
+            "Item ambiguity",
+            format!(
+                "{} esk item title(s) match more than one item in vault '{}' — op cannot tell them apart; delete the duplicates",
+                composition.duplicate_owned, composition.vault
+            ),
+        ));
+    }
+
+    checks
+}
+
+/// Innermost cause of an error chain, for a one-line check detail.
+fn root_cause(e: &anyhow::Error) -> String {
+    e.chain()
+        .last()
+        .map_or_else(|| e.to_string(), std::string::ToString::to_string)
 }
 
 /// Renders a checked section with a colored filled diamond header and aligned check items.

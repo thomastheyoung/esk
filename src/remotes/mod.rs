@@ -338,7 +338,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -386,7 +386,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{{environment}}
   testcloud:
     type: cloud_file
     path: {}
@@ -439,7 +439,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -460,7 +460,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -497,7 +497,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{{environment}}
   dropbox:
     type: cloud_file
     path: {}

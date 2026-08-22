@@ -511,7 +511,7 @@ targets:
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 secrets:
   General:
     MY_SECRET:
@@ -564,7 +564,7 @@ targets:
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 secrets:
   General:
     MY_SECRET:
@@ -1137,7 +1137,7 @@ environments: [dev]
 remotes:
   1password:
     vault: Test
-    item_pattern: test
+    item_pattern: test-{environment}
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
@@ -1615,11 +1615,11 @@ fn push_onepassword_creates_item() {
     // Third call: op item get
     assert_eq!(calls[2].program, "op");
     assert!(calls[2].args.contains(&"get".to_string()));
-    assert!(calls[2].args.contains(&"testapp - Dev".to_string()));
+    assert!(calls[2].args.contains(&"⚙ testapp - Dev".to_string()));
     // Fourth call: op item create
     assert_eq!(calls[3].program, "op");
     assert!(calls[3].args.contains(&"create".to_string()));
-    assert!(calls[3].args.contains(&"testapp - Dev".to_string()));
+    assert!(calls[3].args.contains(&"⚙ testapp - Dev".to_string()));
     assert!(calls[3]
         .args
         .iter()
@@ -2062,7 +2062,7 @@ environments: [dev]
 remotes:
   1password:
     vault: Test
-    item_pattern: test
+    item_pattern: test-{environment}
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();

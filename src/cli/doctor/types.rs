@@ -74,7 +74,9 @@ pub(crate) struct Tally {
 }
 
 impl Tally {
-    fn add_checks(&mut self, checks: &[Check]) {
+    /// Record checks that live outside the `Report` — like `add_health`, these
+    /// are computed at render time and must be folded in by the caller.
+    pub(crate) fn add_checks(&mut self, checks: &[Check]) {
         for c in checks {
             match c.status {
                 CheckStatus::Pass => self.pass += 1,
