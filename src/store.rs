@@ -836,18 +836,8 @@ impl SecretStore {
     }
 
     fn check_rollback(&self, payload: &StorePayload) -> Result<()> {
-        let recorded = if self.version_path.is_file() {
-            let text = std::fs::read_to_string(&self.version_path)
-                .with_context(|| format!("failed to read {}", self.version_path.display()))?;
-            text.trim().parse::<u64>().with_context(|| {
-                format!(
-                    "invalid store high-water mark in {}",
-                    self.version_path.display()
-                )
-            })?
-        } else {
-            0
-        };
+        let _lock = self.acquire_high_water_lock()?;
+        let recorded = self.read_high_water()?;
 
         if payload.version < recorded {
             bail!(
@@ -857,12 +847,46 @@ impl SecretStore {
             );
         }
         if payload.version > recorded || !self.version_path.is_file() {
-            self.write_high_water(payload.version)?;
+            self.write_high_water_unlocked(payload.version)?;
         }
         Ok(())
     }
 
     fn write_high_water(&self, version: u64) -> Result<()> {
+        let _lock = self.acquire_high_water_lock()?;
+        let recorded = self.read_high_water()?;
+        self.write_high_water_unlocked(recorded.max(version))
+    }
+
+    fn acquire_high_water_lock(&self) -> Result<File> {
+        let lock_path = self.version_path.with_extension("lock");
+        let lock = File::options()
+            .read(true)
+            .write(true)
+            .create(true)
+            .truncate(false)
+            .open(&lock_path)
+            .with_context(|| format!("failed to open {} for locking", lock_path.display()))?;
+        lock.lock_exclusive()
+            .with_context(|| format!("failed to acquire lock on {}", lock_path.display()))?;
+        Ok(lock)
+    }
+
+    fn read_high_water(&self) -> Result<u64> {
+        if !self.version_path.is_file() {
+            return Ok(0);
+        }
+        let text = std::fs::read_to_string(&self.version_path)
+            .with_context(|| format!("failed to read {}", self.version_path.display()))?;
+        text.trim().parse::<u64>().with_context(|| {
+            format!(
+                "invalid store high-water mark in {}",
+                self.version_path.display()
+            )
+        })
+    }
+
+    fn write_high_water_unlocked(&self, version: u64) -> Result<()> {
         let dir = self
             .version_path
             .parent()
@@ -1544,6 +1568,35 @@ mod tests {
 
         let err = store.payload().unwrap_err();
         assert!(err.to_string().contains("store rollback detected"));
+    }
+
+    #[test]
+    fn high_water_writes_never_regress() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+
+        store.write_high_water(10).unwrap();
+        store.write_high_water(3).unwrap();
+
+        let recorded = std::fs::read_to_string(dir.path().join(".esk/store.version")).unwrap();
+        assert_eq!(recorded, "10");
+    }
+
+    #[test]
+    fn concurrent_high_water_writes_keep_maximum() {
+        let dir = tmp_root();
+        let store = std::sync::Arc::new(SecretStore::load_or_create(dir.path()).unwrap());
+        let mut threads = Vec::new();
+        for version in 1..=32 {
+            let store = std::sync::Arc::clone(&store);
+            threads.push(std::thread::spawn(move || store.write_high_water(version)));
+        }
+        for thread in threads {
+            thread.join().unwrap().unwrap();
+        }
+
+        let recorded = std::fs::read_to_string(dir.path().join(".esk/store.version")).unwrap();
+        assert_eq!(recorded, "32");
     }
 
     #[test]
