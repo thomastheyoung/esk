@@ -88,7 +88,7 @@ pub struct McpConfig {
     /// Restrict MCP operations to these environments. Empty means all configured envs.
     #[serde(default)]
     pub envs: Vec<String>,
-    /// Disable mutating tools (`esk_set`, `esk_delete`, and `esk_deploy`).
+    /// Disable mutating tools (`esk_set`, `esk_delete`, `esk_deploy`, and `esk_generate`).
     #[serde(default)]
     pub read_only: bool,
 }

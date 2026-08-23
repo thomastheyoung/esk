@@ -183,7 +183,7 @@ impl EskMcpServer {
 
     #[tool(
         name = "esk_generate",
-        description = "Generate code or config files from secret definitions. Formats: 'dts' (TypeScript declarations), 'ts' (runtime module), 'ts-lazy' (lazy runtime module), 'zod' (Zod schema), 'env-example' (.env.example). Omit format to run all configured outputs."
+        description = "Generate code or config files from secret definitions. This tool writes project files and is disabled by the MCP read_only policy. Formats: 'dts' (TypeScript declarations), 'ts' (runtime module), 'ts-lazy' (lazy runtime module), 'zod' (Zod schema), 'env-example' (.env.example). Omit format to run all configured outputs."
     )]
     async fn generate(
         &self,
@@ -498,6 +498,8 @@ fn do_generate_with_config(
     config: &Config,
     params: &GenerateParams,
 ) -> anyhow::Result<GenerateResponse> {
+    ensure_writable(config)?;
+
     let format = match &params.format {
         Some(f) => {
             let parsed: crate::config::GenerateFormat = match f.as_str() {
@@ -766,6 +768,22 @@ mod tests {
                 .as_deref(),
             Some("sentinel-value")
         );
+    }
+
+    #[test]
+    fn read_only_policy_blocks_generate_without_creating_files() {
+        let (dir, config) = project("  read_only: true\n");
+
+        let error = do_generate_with_config(
+            &config,
+            &GenerateParams {
+                format: Some("dts".to_string()),
+            },
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("read-only"));
+        assert!(!dir.path().join("env.d.ts").exists());
     }
 
     #[test]
