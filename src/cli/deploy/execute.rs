@@ -546,6 +546,13 @@ fn execute_animated<'a>(
             });
         }
 
+        // Pruning must observe the completed replacement result for every
+        // batch group. Leaving prune workers in this scope creates a race in
+        // which they can inspect `failed_batch_groups` before a delayed batch
+        // failure records itself.
+    });
+
+    std::thread::scope(|s| {
         // Batch prune workers
         for ((target_name, app), orphan_list) in &plan.batch_prune {
             let results = &results;
@@ -1179,6 +1186,47 @@ mod tests {
 
     struct SiblingLeakBatchTarget;
 
+    struct DelayedFailingBatchTarget {
+        prune_calls: Arc<AtomicUsize>,
+    }
+
+    impl crate::targets::DeployTarget for DelayedFailingBatchTarget {
+        fn name(&self) -> &'static str {
+            "batch"
+        }
+
+        fn deploy_mode(&self) -> crate::targets::DeployMode {
+            crate::targets::DeployMode::Batch
+        }
+
+        fn deploy_secret(
+            &self,
+            _key: &str,
+            _value: &str,
+            _target: &crate::config::ResolvedTarget,
+        ) -> anyhow::Result<()> {
+            anyhow::bail!("individual deployment is unsupported")
+        }
+
+        fn delete_secret(
+            &self,
+            _key: &str,
+            _target: &crate::config::ResolvedTarget,
+        ) -> anyhow::Result<()> {
+            self.prune_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
+
+        fn deploy_batch_state(
+            &self,
+            _batch: crate::targets::BatchDeployment<'_>,
+            _target: &crate::config::ResolvedTarget,
+        ) -> anyhow::Result<Vec<crate::targets::DeployResult>> {
+            std::thread::sleep(Duration::from_millis(100));
+            anyhow::bail!("delayed replacement failure")
+        }
+    }
+
     impl crate::targets::DeployTarget for SiblingLeakBatchTarget {
         fn name(&self) -> &'static str {
             "batch"
@@ -1324,6 +1372,70 @@ mod tests {
             assert!(!error.contains("short-secret"), "{error}");
             assert!(!error.contains("suffix"), "{error}");
         }
+    }
+
+    #[test]
+    fn animated_prune_waits_for_delayed_batch_failure() {
+        let prune_calls = Arc::new(AtomicUsize::new(0));
+        let deploy_targets: Vec<Box<dyn crate::targets::DeployTarget>> =
+            vec![Box::new(DelayedFailingBatchTarget {
+                prune_calls: Arc::clone(&prune_calls),
+            })];
+        let target_map = HashMap::from([("batch", (0, crate::targets::DeployMode::Batch))]);
+        let mut plan = EnvWorkPlan::default();
+        plan.batch_groups.push(super::super::types::BatchGroup {
+            target_name: "batch".to_string(),
+            app: None,
+            secrets: vec![crate::targets::SecretValue {
+                key: "CURRENT".to_string(),
+                value: zeroize::Zeroizing::new("value".to_string()),
+                group: "General".to_string(),
+            }],
+            tombstoned_keys: BTreeSet::new(),
+            target_idx: 0,
+        });
+        plan.batch_prune.insert(
+            ("batch".to_string(), None),
+            vec![crate::orphan::TargetOrphan {
+                tracker_key: DeployIndex::tracker_key("ORPHAN", "batch", None, "dev"),
+                key: "ORPHAN".to_string(),
+                service: "batch".to_string(),
+                app: None,
+                env: "dev".to_string(),
+                last_deployed_at: "earlier".to_string(),
+            }],
+        );
+        let key_lines = build_key_lines(&plan, &[]);
+        let dir = tempfile::tempdir().unwrap();
+        let index = Mutex::new(DeployIndex::new(&dir.path().join("deploy-index.json")));
+        let failed_batch_groups = Mutex::new(BTreeSet::new());
+        let mut deployed = Vec::new();
+        let mut failed = Vec::new();
+        let mut pruned = Vec::new();
+
+        execute_animated(
+            "dev",
+            &plan,
+            &key_lines,
+            &[],
+            DEPLOY_LINE_WIDTH,
+            &deploy_targets,
+            &target_map,
+            &BTreeMap::from([("CURRENT:dev".to_string(), "value".to_string())]),
+            b"test-master-key",
+            &index,
+            &failed_batch_groups,
+            &mut deployed,
+            &mut failed,
+            &mut pruned,
+        );
+
+        assert_eq!(prune_calls.load(Ordering::SeqCst), 0);
+        assert!(pruned.is_empty());
+        assert!(failed.iter().any(|entry| {
+            entry.key == "ORPHAN"
+                && entry.error.as_deref() == Some("skipped: batch deploy had failures")
+        }));
     }
 
     impl crate::targets::DeployTarget for ParallelTarget {
