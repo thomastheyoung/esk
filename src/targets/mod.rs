@@ -388,15 +388,19 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<str>,
 {
+    let mut secrets: Vec<S> = secrets
+        .into_iter()
+        .filter(|secret| !secret.as_ref().is_empty())
+        .collect();
+    // Redact longer values first so an overlapping short value cannot split a
+    // longer secret and leave its suffix visible.
+    secrets.sort_unstable_by_key(|secret| std::cmp::Reverse(secret.as_ref().len()));
+    secrets.dedup_by(|left, right| left.as_ref() == right.as_ref());
     secrets
         .into_iter()
         .fold(message.to_string(), |message, secret| {
             let secret = secret.as_ref();
-            if secret.is_empty() {
-                message
-            } else {
-                message.replace(secret, "<redacted>")
-            }
+            message.replace(secret, "<redacted>")
         })
 }
 
@@ -936,6 +940,25 @@ mod tests {
         let target = TestTarget { fail_keys: vec![] };
         let results = target.deploy_batch(&[], &make_target());
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn redaction_handles_repeated_and_overlapping_secret_values() {
+        let message =
+            "provider echoed token-prefix and token-prefix-suffix twice: token-prefix-suffix";
+        let redacted = redact_secrets(
+            message,
+            [
+                "token-prefix",
+                "token-prefix-suffix",
+                "token-prefix-suffix",
+                "",
+            ],
+        );
+
+        assert!(!redacted.contains("token-prefix"));
+        assert!(!redacted.contains("suffix"));
+        assert_eq!(redacted.matches("<redacted>").count(), 3);
     }
 
     #[test]

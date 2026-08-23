@@ -263,10 +263,7 @@ fn exec_batch_group(
                     .to_string();
                 let error = crate::targets::redact_secrets(
                     &error,
-                    payload_secrets
-                        .get(&composite)
-                        .into_iter()
-                        .map(String::as_str),
+                    bg.secrets.iter().map(|secret| secret.value.as_str()),
                 );
                 idx.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
                 items.push((result.key.clone(), Some(error)));
@@ -1180,6 +1177,44 @@ mod tests {
 
     struct FailingEmptyBatchTarget;
 
+    struct SiblingLeakBatchTarget;
+
+    impl crate::targets::DeployTarget for SiblingLeakBatchTarget {
+        fn name(&self) -> &'static str {
+            "batch"
+        }
+
+        fn deploy_mode(&self) -> crate::targets::DeployMode {
+            crate::targets::DeployMode::Batch
+        }
+
+        fn deploy_secret(
+            &self,
+            _key: &str,
+            _value: &str,
+            _target: &crate::config::ResolvedTarget,
+        ) -> anyhow::Result<()> {
+            anyhow::bail!("individual deployment is unsupported")
+        }
+
+        fn deploy_batch_state(
+            &self,
+            batch: crate::targets::BatchDeployment<'_>,
+            _target: &crate::config::ResolvedTarget,
+        ) -> anyhow::Result<Vec<crate::targets::DeployResult>> {
+            Ok(batch
+                .secrets
+                .iter()
+                .map(|secret| crate::targets::DeployResult {
+                    key: secret.key.clone(),
+                    outcome: crate::targets::DeployOutcome::Failed(
+                        "provider echoed short-secret and short-secret-suffix".to_string(),
+                    ),
+                })
+                .collect())
+        }
+    }
+
     impl crate::targets::DeployTarget for FailingEmptyBatchTarget {
         fn name(&self) -> &'static str {
             ".env"
@@ -1243,6 +1278,52 @@ mod tests {
             crate::deploy_tracker::DeployStatus::Failed
         );
         assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
+    }
+
+    #[test]
+    fn batch_failure_redacts_all_sibling_values_before_index_and_report() {
+        let bg = super::super::types::BatchGroup {
+            target_name: "batch".to_string(),
+            app: None,
+            secrets: vec![
+                crate::targets::SecretValue {
+                    key: "SHORT".to_string(),
+                    value: zeroize::Zeroizing::new("short-secret".to_string()),
+                    group: "General".to_string(),
+                },
+                crate::targets::SecretValue {
+                    key: "LONG".to_string(),
+                    value: zeroize::Zeroizing::new("short-secret-suffix".to_string()),
+                    group: "General".to_string(),
+                },
+            ],
+            tombstoned_keys: BTreeSet::new(),
+            target_idx: 0,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let index = Mutex::new(DeployIndex::new(&dir.path().join("deploy-index.json")));
+
+        let outcome = exec_batch_group(
+            &bg,
+            "dev",
+            &SiblingLeakBatchTarget,
+            &BTreeMap::from([
+                ("SHORT:dev".to_string(), "short-secret".to_string()),
+                ("LONG:dev".to_string(), "short-secret-suffix".to_string()),
+            ]),
+            b"test-master-key",
+            &index,
+        );
+
+        for error in outcome.items.iter().filter_map(|(_, error)| error.as_ref()) {
+            assert!(!error.contains("short-secret"), "{error}");
+            assert!(!error.contains("suffix"), "{error}");
+        }
+        for record in index.lock().unwrap().records.values() {
+            let error = record.last_error.as_deref().unwrap_or_default();
+            assert!(!error.contains("short-secret"), "{error}");
+            assert!(!error.contains("suffix"), "{error}");
+        }
     }
 
     impl crate::targets::DeployTarget for ParallelTarget {
