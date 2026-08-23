@@ -14,6 +14,7 @@ src/
 ├── sync_tracker.rs      # Sync tracking (version + status per remote/env)
 ├── reconcile.rs         # Version-based store reconciliation (pairwise + multi)
 ├── validate.rs          # Value validation (format, enum, pattern, range, length)
+├── verify.rs            # Read-back comparison engine (Fidelity, Evidence, Assessment, VerifyReport)
 ├── suggest.rs           # Typo suggestions (Levenshtein distance)
 ├── orphan.rs            # Orphaned deploy detection and pruning
 ├── ui.rs                # Custom cliclack theme (EskTheme) + shared rendering helpers
@@ -66,6 +67,10 @@ src/
 │   ├── get.rs           # esk get
 │   ├── delete.rs        # esk delete
 │   ├── list.rs          # esk list
+│   ├── diff.rs          # esk diff (compare two environments)
+│   ├── run.rs           # esk run (exec a command with secrets injected)
+│   ├── import.rs        # esk import (load a dotenv file, no sync/deploy)
+│   ├── key.rs           # esk key rotate
 │   ├── deploy/
 │   │   ├── mod.rs       # esk deploy orchestration (target-agnostic)
 │   │   ├── types.rs     # Deploy types (BatchGroup, EnvWorkPlan, PlanOutput)
@@ -82,16 +87,22 @@ src/
 │   │   ├── types.rs     # Report, CheckStatus types
 │   │   ├── build.rs     # Health check construction (config, store, targets, remotes)
 │   │   └── render.rs    # Terminal rendering with pass/warn/fail indicators
+│   ├── verify/
+│   │   ├── mod.rs       # esk verify orchestration (read back, compare, exit code)
+│   │   ├── build.rs     # Scope construction from config, store, and deploy index
+│   │   └── render.rs    # Terminal + JSON rendering of findings and gaps
 │   ├── generate.rs      # esk generate (multi-format: dts, ts, env-example)
+│   ├── generate_helpers/ # TypeScript runtime snippets include_str!'d by generate.rs
 │   ├── sync.rs          # esk sync (remote-agnostic, bidirectional)
 │   └── llm_context.rs   # esk llm-context
 tests/
 ├── helpers/
 │   └── mod.rs              # TestProject, fixtures, MockCommandRunner
-├── store_integration.rs    # Store lifecycle tests (8)
+├── store_integration.rs    # Store lifecycle tests (12)
 ├── reconcile_integration.rs # Reconcile flow tests (3)
 ├── dotenv_integration.rs    # Dotenv file e2e tests (3)
-└── cli_integration.rs      # CLI command tests (197)
+├── sync_e2e.rs             # Sync end-to-end tests (3)
+└── cli_integration.rs      # CLI command tests (242)
 ```
 
 ## Core design
@@ -126,9 +137,14 @@ pub trait DeployTarget: Send + Sync {
     fn deploy_secret(&self, key: &str, value: &str, target: &ResolvedTarget) -> Result<()>;
     fn delete_secret(&self, _key: &str, _target: &ResolvedTarget) -> Result<()>;  // Default: Ok(())
     fn passes_value_as_cli_arg(&self) -> bool;  // Default: false. True for heroku, netlify, azure_app_service, gcp_cloud_run
+    fn artifact_matches(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Option<bool>;  // Default: None ("cannot tell")
+    fn verify_fidelity(&self) -> Fidelity;  // Default: Fidelity::None
+    fn read_back(&self, keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence>;  // Default: Evidence::Unreadable
     fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;  // Default: calls deploy_secret per item
 }
 ```
+
+The verification defaults are deliberately pessimistic: a target that has not opted in reports `Fidelity::None` and `Evidence::Unreadable`, so silence is never mistaken for a pass. `read_back` receives key **names** only — withholding expected values means a dishonest implementation has nothing to fabricate toward, and its answer surfaces as drift rather than as a pass. `compare()` in `verify.rs` is the sole producer of verdicts; targets return raw evidence.
 
 Batch targets handle deletion by regenerating the full output without the deleted key. Individual targets override `delete_secret` to call the external CLI's delete/unset command.
 
@@ -185,6 +201,14 @@ Secrets can declare a `validate:` block (`Validation` struct) and a `required:` 
 - These are orthogonal: `required: true` + `optional: true` = "must exist, but may be empty".
 
 `SecretDef` fields: `description`, `targets`, `validate` (`Option<Validation>`), `required` (`Required`), `allow_empty` (`bool`).
+
+### Verification (`esk verify`)
+
+`deploy`, `status`, and `.esk/deploy-index.json` record what esk *sent*. They are self-certifying: they cannot detect a secret changed or deleted outside esk. `esk verify` is the only command that asks the targets themselves.
+
+Each target declares a `Fidelity` — what its provider's API can prove, which is a permanent property of the service, not a migration state. Some return stored values, some list key names only, and Docker Swarm secrets cannot be read back at all. Targets return raw `Evidence` from `read_back()`; `verify::compare()` is the sole producer of verdicts. A target with `Fidelity::None` is never reported as verified — it is counted and displayed as a gap, so an unverifiable target can never be mistaken for a passing one.
+
+Custom targets opt in by configuring a `read:` command (see TARGETS.md). Without it, a custom target reports as an honest gap rather than as passing.
 
 ### DeployOptions
 
@@ -249,6 +273,7 @@ cargo test deploy_tracker::   # Run deploy tracker unit tests only
 cargo test sync_tracker::     # Run sync tracker unit tests only
 cargo test suggest::          # Run suggest unit tests only
 cargo test validate::         # Run validate unit tests only
+cargo test verify::           # Run verify unit tests only
 cargo test targets::          # Run all target unit tests
 cargo test remotes::          # Run all remote unit tests
 cargo test --test cli_integration  # Run CLI integration tests only
@@ -258,6 +283,6 @@ cargo test --test cli_integration  # Run CLI integration tests only
 
 - **`TestProject`** (`tests/helpers/mod.rs`): wraps `TempDir`, scaffolds valid esk project (writes `esk.yaml`, creates key/store files). Methods: `new(yaml)`, `with_store(yaml)`, `config()`, `store()`, `root()`, `deploy_index_path()`, `sync_index_path()`.
 - **Fixture constants**: `MINIMAL_CONFIG`, `FULL_CONFIG`, `ENV_ONLY_CONFIG`, `REMOTE_CONFIG`, `CLOUDFLARE_CONFIG`, `CONVEX_CONFIG`, `ONEPASSWORD_REMOTE_CONFIG`, `FLY_CONFIG`, `NETLIFY_CONFIG`, `VERCEL_CONFIG`, `GITHUB_CONFIG`, `HEROKU_CONFIG`, `SUPABASE_CONFIG`, `RAILWAY_CONFIG`, `AWS_SSM_CONFIG`, `KUBERNETES_CONFIG`, `GITLAB_CONFIG`, `DOCKER_CONFIG`, `AWS_LAMBDA_CONFIG`, `AZURE_APP_SERVICE_CONFIG`, `CIRCLECI_CONFIG`, `GCP_CLOUD_RUN_CONFIG`, `RENDER_CONFIG`, `CUSTOM_CONFIG`, `VALIDATION_CONFIG`, `REQUIRED_CONFIG`, `ALLOW_EMPTY_CONFIG`, `CROSS_FIELD_CONFIG`, `GENERATE_CONFIG` — reusable YAML for tests.
-- **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests.
+- **`MockCommandRunner`**: records calls and returns configurable responses for target/remote tests. By default an exhausted queue returns success, which keeps tests that assert only "deletion was attempted" simple — but silently passes a call nobody queued. Call `.strict()` to make an unqueued call panic and name the offending command; prefer it in new tests that assert on specific calls.
 - Tests use `tempfile::TempDir` for isolation — no real external services.
 - Never remove or weaken existing tests.

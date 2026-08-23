@@ -291,6 +291,44 @@ The dashboard closes with the current store version.
 
 ---
 
+## `esk verify`
+
+Read back what targets actually hold and compare it against the store.
+
+```bash
+esk verify [--env <ENV>] [--target <TARGET>] [--all] [--json]
+```
+
+| Argument   | Required | Description                                  |
+| ---------- | -------- | -------------------------------------------- |
+| `--env`    | No       | Filter to a single environment               |
+| `--target` | No       | Filter to a single target service            |
+| `--all`    | No       | List every scope, including those that match |
+| `--json`   | No       | Emit a stable JSON report                    |
+
+`esk deploy` and `esk status` report from `.esk/deploy-index.json`, which records what esk *sent*. `esk verify` is the only command that queries the targets themselves, so it is the only way to detect a secret changed or deleted outside esk.
+
+### Verification fidelity
+
+What a target can prove is a permanent property of its provider's API, not a migration state. Some return stored values (full value comparison), some list key names only (presence comparison), and some cannot be read back at all. A target that cannot be verified is reported as an explicit gap and is **never** counted as passing. Per-target fidelity is listed in [TARGETS.md](TARGETS.md).
+
+Custom targets opt in by configuring a `read:` command. Without one, a custom target reports as a gap.
+
+The report never prints a secret value — only verdicts about one.
+
+### Outcomes
+
+| Outcome            | Exit | Meaning                                              |
+| ------------------ | ---- | ---------------------------------------------------- |
+| `clean`            | `0`  | Every scope was read back and agreed with the store  |
+| `clean_with_gaps`  | `0`  | No drift found, but some scopes cannot be read back  |
+| `drift`            | `3`  | At least one target disagrees with the store         |
+| `inconclusive`     | `4`  | At least one target could not be reached             |
+
+`drift` and `inconclusive` are deliberately distinct: "found a mismatch" and "could not look" require different responses, and collapsing them would let an unreachable target read as a pass.
+
+---
+
 ## `esk generate`
 
 Generate code or config files from secret definitions. Supports multiple output formats, including config-driven multi-output.
@@ -481,6 +519,72 @@ Exits with code 1 if any failures are found.
 
 ---
 
+## `esk diff`
+
+Compare secret keys between two environments.
+
+```bash
+esk diff <LEFT_ENV> <RIGHT_ENV> [--values]
+```
+
+| Argument      | Required | Description                                |
+| ------------- | -------- | ------------------------------------------ |
+| `<LEFT_ENV>`  | Yes      | Environment to compare from                |
+| `<RIGHT_ENV>` | Yes      | Environment to compare to                  |
+| `--values`    | No       | Include old and new values in changed entries |
+
+`--values` prints secret material to the terminal. Omit it to compare key presence only.
+
+---
+
+## `esk run`
+
+Run a command with the selected secrets injected into its environment.
+
+```bash
+esk run --env <ENV> [--app <APP>] -- <COMMAND>...
+```
+
+| Argument      | Required | Description                                     |
+| ------------- | -------- | ----------------------------------------------- |
+| `--env`       | Yes      | Environment to inject                           |
+| `--app`       | No       | Application target to select                    |
+| `<COMMAND>`   | Yes      | Command and arguments, and must follow `--`     |
+
+Secrets reach the child process through its environment, never through the command line, so they do not appear in `ps`.
+
+---
+
+## `esk import`
+
+Import values from a dotenv file into the store without syncing or deploying.
+
+```bash
+esk import <PATH> --env <ENV> [--group <GROUP>]
+```
+
+| Argument  | Required | Description                          |
+| --------- | -------- | ------------------------------------ |
+| `<PATH>`  | Yes      | Dotenv file to import                |
+| `--env`   | Yes      | Environment to populate              |
+| `--group` | No       | Config group for newly registered keys |
+
+Imported values are validated and registered atomically: if any value fails validation, nothing is written. Unlike `esk set`, this never triggers auto-sync or auto-deploy.
+
+---
+
+## `esk key rotate`
+
+Generate a new encryption key and re-encrypt the store under it.
+
+```bash
+esk key rotate
+```
+
+Takes no arguments. The store is re-encrypted in place and the previous key is replaced. Back up `.esk/store.enc` before rotating.
+
+---
+
 ## Secret definitions
 
 For a complete `esk.yaml` showcasing every available option, see [docs/esk.example.yaml](docs/esk.example.yaml).
@@ -560,3 +664,5 @@ Boolean, default `false`. When `true`, the secret is exempt from empty-value war
 | ---- | ----------------------------------------------------------------- |
 | `0`  | Success                                                           |
 | `1`  | Error (missing config, unknown environment, deploy failure, etc.) |
+| `3`  | `esk verify` only: drift — a target disagrees with the store      |
+| `4`  | `esk verify` only: inconclusive — a target could not be reached   |

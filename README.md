@@ -180,11 +180,28 @@ When you need cloud deploy targets or shared sync, add target/remote blocks. See
 | `esk list [--env <ENV>]`       | List secrets and deploy status                |
 | `esk deploy [--env <ENV>]`     | Deploy to configured targets                  |
 | `esk status [--env <ENV>]`     | Show deploy and sync dashboard                |
+| `esk verify [--env <ENV>]`     | Read back what targets hold and compare       |
 | `esk sync [--env <ENV>]`       | Pull, reconcile, and push remote state        |
+| `esk diff <ENV> <ENV>`         | Compare two environments                      |
+| `esk run --env <ENV> -- <CMD>` | Run a command with secrets injected           |
+| `esk import <FILE> --env <ENV>`| Load a dotenv file (no sync or deploy)        |
 | `esk generate [<FORMAT>]`      | Generate code/config from secret definitions  |
 | `esk doctor`                   | Diagnose project health in one pass           |
+| `esk key rotate`               | Re-encrypt the store under a new key          |
 
 Full flags and behavior: [API.md](API.md).
+
+### Deployed vs. verified
+
+`esk deploy` and `esk status` report from `.esk/deploy-index.json`, which records what esk *sent*. They cannot detect a secret changed or deleted outside esk — through a provider dashboard, a teammate's CLI, or another tool.
+
+`esk verify` is the only command that asks the targets themselves. Run it when you need to trust the state rather than the record:
+
+```bash
+esk verify --env prod
+```
+
+What each target can prove is a permanent property of its provider's API, not a roadmap item: some return stored values, some list key names only, and a few cannot be read back at all. Targets that cannot be verified are reported as explicit gaps — never as passing. See the verification column in [TARGETS.md](TARGETS.md).
 
 ## Supported deploy targets
 
