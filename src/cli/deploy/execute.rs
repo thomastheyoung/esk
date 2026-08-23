@@ -165,11 +165,63 @@ fn exec_batch_group(
         environment: env_name.to_string(),
     };
 
-    let batch_results = deploy_target.deploy_batch(&bg.secrets, &target);
-
-    let mut idx = index.lock().expect("deploy index mutex poisoned");
     let mut items = Vec::new();
     let mut had_failure = false;
+
+    let expected_keys: BTreeSet<&str> = bg
+        .secrets
+        .iter()
+        .map(|secret| secret.key.as_str())
+        .collect();
+    let batch_deploy = deploy_target
+        .deploy_batch(&bg.secrets, &target)
+        .and_then(|results| {
+            let actual_keys: BTreeSet<&str> =
+                results.iter().map(|result| result.key.as_str()).collect();
+            if results.len() != expected_keys.len() || actual_keys != expected_keys {
+                anyhow::bail!("batch target returned an invalid per-secret result set");
+            }
+            Ok(results)
+        });
+
+    let batch_results = match batch_deploy {
+        Ok(results) => results,
+        Err(error) => {
+            let error = crate::targets::redact_secrets(
+                &error.to_string(),
+                bg.secrets.iter().map(|secret| secret.value.as_str()),
+            );
+            let mut idx = index.lock().expect("deploy index mutex poisoned");
+            for secret in &bg.secrets {
+                let tracker_key = DeployIndex::tracker_key(
+                    &secret.key,
+                    &bg.target_name,
+                    bg.app.as_deref(),
+                    env_name,
+                );
+                let value_hash = DeployIndex::hash_value(&secret.value, master_key);
+                idx.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
+                items.push((secret.key.clone(), Some(error.clone())));
+            }
+            for key in &bg.tombstoned_keys {
+                let tracker_key =
+                    DeployIndex::tracker_key(key, &bg.target_name, bg.app.as_deref(), env_name);
+                idx.record_failure(
+                    tracker_key,
+                    target.to_string(),
+                    DeployIndex::TOMBSTONE_HASH.to_string(),
+                    error.clone(),
+                );
+                items.push((key.clone(), Some(error.clone())));
+            }
+            return BatchExecResult {
+                items,
+                had_failure: true,
+            };
+        }
+    };
+
+    let mut idx = index.lock().expect("deploy index mutex poisoned");
 
     if batch_results.is_empty() {
         // Tombstone-only batch
@@ -212,6 +264,28 @@ fn exec_batch_group(
                 );
                 idx.record_failure(tracker_key, target.to_string(), value_hash, error.clone());
                 items.push((result.key.clone(), Some(error)));
+            }
+        }
+
+        for key in &bg.tombstoned_keys {
+            let tracker_key =
+                DeployIndex::tracker_key(key, &bg.target_name, bg.app.as_deref(), env_name);
+            if had_failure {
+                let error = "batch deploy had failures".to_string();
+                idx.record_failure(
+                    tracker_key,
+                    target.to_string(),
+                    DeployIndex::TOMBSTONE_HASH.to_string(),
+                    error.clone(),
+                );
+                items.push((key.clone(), Some(error)));
+            } else {
+                idx.record_success(
+                    tracker_key,
+                    target.to_string(),
+                    DeployIndex::TOMBSTONE_HASH.to_string(),
+                );
+                items.push((key.clone(), None));
             }
         }
     }
@@ -1096,6 +1170,73 @@ mod tests {
         name: &'static str,
         started: Arc<AtomicUsize>,
         succeeds: bool,
+    }
+
+    struct FailingEmptyBatchTarget;
+
+    impl crate::targets::DeployTarget for FailingEmptyBatchTarget {
+        fn name(&self) -> &'static str {
+            ".env"
+        }
+
+        fn deploy_mode(&self) -> crate::targets::DeployMode {
+            crate::targets::DeployMode::Batch
+        }
+
+        fn deploy_secret(
+            &self,
+            _key: &str,
+            _value: &str,
+            _target: &crate::config::ResolvedTarget,
+        ) -> anyhow::Result<()> {
+            anyhow::bail!("individual deployment is unsupported")
+        }
+
+        fn deploy_batch(
+            &self,
+            _secrets: &[crate::targets::SecretValue],
+            _target: &crate::config::ResolvedTarget,
+        ) -> anyhow::Result<Vec<crate::targets::DeployResult>> {
+            anyhow::bail!("final-secret write failed")
+        }
+    }
+
+    #[test]
+    fn empty_batch_failure_does_not_acknowledge_final_secret_tombstone() {
+        let bg = super::super::types::BatchGroup {
+            target_name: ".env".to_string(),
+            app: Some("web".to_string()),
+            secrets: Vec::new(),
+            tombstoned_keys: BTreeSet::from(["LAST_SECRET".to_string()]),
+            target_idx: 0,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let index = Mutex::new(DeployIndex::new(&dir.path().join("deploy-index.json")));
+
+        let outcome = exec_batch_group(
+            &bg,
+            "dev",
+            &FailingEmptyBatchTarget,
+            &BTreeMap::new(),
+            b"test-master-key",
+            &index,
+        );
+
+        assert!(outcome.had_failure);
+        assert_eq!(
+            outcome.items,
+            vec![(
+                "LAST_SECRET".to_string(),
+                Some("final-secret write failed".to_string())
+            )]
+        );
+        let tracker_key = DeployIndex::tracker_key("LAST_SECRET", ".env", Some("web"), "dev");
+        let record = &index.lock().unwrap().records[&tracker_key];
+        assert_eq!(
+            record.last_deploy_status,
+            crate::deploy_tracker::DeployStatus::Failed
+        );
+        assert_eq!(record.value_hash, DeployIndex::TOMBSTONE_HASH);
     }
 
     impl crate::targets::DeployTarget for ParallelTarget {

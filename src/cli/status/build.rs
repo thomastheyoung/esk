@@ -546,14 +546,16 @@ secrets:
             environment: "dev".to_string(),
         };
         let dotenv = crate::targets::dotenv::DotenvTarget { config: &config };
-        dotenv.deploy_batch(
-            &[SecretValue {
-                key: "MY_SECRET".to_string(),
-                value: zeroize::Zeroizing::new("val1".to_string()),
-                group: "General".to_string(),
-            }],
-            &target,
-        );
+        dotenv
+            .deploy_batch(
+                &[SecretValue {
+                    key: "MY_SECRET".to_string(),
+                    value: zeroize::Zeroizing::new("val1".to_string()),
+                    group: "General".to_string(),
+                }],
+                &target,
+            )
+            .unwrap();
         let index_path = dir.path().join(".esk/deploy-index.json");
         let (mut index, _) = DeployIndex::load(&index_path);
         index.record_success(
@@ -689,14 +691,16 @@ secrets:
             environment: "dev".to_string(),
         };
         let dotenv = crate::targets::dotenv::DotenvTarget { config: &config };
-        dotenv.deploy_batch(
-            &[SecretValue {
-                key: "MY_SECRET".to_string(),
-                value: zeroize::Zeroizing::new("val1".to_string()),
-                group: "General".to_string(),
-            }],
-            &target,
-        );
+        dotenv
+            .deploy_batch(
+                &[SecretValue {
+                    key: "MY_SECRET".to_string(),
+                    value: zeroize::Zeroizing::new("val1".to_string()),
+                    group: "General".to_string(),
+                }],
+                &target,
+            )
+            .unwrap();
         let index_path = dir.path().join(".esk/deploy-index.json");
         let (mut index, _) = DeployIndex::load(&index_path);
         index.record_success(

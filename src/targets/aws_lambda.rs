@@ -240,37 +240,19 @@ impl DeployTarget for AwsLambdaTarget<'_> {
         )
     }
 
-    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
-        let function_name = match self.resolve_function_name(&target.environment) {
-            Ok(name) => name,
-            Err(e) => {
-                return secrets
-                    .iter()
-                    .map(|s| DeployResult {
-                        key: s.key.clone(),
-                        outcome: DeployOutcome::Failed(e.to_string()),
-                    })
-                    .collect();
-            }
-        };
+    fn deploy_batch(
+        &self,
+        secrets: &[SecretValue],
+        target: &ResolvedTarget,
+    ) -> Result<Vec<DeployResult>> {
+        let function_name = self.resolve_function_name(&target.environment)?;
 
         let env_flags = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let kms_key_arn = self.target_config.kms_key_arn.as_deref();
 
         for attempt in 0..=MAX_CONFLICT_RETRIES {
             // Read current env vars
-            let (mut vars, revision_id) = match self.read_env_vars(function_name, &env_flags) {
-                Ok(result) => result,
-                Err(e) => {
-                    return secrets
-                        .iter()
-                        .map(|s| DeployResult {
-                            key: s.key.clone(),
-                            outcome: DeployOutcome::Failed(e.to_string()),
-                        })
-                        .collect();
-                }
-            };
+            let (mut vars, revision_id) = self.read_env_vars(function_name, &env_flags)?;
 
             // Merge esk secrets on top
             for s in secrets {
@@ -286,38 +268,26 @@ impl DeployTarget for AwsLambdaTarget<'_> {
                 &env_flags,
             ) {
                 Ok(()) => {
-                    return secrets
+                    return Ok(secrets
                         .iter()
                         .map(|s| DeployResult {
                             key: s.key.clone(),
                             outcome: DeployOutcome::Success,
                         })
-                        .collect();
+                        .collect());
                 }
                 Err(e) => {
                     if attempt < MAX_CONFLICT_RETRIES && Self::is_conflict_error(&e) {
                         // Retry on conflict
                         continue;
                     }
-                    return secrets
-                        .iter()
-                        .map(|s| DeployResult {
-                            key: s.key.clone(),
-                            outcome: DeployOutcome::Failed(e.to_string()),
-                        })
-                        .collect();
+                    return Err(e);
                 }
             }
         }
 
         // Should not reach here, but handle gracefully
-        secrets
-            .iter()
-            .map(|s| DeployResult {
-                key: s.key.clone(),
-                outcome: DeployOutcome::Failed("exceeded max conflict retries".to_string()),
-            })
-            .collect()
+        anyhow::bail!("exceeded max conflict retries")
     }
 }
 
@@ -516,7 +486,7 @@ targets:
             make_secret("API_KEY", "sk-123"),
             make_secret("DB_URL", "postgres://localhost"),
         ];
-        let results = target.deploy_batch(&secrets, &make_target("dev"));
+        let results = target.deploy_batch(&secrets, &make_target("dev")).unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = runner.take_calls();
@@ -559,7 +529,7 @@ targets:
         };
 
         let secrets = vec![make_secret("API_KEY", "sk-123")];
-        let results = target.deploy_batch(&secrets, &make_target("dev"));
+        let results = target.deploy_batch(&secrets, &make_target("dev")).unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = runner.take_calls();
@@ -590,13 +560,33 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        let results = target.deploy_batch(&secrets, &make_target("dev"));
-        assert!(!results[0].outcome.is_success());
-        assert!(results[0]
-            .outcome
-            .error_message()
-            .unwrap()
-            .contains("AccessDeniedException"));
+        let error = target
+            .deploy_batch(&secrets, &make_target("dev"))
+            .unwrap_err();
+        assert!(error.to_string().contains("AccessDeniedException"));
+    }
+
+    #[test]
+    fn deploy_batch_empty_propagates_final_secret_update_failure() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.aws_lambda.as_ref().unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![
+            get_config_response(&[("LAST_SECRET", "old")], "rev-1"),
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"AccessDeniedException".to_vec(),
+            },
+        ]);
+        let target = AwsLambdaTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let error = target.deploy_batch(&[], &make_target("dev")).unwrap_err();
+        assert!(error.to_string().contains("AccessDeniedException"));
     }
 
     #[test]
@@ -625,7 +615,7 @@ targets:
         };
 
         let secrets = vec![make_secret("API_KEY", "sk-123")];
-        let results = target.deploy_batch(&secrets, &make_target("dev"));
+        let results = target.deploy_batch(&secrets, &make_target("dev")).unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = runner.take_calls();
@@ -707,12 +697,11 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        let results = target.deploy_batch(&secrets, &make_target("staging"));
-        assert!(!results[0].outcome.is_success());
-        assert!(results[0]
-            .outcome
-            .error_message()
-            .unwrap()
+        let error = target
+            .deploy_batch(&secrets, &make_target("staging"))
+            .unwrap_err();
+        assert!(error
+            .to_string()
             .contains("no aws_lambda function_name mapping"));
     }
 
@@ -732,7 +721,7 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        target.deploy_batch(&secrets, &make_target("dev"));
+        target.deploy_batch(&secrets, &make_target("dev")).unwrap();
 
         let calls = runner.take_calls();
         let stdin = calls[1].stdin.as_ref().unwrap();
@@ -759,7 +748,7 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        target.deploy_batch(&secrets, &make_target("prod"));
+        target.deploy_batch(&secrets, &make_target("prod")).unwrap();
 
         let calls = runner.take_calls();
         // Both get and update should have --no-paginate

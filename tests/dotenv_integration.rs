@@ -38,7 +38,9 @@ fn env_file_end_to_end() {
         make_secret("MY_SECRET", "secret_dev", "General"),
         make_secret("OTHER_SECRET", "other_dev", "General"),
     ];
-    let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
+    let results = target
+        .deploy_batch(&secrets, &make_target("web", "dev"))
+        .unwrap();
     assert!(results.iter().all(|r| r.outcome.is_success()));
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
@@ -59,7 +61,9 @@ fn env_file_multiple_groups() {
         make_secret("B", "2", "Convex"),
         make_secret("C", "3", "Resend"),
     ];
-    let results = target.deploy_batch(&secrets, &make_target("web", "dev"));
+    let results = target
+        .deploy_batch(&secrets, &make_target("web", "dev"))
+        .unwrap();
     assert!(results.iter().all(|r| r.outcome.is_success()));
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
@@ -79,11 +83,11 @@ fn env_file_regeneration_replaces() {
 
     // First write
     let secrets1 = vec![make_secret("OLD_KEY", "old", "G")];
-    env_target.deploy_batch(&secrets1, &resolved);
+    env_target.deploy_batch(&secrets1, &resolved).unwrap();
 
     // Second write with different secrets
     let secrets2 = vec![make_secret("NEW_KEY", "new", "G")];
-    env_target.deploy_batch(&secrets2, &resolved);
+    env_target.deploy_batch(&secrets2, &resolved).unwrap();
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
     assert!(content.contains("NEW_KEY=new"));

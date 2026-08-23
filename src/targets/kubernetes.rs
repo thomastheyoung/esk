@@ -203,19 +203,12 @@ impl DeployTarget for KubernetesTarget<'_> {
         Ok(Evidence::Values(values))
     }
 
-    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
-        let manifest = match self.generate_manifest(secrets, target) {
-            Ok(m) => m,
-            Err(e) => {
-                return secrets
-                    .iter()
-                    .map(|s| DeployResult {
-                        key: s.key.clone(),
-                        outcome: DeployOutcome::Failed(e.to_string()),
-                    })
-                    .collect();
-            }
-        };
+    fn deploy_batch(
+        &self,
+        secrets: &[SecretValue],
+        target: &ResolvedTarget,
+    ) -> Result<Vec<DeployResult>> {
+        let manifest = self.generate_manifest(secrets, target)?;
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["apply", "-f", "-"];
@@ -238,31 +231,17 @@ impl DeployTarget for KubernetesTarget<'_> {
             },
         );
 
-        match result {
-            Ok(output) if output.success => secrets
+        let output = result?;
+        if output.success {
+            Ok(secrets
                 .iter()
                 .map(|s| DeployResult {
                     key: s.key.clone(),
                     outcome: DeployOutcome::Success,
                 })
-                .collect(),
-            Ok(output) => {
-                let stderr = String::from_utf8_lossy(&output.stderr).to_string();
-                secrets
-                    .iter()
-                    .map(|s| DeployResult {
-                        key: s.key.clone(),
-                        outcome: DeployOutcome::Failed(stderr.clone()),
-                    })
-                    .collect()
-            }
-            Err(e) => secrets
-                .iter()
-                .map(|s| DeployResult {
-                    key: s.key.clone(),
-                    outcome: DeployOutcome::Failed(e.to_string()),
-                })
-                .collect(),
+                .collect())
+        } else {
+            anyhow::bail!("{}", String::from_utf8_lossy(&output.stderr))
         }
     }
 }
@@ -398,7 +377,7 @@ targets:
             make_secret("DB_HOST", "localhost"),
             make_secret("DB_PASS", "s3cret"),
         ];
-        let results = target.deploy_batch(&secrets, &make_target("dev"));
+        let results = target.deploy_batch(&secrets, &make_target("dev")).unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = runner.take_calls();
@@ -432,7 +411,7 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        target.deploy_batch(&secrets, &make_target("prod"));
+        target.deploy_batch(&secrets, &make_target("prod")).unwrap();
 
         let calls = runner.take_calls();
         assert!(calls[0].args.contains(&"--context".to_string()));
@@ -457,13 +436,10 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        let results = target.deploy_batch(&secrets, &make_target("dev"));
-        assert!(!results[0].outcome.is_success());
-        assert!(results[0]
-            .outcome
-            .error_message()
-            .unwrap()
-            .contains("forbidden"));
+        let error = target
+            .deploy_batch(&secrets, &make_target("dev"))
+            .unwrap_err();
+        assert!(error.to_string().contains("forbidden"));
     }
 
     #[test]
@@ -479,12 +455,11 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        let results = target.deploy_batch(&secrets, &make_target("staging"));
-        assert!(!results[0].outcome.is_success());
-        assert!(results[0]
-            .outcome
-            .error_message()
-            .unwrap()
+        let error = target
+            .deploy_batch(&secrets, &make_target("staging"))
+            .unwrap_err();
+        assert!(error
+            .to_string()
             .contains("no kubernetes namespace mapping"));
     }
 
@@ -579,8 +554,30 @@ targets:
             target_config,
             runner: &runner,
         };
-        let results = target.deploy_batch(&[], &make_target("dev"));
+        let results = target.deploy_batch(&[], &make_target("dev")).unwrap();
         assert!(results.is_empty());
+    }
+
+    #[test]
+    fn deploy_batch_empty_propagates_apply_failure() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: false,
+            stdout: vec![],
+            stderr: b"cannot replace final-secret manifest".to_vec(),
+        }]);
+        let target = KubernetesTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+
+        let error = target.deploy_batch(&[], &make_target("dev")).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("cannot replace final-secret manifest"));
     }
 
     fn verify_keys(names: &[&str]) -> BTreeSet<String> {

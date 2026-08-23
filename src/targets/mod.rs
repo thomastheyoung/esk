@@ -31,6 +31,7 @@ use crate::config::{Config, ResolvedTarget};
 use crate::store::STORE_KEY_ENV;
 
 /// Whether a deploy succeeded or failed.
+#[derive(Debug)]
 pub enum DeployOutcome {
     Success,
     Failed(String),
@@ -49,6 +50,7 @@ impl DeployOutcome {
     }
 }
 
+#[derive(Debug)]
 pub struct DeployResult {
     pub key: String,
     pub outcome: DeployOutcome,
@@ -257,8 +259,12 @@ pub trait DeployTarget: Send + Sync {
     }
 
     /// Deploy a batch of secrets. Default implementation loops deploy_secret.
-    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
-        secrets
+    fn deploy_batch(
+        &self,
+        secrets: &[SecretValue],
+        target: &ResolvedTarget,
+    ) -> Result<Vec<DeployResult>> {
+        Ok(secrets
             .iter()
             .map(|s| match self.deploy_secret(&s.key, &s.value, target) {
                 Ok(()) => DeployResult {
@@ -270,7 +276,7 @@ pub trait DeployTarget: Send + Sync {
                     outcome: DeployOutcome::Failed(e.to_string()),
                 },
             })
-            .collect()
+            .collect())
     }
 }
 
@@ -883,7 +889,7 @@ mod tests {
     fn default_deploy_batch_all_success() {
         let target = TestTarget { fail_keys: vec![] };
         let secrets = vec![make_secret("A"), make_secret("B")];
-        let results = target.deploy_batch(&secrets, &make_target());
+        let results = target.deploy_batch(&secrets, &make_target()).unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
         assert_eq!(results.len(), 2);
     }
@@ -894,7 +900,7 @@ mod tests {
             fail_keys: vec!["B".to_string()],
         };
         let secrets = vec![make_secret("A"), make_secret("B"), make_secret("C")];
-        let results = target.deploy_batch(&secrets, &make_target());
+        let results = target.deploy_batch(&secrets, &make_target()).unwrap();
         assert!(results[0].outcome.is_success());
         assert!(!results[1].outcome.is_success());
         assert!(results[1].outcome.error_message().is_some());
@@ -904,7 +910,7 @@ mod tests {
     #[test]
     fn default_deploy_batch_empty_input() {
         let target = TestTarget { fail_keys: vec![] };
-        let results = target.deploy_batch(&[], &make_target());
+        let results = target.deploy_batch(&[], &make_target()).unwrap();
         assert!(results.is_empty());
     }
 
