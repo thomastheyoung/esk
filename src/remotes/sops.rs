@@ -6,15 +6,16 @@
 //! Azure Key Vault, and HashiCorp Vault Transit.
 //!
 //! CLI: `sops` (Mozilla SOPS).
-//! Commands: `sops -e /dev/stdin` (encrypt) / `sops -d /dev/stdin` (decrypt).
+//! Commands: `sops -e <private-tempfile>` (encrypt) / `sops -d <file>` (decrypt).
 //!
-//! The esk store payload is serialized as JSON, encrypted via **stdin**, and
-//! written to a file (one per environment). On pull, the file is decrypted via
-//! stdin. Requires a `.sops.yaml` configuration file to define encryption keys
-//! and rules.
+//! The esk store payload is serialized as JSON, encrypted from a private
+//! temporary file, and written to a file (one per environment). On pull, the
+//! configured file is decrypted directly. Requires a `.sops.yaml` configuration
+//! file to define encryption keys and rules.
 
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
+use std::io::Write;
 
 use crate::config::{Config, SopsRemoteConfig};
 use crate::store::StorePayload;
@@ -80,16 +81,31 @@ impl SyncRemote for SopsRemote<'_> {
 
         let dest_path = self.resolve_path(env);
 
-        // Encrypt via sops using stdin, capture stdout
+        // SOPS needs a filename to select creation rules. A private temporary
+        // file is portable and keeps secret material out of process arguments.
+        let mut input =
+            tempfile::NamedTempFile::new().context("failed to create temporary SOPS input file")?;
+        input
+            .write_all(json.as_bytes())
+            .context("failed to write temporary SOPS input file")?;
+        input
+            .flush()
+            .context("failed to flush temporary SOPS input file")?;
+        let input_path = input.path().to_string_lossy().into_owned();
+
         let output = self
             .runner
             .run(
                 "sops",
-                &["-e", "/dev/stdin"],
-                CommandOpts {
-                    stdin: Some(json.as_bytes().to_vec()),
-                    ..Default::default()
-                },
+                &[
+                    "-e",
+                    "--input-type",
+                    "json",
+                    "--filename-override",
+                    &dest_path,
+                    &input_path,
+                ],
+                CommandOpts::default(),
             )
             .context("failed to run sops encrypt")?;
 
@@ -272,7 +288,13 @@ remotes:
         let calls = runner.calls();
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].program, "sops");
-        assert_eq!(calls[0].args, vec!["-e", "/dev/stdin"]);
+        assert_eq!(
+            &calls[0].args[..4],
+            ["-e", "--input-type", "json", "--filename-override"]
+        );
+        assert_eq!(calls[0].args[4], dest.to_string_lossy());
+        assert_ne!(calls[0].args[5], "/dev/stdin");
+        assert!(calls[0].stdin.is_none());
 
         // Verify file was written
         assert!(dest.exists());
@@ -347,11 +369,12 @@ remotes:
 
     #[test]
     fn push_uses_env_version() {
-        // Capture stdin to verify version
-        struct StdinCapture {
+        // Read the private input while it exists during the runner call.
+        struct InputCapture {
             calls: Mutex<Vec<StdinCall>>,
+            input: Mutex<Option<Vec<u8>>>,
         }
-        impl CommandRunner for StdinCapture {
+        impl CommandRunner for InputCapture {
             fn run(
                 &self,
                 program: &str,
@@ -366,6 +389,9 @@ remotes:
                         args.iter().map(|s| (*s).to_string()).collect(),
                         opts.stdin,
                     ));
+                let input_path = args.last().context("missing SOPS input path")?;
+                *self.input.lock().expect("input capture mutex poisoned") =
+                    Some(std::fs::read(input_path)?);
                 Ok(CommandOutput {
                     success: true,
                     stdout: b"encrypted".to_vec(),
@@ -388,8 +414,9 @@ remotes:
         let fixture = ConfigFixture::new(&yaml).expect("fixture");
         let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
 
-        let runner = StdinCapture {
+        let runner = InputCapture {
             calls: Mutex::new(Vec::new()),
+            input: Mutex::new(None),
         };
         let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
 
@@ -403,9 +430,9 @@ remotes:
         };
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
-        let calls = runner.calls.lock().expect("stdin capture mutex poisoned");
-        let stdin = calls[0].2.as_ref().unwrap();
-        let json: BTreeMap<String, String> = serde_json::from_slice(stdin).unwrap();
+        let input = runner.input.lock().expect("input capture mutex poisoned");
+        let json: BTreeMap<String, String> =
+            serde_json::from_slice(input.as_ref().unwrap()).unwrap();
         assert_eq!(json.get(crate::remotes::ESK_VERSION_KEY).unwrap(), "99");
     }
 }

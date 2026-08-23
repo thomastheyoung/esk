@@ -10,12 +10,13 @@
 //!
 //! The entire esk store payload is serialized as a single JSON blob and stored
 //! under one secret name per environment (e.g. `{project}/{environment}`).
-//! Secret values are sent via **stdin** (`file:///dev/stdin`). On first push,
+//! Secret values are sent via a private temporary file. On first push,
 //! falls back to `create-secret` if the secret doesn't exist yet. Supports
 //! `--region` and `--profile` for multi-account setups.
 
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
+use std::io::Write;
 
 use crate::config::{AwsSecretsManagerRemoteConfig, Config};
 use crate::store::StorePayload;
@@ -77,6 +78,15 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
 
         let json =
             serde_json::to_string(&env_payload).context("failed to serialize store payload")?;
+        let mut input = tempfile::NamedTempFile::new()
+            .context("failed to create temporary AWS Secrets Manager input file")?;
+        input
+            .write_all(json.as_bytes())
+            .context("failed to write temporary AWS Secrets Manager input file")?;
+        input
+            .flush()
+            .context("failed to flush temporary AWS Secrets Manager input file")?;
+        let file_arg = format!("file://{}", input.path().display());
 
         let secret_name = self.secret_name(env);
         let base = self.base_args();
@@ -88,20 +98,13 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
             "--secret-id",
             &secret_name,
             "--secret-string",
-            "file:///dev/stdin",
+            &file_arg,
         ];
         args.extend(base.iter().map(String::as_str));
 
         let output = self
             .runner
-            .run(
-                "aws",
-                &args,
-                CommandOpts {
-                    stdin: Some(json.as_bytes().to_vec()),
-                    ..Default::default()
-                },
-            )
+            .run("aws", &args, CommandOpts::default())
             .context("failed to run aws secretsmanager put-secret-value")?;
 
         if !output.success {
@@ -115,20 +118,13 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
                     "--name",
                     &secret_name,
                     "--secret-string",
-                    "file:///dev/stdin",
+                    &file_arg,
                 ];
                 create_args.extend(base.iter().map(String::as_str));
 
                 let create_output = self
                     .runner
-                    .run(
-                        "aws",
-                        &create_args,
-                        CommandOpts {
-                            stdin: Some(json.as_bytes().to_vec()),
-                            ..Default::default()
-                        },
-                    )
+                    .run("aws", &create_args, CommandOpts::default())
                     .context("failed to run aws secretsmanager create-secret")?;
 
                 if !create_output.success {
@@ -582,6 +578,32 @@ remotes:
 
     #[test]
     fn push_uses_env_version() {
+        struct FileCapture(std::sync::Mutex<Option<Vec<u8>>>);
+        impl CommandRunner for FileCapture {
+            fn run(
+                &self,
+                _program: &str,
+                args: &[&str],
+                opts: CommandOpts,
+            ) -> Result<CommandOutput> {
+                assert!(opts.stdin.is_none());
+                let file_arg = args
+                    .windows(2)
+                    .find(|pair| pair[0] == "--secret-string")
+                    .map(|pair| pair[1])
+                    .context("missing --secret-string argument")?;
+                let path = file_arg
+                    .strip_prefix("file://")
+                    .context("secret string must use a file URI")?;
+                *self.0.lock().expect("capture mutex poisoned") = Some(std::fs::read(path)?);
+                Ok(CommandOutput {
+                    success: true,
+                    stdout: b"{}".to_vec(),
+                    stderr: Vec::new(),
+                })
+            }
+        }
+
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"
 project: myapp
@@ -596,11 +618,7 @@ remotes:
         let remote_config: AwsSecretsManagerRemoteConfig =
             config.remote_config("aws_secrets_manager").unwrap();
 
-        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
-            success: true,
-            stdout: b"{}".to_vec(),
-            stderr: Vec::new(),
-        }]);
+        let runner = FileCapture(std::sync::Mutex::new(None));
         let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
         let mut env_versions = BTreeMap::new();
@@ -616,10 +634,8 @@ remotes:
 
         remote.push(&payload, &config, "dev").unwrap();
 
-        let calls = runner.calls();
-        assert_eq!(calls.len(), 1);
-        let pushed: StorePayload =
-            serde_json::from_slice(calls[0].stdin.as_ref().unwrap()).unwrap();
+        let input = runner.0.lock().expect("capture mutex poisoned");
+        let pushed: StorePayload = serde_json::from_slice(input.as_ref().unwrap()).unwrap();
         assert_eq!(pushed.version, 10);
         assert!(pushed.secrets.contains_key("KEY"));
         assert!(!pushed.secrets.contains_key("KEY:dev"));
