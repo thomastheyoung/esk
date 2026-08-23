@@ -5,7 +5,7 @@ use std::io::IsTerminal;
 
 use crate::config::Config;
 use crate::reconcile::{self, ConflictPreference};
-use crate::remotes::{self, SyncRemote};
+use crate::remotes::{self, RemoteSnapshot, SyncRemote};
 use crate::store::{SecretStore, StorePayload};
 use crate::suggest;
 use crate::sync_tracker::SyncIndex;
@@ -277,36 +277,42 @@ pub fn run_with_runner(
     ));
 
     #[allow(clippy::type_complexity)]
-    let pull_results: Vec<(String, Result<Option<(BTreeMap<String, String>, u64)>>)> =
-        std::thread::scope(|s| {
-            let handles: Vec<_> = target_remotes
-                .iter()
-                .map(|rem| {
-                    let name = rem.name().to_string();
-                    s.spawn(move || (name, rem.pull(config, env)))
-                })
-                .collect();
-            handles.into_iter().map(|h| h.join().unwrap()).collect()
-        });
+    let pull_results: Vec<(String, Result<Option<RemoteSnapshot>>)> = std::thread::scope(|s| {
+        let handles: Vec<_> = target_remotes
+            .iter()
+            .map(|rem| {
+                let name = rem.name().to_string();
+                s.spawn(move || (name, rem.pull(config, env)))
+            })
+            .collect();
+        handles.into_iter().map(|h| h.join().unwrap()).collect()
+    });
 
     // Process pull results
     let mut pull_lines: Vec<String> = Vec::new();
-    let mut remote_data: Vec<(String, BTreeMap<String, String>, u64)> = Vec::new();
+    let mut remote_data: Vec<(String, RemoteSnapshot)> = Vec::new();
     let mut pull_failures: Vec<String> = Vec::new();
 
     for (name, result) in pull_results {
         match result {
-            Ok(Some((secrets, version))) => {
+            Ok(Some(snapshot)) => {
                 let outcome = PullOutcome::Fetched {
-                    version,
-                    secret_count: secrets.len(),
+                    version: snapshot.version,
+                    secret_count: snapshot.secrets.len(),
                 };
                 pull_lines.push(format_pull_line(&name, &outcome));
-                remote_data.push((name, secrets, version));
+                remote_data.push((name, snapshot));
             }
             Ok(None) => {
                 pull_lines.push(format_pull_line(&name, &PullOutcome::Empty));
-                remote_data.push((name, BTreeMap::new(), 0));
+                remote_data.push((
+                    name,
+                    RemoteSnapshot {
+                        secrets: BTreeMap::new(),
+                        tombstones: BTreeMap::new(),
+                        version: 0,
+                    },
+                ));
             }
             Err(e) => {
                 pull_lines.push(format_pull_line(&name, &PullOutcome::Failed(e.to_string())));
@@ -335,12 +341,12 @@ pub fn run_with_runner(
     }
 
     // Phase 2: Reconcile (single-threaded, may prompt interactively)
-    let remotes_ref: Vec<(&str, &BTreeMap<String, String>, u64)> = remote_data
+    let remotes_ref: Vec<(&str, &RemoteSnapshot)> = remote_data
         .iter()
-        .map(|(name, secrets, version)| (name.as_str(), secrets, *version))
+        .map(|(name, snapshot)| (name.as_str(), snapshot))
         .collect();
 
-    let result = match reconcile::reconcile_multi_with_jump_limit(
+    let result = match reconcile::reconcile_multi_snapshots_with_jump_limit(
         &payload,
         &remotes_ref,
         env,
@@ -362,7 +368,13 @@ pub fn run_with_runner(
             } else {
                 bail!("{e}\nRun with --force to bypass version jump protection.");
             }
-            reconcile::reconcile_multi_with_jump_limit(&payload, &remotes_ref, env, prefer, false)?
+            reconcile::reconcile_multi_snapshots_with_jump_limit(
+                &payload,
+                &remotes_ref,
+                env,
+                prefer,
+                false,
+            )?
         }
         Err(e) => return Err(e),
     };

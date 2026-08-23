@@ -66,7 +66,7 @@ impl SyncRemote for DopplerRemote<'_> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+        let Some(json_map) = super::flat_snapshot_map(payload, env)? else {
             return Ok(());
         };
 
@@ -75,8 +75,6 @@ impl SyncRemote for DopplerRemote<'_> {
 
         // Build JSON payload with all secrets + version metadata, upload in a single call
         // via stdin to avoid exposing values in process arguments.
-        let mut json_map: BTreeMap<String, String> = env_secrets;
-        json_map.insert(super::ESK_VERSION_KEY.to_string(), version.to_string());
         let json = serde_json::to_string(&json_map).context("failed to serialize secrets")?;
 
         let output = self
@@ -107,7 +105,7 @@ impl SyncRemote for DopplerRemote<'_> {
         Ok(())
     }
 
-    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         let doppler_config = self.config_name(env)?;
         let project = &self.remote_config.project;
 
@@ -137,18 +135,7 @@ impl SyncRemote for DopplerRemote<'_> {
         let json_map: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)
             .context("failed to parse Doppler secrets JSON")?;
 
-        let version: u64 = json_map
-            .get(super::ESK_VERSION_KEY)
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
-
-        let composite: BTreeMap<String, String> = json_map
-            .into_iter()
-            .filter(|(k, _)| k != super::ESK_VERSION_KEY)
-            .map(|(k, v)| (format!("{k}:{env}"), v))
-            .collect();
-
-        Ok(Some((composite, version)))
+        Ok(Some(super::parse_flat_snapshot(json_map, env)?))
     }
 }
 
@@ -325,7 +312,9 @@ remotes:
             stderr: Vec::new(),
         }]);
         let remote = DopplerRemote::new(remote_config, &runner);
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
 
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -386,7 +375,9 @@ remotes:
             stderr: Vec::new(),
         }]);
         let remote = DopplerRemote::new(remote_config, &runner);
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
         assert!(secrets.is_empty());
         assert_eq!(version, 0);
     }

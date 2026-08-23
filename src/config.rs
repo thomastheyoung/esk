@@ -2568,6 +2568,18 @@ secrets:
     }
 
     #[test]
+    fn validate_rejects_reserved_remote_metadata_keys() {
+        for key in ["_esk_version", "_esk_tombstones"] {
+            let dir = tempfile::tempdir().unwrap();
+            let yaml =
+                format!("project: x\nenvironments: [dev]\nsecrets:\n  G:\n    {key}: {{}}\n");
+            let path = write_yaml(dir.path(), &yaml);
+            let error = Config::load(&path).unwrap_err();
+            assert!(format!("{error:#}").contains("reserved for sync metadata"));
+        }
+    }
+
+    #[test]
     fn validate_duplicate_key_across_groups() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r#"

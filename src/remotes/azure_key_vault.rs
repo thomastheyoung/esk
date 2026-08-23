@@ -86,14 +86,12 @@ impl SyncRemote for AzureKeyVaultRemote<'_> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+        let Some(json_map) = super::flat_snapshot_map(payload, env)? else {
             return Ok(());
         };
 
         // Build JSON payload with bare keys + version metadata.
         // Write to a temp file and pass via --file to avoid exposing values in process arguments.
-        let mut json_map: BTreeMap<String, String> = env_secrets;
-        json_map.insert(super::ESK_VERSION_KEY.to_string(), version.to_string());
         let json = serde_json::to_string(&json_map).context("failed to serialize secrets")?;
 
         let mut tmpfile =
@@ -133,7 +131,7 @@ impl SyncRemote for AzureKeyVaultRemote<'_> {
         Ok(())
     }
 
-    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         let secret_name = self.secret_name(env);
         let vault_name = &self.remote_config.vault_name;
 
@@ -175,7 +173,7 @@ impl SyncRemote for AzureKeyVaultRemote<'_> {
         let json_map: BTreeMap<String, String> =
             serde_json::from_str(value_str).context("failed to parse secret value JSON")?;
 
-        Ok(Some(super::parse_pulled_secrets(json_map, env)))
+        Ok(Some(super::parse_flat_snapshot(json_map, env)?))
     }
 }
 
@@ -359,7 +357,9 @@ remotes:
             stderr: Vec::new(),
         }]);
         let remote = AzureKeyVaultRemote::new(fixture.config(), remote_config, &runner);
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
 
         assert_eq!(version, 5);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");

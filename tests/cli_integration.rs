@@ -1088,9 +1088,9 @@ fn cloud_file_push_pull_cleartext() {
     cloud_remote.push(&payload, &config, "dev").unwrap();
     assert!(cloud_dir.path().join("secrets-dev.json").is_file());
 
-    let (secrets, version) = cloud_remote.pull(&config, "dev").unwrap().unwrap();
-    assert_eq!(version, 1);
-    assert_eq!(secrets.get("KEY:dev").unwrap(), "val123");
+    let snapshot = cloud_remote.pull(&config, "dev").unwrap().unwrap();
+    assert_eq!(snapshot.version, 1);
+    assert_eq!(snapshot.secrets.get("KEY:dev").unwrap(), "val123");
 }
 
 #[test]
@@ -1123,9 +1123,9 @@ fn cloud_file_push_pull_encrypted() {
     cloud_remote.push(&payload, &config, "dev").unwrap();
     assert!(cloud_dir.path().join("secrets-dev.enc").is_file());
 
-    let (secrets, version) = cloud_remote.pull(&config, "dev").unwrap().unwrap();
-    assert_eq!(version, 1);
-    assert_eq!(secrets.get("SECRET:dev").unwrap(), "encrypted_val");
+    let snapshot = cloud_remote.pull(&config, "dev").unwrap().unwrap();
+    assert_eq!(snapshot.version, 1);
+    assert_eq!(snapshot.secrets.get("SECRET:dev").unwrap(), "encrypted_val");
 }
 
 #[test]

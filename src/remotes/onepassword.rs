@@ -313,7 +313,13 @@ impl<'a> OnePasswordRemote<'a> {
     // positional args (e.g. `section.key[concealed]=value`). There is no stdin/file support for
     // field values. Secret values are exposed in process arguments (visible via `ps aux`).
     // No workaround available.
-    fn push_item(&self, env: &str, secrets: &BTreeMap<String, String>, version: u64) -> Result<()> {
+    fn push_item(
+        &self,
+        env: &str,
+        secrets: &BTreeMap<String, String>,
+        tombstones: &BTreeMap<String, u64>,
+        version: u64,
+    ) -> Result<()> {
         let item_name = self.item_name(env);
         let vault = &self.remote_config.vault;
 
@@ -343,6 +349,10 @@ impl<'a> OnePasswordRemote<'a> {
 
         // Add version metadata
         assignments.push(format!("_Metadata.version[text]={version}"));
+        assignments.push(format!(
+            "_Metadata.tombstones[text]={}",
+            serde_json::to_string(tombstones).context("failed to serialize deletion metadata")?
+        ));
         let ownership_tag = self.ownership_tag(env);
 
         // Remove stale fields from 1Password (present remotely but not locally)
@@ -403,11 +413,8 @@ impl<'a> OnePasswordRemote<'a> {
     }
 
     /// Pull secrets from a 1Password item.
-    fn pull_item(&self, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
-        let Some(item) = self.get_item(env)? else {
-            return Ok(None);
-        };
-        Ok(Some((item.secrets, item.version)))
+    fn pull_item(&self, env: &str) -> Result<Option<OpItem>> {
+        self.get_item(env)
     }
 }
 
@@ -440,34 +447,39 @@ impl SyncRemote for OnePasswordRemote<'_> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        // Extract bare keys for this environment
-        let suffix = format!(":{env}");
-        let env_secrets: BTreeMap<String, String> = payload
-            .secrets
-            .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
-            })
-            .collect();
-
-        if env_secrets.is_empty() {
+        let env_payload = payload.for_env(env);
+        if env_payload.secrets.is_empty() && env_payload.tombstones.is_empty() {
             return Ok(());
         }
-
-        let version = payload.env_version(env);
-        self.push_item(env, &env_secrets, version)
+        self.push_item(
+            env,
+            &env_payload.secrets,
+            &env_payload.tombstones,
+            env_payload.version,
+        )
     }
 
-    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         // Pull returns bare keys — convert to composite for consistency
         match self.pull_item(env)? {
-            Some((bare_secrets, version)) => {
-                let composite: BTreeMap<String, String> = bare_secrets
+            Some(item) => {
+                let composite: BTreeMap<String, String> = item
+                    .secrets
                     .into_iter()
                     .map(|(k, v)| (format!("{k}:{env}"), v))
                     .collect();
-                Ok(Some((composite, version)))
+                let tombstones = item
+                    .tombstones
+                    .into_iter()
+                    .map(|(key, version)| (format!("{key}:{env}"), version))
+                    .collect();
+                let snapshot = super::RemoteSnapshot {
+                    secrets: composite,
+                    tombstones,
+                    version: item.version,
+                };
+                snapshot.validate(env)?;
+                Ok(Some(snapshot))
             }
             None => Ok(None),
         }
@@ -483,6 +495,7 @@ struct OpItem {
     /// Tracks which section each secret key came from (key -> section label).
     sections: BTreeMap<String, String>,
     version: u64,
+    tombstones: BTreeMap<String, u64>,
 }
 
 impl OpItem {
@@ -491,6 +504,7 @@ impl OpItem {
         let mut secrets = BTreeMap::new();
         let mut sections = BTreeMap::new();
         let mut version = 0u64;
+        let mut tombstones = BTreeMap::new();
 
         let fields = json["fields"].as_array().context("op item has no fields")?;
 
@@ -500,7 +514,14 @@ impl OpItem {
             let value = field["value"].as_str().unwrap_or("");
 
             if section == "_Metadata" && label == "version" {
-                version = value.parse().unwrap_or(0);
+                version = value
+                    .parse()
+                    .context("invalid 1Password version metadata")?;
+                continue;
+            }
+            if section == "_Metadata" && label == "tombstones" {
+                tombstones =
+                    serde_json::from_str(value).context("invalid 1Password tombstone metadata")?;
                 continue;
             }
 
@@ -519,6 +540,7 @@ impl OpItem {
             secrets,
             sections,
             version,
+            tombstones,
         })
     }
 }
@@ -564,6 +586,19 @@ mod tests {
         });
         let item = OpItem::from_json(&json).unwrap();
         assert_eq!(item.version, 42);
+    }
+
+    #[test]
+    fn op_item_from_json_extracts_tombstones() {
+        let json = json!({
+            "fields": [
+                {"section": {"label": "_Metadata"}, "label": "version", "value": "4"},
+                {"section": {"label": "_Metadata"}, "label": "tombstones", "value": "{\"KEY\":4}"},
+            ]
+        });
+        let item = OpItem::from_json(&json).unwrap();
+        assert_eq!(item.tombstones.get("KEY"), Some(&4));
+        assert!(!item.secrets.contains_key("tombstones"));
     }
 
     #[test]
@@ -618,8 +653,10 @@ mod tests {
                 {"section": {"label": "_Metadata"}, "label": "version", "value": "abc"},
             ]
         });
-        let item = OpItem::from_json(&json).unwrap();
-        assert_eq!(item.version, 0);
+        let error = OpItem::from_json(&json).unwrap_err();
+        assert!(error
+            .to_string()
+            .contains("invalid 1Password version metadata"));
     }
 
     #[test]
@@ -907,7 +944,9 @@ secrets:
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "new_val".to_string());
         secrets.insert("SECRET".to_string(), "new_val".to_string());
-        remote.push_item("dev", &secrets, 2).unwrap();
+        remote
+            .push_item("dev", &secrets, &BTreeMap::new(), 2)
+            .unwrap();
 
         let calls = runner.calls();
         // Last call is op item edit
@@ -968,7 +1007,9 @@ secrets:
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "new_val".to_string());
-        remote.push_item("dev", &secrets, 2).unwrap();
+        remote
+            .push_item("dev", &secrets, &BTreeMap::new(), 2)
+            .unwrap();
 
         let calls = runner.calls();
         let edit_call = calls.last().unwrap();
@@ -1024,7 +1065,9 @@ remotes:
 
         // Push with no secrets — API_KEY becomes stale
         let secrets = BTreeMap::new();
-        remote.push_item("dev", &secrets, 2).unwrap();
+        remote
+            .push_item("dev", &secrets, &BTreeMap::new(), 2)
+            .unwrap();
 
         let calls = runner.calls();
         let edit_call = calls.last().unwrap();
@@ -1066,7 +1109,9 @@ remotes:
 
         let mut secrets = BTreeMap::new();
         secrets.insert("API_KEY".to_string(), "val".to_string());
-        remote.push_item("dev", &secrets, 1).unwrap();
+        remote
+            .push_item("dev", &secrets, &BTreeMap::new(), 1)
+            .unwrap();
 
         let calls = runner.calls();
         // Second call is op item create
@@ -1326,7 +1371,9 @@ remotes:
 
         let mut secrets = BTreeMap::new();
         secrets.insert("KEY".to_string(), "new".to_string());
-        remote.push_item("dev", &secrets, 2).unwrap();
+        remote
+            .push_item("dev", &secrets, &BTreeMap::new(), 2)
+            .unwrap();
 
         let calls = runner.calls();
         assert_eq!(calls.len(), 3);

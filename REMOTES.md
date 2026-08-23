@@ -4,6 +4,15 @@ Remotes sync the entire secret list via `esk sync`. Unlike targets (which deploy
 
 For deploy targets (env files, Cloudflare, Convex, etc.), see [TARGETS.md](TARGETS.md).
 
+Each environment is synchronized as a versioned snapshot containing both live
+values and deletion tombstones. Tombstones prevent an older remote from
+resurrecting a deleted value; a value can return automatically only from a
+strictly newer snapshot. Blob remotes store tombstones as part of the payload.
+Flat key/value providers use reserved `_esk_version` and `_esk_tombstones`
+metadata fields, which cannot be used as secret names. Remotes written by older
+esk versions remain readable (missing tombstones mean none); the next successful
+push upgrades their snapshot metadata.
+
 ## Overview
 
 | Remote                                      | Config key                    | External CLI  | Storage location          |
@@ -33,7 +42,7 @@ Uses the 1Password CLI (`op`) to push and pull entire environment snapshots as v
 1. Collects all secrets for the environment from the local store.
 2. Groups them by group (using the `secrets` section of `esk.yaml`).
 3. Creates or updates a 1Password item with concealed fields organized into group sections. On update, fields present in 1Password but absent from the local store are deleted using `[delete]` field assignments.
-4. Stores a `_Metadata.version` field for reconciliation.
+4. Stores `_Metadata.version` and `_Metadata.tombstones` fields for reconciliation.
 
 **Pull** (during `esk sync`):
 

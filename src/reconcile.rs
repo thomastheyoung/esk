@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{bail, Context, Result};
 use std::collections::BTreeMap;
 use thiserror::Error;
 
@@ -273,6 +273,12 @@ pub struct MultiReconcileResult {
     pub has_drift: bool,
 }
 
+#[derive(Clone, PartialEq, Eq)]
+enum SnapshotCandidate {
+    Value(String),
+    Tombstone,
+}
+
 /// Reconcile local store against N remote sources.
 ///
 /// Finds the highest version, starts with that as base, merges in
@@ -508,6 +514,220 @@ pub fn reconcile_multi_with_jump_limit(
     })
 }
 
+pub fn reconcile_multi_snapshots_with_jump_limit(
+    local: &StorePayload,
+    remotes: &[(&str, &crate::remotes::RemoteSnapshot)],
+    env: &str,
+    prefer: ConflictPreference,
+    enforce_jump_limit: bool,
+) -> Result<MultiReconcileResult> {
+    for (_, snapshot) in remotes {
+        snapshot.validate(env)?;
+    }
+    let local_version = local.env_version(env);
+    let max_version = remotes
+        .iter()
+        .map(|(_, snapshot)| snapshot.version)
+        .max()
+        .unwrap_or(local_version)
+        .max(local_version);
+    for (name, snapshot) in remotes {
+        if enforce_jump_limit && snapshot.version.saturating_sub(local_version) > MAX_VERSION_JUMP {
+            return Err(ReconcileError::RemoteVersionJump {
+                remote: (*name).to_string(),
+                local_version,
+                remote_version: snapshot.version,
+                jump: snapshot.version - local_version,
+                max_allowed_jump: MAX_VERSION_JUMP,
+            }
+            .into());
+        }
+    }
+
+    let suffix = format!(":{env}");
+    let local_scope = scoped_composite_secrets(&local.secrets, env);
+    let local_tombstones: BTreeMap<String, u64> = local
+        .tombstones
+        .keys()
+        .filter(|key| key.ends_with(&suffix))
+        .map(|key| (key.clone(), local_version))
+        .collect();
+    let highest: Vec<_> = remotes
+        .iter()
+        .filter(|(_, snapshot)| snapshot.version == max_version)
+        .collect();
+
+    let snapshots_equal = |a: &crate::remotes::RemoteSnapshot,
+                           b: &crate::remotes::RemoteSnapshot| {
+        a.secrets == b.secrets && a.tombstones == b.tombstones
+    };
+    if local_version < max_version && highest.len() > 1 {
+        let first = highest[0].1;
+        if highest[1..]
+            .iter()
+            .any(|(_, snapshot)| !snapshots_equal(first, snapshot))
+        {
+            let mut names: Vec<_> = highest.iter().map(|(name, _)| *name).collect();
+            names.sort_unstable();
+            bail!(
+                "multiple remotes disagree at highest version v{max_version}: {}. \
+                 Use --only <remote> to choose an authoritative source.",
+                names.join(", ")
+            );
+        }
+    }
+
+    let mut base_values = local_scope.clone();
+    let mut base_tombstones = local_tombstones.clone();
+    let mut base_is_remote = false;
+    if local_version < max_version {
+        if let Some((_, snapshot)) = highest.first() {
+            base_values = snapshot.secrets.clone();
+            base_tombstones = snapshot.tombstones.clone();
+            base_is_remote = true;
+        }
+    } else if prefer == ConflictPreference::Remote {
+        let drifted: Vec<_> = highest
+            .iter()
+            .filter(|(_, snapshot)| {
+                snapshot.secrets != local_scope || snapshot.tombstones != local_tombstones
+            })
+            .collect();
+        if let Some(first) = drifted.first() {
+            if drifted[1..]
+                .iter()
+                .any(|(_, snapshot)| !snapshots_equal(first.1, snapshot))
+            {
+                let mut names: Vec<_> = drifted.iter().map(|(name, _)| *name).collect();
+                names.sort_unstable();
+                bail!(
+                    "multiple remotes disagree at equal version v{max_version}: {}. \
+                     Use --only <remote> to choose which remote to prefer.",
+                    names.join(", ")
+                );
+            }
+            // Explicit operator override: equal-version remote state, including
+            // deletion or resurrection, replaces local scope.
+            base_values = first.1.secrets.clone();
+            base_tombstones = first.1.tombstones.clone();
+            base_is_remote = true;
+        }
+    }
+
+    let mut candidates: BTreeMap<String, (u64, SnapshotCandidate)> = BTreeMap::new();
+    let mut add_candidate = |key: &str, version: u64, candidate: SnapshotCandidate| -> Result<()> {
+        match candidates.get(key) {
+            Some((current_version, _)) if *current_version > version => {}
+            Some((current_version, current)) if *current_version == version => {
+                match (current, &candidate) {
+                    (SnapshotCandidate::Tombstone, _) => {}
+                    (_, SnapshotCandidate::Tombstone) => {
+                        candidates.insert(key.to_string(), (version, SnapshotCandidate::Tombstone));
+                    }
+                    (SnapshotCandidate::Value(left), SnapshotCandidate::Value(right))
+                        if left != right =>
+                    {
+                        bail!("sources disagree for a key at equal version v{version}");
+                    }
+                    _ => {}
+                }
+            }
+            _ => {
+                candidates.insert(key.to_string(), (version, candidate));
+            }
+        }
+        Ok(())
+    };
+    if base_is_remote && local_version < max_version {
+        for (key, value) in &local_scope {
+            add_candidate(key, local_version, SnapshotCandidate::Value(value.clone()))?;
+        }
+        for key in local_tombstones.keys() {
+            add_candidate(key, local_version, SnapshotCandidate::Tombstone)?;
+        }
+    }
+    for (_, snapshot) in remotes {
+        if snapshot.version < max_version {
+            for (key, value) in &snapshot.secrets {
+                add_candidate(
+                    key,
+                    snapshot.version,
+                    SnapshotCandidate::Value(value.clone()),
+                )?;
+            }
+            for (key, version) in &snapshot.tombstones {
+                add_candidate(key, *version, SnapshotCandidate::Tombstone)?;
+            }
+        }
+    }
+
+    let mut had_merge = false;
+    for (key, (_, candidate)) in candidates {
+        if base_values.contains_key(&key) || base_tombstones.contains_key(&key) {
+            continue;
+        }
+        match candidate {
+            SnapshotCandidate::Value(value) => {
+                base_values.insert(key, value);
+            }
+            SnapshotCandidate::Tombstone => {
+                base_tombstones.insert(key, max_version);
+            }
+        }
+        had_merge = true;
+    }
+    let final_version = max_version
+        .checked_add(u64::from(had_merge))
+        .context("environment version overflow during reconciliation")?;
+    if had_merge {
+        for version in base_tombstones.values_mut() {
+            *version = final_version;
+        }
+    }
+
+    let mut merged = local.secrets.clone();
+    merged.retain(|key, _| !key.ends_with(&suffix));
+    merged.extend(base_values.clone());
+    let mut merged_tombstones = local.tombstones.clone();
+    merged_tombstones.retain(|key, _| !key.ends_with(&suffix));
+    merged_tombstones.extend(base_tombstones.clone());
+
+    let mut sources_to_update = Vec::new();
+    let mut has_drift = false;
+    for (name, snapshot) in remotes {
+        if snapshot.version < final_version
+            || snapshot.secrets != base_values
+            || snapshot.tombstones != base_tombstones
+        {
+            sources_to_update.push((*name).to_string());
+            if snapshot.version == final_version {
+                has_drift = true;
+            }
+        }
+    }
+    let local_changed = local_version != final_version
+        || local_scope != base_values
+        || local_tombstones != base_tombstones;
+    let mut env_versions = local.env_versions.clone();
+    env_versions.insert(env.to_string(), final_version);
+    let mut changed_at = local.env_last_changed_at.clone();
+    if local_version != final_version {
+        changed_at.insert(env.to_string(), chrono::Utc::now().to_rfc3339());
+    }
+    Ok(MultiReconcileResult {
+        merged_payload: StorePayload {
+            secrets: merged,
+            version: local.version.max(final_version),
+            tombstones: merged_tombstones,
+            env_versions,
+            env_last_changed_at: changed_at,
+        },
+        sources_to_update,
+        local_changed,
+        has_drift,
+    })
+}
+
 fn scoped_composite_secrets(
     secrets: &BTreeMap<String, String>,
     env: &str,
@@ -542,6 +762,107 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect()
+    }
+
+    fn snapshot(
+        secrets: &[(&str, &str)],
+        tombstones: &[(&str, u64)],
+        version: u64,
+    ) -> crate::remotes::RemoteSnapshot {
+        crate::remotes::RemoteSnapshot {
+            secrets: secrets
+                .iter()
+                .map(|(key, value)| ((*key).to_string(), (*value).to_string()))
+                .collect(),
+            tombstones: tombstones
+                .iter()
+                .map(|(key, version)| ((*key).to_string(), *version))
+                .collect(),
+            version,
+        }
+    }
+
+    #[test]
+    fn typed_snapshot_deletion_converges_on_second_node() {
+        let local = StorePayload {
+            secrets: BTreeMap::from([("KEY:dev".to_string(), "old".to_string())]),
+            version: 1,
+            env_versions: BTreeMap::from([("dev".to_string(), 1)]),
+            ..Default::default()
+        };
+        let deleted = snapshot(&[], &[("KEY:dev", 2)], 2);
+        let result = reconcile_multi_snapshots_with_jump_limit(
+            &local,
+            &[("remote", &deleted)],
+            "dev",
+            ConflictPreference::Local,
+            true,
+        )
+        .unwrap();
+        assert!(!result.merged_payload.secrets.contains_key("KEY:dev"));
+        assert_eq!(result.merged_payload.tombstones.get("KEY:dev"), Some(&2));
+    }
+
+    #[test]
+    fn typed_snapshot_resurrection_requires_strictly_newer_value() {
+        let local = StorePayload {
+            version: 2,
+            tombstones: BTreeMap::from([("KEY:dev".to_string(), 2)]),
+            env_versions: BTreeMap::from([("dev".to_string(), 2)]),
+            ..Default::default()
+        };
+        let equal_value = snapshot(&[("KEY:dev", "value")], &[], 2);
+        let kept = reconcile_multi_snapshots_with_jump_limit(
+            &local,
+            &[("remote", &equal_value)],
+            "dev",
+            ConflictPreference::Local,
+            true,
+        )
+        .unwrap();
+        assert!(!kept.merged_payload.secrets.contains_key("KEY:dev"));
+
+        let newer_value = snapshot(&[("KEY:dev", "value")], &[], 3);
+        let resurrected = reconcile_multi_snapshots_with_jump_limit(
+            &local,
+            &[("remote", &newer_value)],
+            "dev",
+            ConflictPreference::Local,
+            true,
+        )
+        .unwrap();
+        assert!(resurrected.merged_payload.secrets.contains_key("KEY:dev"));
+        assert!(!resurrected
+            .merged_payload
+            .tombstones
+            .contains_key("KEY:dev"));
+    }
+
+    #[test]
+    fn lower_source_tombstone_uses_event_provenance_order_independently() {
+        let local = StorePayload {
+            secrets: BTreeMap::from([("KEY:dev".to_string(), "old".to_string())]),
+            version: 3,
+            env_versions: BTreeMap::from([("dev".to_string(), 3)]),
+            ..Default::default()
+        };
+        let highest = snapshot(&[], &[], 5);
+        let deleted = snapshot(&[], &[("KEY:dev", 4)], 4);
+        for remotes in [
+            vec![("high", &highest), ("deleted", &deleted)],
+            vec![("deleted", &deleted), ("high", &highest)],
+        ] {
+            let result = reconcile_multi_snapshots_with_jump_limit(
+                &local,
+                &remotes,
+                "dev",
+                ConflictPreference::Local,
+                true,
+            )
+            .unwrap();
+            assert!(!result.merged_payload.secrets.contains_key("KEY:dev"));
+            assert!(result.merged_payload.tombstones.contains_key("KEY:dev"));
+        }
     }
 
     #[test]

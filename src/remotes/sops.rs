@@ -69,13 +69,11 @@ impl SyncRemote for SopsRemote<'_> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+        let Some(json_map) = super::flat_snapshot_map(payload, env)? else {
             return Ok(());
         };
 
         // Build JSON payload with bare keys + version metadata
-        let mut json_map: BTreeMap<String, String> = env_secrets;
-        json_map.insert(super::ESK_VERSION_KEY.to_string(), version.to_string());
         let json =
             serde_json::to_string_pretty(&json_map).context("failed to serialize secrets")?;
 
@@ -130,7 +128,7 @@ impl SyncRemote for SopsRemote<'_> {
         Ok(())
     }
 
-    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         let file_path = self.resolve_path(env);
 
         if !std::path::Path::new(&file_path).exists() {
@@ -151,7 +149,7 @@ impl SyncRemote for SopsRemote<'_> {
         let json_map: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)
             .context("failed to parse decrypted SOPS JSON")?;
 
-        Ok(Some(super::parse_pulled_secrets(json_map, env)))
+        Ok(Some(super::parse_flat_snapshot(json_map, env)?))
     }
 }
 
@@ -346,7 +344,9 @@ remotes:
             stderr: Vec::new(),
         }]);
         let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
 
         assert_eq!(version, 5);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");

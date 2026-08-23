@@ -15,6 +15,7 @@
 //! `--region` and `--profile` for multi-account setups.
 
 use anyhow::{Context, Result};
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::io::Write;
 
@@ -139,7 +140,7 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
         Ok(())
     }
 
-    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         let secret_name = self.secret_name(env);
 
         let base = self.base_args();
@@ -176,10 +177,10 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
         let remote_payload: StorePayload =
             serde_json::from_str(secret_string).context("failed to parse SecretString payload")?;
 
-        Ok(Some((
-            StorePayload::bare_to_composite(&remote_payload.secrets, env),
-            remote_payload.version,
-        )))
+        Ok(Some(super::RemoteSnapshot::from_payload(
+            remote_payload,
+            env,
+        )?))
     }
 }
 
@@ -543,7 +544,9 @@ remotes:
         }]);
         let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
 
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let snapshot = remote.pull(&config, "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_live");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://prod");

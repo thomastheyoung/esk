@@ -13,6 +13,7 @@
 //! temp-file-then-rename.
 
 use anyhow::{Context, Result};
+#[cfg(test)]
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use tempfile::NamedTempFile;
@@ -127,7 +128,7 @@ impl SyncRemote for CloudFileRemote {
         Ok(())
     }
 
-    fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         let base_path = self.expand_path()?;
 
         match self.remote_config.format {
@@ -147,10 +148,7 @@ impl SyncRemote for CloudFileRemote {
                 let json = decrypt_with_key(&dk, content)?;
                 let payload: StorePayload =
                     serde_json::from_str(&json).context("decrypted payload is not valid JSON")?;
-                Ok(Some((
-                    StorePayload::bare_to_composite(&payload.secrets, env),
-                    payload.version,
-                )))
+                Ok(Some(super::RemoteSnapshot::from_payload(payload, env)?))
             }
             CloudFileFormat::Cleartext => {
                 let per_env = base_path.join(format!("secrets-{env}.json"));
@@ -161,10 +159,7 @@ impl SyncRemote for CloudFileRemote {
                     .with_context(|| format!("failed to read {}", per_env.display()))?;
                 let payload: StorePayload =
                     serde_json::from_str(&content).context("failed to parse secrets JSON")?;
-                Ok(Some((
-                    StorePayload::bare_to_composite(&payload.secrets, env),
-                    payload.version,
-                )))
+                Ok(Some(super::RemoteSnapshot::from_payload(payload, env)?))
             }
         }
     }
@@ -268,7 +263,9 @@ mod tests {
         assert!(cloud_dir.path().join("secrets-dev.json").is_file());
         assert!(!cloud_dir.path().join("secrets.json").is_file());
 
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let snapshot = remote.pull(&config, "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
         assert_eq!(version, 5);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "val1");
         // prod key should NOT be in the dev-specific file
@@ -301,7 +298,9 @@ mod tests {
         assert!(cloud_dir.path().join("secrets-dev.enc").is_file());
         assert!(!cloud_dir.path().join("secrets.enc").is_file());
 
-        let (secrets, version) = remote.pull(&config, "dev").unwrap().unwrap();
+        let snapshot = remote.pull(&config, "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
         assert_eq!(version, 1);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "encrypted_val");
     }
@@ -328,12 +327,12 @@ mod tests {
         remote.push(&payload, &config, "prod").unwrap();
 
         // Dev file should only have dev secrets
-        let (dev_secrets, _) = remote.pull(&config, "dev").unwrap().unwrap();
+        let dev_secrets = remote.pull(&config, "dev").unwrap().unwrap().secrets;
         assert_eq!(dev_secrets.get("KEY:dev").unwrap(), "dev_val");
         assert!(!dev_secrets.contains_key("KEY:prod"));
 
         // Prod file should only have prod secrets
-        let (prod_secrets, _) = remote.pull(&config, "prod").unwrap().unwrap();
+        let prod_secrets = remote.pull(&config, "prod").unwrap().unwrap().secrets;
         assert_eq!(prod_secrets.get("KEY:prod").unwrap(), "prod_val");
         assert!(!prod_secrets.contains_key("KEY:dev"));
     }

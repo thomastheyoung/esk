@@ -86,7 +86,7 @@ impl SyncRemote for InfisicalRemote<'_> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+        let Some(push_map) = super::flat_snapshot_map(payload, env)? else {
             return Ok(());
         };
 
@@ -94,9 +94,6 @@ impl SyncRemote for InfisicalRemote<'_> {
         let base = self.base_args(&slug);
 
         // Build the push map: bare keys + version metadata
-        let mut push_map: BTreeMap<String, String> = env_secrets;
-        push_map.insert(super::ESK_VERSION_KEY.to_string(), version.to_string());
-
         // Delete orphaned keys: export current remote state, diff, delete absent keys.
         // If the export fails (empty project, etc.), skip deletion and proceed with set.
         let mut export_args = vec!["export", "--format", "json"];
@@ -157,7 +154,7 @@ impl SyncRemote for InfisicalRemote<'_> {
         Ok(())
     }
 
-    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         let slug = self.env_slug(env);
         let base = self.base_args(&slug);
 
@@ -174,7 +171,7 @@ impl SyncRemote for InfisicalRemote<'_> {
         }
 
         let data = parse_export_json(&output.stdout)?;
-        Ok(Some(super::parse_pulled_secrets(data, env)))
+        Ok(Some(super::parse_flat_snapshot(data, env)?))
     }
 }
 
@@ -416,7 +413,9 @@ remotes:
             stderr: Vec::new(),
         }]);
         let remote = make_remote(&runner);
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
 
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
@@ -477,7 +476,9 @@ remotes:
             stderr: Vec::new(),
         }]);
         let remote = make_remote(&runner);
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
         assert!(secrets.is_empty());
         assert_eq!(version, 0);
     }

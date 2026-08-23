@@ -127,19 +127,15 @@ impl SyncRemote for BitwardenRemote<'_> {
     }
 
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
-        let Some((env_secrets, version)) = payload.env_secrets(env) else {
+        let Some(flat) = super::flat_snapshot_map(payload, env)? else {
             return Ok(());
         };
 
         // Build JSON payload with bare keys + version
-        let mut data: BTreeMap<String, Value> = env_secrets
+        let data: BTreeMap<String, Value> = flat
             .into_iter()
             .map(|(k, v)| (k, Value::String(v)))
             .collect();
-        data.insert(
-            super::ESK_VERSION_KEY.to_string(),
-            Value::Number(version.into()),
-        );
 
         let json = serde_json::to_string(&data).context("failed to serialize secrets")?;
         let secret_name = self.secret_name(env);
@@ -192,7 +188,7 @@ impl SyncRemote for BitwardenRemote<'_> {
         Ok(())
     }
 
-    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         let secret_name = self.secret_name(env);
         let items = self.list_secrets()?;
 
@@ -214,22 +210,25 @@ impl SyncRemote for BitwardenRemote<'_> {
         let data: BTreeMap<String, Value> =
             serde_json::from_str(value_str).context("failed to parse secret value as JSON")?;
 
-        let mut secrets = BTreeMap::new();
-        let mut version = 0u64;
-
-        for (k, v) in &data {
-            if k == super::ESK_VERSION_KEY {
-                version = v
-                    .as_u64()
-                    .or_else(|| v.as_str().and_then(|s| s.parse().ok()))
-                    .unwrap_or(0);
-                continue;
-            }
-            let val = v.as_str().unwrap_or_default();
-            secrets.insert(format!("{k}:{env}"), val.to_string());
-        }
-
-        Ok(Some((secrets, version)))
+        let strings: BTreeMap<String, String> = data
+            .into_iter()
+            .map(|(key, value)| -> Result<_> {
+                let value = if key == super::ESK_VERSION_KEY {
+                    value
+                        .as_str()
+                        .map(ToString::to_string)
+                        .or_else(|| value.as_u64().map(|v| v.to_string()))
+                        .context("Bitwarden version metadata has invalid type")?
+                } else {
+                    value
+                        .as_str()
+                        .map(ToString::to_string)
+                        .context("Bitwarden snapshot contains a non-string value")?
+                };
+                Ok((key, value))
+            })
+            .collect::<Result<_>>()?;
+        Ok(Some(super::parse_flat_snapshot(strings, env)?))
     }
 }
 
@@ -448,7 +447,9 @@ remotes:
             MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
         let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
 
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
@@ -526,7 +527,9 @@ remotes:
             MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())]);
         let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
 
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
         assert_eq!(version, 42);
         assert_eq!(secrets.get("KEY:dev").unwrap(), "val");
     }

@@ -10,7 +10,7 @@ pub mod onepassword;
 pub mod s3;
 pub mod sops;
 
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 
 use crate::config::Config;
@@ -18,7 +18,129 @@ use crate::store::{validate_key, StorePayload};
 use crate::targets::{CommandRunner, PreflightItem};
 
 /// The key used to store version metadata in remote payloads.
-pub const ESK_VERSION_KEY: &str = "_esk_version";
+pub const ESK_VERSION_KEY: &str = crate::store::REMOTE_VERSION_KEY;
+/// Flat-provider metadata key containing a JSON object of key -> env version.
+pub const ESK_TOMBSTONES_KEY: &str = crate::store::REMOTE_TOMBSTONES_KEY;
+
+#[derive(Clone)]
+pub struct RemoteSnapshot {
+    pub secrets: BTreeMap<String, String>,
+    pub tombstones: BTreeMap<String, u64>,
+    pub version: u64,
+}
+
+impl std::fmt::Debug for RemoteSnapshot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("RemoteSnapshot")
+            .field("secrets", &format_args!("<{} entries>", self.secrets.len()))
+            .field("tombstones", &self.tombstones)
+            .field("version", &self.version)
+            .finish()
+    }
+}
+
+impl RemoteSnapshot {
+    pub fn from_payload(payload: StorePayload, env: &str) -> Result<Self> {
+        let secrets = StorePayload::bare_to_composite(&payload.secrets, env);
+        let tombstones = payload
+            .tombstones
+            .into_iter()
+            .map(|(key, version)| (format!("{key}:{env}"), version))
+            .collect();
+        let snapshot = Self {
+            secrets,
+            tombstones,
+            version: payload.version,
+        };
+        snapshot.validate(env)?;
+        Ok(snapshot)
+    }
+
+    pub fn validate(&self, env: &str) -> Result<()> {
+        let suffix = format!(":{env}");
+        for key in self.secrets.keys() {
+            let bare = key
+                .strip_suffix(&suffix)
+                .context("remote snapshot contains a key outside the requested environment")?;
+            validate_key(bare).context("remote snapshot contains an invalid key")?;
+            if bare == ESK_VERSION_KEY || bare == ESK_TOMBSTONES_KEY {
+                anyhow::bail!("remote snapshot contains a reserved key");
+            }
+            if self.tombstones.contains_key(key) {
+                anyhow::bail!("remote snapshot contains overlapping value and tombstone keys");
+            }
+        }
+        for (key, version) in &self.tombstones {
+            let bare = key
+                .strip_suffix(&suffix)
+                .context("remote tombstone is outside the requested environment")?;
+            validate_key(bare).context("remote tombstone contains an invalid key")?;
+            if bare == ESK_VERSION_KEY || bare == ESK_TOMBSTONES_KEY {
+                anyhow::bail!("remote tombstone contains a reserved key");
+            }
+            if *version > self.version {
+                anyhow::bail!("remote tombstone version exceeds snapshot version");
+            }
+        }
+        Ok(())
+    }
+}
+
+pub fn flat_snapshot_map(
+    payload: &StorePayload,
+    env: &str,
+) -> Result<Option<BTreeMap<String, String>>> {
+    let env_payload = payload.for_env(env);
+    if env_payload.secrets.is_empty() && env_payload.tombstones.is_empty() {
+        return Ok(None);
+    }
+    if env_payload.secrets.contains_key(ESK_VERSION_KEY)
+        || env_payload.secrets.contains_key(ESK_TOMBSTONES_KEY)
+    {
+        anyhow::bail!("secret key collides with reserved sync metadata");
+    }
+    let mut data = env_payload.secrets;
+    data.insert(ESK_VERSION_KEY.to_string(), env_payload.version.to_string());
+    if !env_payload.tombstones.is_empty() {
+        data.insert(
+            ESK_TOMBSTONES_KEY.to_string(),
+            serde_json::to_string(&env_payload.tombstones)
+                .context("failed to serialize deletion metadata")?,
+        );
+    }
+    Ok(Some(data))
+}
+
+pub fn parse_flat_snapshot(
+    mut data: BTreeMap<String, String>,
+    env: &str,
+) -> Result<RemoteSnapshot> {
+    let tombstone_metadata = data.remove(ESK_TOMBSTONES_KEY);
+    let version = match data.remove(ESK_VERSION_KEY) {
+        Some(value) => value
+            .parse::<u64>()
+            .context("remote snapshot has invalid version metadata")?,
+        None if tombstone_metadata.is_some() => {
+            anyhow::bail!("remote tombstones require version metadata")
+        }
+        None => 0,
+    };
+    let tombstones: BTreeMap<String, u64> = match tombstone_metadata {
+        Some(metadata) => {
+            serde_json::from_str(&metadata).context("remote tombstone metadata is malformed")?
+        }
+        None => BTreeMap::new(),
+    };
+    RemoteSnapshot::from_payload(
+        StorePayload {
+            secrets: data,
+            tombstones,
+            version,
+            ..Default::default()
+        },
+        env,
+    )
+}
 
 /// Parse a pulled string-valued secret map back into composite-key secrets.
 /// Extracts the version from `ESK_VERSION_KEY`, strips it from the map,
@@ -77,7 +199,7 @@ pub trait SyncRemote: Send + Sync {
 
     /// Pull store state from this remote for a given environment.
     /// Returns (composite_key_secrets, version), or None if nothing stored.
-    fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>>;
+    fn pull(&self, config: &Config, env: &str) -> Result<Option<RemoteSnapshot>>;
 
     /// Whether this remote passes secret values as CLI arguments (visible in `ps`).
     fn passes_value_as_cli_arg(&self) -> bool {
@@ -316,6 +438,49 @@ mod tests {
         let (composite, version) = parse_pulled_secrets(data, "dev");
         assert_eq!(version, 1);
         assert!(composite.is_empty());
+    }
+
+    #[test]
+    fn flat_snapshot_roundtrips_tombstones_without_secret_leakage() {
+        let payload = StorePayload {
+            secrets: BTreeMap::from([("LIVE:dev".to_string(), "value".to_string())]),
+            version: 7,
+            tombstones: BTreeMap::from([("DELETED:dev".to_string(), 7)]),
+            env_versions: BTreeMap::from([("dev".to_string(), 7)]),
+            ..Default::default()
+        };
+        let encoded = flat_snapshot_map(&payload, "dev").unwrap().unwrap();
+        let snapshot = parse_flat_snapshot(encoded, "dev").unwrap();
+
+        assert_eq!(snapshot.version, 7);
+        assert_eq!(snapshot.secrets.len(), 1);
+        assert_eq!(snapshot.secrets.get("LIVE:dev"), Some(&"value".to_string()));
+        assert_eq!(snapshot.tombstones.get("DELETED:dev"), Some(&7));
+        assert!(!snapshot.secrets.contains_key("_esk_tombstones:dev"));
+    }
+
+    #[test]
+    fn flat_snapshot_rejects_malformed_or_unversioned_tombstones() {
+        let malformed = BTreeMap::from([
+            (ESK_VERSION_KEY.to_string(), "2".to_string()),
+            (ESK_TOMBSTONES_KEY.to_string(), "not-json".to_string()),
+        ]);
+        assert!(parse_flat_snapshot(malformed, "dev").is_err());
+
+        let unversioned =
+            BTreeMap::from([(ESK_TOMBSTONES_KEY.to_string(), r#"{"KEY":1}"#.to_string())]);
+        assert!(parse_flat_snapshot(unversioned, "dev").is_err());
+    }
+
+    #[test]
+    fn remote_snapshot_debug_redacts_values() {
+        let snapshot = RemoteSnapshot {
+            secrets: BTreeMap::from([("KEY:dev".to_string(), "sensitive-value".to_string())]),
+            tombstones: BTreeMap::new(),
+            version: 1,
+        };
+        let debug = format!("{snapshot:?}");
+        assert!(!debug.contains("sensitive-value"));
     }
 
     #[test]

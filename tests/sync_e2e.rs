@@ -77,10 +77,10 @@ fn sync_cloud_file_cleartext_runs_pull_reconcile_and_push() {
         merged.secrets.get("REMOTE_KEY:dev"),
         Some(&"remote-value".to_string())
     );
-    let (synced, version) = remote.pull(&config, "dev").unwrap().unwrap();
-    assert_eq!(version, 3);
+    let snapshot = remote.pull(&config, "dev").unwrap().unwrap();
+    assert_eq!(snapshot.version, 3);
     assert_eq!(
-        synced,
+        snapshot.secrets,
         merged
             .for_env("dev")
             .secrets
@@ -122,8 +122,8 @@ fn sync_cloud_file_encrypted_roundtrips_through_orchestration() {
         merged.secrets.get("REMOTE_KEY:dev").unwrap(),
         "remote-value"
     );
-    let (_, version) = remote.pull(&config, "dev").unwrap().unwrap();
-    assert_eq!(version, 3);
+    let snapshot = remote.pull(&config, "dev").unwrap().unwrap();
+    assert_eq!(snapshot.version, 3);
 }
 
 #[test]

@@ -13,6 +13,7 @@
 //! `--region` and `--profile` for multi-account setups.
 
 use anyhow::{Context, Result};
+#[cfg(test)]
 use std::collections::BTreeMap;
 
 use crate::config::{CloudFileFormat, Config, S3RemoteConfig};
@@ -135,7 +136,7 @@ impl SyncRemote for S3Remote<'_> {
         Ok(())
     }
 
-    fn pull(&self, _config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>> {
+    fn pull(&self, _config: &Config, env: &str) -> Result<Option<super::RemoteSnapshot>> {
         let s3_uri = self.s3_uri(env);
         let base = self.base_args();
 
@@ -177,10 +178,7 @@ impl SyncRemote for S3Remote<'_> {
             }
         };
 
-        Ok(Some((
-            StorePayload::bare_to_composite(&payload.secrets, env),
-            payload.version,
-        )))
+        Ok(Some(super::RemoteSnapshot::from_payload(payload, env)?))
     }
 }
 
@@ -474,7 +472,9 @@ remotes:
         let runner = MockCommandRunner::from_outputs(vec![ok_output(json.as_bytes())]);
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
 
-        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        let secrets = snapshot.secrets;
+        let version = snapshot.version;
         assert_eq!(version, 7);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");

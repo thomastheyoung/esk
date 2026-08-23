@@ -28,10 +28,17 @@ const ROTATION_JOURNAL_FILE: &str = "key-rotation.json";
 /// This is crate-visible so every subprocess boundary can explicitly remove
 /// the key before spawning an external command.
 pub(crate) const STORE_KEY_ENV: &str = "ESK_STORE_KEY";
+/// Reserved flat-remote field containing the environment snapshot version.
+pub const REMOTE_VERSION_KEY: &str = "_esk_version";
+/// Reserved flat-remote field containing serialized deletion metadata.
+pub const REMOTE_TOMBSTONES_KEY: &str = "_esk_tombstones";
 
 /// Validate that a secret key matches `[A-Za-z_][A-Za-z0-9_]*`.
 /// Prevents shell injection, format corruption, and target compatibility issues.
 pub fn validate_key(key: &str) -> Result<()> {
+    if key == REMOTE_VERSION_KEY || key == REMOTE_TOMBSTONES_KEY {
+        bail!("secret key '{key}' is reserved for sync metadata");
+    }
     let mut chars = key.chars();
     let Some(first) = chars.next() else {
         bail!("invalid secret key '': must match [A-Za-z_][A-Za-z0-9_]*");
@@ -170,25 +177,30 @@ impl StorePayload {
         }
 
         let version = self.env_version(env);
-
         Some((env_secrets, version))
     }
 
     /// Build a per-env StorePayload with bare keys for syncing to remotes.
     /// Strips the `:{env}` suffix from secret keys and includes env-specific
-    /// version and timestamp. Returns a payload with empty tombstones and env_versions.
+    /// version and timestamp.
     #[must_use]
     pub fn for_env(&self, env: &str) -> StorePayload {
         let suffix = format!(":{env}");
+        let version = self.env_version(env);
         let bare: BTreeMap<String, String> = self
             .secrets
             .iter()
-            .filter_map(|(k, v)| {
-                k.strip_suffix(&suffix)
-                    .map(|bare| (bare.to_string(), v.clone()))
+            .filter_map(|(key, value)| {
+                key.strip_suffix(&suffix)
+                    .map(|bare| (bare.to_string(), value.clone()))
             })
             .collect();
-        let version = self.env_version(env);
+        let bare_tombstones: BTreeMap<String, u64> = self
+            .tombstones
+            .keys()
+            .filter_map(|key| key.strip_suffix(&suffix))
+            .map(|bare| (bare.to_string(), version))
+            .collect();
         let mut env_last_changed_at = BTreeMap::new();
         if let Some(ts) = self.env_last_changed_at(env) {
             env_last_changed_at.insert(env.to_string(), ts.to_string());
@@ -196,6 +208,7 @@ impl StorePayload {
         StorePayload {
             secrets: bare,
             version,
+            tombstones: bare_tombstones,
             env_last_changed_at,
             ..Default::default()
         }
@@ -710,10 +723,11 @@ impl SecretStore {
             payload.version += 1;
             let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
             *env_v += 1;
+            let tombstone_version = *env_v;
             payload
                 .env_last_changed_at
                 .insert(env.to_string(), chrono::Utc::now().to_rfc3339());
-            payload.tombstones.insert(composite, payload.version);
+            payload.tombstones.insert(composite, tombstone_version);
             self.write_payload(&payload)?;
             Ok(payload)
         })
@@ -2066,6 +2080,33 @@ mod tests {
         store.set("KEY", "dev", "val").unwrap();
         let payload = store.delete("KEY", "dev").unwrap();
         assert_eq!(payload.tombstones.get("KEY:dev"), Some(&2));
+    }
+
+    #[test]
+    fn delete_tombstone_uses_environment_version_domain() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        store.set("PROD_ONLY", "prod", "value").unwrap();
+        store.set("KEY", "dev", "value").unwrap();
+        let payload = store.delete("KEY", "dev").unwrap();
+
+        assert_eq!(payload.version, 3);
+        assert_eq!(payload.env_version("dev"), 2);
+        assert_eq!(payload.tombstones.get("KEY:dev"), Some(&2));
+    }
+
+    #[test]
+    fn per_env_payload_normalizes_legacy_tombstone_versions() {
+        let payload = StorePayload {
+            version: 9,
+            tombstones: BTreeMap::from([("KEY:dev".to_string(), 9)]),
+            env_versions: BTreeMap::from([("dev".to_string(), 2)]),
+            ..Default::default()
+        };
+
+        let env_payload = payload.for_env("dev");
+        assert_eq!(env_payload.version, 2);
+        assert_eq!(env_payload.tombstones.get("KEY"), Some(&2));
     }
 
     #[test]
