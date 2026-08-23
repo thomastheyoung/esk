@@ -465,7 +465,7 @@ impl VerifyReport {
         }
         // Nothing verified is not the same as everything verified. A run made
         // only of scopes esk could not or did not check must never read clean.
-        if tally.unverifiable > 0 || (tally.skipped > 0 && tally.verified() == 0) {
+        if tally.has_gaps() {
             return Outcome::CleanWithGaps;
         }
         Outcome::Clean
@@ -670,6 +670,64 @@ mod tests {
         };
         assert_eq!(report.outcome(), Outcome::CleanWithGaps);
         assert!(report.tally().has_gaps());
+    }
+
+    #[test]
+    fn skipped_scope_alongside_verified_scope_reports_clean_with_gaps() {
+        let report = VerifyReport {
+            scopes: vec![
+                scope(
+                    Fidelity::Value,
+                    compare(
+                        Fidelity::Value,
+                        Ok(values(&[("A", "1")])),
+                        &expected(&[("A", "1")]),
+                    ),
+                ),
+                scope(
+                    Fidelity::Value,
+                    compare(
+                        Fidelity::Value,
+                        Ok(Evidence::Values(BTreeMap::new())),
+                        &BTreeMap::new(),
+                    ),
+                ),
+            ],
+        };
+
+        assert_eq!(report.tally().verified(), 1);
+        assert_eq!(report.tally().skipped, 1);
+        assert_eq!(report.outcome(), Outcome::CleanWithGaps);
+    }
+
+    #[test]
+    fn unset_scope_alongside_verified_scope_reports_clean_with_gaps() {
+        let mut unset_scope = scope(
+            Fidelity::Value,
+            compare(
+                Fidelity::Value,
+                Ok(values(&[("B", "2")])),
+                &expected(&[("B", "2")]),
+            ),
+        );
+        unset_scope.unset.push("NOT_SET".to_string());
+        let report = VerifyReport {
+            scopes: vec![
+                scope(
+                    Fidelity::Value,
+                    compare(
+                        Fidelity::Value,
+                        Ok(values(&[("A", "1")])),
+                        &expected(&[("A", "1")]),
+                    ),
+                ),
+                unset_scope,
+            ],
+        };
+
+        assert_eq!(report.tally().verified(), 1);
+        assert_eq!(report.tally().skipped, 1);
+        assert_eq!(report.outcome(), Outcome::CleanWithGaps);
     }
 
     #[test]
