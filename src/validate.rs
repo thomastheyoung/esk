@@ -32,6 +32,7 @@ impl fmt::Display for Format {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Validation {
     #[serde(default)]
     pub format: Option<Format>,

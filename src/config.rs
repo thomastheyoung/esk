@@ -45,6 +45,7 @@ impl GenerateFormat {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GenerateOutput {
     pub format: GenerateFormat,
     #[serde(default)]
@@ -52,6 +53,7 @@ pub struct GenerateOutput {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Config {
     pub project: String,
     pub environments: Vec<String>,
@@ -81,6 +83,7 @@ pub struct Config {
 
 /// Controls the capabilities exposed by `esk-mcp` for a project.
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct McpConfig {
     /// Return secret values from `esk_get`. Defaults to metadata/redaction.
     #[serde(default)]
@@ -94,11 +97,13 @@ pub struct McpConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AppConfig {
     pub path: String,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TargetsConfig {
     #[serde(default, rename = ".env")]
     pub dotenv: Option<DotenvTargetConfig>,
@@ -145,6 +150,7 @@ pub struct TargetsConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DotenvTargetConfig {
     pub pattern: String,
     #[serde(default)]
@@ -160,6 +166,7 @@ pub enum CloudflareMode {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CloudflareTargetConfig {
     /// Mode: workers (default) or pages.
     #[serde(default)]
@@ -172,6 +179,7 @@ pub struct CloudflareTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct ConvexTargetConfig {
     pub path: String,
     #[serde(default)]
@@ -181,6 +189,7 @@ pub struct ConvexTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct FlyTargetConfig {
     /// Maps esk app name → Fly app name (e.g. web → my-fly-app).
     pub app_names: BTreeMap<String, String>,
@@ -189,6 +198,7 @@ pub struct FlyTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NetlifyTargetConfig {
     /// Optional Netlify site ID or name.
     #[serde(default)]
@@ -198,6 +208,7 @@ pub struct NetlifyTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct VercelTargetConfig {
     /// Maps esk env name → Vercel env name (e.g. prod → production).
     pub env_names: BTreeMap<String, String>,
@@ -206,6 +217,7 @@ pub struct VercelTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GithubTargetConfig {
     /// Optional GitHub repo in owner/repo format.
     #[serde(default)]
@@ -215,6 +227,7 @@ pub struct GithubTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HerokuTargetConfig {
     /// Maps esk app name → Heroku app name.
     pub app_names: BTreeMap<String, String>,
@@ -223,6 +236,7 @@ pub struct HerokuTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SupabaseTargetConfig {
     /// Supabase project reference ID.
     pub project_ref: String,
@@ -231,18 +245,21 @@ pub struct SupabaseTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RailwayTargetConfig {
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GitlabTargetConfig {
     #[serde(default)]
     pub env_flags: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AwsSsmTargetConfig {
     /// Path prefix with interpolation, e.g. "/{project}/{environment}/".
     pub path_prefix: String,
@@ -262,6 +279,7 @@ fn default_ssm_parameter_type() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AwsLambdaTargetConfig {
     /// Maps esk env → Lambda function name.
     pub function_name: BTreeMap<String, String>,
@@ -277,6 +295,7 @@ pub struct AwsLambdaTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct KubernetesTargetConfig {
     /// Maps esk env → Kubernetes namespace.
     pub namespace: BTreeMap<String, String>,
@@ -291,6 +310,7 @@ pub struct KubernetesTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DockerTargetConfig {
     /// Name pattern for Docker secrets with `{project}`, `{environment}`, `{key}` placeholders.
     #[serde(default = "default_docker_name_pattern")]
@@ -307,6 +327,7 @@ fn default_docker_name_pattern() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CircleciTargetConfig {
     pub org_id: String,
     pub context_name: String,
@@ -315,6 +336,7 @@ pub struct CircleciTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AzureAppServiceTargetConfig {
     /// Maps esk app name → Azure web app name.
     pub app_names: BTreeMap<String, String>,
@@ -331,6 +353,7 @@ pub struct AzureAppServiceTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GcpCloudRunTargetConfig {
     /// Maps esk app name → Cloud Run service name.
     pub service_names: BTreeMap<String, String>,
@@ -343,6 +366,7 @@ pub struct GcpCloudRunTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct RenderTargetConfig {
     /// Maps esk app name → Render service ID (e.g. web → srv-abc123).
     pub service_ids: BTreeMap<String, String>,
@@ -360,6 +384,7 @@ fn default_render_api_key_env() -> String {
 // --- Custom target config ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CustomTargetConfig {
     pub deploy: CustomCommandConfig,
     #[serde(default)]
@@ -378,6 +403,7 @@ pub struct CustomTargetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CustomCommandConfig {
     pub program: String,
     pub args: Vec<String>,
@@ -388,6 +414,7 @@ pub struct CustomCommandConfig {
 // --- Remote config types ---
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct OnePasswordRemoteConfig {
     pub vault: String,
     pub item_pattern: String,
@@ -468,6 +495,7 @@ fn validate_onepassword_item_pattern(
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct CloudFileRemoteConfig {
     pub path: String,
     #[serde(default = "default_cloud_file_format")]
@@ -478,6 +506,14 @@ fn default_cloud_file_format() -> CloudFileFormat {
     CloudFileFormat::Encrypted
 }
 
+fn without_remote_type(value: &serde_json::Value) -> serde_json::Value {
+    let mut value = value.clone();
+    if let Some(object) = value.as_object_mut() {
+        object.remove("type");
+    }
+    value
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CloudFileFormat {
@@ -486,6 +522,7 @@ pub enum CloudFileFormat {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AwsSecretsManagerRemoteConfig {
     /// Secret name pattern, e.g. "{project}/{environment}".
     pub secret_name: String,
@@ -496,6 +533,7 @@ pub struct AwsSecretsManagerRemoteConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct BitwardenRemoteConfig {
     pub project_id: String,
     /// Secret name pattern, e.g. "{project}-{environment}".
@@ -503,6 +541,7 @@ pub struct BitwardenRemoteConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct HashicorpVaultRemoteConfig {
     /// KV path pattern, e.g. "secret/data/{project}/{environment}".
     pub path: String,
@@ -517,6 +556,7 @@ fn default_kv_version() -> u8 {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct S3RemoteConfig {
     pub bucket: String,
     #[serde(default)]
@@ -533,6 +573,7 @@ pub struct S3RemoteConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct GcpSecretManagerRemoteConfig {
     pub project: String,
     /// Secret name pattern, e.g. "{project}-{environment}".
@@ -540,6 +581,7 @@ pub struct GcpSecretManagerRemoteConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct AzureKeyVaultRemoteConfig {
     pub vault_name: String,
     /// Secret name pattern, e.g. "{project}-{environment}".
@@ -547,6 +589,7 @@ pub struct AzureKeyVaultRemoteConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct DopplerRemoteConfig {
     pub project: String,
     /// Maps esk env → Doppler config name.
@@ -554,6 +597,7 @@ pub struct DopplerRemoteConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct InfisicalRemoteConfig {
     pub project_id: String,
     /// Maps esk env → Infisical environment slug. When absent, the esk env name is used directly.
@@ -569,6 +613,7 @@ fn default_infisical_path() -> String {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SopsRemoteConfig {
     /// File path pattern with {environment} interpolation.
     pub path: String,
@@ -809,6 +854,7 @@ impl<'de> Deserialize<'de> for Required {
 /// - `validate.optional` gates validation — empty values pass validation.
 /// - `required: true` + `optional: true` = "must exist, but may be empty".
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct SecretDef {
     #[serde(default)]
     pub description: Option<String>,
@@ -1302,9 +1348,10 @@ impl Config {
                         match type_str {
                             "cloud_file" => {
                                 let cfg: CloudFileRemoteConfig =
-                                    serde_json::from_value(value.clone()).with_context(|| {
-                                        format!("invalid cloud_file remote config for '{name}'")
-                                    })?;
+                                    serde_json::from_value(without_remote_type(value))
+                                        .with_context(|| {
+                                            format!("invalid cloud_file remote config for '{name}'")
+                                        })?;
                                 self.typed_remotes.push(TypedRemoteConfig::CloudFile {
                                     name: name.clone(),
                                     config: cfg,
@@ -1612,7 +1659,8 @@ impl Config {
                 if type_val != "cloud_file" {
                     return None;
                 }
-                let cfg: CloudFileRemoteConfig = serde_json::from_value(value.clone()).ok()?;
+                let cfg: CloudFileRemoteConfig =
+                    serde_json::from_value(without_remote_type(value)).ok()?;
                 Some((name.clone(), cfg))
             })
             .collect()
@@ -1910,6 +1958,78 @@ mod tests {
         assert_eq!(config.environments, vec!["dev"]);
         assert!(config.apps.is_empty());
         assert!(config.secrets.is_empty());
+    }
+
+    #[test]
+    fn unknown_top_level_field_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(
+            dir.path(),
+            "project: x\nenvironments: [dev]\nenvironemnts: [prod]\n",
+        );
+        let error = Config::load(&path).unwrap_err();
+        assert!(format!("{error:#}").contains("environemnts"));
+    }
+
+    #[test]
+    fn unknown_mcp_policy_field_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(
+            dir.path(),
+            "project: x\nenvironments: [dev]\nmcp:\n  read_ony: true\n",
+        );
+        let error = Config::load(&path).unwrap_err();
+        assert!(format!("{error:#}").contains("read_ony"));
+    }
+
+    #[test]
+    fn unknown_nested_target_and_validation_fields_are_rejected() {
+        for yaml in [
+            "project: x\nenvironments: [dev]\ntargets:\n  aws_ssm:\n    path_prefix: /x/\n    profil: dev\n",
+            "project: x\nenvironments: [dev]\nsecrets:\n  General:\n    KEY:\n      validate:\n        min_lenght: 3\n",
+        ] {
+            let dir = tempfile::tempdir().unwrap();
+            let path = write_yaml(dir.path(), yaml);
+            let error = Config::load(&path).unwrap_err();
+            let message = format!("{error:#}");
+            assert!(
+                message.contains("profil") || message.contains("min_lenght"),
+                "{message}"
+            );
+        }
+    }
+
+    #[test]
+    fn dynamic_custom_and_remote_names_remain_supported() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(
+            dir.path(),
+            "project: x\nenvironments: [dev]\ntargets:\n  custom:\n    internal-secret-api:\n      deploy:\n        program: internal-cli\n        args: [set, \"{{key}}\"]\nremotes:\n  team-backup:\n    type: cloud_file\n    path: backups/{environment}.json\n",
+        );
+
+        let config = Config::load(&path).unwrap();
+        assert!(config.targets.custom.contains_key("internal-secret-api"));
+        assert!(config.remotes.contains_key("team-backup"));
+    }
+
+    #[test]
+    fn unknown_typed_remote_field_is_rejected() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = write_yaml(
+            dir.path(),
+            r"
+project: x
+environments: [dev]
+remotes:
+  team-backup:
+    type: cloud_file
+    path: backups/{environment}.json
+    fomrat: encrypted
+",
+        );
+
+        let error = Config::load(&path).unwrap_err();
+        assert!(format!("{error:#}").contains("fomrat"));
     }
 
     #[test]

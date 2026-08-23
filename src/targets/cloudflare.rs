@@ -847,8 +847,7 @@ apps:
 targets:
   cloudflare:
     mode: pages
-    project_names:
-      web: my-pages-project
+    pages_project: my-pages-project
 ";
         let fixture = ConfigFixture::new(yaml).expect("fixture");
         let config = fixture.config();
