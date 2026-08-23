@@ -1151,7 +1151,10 @@ Custom targets are individual-mode only (one secret at a time).
 1. On deploy, esk substitutes template variables in the command args and stdin, then executes the program.
 2. Non-zero exit codes are treated as deploy failures.
 3. If `preflight` is configured, it runs before any deploys to verify the external service is reachable.
-4. If `delete` is configured, it's called when pruning orphaned secrets. Otherwise, delete is a no-op.
+4. If `delete` is configured, it's called for tombstones and when pruning orphaned secrets. If it
+   is omitted, those deletion attempts fail explicitly and remain unacknowledged so stale remote
+   values are never reported as removed. Omission is safe only for deploy-only configurations that
+   will never delete or prune managed secrets.
 
 ### Configuration
 
@@ -1181,7 +1184,7 @@ targets:
 | Field       | Required | Description                                                                        |
 | ----------- | -------- | ---------------------------------------------------------------------------------- |
 | `deploy`    | Yes      | Command to run for each secret. Must have `program` and `args`.                    |
-| `delete`    | No       | Command to run when pruning orphaned secrets. Same structure as `deploy`.          |
+| `delete`    | No       | Command for tombstones and pruning. Without it, deletion fails as unsupported.     |
 | `preflight` | No       | Command to run before any deploys to check service availability. Same structure.   |
 | `read`      | No       | Command that prints the target's current values, enabling `esk verify`.            |
 | `env_flags` | No       | Map of environment name to extra CLI flags appended to deploy and delete commands. |

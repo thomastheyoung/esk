@@ -186,7 +186,10 @@ impl DeployTarget for CustomTarget<'_> {
 
     fn delete_secret(&self, key: &str, target: &ResolvedTarget) -> Result<()> {
         let Some(ref cmd) = self.target_config.delete else {
-            return Ok(());
+            anyhow::bail!(
+                "custom target '{}': deletion is unsupported because no delete command is configured",
+                self.target_name
+            );
         };
         let args = build_args(&cmd.args, key, "", target, &self.target_config.env_flags);
         let args_ref: Vec<&str> = args.iter().map(String::as_str).collect();
@@ -406,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn delete_noop_when_unconfigured() {
+    fn delete_without_command_is_not_acknowledged() {
         let config = make_target_config(vec!["set", "{{key}}"], None);
         let runner = MockCommandRunner::new();
 
@@ -415,10 +418,11 @@ mod tests {
             target_config: &config,
             runner: &runner,
         };
-        // Should succeed without calling runner
-        target
+        let error = target
             .delete_secret("KEY", &make_resolved("my-api", None, "dev"))
-            .unwrap();
+            .unwrap_err();
+        assert!(error.to_string().contains("deletion is unsupported"));
+        assert!(!error.to_string().contains("KEY"));
         assert!(runner.take_calls().is_empty());
     }
 
