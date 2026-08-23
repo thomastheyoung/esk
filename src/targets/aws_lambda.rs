@@ -6,7 +6,7 @@
 //! `AWS_REGION`, etc.), this target uses a read-merge-write pattern:
 //!
 //! 1. `get-function-configuration` → read current env vars + `RevisionId`
-//! 2. Overlay esk secrets on top of existing vars
+//! 2. Remove managed tombstoned keys and overlay current esk secrets
 //! 3. `update-function-configuration` with merged map via `--cli-input-json`
 //!
 //! Uses `RevisionId` as an optimistic concurrency lock. If
@@ -24,8 +24,8 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use crate::config::{AwsLambdaTargetConfig, Config, ResolvedTarget};
 use crate::targets::{
-    resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployOutcome, DeployResult,
-    DeployTarget, SecretValue,
+    resolve_env_flags, BatchDeployment, CommandOpts, CommandRunner, DeployMode, DeployOutcome,
+    DeployResult, DeployTarget,
 };
 use crate::verify::{Evidence, Fidelity};
 
@@ -242,7 +242,24 @@ impl DeployTarget for AwsLambdaTarget<'_> {
 
     fn deploy_batch(
         &self,
-        secrets: &[SecretValue],
+        secrets: &[crate::targets::SecretValue],
+        target: &ResolvedTarget,
+    ) -> Vec<DeployResult> {
+        self.deploy_batch_state(BatchDeployment::without_tombstones(secrets), target)
+            .unwrap_or_else(|error| {
+                secrets
+                    .iter()
+                    .map(|secret| DeployResult {
+                        key: secret.key.clone(),
+                        outcome: DeployOutcome::Failed(error.to_string()),
+                    })
+                    .collect()
+            })
+    }
+
+    fn deploy_batch_state(
+        &self,
+        batch: BatchDeployment<'_>,
         target: &ResolvedTarget,
     ) -> Result<Vec<DeployResult>> {
         let function_name = self.resolve_function_name(&target.environment)?;
@@ -254,8 +271,12 @@ impl DeployTarget for AwsLambdaTarget<'_> {
             // Read current env vars
             let (mut vars, revision_id) = self.read_env_vars(function_name, &env_flags)?;
 
+            for key in batch.tombstoned_keys {
+                vars.remove(key);
+            }
+
             // Merge esk secrets on top
-            for s in secrets {
+            for s in batch.secrets {
                 vars.insert(s.key.clone(), s.value.to_string());
             }
 
@@ -268,7 +289,8 @@ impl DeployTarget for AwsLambdaTarget<'_> {
                 &env_flags,
             ) {
                 Ok(()) => {
-                    return Ok(secrets
+                    return Ok(batch
+                        .secrets
                         .iter()
                         .map(|s| DeployResult {
                             key: s.key.clone(),
@@ -295,6 +317,7 @@ impl DeployTarget for AwsLambdaTarget<'_> {
 mod tests {
     use super::*;
     use crate::targets::CommandOutput;
+    use crate::targets::SecretValue;
     use crate::test_support::{ConfigFixture, ErrorCommandRunner, MockCommandRunner};
 
     fn make_config() -> ConfigFixture {
@@ -486,7 +509,12 @@ targets:
             make_secret("API_KEY", "sk-123"),
             make_secret("DB_URL", "postgres://localhost"),
         ];
-        let results = target.deploy_batch(&secrets, &make_target("dev")).unwrap();
+        let results = target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("dev"),
+            )
+            .unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = runner.take_calls();
@@ -529,7 +557,12 @@ targets:
         };
 
         let secrets = vec![make_secret("API_KEY", "sk-123")];
-        let results = target.deploy_batch(&secrets, &make_target("dev")).unwrap();
+        let results = target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("dev"),
+            )
+            .unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = runner.take_calls();
@@ -538,6 +571,99 @@ targets:
         let vars = json["Environment"]["Variables"].as_object().unwrap();
         assert_eq!(vars.len(), 1);
         assert_eq!(vars["API_KEY"], "sk-123");
+    }
+
+    #[test]
+    fn deploy_batch_state_removes_tombstones_and_preserves_unmanaged_variables() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.aws_lambda.as_ref().unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![
+            get_config_response(
+                &[
+                    ("REMOVED_SECRET", "old"),
+                    ("CURRENT_SECRET", "stale"),
+                    ("UNMANAGED", "preserve-me"),
+                ],
+                "rev-1",
+            ),
+            success_output(),
+        ]);
+        let target = AwsLambdaTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+        let secrets = vec![make_secret("CURRENT_SECRET", "fresh")];
+        let tombstones = BTreeSet::from([
+            "REMOVED_SECRET".to_string(),
+            // A defensive overlap cannot delete the desired value: desired
+            // state is applied after removals.
+            "CURRENT_SECRET".to_string(),
+        ]);
+
+        target
+            .deploy_batch_state(
+                BatchDeployment {
+                    secrets: &secrets,
+                    tombstoned_keys: &tombstones,
+                },
+                &make_target("dev"),
+            )
+            .unwrap();
+
+        let calls = runner.take_calls();
+        let json: serde_json::Value =
+            serde_json::from_slice(calls[1].stdin.as_ref().unwrap()).unwrap();
+        let vars = json["Environment"]["Variables"].as_object().unwrap();
+        assert!(!vars.contains_key("REMOVED_SECRET"));
+        assert_eq!(vars["CURRENT_SECRET"], "fresh");
+        assert_eq!(vars["UNMANAGED"], "preserve-me");
+        assert_eq!(json["RevisionId"], "rev-1");
+    }
+
+    #[test]
+    fn deploy_batch_state_reapplies_tombstones_after_conflict_reread() {
+        let fixture = make_config();
+        let config = fixture.config();
+        let target_config = config.targets.aws_lambda.as_ref().unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![
+            get_config_response(&[("REMOVED_SECRET", "old")], "rev-1"),
+            CommandOutput {
+                success: false,
+                stdout: vec![],
+                stderr: b"ResourceConflictException".to_vec(),
+            },
+            get_config_response(
+                &[("REMOVED_SECRET", "concurrent-old"), ("UNMANAGED", "new")],
+                "rev-2",
+            ),
+            success_output(),
+        ]);
+        let target = AwsLambdaTarget {
+            config,
+            target_config,
+            runner: &runner,
+        };
+        let tombstones = BTreeSet::from(["REMOVED_SECRET".to_string()]);
+
+        target
+            .deploy_batch_state(
+                BatchDeployment {
+                    secrets: &[],
+                    tombstoned_keys: &tombstones,
+                },
+                &make_target("dev"),
+            )
+            .unwrap();
+
+        let calls = runner.take_calls();
+        let json: serde_json::Value =
+            serde_json::from_slice(calls[3].stdin.as_ref().unwrap()).unwrap();
+        let vars = json["Environment"]["Variables"].as_object().unwrap();
+        assert!(!vars.contains_key("REMOVED_SECRET"));
+        assert_eq!(vars["UNMANAGED"], "new");
+        assert_eq!(json["RevisionId"], "rev-2");
     }
 
     #[test]
@@ -561,7 +687,10 @@ targets:
 
         let secrets = vec![make_secret("KEY", "val")];
         let error = target
-            .deploy_batch(&secrets, &make_target("dev"))
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("dev"),
+            )
             .unwrap_err();
         assert!(error.to_string().contains("AccessDeniedException"));
     }
@@ -585,7 +714,12 @@ targets:
             runner: &runner,
         };
 
-        let error = target.deploy_batch(&[], &make_target("dev")).unwrap_err();
+        let error = target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&[]),
+                &make_target("dev"),
+            )
+            .unwrap_err();
         assert!(error.to_string().contains("AccessDeniedException"));
     }
 
@@ -615,7 +749,12 @@ targets:
         };
 
         let secrets = vec![make_secret("API_KEY", "sk-123")];
-        let results = target.deploy_batch(&secrets, &make_target("dev")).unwrap();
+        let results = target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("dev"),
+            )
+            .unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = runner.take_calls();
@@ -698,7 +837,10 @@ targets:
 
         let secrets = vec![make_secret("KEY", "val")];
         let error = target
-            .deploy_batch(&secrets, &make_target("staging"))
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("staging"),
+            )
             .unwrap_err();
         assert!(error
             .to_string()
@@ -721,7 +863,12 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        target.deploy_batch(&secrets, &make_target("dev")).unwrap();
+        target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("dev"),
+            )
+            .unwrap();
 
         let calls = runner.take_calls();
         let stdin = calls[1].stdin.as_ref().unwrap();
@@ -748,7 +895,12 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        target.deploy_batch(&secrets, &make_target("prod")).unwrap();
+        target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("prod"),
+            )
+            .unwrap();
 
         let calls = runner.take_calls();
         // Both get and update should have --no-paginate

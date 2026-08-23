@@ -174,7 +174,13 @@ fn exec_batch_group(
         .map(|secret| secret.key.as_str())
         .collect();
     let batch_deploy = deploy_target
-        .deploy_batch(&bg.secrets, &target)
+        .deploy_batch_state(
+            crate::targets::BatchDeployment {
+                secrets: &bg.secrets,
+                tombstoned_keys: &bg.tombstoned_keys,
+            },
+            &target,
+        )
         .and_then(|results| {
             let actual_keys: BTreeSet<&str> =
                 results.iter().map(|result| result.key.as_str()).collect();
@@ -1192,9 +1198,9 @@ mod tests {
             anyhow::bail!("individual deployment is unsupported")
         }
 
-        fn deploy_batch(
+        fn deploy_batch_state(
             &self,
-            _secrets: &[crate::targets::SecretValue],
+            _batch: crate::targets::BatchDeployment<'_>,
             _target: &crate::config::ResolvedTarget,
         ) -> anyhow::Result<Vec<crate::targets::DeployResult>> {
             anyhow::bail!("final-secret write failed")

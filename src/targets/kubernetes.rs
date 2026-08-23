@@ -22,8 +22,8 @@ use std::fmt::Write;
 
 use crate::config::{Config, KubernetesTargetConfig, ResolvedTarget};
 use crate::targets::{
-    check_command, resolve_env_flags, CommandOpts, CommandRunner, DeployMode, DeployOutcome,
-    DeployResult, DeployTarget, SecretValue,
+    check_command, resolve_env_flags, BatchDeployment, CommandOpts, CommandRunner, DeployMode,
+    DeployOutcome, DeployResult, DeployTarget, SecretValue,
 };
 use crate::verify::{Evidence, Fidelity};
 
@@ -203,12 +203,25 @@ impl DeployTarget for KubernetesTarget<'_> {
         Ok(Evidence::Values(values))
     }
 
-    fn deploy_batch(
+    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
+        self.deploy_batch_state(BatchDeployment::without_tombstones(secrets), target)
+            .unwrap_or_else(|error| {
+                secrets
+                    .iter()
+                    .map(|secret| DeployResult {
+                        key: secret.key.clone(),
+                        outcome: DeployOutcome::Failed(error.to_string()),
+                    })
+                    .collect()
+            })
+    }
+
+    fn deploy_batch_state(
         &self,
-        secrets: &[SecretValue],
+        batch: BatchDeployment<'_>,
         target: &ResolvedTarget,
     ) -> Result<Vec<DeployResult>> {
-        let manifest = self.generate_manifest(secrets, target)?;
+        let manifest = self.generate_manifest(batch.secrets, target)?;
 
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
         let mut args: Vec<&str> = vec!["apply", "-f", "-"];
@@ -233,7 +246,8 @@ impl DeployTarget for KubernetesTarget<'_> {
 
         let output = result?;
         if output.success {
-            Ok(secrets
+            Ok(batch
+                .secrets
                 .iter()
                 .map(|s| DeployResult {
                     key: s.key.clone(),
@@ -377,7 +391,12 @@ targets:
             make_secret("DB_HOST", "localhost"),
             make_secret("DB_PASS", "s3cret"),
         ];
-        let results = target.deploy_batch(&secrets, &make_target("dev")).unwrap();
+        let results = target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("dev"),
+            )
+            .unwrap();
         assert!(results.iter().all(|r| r.outcome.is_success()));
 
         let calls = runner.take_calls();
@@ -411,7 +430,12 @@ targets:
         };
 
         let secrets = vec![make_secret("KEY", "val")];
-        target.deploy_batch(&secrets, &make_target("prod")).unwrap();
+        target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("prod"),
+            )
+            .unwrap();
 
         let calls = runner.take_calls();
         assert!(calls[0].args.contains(&"--context".to_string()));
@@ -437,7 +461,10 @@ targets:
 
         let secrets = vec![make_secret("KEY", "val")];
         let error = target
-            .deploy_batch(&secrets, &make_target("dev"))
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("dev"),
+            )
             .unwrap_err();
         assert!(error.to_string().contains("forbidden"));
     }
@@ -456,7 +483,10 @@ targets:
 
         let secrets = vec![make_secret("KEY", "val")];
         let error = target
-            .deploy_batch(&secrets, &make_target("staging"))
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("staging"),
+            )
             .unwrap_err();
         assert!(error
             .to_string()
@@ -554,7 +584,12 @@ targets:
             target_config,
             runner: &runner,
         };
-        let results = target.deploy_batch(&[], &make_target("dev")).unwrap();
+        let results = target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&[]),
+                &make_target("dev"),
+            )
+            .unwrap();
         assert!(results.is_empty());
     }
 
@@ -574,7 +609,12 @@ targets:
             runner: &runner,
         };
 
-        let error = target.deploy_batch(&[], &make_target("dev")).unwrap_err();
+        let error = target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&[]),
+                &make_target("dev"),
+            )
+            .unwrap_err();
         assert!(error
             .to_string()
             .contains("cannot replace final-secret manifest"));

@@ -64,6 +64,22 @@ pub struct SecretValue {
     pub group: String,
 }
 
+/// Complete desired state for one atomic batch target update.
+pub struct BatchDeployment<'a> {
+    pub secrets: &'a [SecretValue],
+    pub tombstoned_keys: &'a BTreeSet<String>,
+}
+
+impl<'a> BatchDeployment<'a> {
+    pub fn without_tombstones(secrets: &'a [SecretValue]) -> Self {
+        static EMPTY: BTreeSet<String> = BTreeSet::new();
+        Self {
+            secrets,
+            tombstoned_keys: &EMPTY,
+        }
+    }
+}
+
 /// Whether a target deploys secrets individually or as a batch per target group.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeployMode {
@@ -259,12 +275,8 @@ pub trait DeployTarget: Send + Sync {
     }
 
     /// Deploy a batch of secrets. Default implementation loops deploy_secret.
-    fn deploy_batch(
-        &self,
-        secrets: &[SecretValue],
-        target: &ResolvedTarget,
-    ) -> Result<Vec<DeployResult>> {
-        Ok(secrets
+    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult> {
+        secrets
             .iter()
             .map(|s| match self.deploy_secret(&s.key, &s.value, target) {
                 Ok(()) => DeployResult {
@@ -276,7 +288,19 @@ pub trait DeployTarget: Send + Sync {
                     outcome: DeployOutcome::Failed(e.to_string()),
                 },
             })
-            .collect())
+            .collect()
+    }
+
+    /// Deploy a complete batch state with a group-level failure channel.
+    ///
+    /// The default preserves compatibility for third-party targets that only
+    /// implement `deploy_batch`; state-aware atomic targets override this.
+    fn deploy_batch_state(
+        &self,
+        batch: BatchDeployment<'_>,
+        target: &ResolvedTarget,
+    ) -> Result<Vec<DeployResult>> {
+        Ok(self.deploy_batch(batch.secrets, target))
     }
 }
 
@@ -889,7 +913,7 @@ mod tests {
     fn default_deploy_batch_all_success() {
         let target = TestTarget { fail_keys: vec![] };
         let secrets = vec![make_secret("A"), make_secret("B")];
-        let results = target.deploy_batch(&secrets, &make_target()).unwrap();
+        let results = target.deploy_batch(&secrets, &make_target());
         assert!(results.iter().all(|r| r.outcome.is_success()));
         assert_eq!(results.len(), 2);
     }
@@ -900,7 +924,7 @@ mod tests {
             fail_keys: vec!["B".to_string()],
         };
         let secrets = vec![make_secret("A"), make_secret("B"), make_secret("C")];
-        let results = target.deploy_batch(&secrets, &make_target()).unwrap();
+        let results = target.deploy_batch(&secrets, &make_target());
         assert!(results[0].outcome.is_success());
         assert!(!results[1].outcome.is_success());
         assert!(results[1].outcome.error_message().is_some());
@@ -910,7 +934,7 @@ mod tests {
     #[test]
     fn default_deploy_batch_empty_input() {
         let target = TestTarget { fail_keys: vec![] };
-        let results = target.deploy_batch(&[], &make_target()).unwrap();
+        let results = target.deploy_batch(&[], &make_target());
         assert!(results.is_empty());
     }
 

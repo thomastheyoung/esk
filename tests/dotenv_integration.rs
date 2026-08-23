@@ -2,7 +2,7 @@ mod helpers;
 
 use esk::config::ResolvedTarget;
 use esk::targets::dotenv::DotenvTarget;
-use esk::targets::{DeployTarget, SecretValue};
+use esk::targets::{BatchDeployment, DeployTarget, SecretValue};
 use helpers::*;
 use zeroize::Zeroizing;
 
@@ -39,7 +39,10 @@ fn env_file_end_to_end() {
         make_secret("OTHER_SECRET", "other_dev", "General"),
     ];
     let results = target
-        .deploy_batch(&secrets, &make_target("web", "dev"))
+        .deploy_batch_state(
+            BatchDeployment::without_tombstones(&secrets),
+            &make_target("web", "dev"),
+        )
         .unwrap();
     assert!(results.iter().all(|r| r.outcome.is_success()));
 
@@ -62,7 +65,10 @@ fn env_file_multiple_groups() {
         make_secret("C", "3", "Resend"),
     ];
     let results = target
-        .deploy_batch(&secrets, &make_target("web", "dev"))
+        .deploy_batch_state(
+            BatchDeployment::without_tombstones(&secrets),
+            &make_target("web", "dev"),
+        )
         .unwrap();
     assert!(results.iter().all(|r| r.outcome.is_success()));
 
@@ -83,11 +89,15 @@ fn env_file_regeneration_replaces() {
 
     // First write
     let secrets1 = vec![make_secret("OLD_KEY", "old", "G")];
-    env_target.deploy_batch(&secrets1, &resolved).unwrap();
+    env_target
+        .deploy_batch_state(BatchDeployment::without_tombstones(&secrets1), &resolved)
+        .unwrap();
 
     // Second write with different secrets
     let secrets2 = vec![make_secret("NEW_KEY", "new", "G")];
-    env_target.deploy_batch(&secrets2, &resolved).unwrap();
+    env_target
+        .deploy_batch_state(BatchDeployment::without_tombstones(&secrets2), &resolved)
+        .unwrap();
 
     let content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
     assert!(content.contains("NEW_KEY=new"));

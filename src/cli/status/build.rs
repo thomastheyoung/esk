@@ -547,12 +547,12 @@ secrets:
         };
         let dotenv = crate::targets::dotenv::DotenvTarget { config: &config };
         dotenv
-            .deploy_batch(
-                &[SecretValue {
+            .deploy_batch_state(
+                crate::targets::BatchDeployment::without_tombstones(&[SecretValue {
                     key: "MY_SECRET".to_string(),
                     value: zeroize::Zeroizing::new("val1".to_string()),
                     group: "General".to_string(),
-                }],
+                }]),
                 &target,
             )
             .unwrap();
@@ -692,12 +692,12 @@ secrets:
         };
         let dotenv = crate::targets::dotenv::DotenvTarget { config: &config };
         dotenv
-            .deploy_batch(
-                &[SecretValue {
+            .deploy_batch_state(
+                crate::targets::BatchDeployment::without_tombstones(&[SecretValue {
                     key: "MY_SECRET".to_string(),
                     value: zeroize::Zeroizing::new("val1".to_string()),
                     group: "General".to_string(),
-                }],
+                }]),
                 &target,
             )
             .unwrap();
