@@ -21,16 +21,30 @@ pub fn run_with_runner(cwd: &Path, runner: &dyn CommandRunner) -> Result<()> {
 
 /// Emit the doctor report as stable JSON. Secret values are never included.
 pub fn run_json(cwd: &Path) -> Result<()> {
+    run_json_with_runner(cwd, &RealCommandRunner)
+}
+
+fn run_json_with_runner(cwd: &Path, runner: &dyn CommandRunner) -> Result<()> {
+    let (output, tally) = json_report(cwd, runner);
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    if tally.has_failures() {
+        anyhow::bail!("{}", tally.summary());
+    }
+    Ok(())
+}
+
+fn json_report(cwd: &Path, runner: &dyn CommandRunner) -> (serde_json::Value, types::Tally) {
     let report = Report::build(cwd);
-    let (target_health, remote_health) = match report.project.as_ref() {
+    let (target_health, remote_health, vault_checks) = match report.project.as_ref() {
         Some(_) => match Config::load(&report.root.join("esk.yaml")) {
             Ok(config) => (
-                crate::targets::check_target_health(&config, &crate::targets::RealCommandRunner),
-                crate::remotes::check_remote_health(&config, &crate::targets::RealCommandRunner),
+                crate::targets::check_target_health(&config, runner),
+                crate::remotes::check_remote_health(&config, runner),
+                render::vault_isolation_checks(&config, runner),
             ),
-            Err(_) => (Vec::new(), Vec::new()),
+            Err(_) => (Vec::new(), Vec::new(), Vec::new()),
         },
-        None => (Vec::new(), Vec::new()),
+        None => (Vec::new(), Vec::new(), Vec::new()),
     };
     let check = |c: &types::Check| {
         serde_json::json!({
@@ -70,11 +84,21 @@ pub fn run_json(cwd: &Path) -> Result<()> {
             "status": if h.status.is_ok() { "ok" } else { "failed" },
             "message": h.status.message(),
         })).collect::<Vec<_>>(),
+        "onepassword": if vault_checks.is_empty() {
+            serde_json::json!({
+                "status": "skipped",
+                "reason": "not configured or config unavailable",
+            })
+        } else {
+            serde_json::json!({
+                "status": "checked",
+                "checks": vault_checks.iter().map(check).collect::<Vec<_>>(),
+            })
+        },
         "suggestions": report.suggestions.iter().map(|s| serde_json::json!({
             "command": s.command, "reason": s.reason,
         })).collect::<Vec<_>>(),
     });
-    println!("{}", serde_json::to_string_pretty(&output)?);
 
     // Exit status must agree with the text path (`Report::render`), so that a
     // CI gate using `--json` cannot pass on a config the text path rejects.
@@ -85,10 +109,8 @@ pub fn run_json(cwd: &Path) -> Result<()> {
         target_health.len() - target_fail + (remote_health.len() - remote_fail),
         target_fail + remote_fail,
     );
-    if tally.has_failures() {
-        anyhow::bail!("{}", tally.summary());
-    }
-    Ok(())
+    tally.add_checks(&vault_checks);
+    (output, tally)
 }
 
 #[cfg(test)]
@@ -97,6 +119,8 @@ mod tests {
     use crate::deploy_tracker::DeployIndex;
     use crate::store::SecretStore;
     use crate::sync_tracker::SyncIndex;
+    use crate::targets::CommandOutput;
+    use crate::test_support::MockCommandRunner;
     use tempfile::TempDir;
 
     fn setup_healthy_project() -> TempDir {
@@ -133,6 +157,75 @@ secrets:
         std::fs::write(dir.path().join(".esk/.gitignore"), gitignore).unwrap();
 
         dir
+    }
+
+    fn setup_onepassword_project() -> TempDir {
+        let dir = TempDir::new().unwrap();
+        let yaml = r#"
+project: testapp
+environments: [dev]
+remotes:
+  1password:
+    vault: Engineering
+    item_pattern: "esk/{project}/{environment}"
+"#;
+        std::fs::write(dir.path().join("esk.yaml"), yaml).unwrap();
+        SecretStore::load_or_create(dir.path()).unwrap();
+        DeployIndex::new(&dir.path().join(".esk/deploy-index.json"))
+            .save()
+            .unwrap();
+        SyncIndex::new(&dir.path().join(".esk/sync-index.json"))
+            .save()
+            .unwrap();
+        let gitignore = crate::cli::init::ESK_GITIGNORE_ENTRIES.join("\n") + "\n";
+        std::fs::write(dir.path().join(".esk/.gitignore"), gitignore).unwrap();
+        dir
+    }
+
+    #[test]
+    fn doctor_json_includes_and_tallies_onepassword_failures() {
+        let dir = setup_onepassword_project();
+        let duplicate_tags = serde_json::json!([
+            {
+                "id": "first-id",
+                "title": "first",
+                "tags": ["esk/testapp/dev"],
+            },
+            {
+                "id": "second-id",
+                "title": "second",
+                "tags": ["esk/testapp/dev"],
+            },
+        ]);
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&duplicate_tags).unwrap(),
+                stderr: Vec::new(),
+            },
+        ]);
+
+        let (output, tally) = super::json_report(dir.path(), &runner);
+        let checks = output["onepassword"]["checks"].as_array().unwrap();
+        assert_eq!(output["onepassword"]["status"], "checked");
+        assert!(checks
+            .iter()
+            .any(|check| { check["label"] == "Item ambiguity" && check["status"] == "fail" }));
+        assert!(
+            tally.has_failures(),
+            "JSON exit tally must include the failure"
+        );
+        assert_eq!(runner.calls().len(), 3);
     }
 
     #[test]

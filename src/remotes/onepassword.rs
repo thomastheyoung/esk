@@ -18,13 +18,71 @@ use std::collections::BTreeMap;
 
 use crate::config::{Config, OnePasswordRemoteConfig};
 use crate::store::StorePayload;
-use crate::targets::{CommandOpts, CommandRunner};
+use crate::targets::{CommandOpts, CommandOutput, CommandRunner};
 
 use super::SyncRemote;
+
+/// An `op` invocation was aimed at something esk does not own.
+///
+/// Returned instead of running the command, so a bad config or a future code
+/// path cannot reach an unrelated vault item.
+#[derive(Debug, thiserror::Error)]
+pub enum AccessError {
+    #[error(
+        "refusing to run `op {verb}` against item {requested:?}: esk only manages {owned:?} in vault {vault:?}"
+    )]
+    ForeignItem {
+        verb: &'static str,
+        requested: String,
+        owned: Vec<String>,
+        vault: String,
+    },
+    /// Unreachable through `Config::load`, which rejects an empty environment
+    /// list. Kept as defense in depth for a `Config` built without `validate()`:
+    /// an empty owned set would otherwise fall through to `ForeignItem` and
+    /// report "esk only manages []", which reads as a config typo rather than
+    /// the invariant violation it is.
+    #[error(
+        "refusing to run `op {verb}`: esk owns no items in vault {vault:?} (no environments are configured)"
+    )]
+    NoOwnedItems { verb: &'static str, vault: String },
+    #[error(
+        "refusing to use 1Password ownership tag {tag:?}: {matches} items carry it in vault {vault:?}; exactly one is required"
+    )]
+    AmbiguousOwnershipTag {
+        tag: String,
+        matches: usize,
+        vault: String,
+    },
+}
+
+/// Counts of esk-owned vs. other items in the configured vault.
+///
+/// Deliberately carries no titles — see [`OnePasswordRemote::vault_composition`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VaultComposition {
+    pub vault: String,
+    pub esk_owned: usize,
+    pub foreign: usize,
+    /// How many esk ownership tags match more than one item in the vault.
+    ///
+    /// Ownership tags are the stable identity boundary. Non-zero means esk
+    /// cannot choose an item safely and will refuse to read or edit either one.
+    pub duplicate_owned: usize,
+}
+
+impl VaultComposition {
+    /// True when the vault holds nothing but esk's own items.
+    pub fn is_isolated(&self) -> bool {
+        self.foreign == 0
+    }
+}
 
 pub struct OnePasswordRemote<'a> {
     config: &'a Config,
     remote_config: OnePasswordRemoteConfig,
+    /// Private and never exposed: every `op` call must go through
+    /// [`Self::run_op`], which enforces item ownership first.
     runner: &'a dyn CommandRunner,
 }
 
@@ -41,39 +99,197 @@ impl<'a> OnePasswordRemote<'a> {
         }
     }
 
+    /// Every item title esk owns in this vault — one per configured environment.
+    ///
+    /// This is the whole of esk's reach into 1Password. Membership in this set,
+    /// not the shape of the title, is what [`Self::assert_owns`] checks: a
+    /// prefix test could be widened by a crafted `item_pattern`, a set cannot.
+    pub fn owned_items(&self) -> Vec<String> {
+        self.config
+            .environments
+            .iter()
+            .map(|env| self.item_name(env))
+            .collect()
+    }
+
+    /// Reject any item title outside [`Self::owned_items`].
+    ///
+    /// Matching is case-insensitive because `op` resolves item titles that way:
+    /// `op item get "VINEO - DEV"` returns the item titled `vineo - Dev`. A
+    /// case-sensitive guard would be *narrower* than what `op` can reach, so an
+    /// item differing only in case would slip past as "not ours" while `op`
+    /// still resolved to it. Guard and CLI must agree on item identity.
+    ///
+    /// Full Unicode lowercasing rather than ASCII-only: `op`'s folding of
+    /// non-ASCII titles is unverified, and the two error directions are not
+    /// symmetric. Too narrow means esk waves through a title that `op` will
+    /// resolve to a *different* item — a wrong-item write. Too wide means esk
+    /// accepts a title that differs from an owned one only by case, which the
+    /// production call sites cannot produce anyway: both pass
+    /// [`Self::item_name`] output verbatim. Err wide.
+    fn assert_owns(&self, verb: &'static str, item: &str) -> Result<(), AccessError> {
+        let owned = self.owned_items();
+        if owned.is_empty() {
+            return Err(AccessError::NoOwnedItems {
+                verb,
+                vault: self.remote_config.vault.clone(),
+            });
+        }
+        let needle = item.to_lowercase();
+        if owned.iter().any(|o| o.to_lowercase() == needle) {
+            return Ok(());
+        }
+        Err(AccessError::ForeignItem {
+            verb,
+            requested: item.to_string(),
+            owned,
+            vault: self.remote_config.vault.clone(),
+        })
+    }
+
+    /// The only path from this module to the `op` CLI for item commands.
+    ///
+    /// `item` is checked against the owned set before the command runs, so an
+    /// item esk does not own is never named in an `op` invocation at all.
+    fn run_op(&self, verb: &'static str, item: &str, args: &[&str]) -> Result<CommandOutput> {
+        self.assert_owns(verb, item)?;
+        self.runner
+            .run("op", args, CommandOpts::default())
+            .with_context(|| format!("failed to run op item {verb}"))
+    }
+
+    /// A durable, non-secret identity marker stored as a 1Password tag.
+    ///
+    /// Titles are presentation: another item can already have the same title,
+    /// and 1Password resolves duplicate titles arbitrarily. The tag binds an
+    /// item to this exact project/environment without reading any item fields.
+    fn ownership_tag(&self, env: &str) -> String {
+        format!("esk/{}/{}", self.config.project, env)
+    }
+
+    /// List items in the configured vault, optionally restricting by tag.
+    fn list_items(&self, tag: Option<&str>) -> Result<Vec<Value>> {
+        let vault = &self.remote_config.vault;
+        let mut args = vec!["item", "list", "--vault", vault];
+        if let Some(tag) = tag {
+            args.extend(["--tags", tag]);
+        }
+        args.extend(["--format", "json"]);
+
+        let output = self
+            .runner
+            .run("op", &args, CommandOpts::default())
+            .context("failed to run op item list")?;
+        if !output.success {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            anyhow::bail!("op item list failed: {stderr}");
+        }
+
+        let json: Value = serde_json::from_slice(&output.stdout)
+            .context("failed to parse op item list output")?;
+        json.as_array()
+            .cloned()
+            .context("op item list did not return a list")
+    }
+
+    /// Resolve the unique item carrying this environment's ownership tag.
+    ///
+    /// This deliberately happens before `op item get`, so an unrelated item
+    /// with a colliding title is never read. The returned ID is used for both
+    /// get and edit, avoiding 1Password's ambiguous title lookup entirely.
+    fn owned_item_id(&self, env: &str) -> Result<Option<String>> {
+        let tag = self.ownership_tag(env);
+        let items = self.list_items(Some(&tag))?;
+        let matches: Vec<&Value> = items
+            .iter()
+            .filter(|item| item_has_tag(item, &tag))
+            .collect();
+
+        if matches.len() > 1 {
+            return Err(AccessError::AmbiguousOwnershipTag {
+                tag,
+                matches: matches.len(),
+                vault: self.remote_config.vault.clone(),
+            }
+            .into());
+        }
+
+        matches
+            .first()
+            .map(|item| {
+                item["id"]
+                    .as_str()
+                    .map(str::to_owned)
+                    .context("owned 1Password item has no id")
+            })
+            .transpose()
+    }
+
+    /// How much of the configured vault is esk's.
+    ///
+    /// Returns counts only. `op item list` hands back the title of every item
+    /// in the vault; those titles are tallied and dropped inside this function
+    /// and never returned, logged, or stored, so esk learns how many foreign
+    /// items exist without retaining what they are.
+    ///
+    /// A vault holding only esk items is the one real isolation boundary —
+    /// [`Self::assert_owns`] guards esk's own code, but only 1Password can stop
+    /// a credential from reaching an item in the first place.
+    pub fn vault_composition(&self) -> Result<VaultComposition> {
+        let vault = &self.remote_config.vault;
+        let items = self.list_items(None)?;
+        let owned_tags: Vec<String> = self
+            .config
+            .environments
+            .iter()
+            .map(|env| self.ownership_tag(env))
+            .collect();
+        let mut esk_owned = 0usize;
+        let mut foreign = 0usize;
+        let mut hits_per_owner_tag: BTreeMap<String, usize> = BTreeMap::new();
+        for item in &items {
+            if let Some(tag) = owned_tags.iter().find(|tag| item_has_tag(item, tag)) {
+                esk_owned += 1;
+                *hits_per_owner_tag.entry(tag.clone()).or_default() += 1;
+            } else {
+                foreign += 1;
+            }
+        }
+
+        let duplicate_owned = hits_per_owner_tag.values().filter(|&&n| n > 1).count();
+
+        Ok(VaultComposition {
+            vault: vault.clone(),
+            esk_owned,
+            foreign,
+            duplicate_owned,
+        })
+    }
+
     /// Resolve the 1Password item name for an environment.
     fn item_name(&self, env: &str) -> String {
-        // Capitalize first letter of env for {Environment} pattern
-        let env_capitalized = {
-            let mut chars = env.chars();
-            match chars.next() {
-                Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
-                None => String::new(),
-            }
-        };
-
-        self.remote_config
-            .item_pattern
-            .replace("{project}", &self.config.project)
-            .replace("{Environment}", &env_capitalized)
-            .replace("{environment}", env)
+        crate::config::resolve_onepassword_item_title(
+            &self.remote_config,
+            &self.config.project,
+            env,
+        )
     }
 
     /// Get a 1Password item, returning None if it doesn't exist.
     fn get_item(&self, env: &str) -> Result<Option<OpItem>> {
         let item_name = self.item_name(env);
         let vault = &self.remote_config.vault;
+        let Some(item_id) = self.owned_item_id(env)? else {
+            return Ok(None);
+        };
 
-        let output = self
-            .runner
-            .run(
-                "op",
-                &[
-                    "item", "get", &item_name, "--vault", vault, "--format", "json",
-                ],
-                CommandOpts::default(),
-            )
-            .context("failed to run op CLI")?;
+        let output = self.run_op(
+            "get",
+            &item_name,
+            &[
+                "item", "get", &item_id, "--vault", vault, "--format", "json",
+            ],
+        )?;
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
@@ -86,7 +302,9 @@ impl<'a> OnePasswordRemote<'a> {
         let json: Value =
             serde_json::from_slice(&output.stdout).context("failed to parse op output")?;
 
-        Ok(Some(OpItem::from_json(&json)?))
+        let mut item = OpItem::from_json(&json)?;
+        item.id = item_id;
+        Ok(Some(item))
     }
 
     /// Push secrets to a 1Password item. Creates or updates.
@@ -125,6 +343,7 @@ impl<'a> OnePasswordRemote<'a> {
 
         // Add version metadata
         assignments.push(format!("_Metadata.version[text]={version}"));
+        let ownership_tag = self.ownership_tag(env);
 
         // Remove stale fields from 1Password (present remotely but not locally)
         if let Some(ref item) = existing {
@@ -139,21 +358,20 @@ impl<'a> OnePasswordRemote<'a> {
             }
         }
 
-        if existing.is_some() {
+        if let Some(item) = &existing {
             // Update existing item
             let mut args: Vec<String> = vec![
                 "item".to_string(),
                 "edit".to_string(),
-                item_name,
+                item.id.clone(),
+                "--title".to_string(),
+                item_name.clone(),
                 "--vault".to_string(),
                 vault.clone(),
             ];
             args.extend(assignments.iter().cloned());
             let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
-            let output = self
-                .runner
-                .run("op", &args_ref, CommandOpts::default())
-                .context("failed to run op item edit")?;
+            let output = self.run_op("edit", &item_name, &args_ref)?;
             if !output.success {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 anyhow::bail!("op item edit failed: {stderr}");
@@ -166,16 +384,15 @@ impl<'a> OnePasswordRemote<'a> {
                 "--category".to_string(),
                 "Secure Note".to_string(),
                 "--title".to_string(),
-                item_name,
+                item_name.clone(),
+                "--tags".to_string(),
+                ownership_tag,
                 "--vault".to_string(),
                 vault.clone(),
             ];
             args.extend(assignments.iter().cloned());
             let args_ref: Vec<&str> = args.iter().map(std::string::String::as_str).collect();
-            let output = self
-                .runner
-                .run("op", &args_ref, CommandOpts::default())
-                .context("failed to run op item create")?;
+            let output = self.run_op("create", &item_name, &args_ref)?;
             if !output.success {
                 let stderr = String::from_utf8_lossy(&output.stderr);
                 anyhow::bail!("op item create failed: {stderr}");
@@ -259,6 +476,9 @@ impl SyncRemote for OnePasswordRemote<'_> {
 
 #[derive(Debug)]
 struct OpItem {
+    /// Stable item ID resolved from the ownership tag. Empty only in parser
+    /// unit tests that exercise field decoding without a list lookup.
+    id: String,
     secrets: BTreeMap<String, String>,
     /// Tracks which section each secret key came from (key -> section label).
     sections: BTreeMap<String, String>,
@@ -295,11 +515,18 @@ impl OpItem {
         }
 
         Ok(Self {
+            id: String::new(),
             secrets,
             sections,
             version,
         })
     }
+}
+
+fn item_has_tag(item: &Value, expected: &str) -> bool {
+    item["tags"]
+        .as_array()
+        .is_some_and(|tags| tags.iter().any(|tag| tag.as_str() == Some(expected)))
 }
 
 #[cfg(test)]
@@ -308,6 +535,10 @@ mod tests {
     use crate::targets::CommandOutput;
     use crate::test_support::{ErrorCommandRunner, MockCommandRunner};
     use serde_json::json;
+
+    fn listed_item(id: &str, title: &str, tags: &[&str]) -> Value {
+        json!({"id": id, "title": title, "tags": tags})
+    }
 
     #[test]
     fn op_item_from_json_parses_secrets() {
@@ -422,7 +653,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -458,7 +689,7 @@ environments: [dev]
 remotes:
   1password:
     vault: SecretVault
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -494,7 +725,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -536,7 +767,7 @@ remotes:
         let op_config = config.onepassword_remote_config().unwrap();
         let runner = DummyRunner;
         let remote = OnePasswordRemote::new(&config, op_config, &runner);
-        assert_eq!(remote.item_name("dev"), "myapp - Dev");
+        assert_eq!(remote.item_name("dev"), "⚙ myapp - Dev");
     }
 
     #[test]
@@ -568,7 +799,7 @@ remotes:
         let op_config = config.onepassword_remote_config().unwrap();
         let runner = DummyRunner;
         let remote = OnePasswordRemote::new(&config, op_config, &runner);
-        assert_eq!(remote.item_name("dev"), "dev");
+        assert_eq!(remote.item_name("dev"), "⚙ dev");
     }
 
     #[test]
@@ -600,7 +831,7 @@ remotes:
         let op_config = config.onepassword_remote_config().unwrap();
         let runner = DummyRunner;
         let remote = OnePasswordRemote::new(&config, op_config, &runner);
-        assert_eq!(remote.item_name(""), "myapp - ");
+        assert_eq!(remote.item_name(""), "⚙ myapp - ");
     }
 
     #[test]
@@ -626,7 +857,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 secrets:
   Stripe:
     API_KEY:
@@ -648,7 +879,17 @@ secrets:
                 {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
             ]
         });
+        let listing = json!([listed_item(
+            "owned-dev-id",
+            "⚙ test-dev",
+            &["esk/myapp/dev"]
+        )]);
         let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&listing).unwrap(),
+                stderr: Vec::new(),
+            },
             CommandOutput {
                 success: true,
                 stdout: serde_json::to_vec(&json).unwrap(),
@@ -656,7 +897,7 @@ secrets:
             },
             CommandOutput {
                 success: true,
-                stdout: serde_json::to_vec(&json).unwrap(),
+                stdout: Vec::new(),
                 stderr: Vec::new(),
             },
         ]);
@@ -684,7 +925,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 secrets:
   Stripe:
     API_KEY:
@@ -701,7 +942,17 @@ secrets:
                 {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
             ]
         });
+        let listing = json!([listed_item(
+            "owned-dev-id",
+            "⚙ test-dev",
+            &["esk/myapp/dev"]
+        )]);
         let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&listing).unwrap(),
+                stderr: Vec::new(),
+            },
             CommandOutput {
                 success: true,
                 stdout: serde_json::to_vec(&json).unwrap(),
@@ -709,7 +960,7 @@ secrets:
             },
             CommandOutput {
                 success: true,
-                stdout: serde_json::to_vec(&json).unwrap(),
+                stdout: Vec::new(),
                 stderr: Vec::new(),
             },
         ]);
@@ -734,7 +985,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -747,7 +998,17 @@ remotes:
                 {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
             ]
         });
+        let listing = json!([listed_item(
+            "owned-dev-id",
+            "⚙ test-dev",
+            &["esk/myapp/dev"]
+        )]);
         let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&listing).unwrap(),
+                stderr: Vec::new(),
+            },
             CommandOutput {
                 success: true,
                 stdout: serde_json::to_vec(&json).unwrap(),
@@ -755,7 +1016,7 @@ remotes:
             },
             CommandOutput {
                 success: true,
-                stdout: serde_json::to_vec(&json).unwrap(),
+                stdout: Vec::new(),
                 stderr: Vec::new(),
             },
         ]);
@@ -782,7 +1043,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = dir.path().join("esk.yaml");
         std::fs::write(&path, yaml).unwrap();
@@ -791,9 +1052,9 @@ remotes:
 
         let runner = MockCommandRunner::from_outputs(vec![
             CommandOutput {
-                success: false,
-                stdout: Vec::new(),
-                stderr: b"isn't an item".to_vec(),
+                success: true,
+                stdout: b"[]".to_vec(),
+                stderr: Vec::new(),
             },
             CommandOutput {
                 success: true,
@@ -812,6 +1073,517 @@ remotes:
         let create_call = &calls[1];
         let args_str = create_call.args.join(" ");
         assert!(args_str.contains("create"));
+        assert!(args_str.contains("--tags esk/myapp/dev"));
         assert!(!args_str.contains("[delete]"));
+    }
+
+    // --- Access control: esk must never touch an item it does not own ---
+
+    /// Config with two environments, so the owned set has more than one member.
+    fn access_config(dir: &std::path::Path, extra: &str) -> Config {
+        let yaml = format!(
+            r#"
+project: vineo
+environments: [dev, prod]
+remotes:
+  1password:
+    vault: SharedVault
+    item_pattern: "{{project}} - {{Environment}}"
+{extra}
+"#
+        );
+        let path = dir.join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        Config::load(&path).unwrap()
+    }
+
+    /// A runner that fails the test if it is ever invoked.
+    struct ForbiddenRunner;
+    impl CommandRunner for ForbiddenRunner {
+        fn run(&self, program: &str, args: &[&str], _: CommandOpts) -> Result<CommandOutput> {
+            panic!("op must not be executed: {program} {args:?}");
+        }
+    }
+
+    #[test]
+    fn prefix_defaults_to_esk_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+        assert_eq!(op_config.prefix, "⚙");
+
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name("dev"), "⚙ vineo - Dev");
+        assert_eq!(remote.item_name("prod"), "⚙ vineo - Prod");
+    }
+
+    #[test]
+    fn documented_default_resolves_to_the_path_form() {
+        // The shape docs/esk.example.yaml recommends, pinned end to end so the
+        // docs and the binary cannot drift apart.
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev, prod]
+remotes:
+  1password:
+    vault: Engineering
+    item_pattern: "esk/{project}/{environment}"
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
+        // prefix is omitted above, so this exercises the built-in default.
+        assert_eq!(op_config.prefix, "\u{2699}");
+
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name("dev"), "\u{2699} esk/myapp/dev");
+        assert_eq!(remote.item_name("prod"), "\u{2699} esk/myapp/prod");
+        // Environment names pass through unaltered — no title-casing.
+        assert!(!remote.item_name("prod").contains("Prod"));
+    }
+
+    #[test]
+    fn prefix_can_be_overridden() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: vineo
+environments: [dev]
+remotes:
+  1password:
+    vault: V
+    item_pattern: "{project} - {Environment}"
+    prefix: "⟦ESK⟧"
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name("dev"), "⟦ESK⟧ vineo - Dev");
+    }
+
+    #[test]
+    fn empty_prefix_opts_out() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: vineo
+environments: [dev]
+remotes:
+  1password:
+    vault: V
+    item_pattern: "{project} - {Environment}"
+    prefix: ""
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.item_name("dev"), "vineo - Dev");
+    }
+
+    #[test]
+    fn owned_items_covers_exactly_the_configured_environments() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(
+            remote.owned_items(),
+            vec!["⚙ vineo - Dev", "⚙ vineo - Prod"]
+        );
+    }
+
+    #[test]
+    fn assert_owns_accepts_owned_items() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert!(remote.assert_owns("get", "⚙ vineo - Dev").is_ok());
+        assert!(remote.assert_owns("edit", "⚙ vineo - Prod").is_ok());
+    }
+
+    #[test]
+    fn assert_owns_rejects_a_foreign_item() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        for foreign in [
+            "Personal Bank Login",
+            "vineo esk store key",
+            "⚙ otherproject - Dev",
+            "vineo - Dev",
+        ] {
+            let err = remote.assert_owns("get", foreign).unwrap_err();
+            assert!(
+                matches!(err, AccessError::ForeignItem { .. }),
+                "expected refusal for {foreign:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn assert_owns_rejects_an_item_merely_wearing_the_prefix() {
+        // A prefix *test* would pass this; set membership must not.
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        let err = remote
+            .assert_owns("get", "⚙ someone elses secrets")
+            .unwrap_err();
+        assert!(matches!(err, AccessError::ForeignItem { .. }));
+    }
+
+    #[test]
+    fn assert_owns_rejects_when_no_environments_configured() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: vineo
+environments: []
+remotes:
+  1password:
+    vault: V
+    item_pattern: "{project}"
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let Ok(config) = Config::load(&path) else {
+            // Config validation may reject an empty environment list outright,
+            // which satisfies the same invariant at an earlier layer.
+            return;
+        };
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        let err = remote.assert_owns("get", "vineo").unwrap_err();
+        assert!(matches!(err, AccessError::NoOwnedItems { .. }));
+    }
+
+    #[test]
+    fn foreign_item_is_never_passed_to_op() {
+        // The guard must run *before* the process is spawned, so a foreign
+        // title never appears in an op argv at all.
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner; // panics if op is executed
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        let err = remote.run_op("get", "Personal Bank Login", &["item", "get", "x"]);
+        assert!(err.is_err());
+    }
+
+    #[test]
+    fn every_item_command_names_only_owned_titles() {
+        // Drive a real push and assert that discovery uses the ownership tag,
+        // while get/edit use the stable ID returned for that tag.
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+
+        let existing = json!({
+            "fields": [
+                {"section": {"label": "G"}, "label": "KEY", "value": "old"},
+                {"section": {"label": "_Metadata"}, "label": "version", "value": "1"},
+            ]
+        });
+        let listing = json!([listed_item(
+            "owned-dev-id",
+            "⚙ vineo - Dev",
+            &["esk/vineo/dev"]
+        )]);
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&listing).unwrap(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: serde_json::to_vec(&existing).unwrap(),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        ]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        let mut secrets = BTreeMap::new();
+        secrets.insert("KEY".to_string(), "new".to_string());
+        remote.push_item("dev", &secrets, 2).unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 3);
+        assert!(calls[0]
+            .args
+            .windows(2)
+            .any(|args| args == ["--tags", "esk/vineo/dev"]));
+        assert_eq!(calls[1].args[2], "owned-dev-id");
+        assert_eq!(calls[2].args[2], "owned-dev-id");
+        assert!(calls[2]
+            .args
+            .windows(2)
+            .any(|args| args == ["--title", "⚙ vineo - Dev"]));
+    }
+
+    #[test]
+    fn push_and_pull_target_the_prefixed_item() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: b"[]".to_vec(),
+            stderr: Vec::new(),
+        }]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
+
+        let calls = runner.calls();
+        assert!(calls[0]
+            .args
+            .windows(2)
+            .any(|args| args == ["--tags", "esk/vineo/dev"]));
+    }
+
+    #[test]
+    fn colliding_untagged_item_is_never_read() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+
+        // Defend against both a provider-side filter regression and a malicious
+        // response: an exact title without the exact ownership tag is foreign.
+        let listing = json!([listed_item("foreign-id", "⚙ vineo - Dev", &["personal"])]);
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&listing).unwrap(),
+            stderr: Vec::new(),
+        }]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
+        let calls = runner.calls();
+        assert_eq!(
+            calls.len(),
+            1,
+            "foreign item must never reach `op item get`"
+        );
+        assert!(calls[0].args.contains(&"list".to_string()));
+        assert!(!calls[0].args.contains(&"foreign-id".to_string()));
+    }
+
+    #[test]
+    fn duplicate_ownership_tag_fails_before_reading_either_item() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+        let listing = json!([
+            listed_item("first-id", "first", &["esk/vineo/dev"]),
+            listed_item("second-id", "second", &["esk/vineo/dev"]),
+        ]);
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&listing).unwrap(),
+            stderr: Vec::new(),
+        }]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        let err = remote.pull(&config, "dev").unwrap_err();
+        assert!(err.to_string().contains("2 items carry it"));
+        assert_eq!(runner.calls().len(), 1);
+    }
+
+    #[test]
+    fn vault_composition_counts_without_returning_titles() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+
+        let listing = json!([
+            listed_item("dev-id", "⚙ vineo - Dev", &["esk/vineo/dev"]),
+            listed_item("prod-id", "⚙ vineo - Prod", &["esk/vineo/prod"]),
+            listed_item("bank-id", "Personal Bank Login", &[]),
+            listed_item("key-id", "vineo esk store key", &[]),
+        ]);
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&listing).unwrap(),
+            stderr: Vec::new(),
+        }]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        let comp = remote.vault_composition().unwrap();
+        assert_eq!(comp.esk_owned, 2);
+        assert_eq!(comp.foreign, 2);
+        assert!(!comp.is_isolated());
+
+        // The struct must not carry any foreign title.
+        let rendered = format!("{comp:?}");
+        assert!(!rendered.contains("Bank"));
+        assert!(!rendered.contains("store key"));
+    }
+
+    #[test]
+    fn assert_owns_folds_case_like_op_does() {
+        // `op item get "VINEO - DEV"` resolves the item titled "vineo - Dev".
+        // The guard must treat those as the same item, or a case variant would
+        // be judged foreign while op still wrote to the real item.
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+        let runner = ForbiddenRunner;
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        for variant in ["⚙ VINEO - DEV", "⚙ vineo - dev", "⚙ ViNeO - DeV"] {
+            assert!(
+                remote.assert_owns("get", variant).is_ok(),
+                "case variant {variant:?} must be recognized as owned"
+            );
+        }
+
+        // Folding must not widen the guard to genuinely different titles.
+        assert!(remote.assert_owns("get", "⚙ vineo - Staging").is_err());
+        assert!(remote.assert_owns("get", "personal bank login").is_err());
+    }
+
+    #[test]
+    fn vault_composition_uses_tags_not_titles_for_ownership() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+
+        // Titles are presentation only: exact tags determine ownership.
+        let listing = json!([
+            listed_item("dev-id", "renamed by a human", &["esk/vineo/dev"]),
+            listed_item("prod-id", "⚙ VINEO - PROD", &["esk/vineo/prod"]),
+            listed_item("bank-id", "⚙ vineo - Dev", &[]),
+        ]);
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&listing).unwrap(),
+            stderr: Vec::new(),
+        }]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        let comp = remote.vault_composition().unwrap();
+        assert_eq!(comp.esk_owned, 2, "exact ownership tags must count");
+        assert_eq!(comp.foreign, 1);
+    }
+
+    #[test]
+    fn no_unguarded_op_item_call_sites_exist() {
+        // Structural guard: item commands must route through `run_op`, which
+        // enforces ownership. A new `self.runner.run("op", ...)` that names an
+        // item would bypass that, so the count of raw runner uses is pinned.
+        //
+        // The three permitted uses are: inside `run_op` itself, `check_command`
+        // (runs `op --version`), and `vault_composition` / `preflight`, which
+        // are vault-scoped and name no item.
+        let src = include_str!("onepassword.rs");
+        let production = src
+            .split("#[cfg(test)]")
+            .next()
+            .expect("module has a test section");
+
+        // Normalize whitespace so a `self\n    .runner` line break still counts.
+        let flat: String = production.split_whitespace().collect::<Vec<_>>().join(" ");
+        let raw_uses = flat.matches("self .runner").count() + flat.matches("self.runner").count();
+        assert_eq!(
+            raw_uses, 4,
+            "raw `self.runner` uses changed ({raw_uses}); every item command must go \
+             through run_op(). Permitted: run_op itself, check_command (op --version), \
+             preflight (op vault get), vault_composition (op item list) — all of which \
+             name no specific item. Anything naming an item must use run_op()."
+        );
+    }
+
+    #[test]
+    fn vault_composition_flags_duplicate_ownership_tags() {
+        // Two items carry one environment's tag, so neither is safe to choose.
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+
+        let listing = json!([
+            listed_item("dev-a", "⚙ vineo - Dev", &["esk/vineo/dev"]),
+            listed_item("dev-b", "renamed duplicate", &["esk/vineo/dev"]),
+            listed_item("prod-id", "⚙ vineo - Prod", &["esk/vineo/prod"]),
+        ]);
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&listing).unwrap(),
+            stderr: Vec::new(),
+        }]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        let comp = remote.vault_composition().unwrap();
+        assert_eq!(comp.esk_owned, 3);
+        assert_eq!(comp.foreign, 0);
+        assert_eq!(
+            comp.duplicate_owned, 1,
+            "the duplicated ownership tag must be flagged"
+        );
+        // An ambiguous vault is not a clean vault, even with nothing foreign.
+        assert!(comp.is_isolated());
+    }
+
+    #[test]
+    fn vault_composition_reports_no_duplicates_when_tags_are_unique() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+
+        let listing = json!([
+            listed_item("dev-id", "same title", &["esk/vineo/dev"]),
+            listed_item("prod-id", "same title", &["esk/vineo/prod"]),
+            listed_item("other-id", "Unrelated", &[]),
+        ]);
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&listing).unwrap(),
+            stderr: Vec::new(),
+        }]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+        assert_eq!(remote.vault_composition().unwrap().duplicate_owned, 0);
+    }
+
+    #[test]
+    fn vault_composition_reports_an_isolated_vault() {
+        let dir = tempfile::tempdir().unwrap();
+        let config = access_config(dir.path(), "");
+        let op_config = config.onepassword_remote_config().unwrap();
+
+        let listing = json!([
+            listed_item("dev-id", "⚙ vineo - Dev", &["esk/vineo/dev"]),
+            listed_item("prod-id", "⚙ vineo - Prod", &["esk/vineo/prod"]),
+        ]);
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&listing).unwrap(),
+            stderr: Vec::new(),
+        }]);
+        let remote = OnePasswordRemote::new(&config, op_config, &runner);
+
+        let comp = remote.vault_composition().unwrap();
+        assert_eq!(comp.foreign, 0);
+        assert!(comp.is_isolated());
     }
 }

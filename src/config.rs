@@ -391,6 +391,80 @@ pub struct CustomCommandConfig {
 pub struct OnePasswordRemoteConfig {
     pub vault: String,
     pub item_pattern: String,
+    /// Visual marker prepended to every resolved item title. Ownership is
+    /// enforced separately with the `esk/{project}/{environment}` item tag.
+    /// Set to "" to keep titles unprefixed.
+    ///
+    /// The default gear says "machine-written" — in a vault where every item is
+    /// a secret, provenance is the useful signal, not another key glyph. It also
+    /// sorts esk's items into one block below the alphabetical entries.
+    #[serde(default = "default_onepassword_prefix")]
+    pub prefix: String,
+}
+
+fn default_onepassword_prefix() -> String {
+    "\u{2699}".to_string()
+}
+
+/// Require that resolved 1Password item titles vary per environment.
+///
+/// Ownership tags and stable IDs provide the access boundary, but duplicate
+/// titles remain misleading to humans and unsafe for any manual `op` command.
+/// Resolve the exact configured title for every environment and compare it the
+/// same case-insensitive way 1Password does.
+pub(crate) fn resolve_onepassword_item_title(
+    cfg: &OnePasswordRemoteConfig,
+    project: &str,
+    env: &str,
+) -> String {
+    let env_capitalized = {
+        let mut chars = env.chars();
+        match chars.next() {
+            Some(c) => format!("{}{}", c.to_uppercase(), chars.as_str()),
+            None => String::new(),
+        }
+    };
+    let resolved = cfg
+        .item_pattern
+        .replace("{project}", project)
+        .replace("{Environment}", &env_capitalized)
+        .replace("{environment}", env);
+    let prefix = cfg.prefix.trim();
+    if prefix.is_empty() {
+        resolved
+    } else {
+        format!("{prefix} {resolved}")
+    }
+}
+
+fn validate_onepassword_item_pattern(
+    cfg: &OnePasswordRemoteConfig,
+    project: &str,
+    environments: &[String],
+) -> Result<()> {
+    let has_env_placeholder =
+        cfg.item_pattern.contains("{environment}") || cfg.item_pattern.contains("{Environment}");
+    if !has_env_placeholder {
+        anyhow::bail!(
+            "1password item_pattern '{}' must contain '{{environment}}' or '{{Environment}}'.\n\
+             Without it every environment resolves to the same item title.",
+            cfg.item_pattern
+        );
+    }
+
+    let mut resolved: BTreeMap<String, &str> = BTreeMap::new();
+    for env in environments {
+        let title = resolve_onepassword_item_title(cfg, project, env);
+        let folded = title.to_lowercase();
+        if let Some(previous) = resolved.insert(folded, env) {
+            anyhow::bail!(
+                "1password item_pattern resolves environments '{previous}' and '{env}' \
+                 to the same case-insensitive title {title:?}; each environment must \
+                 have a distinct 1Password item title"
+            );
+        }
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1170,6 +1244,7 @@ impl Config {
                 "1password" => {
                     let cfg: OnePasswordRemoteConfig = serde_json::from_value(value.clone())
                         .context("invalid 1password remote config")?;
+                    validate_onepassword_item_pattern(&cfg, &self.project, &self.environments)?;
                     self.typed_remotes.push(TypedRemoteConfig::OnePassword(cfg));
                 }
                 "aws_secrets_manager" => {
@@ -1499,6 +1574,24 @@ impl Config {
     pub fn secret_group_names(&self) -> Vec<String> {
         self.secrets.keys().cloned().collect()
     }
+
+    /// The parsed 1Password remote config, if 1Password is configured.
+    ///
+    /// `None` means "not configured"; `Some(Err)` means the block is present but
+    /// malformed. Callers must not collapse the two — a doctor check that goes
+    /// silent on a broken config hides exactly what it exists to report.
+    pub fn try_onepassword_remote_config(
+        &self,
+    ) -> Option<std::result::Result<OnePasswordRemoteConfig, serde_json::Error>> {
+        self.remotes
+            .get("1password")
+            .map(|v| serde_json::from_value(v.clone()))
+    }
+
+    /// The parsed 1Password remote config, or `None` if absent or malformed.
+    pub fn onepassword_remote_config(&self) -> Option<OnePasswordRemoteConfig> {
+        self.try_onepassword_remote_config()?.ok()
+    }
 }
 
 #[cfg(test)]
@@ -1508,11 +1601,6 @@ impl Config {
         self.remotes
             .get(name)
             .and_then(|v| serde_json::from_value(v.clone()).ok())
-    }
-
-    /// Test-only: get the parsed 1Password remote config.
-    pub fn onepassword_remote_config(&self) -> Option<OnePasswordRemoteConfig> {
-        self.remote_config("1password")
     }
 
     /// Test-only: get all cloud_file remote configs.
@@ -2061,6 +2149,75 @@ secrets:
     }
 
     #[test]
+    fn onepassword_item_pattern_must_vary_by_environment() {
+        // A pattern with no environment placeholder gives every env the same
+        // human-facing title even though ownership tags remain distinct.
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r"
+project: myapp
+environments: [dev, prod]
+remotes:
+  1password:
+    vault: V
+    item_pattern: Personal Bank Login
+";
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = Config::load(&path).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("must contain"), "got: {msg}");
+    }
+
+    #[test]
+    fn onepassword_item_pattern_accepts_either_placeholder_case() {
+        for pattern in ["{project} - {Environment}", "{project}-{environment}"] {
+            let dir = tempfile::tempdir().unwrap();
+            let yaml = format!(
+                "project: myapp\nenvironments: [dev]\nremotes:\n  1password:\n    vault: V\n    item_pattern: \"{pattern}\"\n"
+            );
+            let path = dir.path().join("esk.yaml");
+            std::fs::write(&path, yaml).unwrap();
+            assert!(
+                Config::load(&path).is_ok(),
+                "pattern {pattern:?} should be accepted"
+            );
+        }
+    }
+
+    #[test]
+    fn onepassword_titles_must_be_case_insensitively_unique() {
+        for pattern in ["{environment}", "{Environment}"] {
+            let dir = tempfile::tempdir().unwrap();
+            let yaml = format!(
+                "project: myapp\nenvironments: [dev, Dev]\nremotes:\n  1password:\n    vault: V\n    item_pattern: \"{pattern}\"\n"
+            );
+            let path = dir.path().join("esk.yaml");
+            std::fs::write(&path, yaml).unwrap();
+            let err = Config::load(&path).unwrap_err();
+            let msg = format!("{err:#}");
+            assert!(msg.contains("case-insensitive title"), "got: {msg}");
+            assert!(msg.contains("'dev' and 'Dev'"), "got: {msg}");
+        }
+    }
+
+    #[test]
+    fn onepassword_titles_reject_duplicate_environment_entries() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = r#"
+project: myapp
+environments: [dev, dev]
+remotes:
+  1password:
+    vault: V
+    item_pattern: "{project}/{environment}"
+"#;
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let err = Config::load(&path).unwrap_err();
+        assert!(format!("{err:#}").contains("case-insensitive title"));
+    }
+
+    #[test]
     fn validate_remotes_onepassword() {
         let dir = tempfile::tempdir().unwrap();
         let yaml = r"
@@ -2069,13 +2226,13 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 ";
         let path = write_yaml(dir.path(), yaml);
         let config = Config::load(&path).unwrap();
         let op = config.onepassword_remote_config().unwrap();
         assert_eq!(op.vault, "V");
-        assert_eq!(op.item_pattern, "test");
+        assert_eq!(op.item_pattern, "test-{environment}");
     }
 
     #[test]
@@ -3568,7 +3725,7 @@ environments: [dev]
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{{environment}}
   dropbox:
     type: cloud_file
     path: {}

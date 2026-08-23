@@ -59,30 +59,81 @@ Preflight verifies both CLI installation and vault accessibility by running `op 
 remotes:
   1password:
     vault: Engineering
-    item_pattern: "{project} - {Environment}"
+    item_pattern: "esk/{project}/{environment}"
+    prefix: "⚙"
 ```
+
+Resolves to `⚙ esk/myapp/dev`.
 
 | Field          | Required | Description                                                                                                                 |
 | -------------- | -------- | --------------------------------------------------------------------------------------------------------------------------- |
 | `vault`        | Yes      | 1Password vault name to store items in.                                                                                     |
 | `item_pattern` | Yes      | Template for item names. Supports `{project}`, `{Environment}` (capitalized), and `{environment}` (lowercase) placeholders. |
+| `prefix`       | No       | Visual marker prepended to every resolved title, separated by a space. Defaults to `⚙`. Set to `""` to opt out.             |
 
 ### Item naming
 
-The `item_pattern` is resolved per environment:
+The `item_pattern` is resolved per environment, then `prefix` is prepended:
 
-| Pattern                     | Project | Environment | Result          |
-| --------------------------- | ------- | ----------- | --------------- |
-| `{project} - {Environment}` | `myapp` | `dev`       | `myapp - Dev`   |
-| `{project} - {Environment}` | `myapp` | `prod`      | `myapp - Prod`  |
-| `{project} {environment}`   | `myapp` | `staging`   | `myapp staging` |
+| Pattern                       | Prefix | Project | Environment | Result               |
+| ----------------------------- | ------ | ------- | ----------- | -------------------- |
+| `esk/{project}/{environment}` | `⚙`    | `myapp` | `dev`       | `⚙ esk/myapp/dev`    |
+| `esk/{project}/{environment}` | `⚙`    | `myapp` | `prod`      | `⚙ esk/myapp/prod`   |
+| `{project} - {Environment}`   | `⚙`    | `myapp` | `staging`   | `⚙ myapp - Staging`  |
+| `esk/{project}/{environment}` | `""`   | `myapp` | `dev`       | `esk/myapp/dev`      |
+
+Note that `{Environment}` only uppercases the first character: `prod` becomes `Prod`, and an environment named `us-east-1` becomes `Us-east-1`. Prefer `{environment}`, which passes the name through as written in your config.
+
+Titles may contain any Unicode. A leading glyph sorts esk's items into one block below the alphabetically-sorted entries, rather than scattering them among unrelated items; `⚙` reads as "machine-written — your manual edits get overwritten on the next sync", which is the useful signal in a vault where everything is already a secret. No glyph is typeable in 1Password's search box, but searching `esk` still matches the path.
+
+**Changing the prefix or pattern renames the item on the next write.** The ownership tag, not the title, is the lookup key.
+
+### Access scope
+
+Every item esk creates carries a non-secret ownership tag:
+
+```text
+esk/{project}/{environment}
+```
+
+For `myapp`'s `dev` environment, that tag is `esk/myapp/dev`. Titles are for humans; tags establish ownership.
+
+```text
+configured environment
+        │
+        ▼
+esk/myapp/dev ownership tag
+        │
+        ▼
+op item list --tags esk/myapp/dev
+        │
+        ├── 0 exact matches ──► create a tagged item
+        ├── 1 exact match   ──► get/edit that item's stable ID
+        └── 2+ matches      ──► fail closed; the owner is ambiguous
+```
+
+esk verifies the exact returned tag itself because 1Password tag filters also include nested tags. It resolves the item ID before reading fields, so an unrelated item with the same title is neither read nor edited. Editing by ID also makes duplicate titles harmless.
+
+`item_pattern` must contain `{environment}` or `{Environment}` so each environment also has a distinct, recognizable title. esk renders every configured title during config loading and rejects duplicates using 1Password's case-insensitive comparison; `dev` and `Dev` therefore cannot collapse onto one title. The tag and stable item ID remain the enforcement boundary.
+
+`esk doctor` counts items with an exact configured ownership tag. If more than one item carries the same tag, doctor fails and normal sync operations refuse to read either item.
+
+#### Upgrading existing items
+
+Items created before ownership tags were introduced are intentionally not trusted by title alone. For each environment, either:
+
+1. Add the matching `esk/{project}/{environment}` tag to the existing item in 1Password, preserving any other tags; or
+2. Let esk create a new tagged item, then remove the old one after checking the new copy.
+
+This is a guardrail in esk's own code, **not** a sandbox. esk inherits your `op` session, so whatever your 1Password account can read, the `op` process could read. The only true boundary is 1Password's: put esk items in a dedicated vault, ideally reached through a [service account](https://developer.1password.com/docs/service-accounts/) scoped to that vault alone. `esk doctor` reports whether the configured vault holds anything else, counting foreign items without recording their names.
 
 ### 1Password item structure
 
 Items are created as "Secure Note" category with the following field layout:
 
 ```
-Title: myapp - Prod
+Title: ⚙ esk/myapp/prod
+Tag: esk/myapp/prod
 Category: Secure Note
 Vault: Engineering
 

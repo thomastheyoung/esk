@@ -511,7 +511,7 @@ targets:
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 secrets:
   General:
     MY_SECRET:
@@ -564,7 +564,7 @@ targets:
 remotes:
   1password:
     vault: V
-    item_pattern: test
+    item_pattern: test-{environment}
 secrets:
   General:
     MY_SECRET:
@@ -1137,7 +1137,7 @@ environments: [dev]
 remotes:
   1password:
     vault: Test
-    item_pattern: test
+    item_pattern: test-{environment}
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
@@ -1588,6 +1588,14 @@ fn deploy_convex_failure_tracked() {
 
 // === onepassword remote integration ===
 
+fn onepassword_owned_listing() -> serde_json::Value {
+    json!([{
+        "id": "owned-dev-id",
+        "title": "⚙ testapp - Dev",
+        "tags": ["esk/testapp/dev"],
+    }])
+}
+
 #[test]
 fn push_onepassword_creates_item() {
     let project = TestProject::with_store(ONEPASSWORD_REMOTE_CONFIG).unwrap();
@@ -1599,9 +1607,8 @@ fn push_onepassword_creates_item() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // op item get → not found
-    runner.push_failure(b"isn't an item in vault");
-    // op item create → success
+    runner.push_success(b"[]", b""); // tagged item lookup → not found
+                                     // op item create → success
     runner.push_success(b"", b"");
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
@@ -1612,14 +1619,15 @@ fn push_onepassword_creates_item() {
     assert_eq!(calls.len(), 4);
     // First call: op --version (preflight)
     // Second call: op vault get (preflight)
-    // Third call: op item get
+    // Third call: tagged item lookup
     assert_eq!(calls[2].program, "op");
-    assert!(calls[2].args.contains(&"get".to_string()));
-    assert!(calls[2].args.contains(&"testapp - Dev".to_string()));
+    assert!(calls[2].args.contains(&"list".to_string()));
+    assert!(calls[2].args.contains(&"esk/testapp/dev".to_string()));
     // Fourth call: op item create
     assert_eq!(calls[3].program, "op");
     assert!(calls[3].args.contains(&"create".to_string()));
-    assert!(calls[3].args.contains(&"testapp - Dev".to_string()));
+    assert!(calls[3].args.contains(&"⚙ testapp - Dev".to_string()));
+    assert!(calls[3].args.contains(&"esk/testapp/dev".to_string()));
     assert!(calls[3]
         .args
         .iter()
@@ -1637,7 +1645,9 @@ fn push_onepassword_edits_existing() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // op item get → found (return valid JSON)
+    let listing = onepassword_owned_listing();
+    runner.push_success(serde_json::to_vec(&listing).unwrap().as_slice(), b"");
+    // op item get by owned ID → found (return valid JSON)
     let item_json = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "sk_old"},
@@ -1653,9 +1663,11 @@ fn push_onepassword_edits_existing() {
     cli::sync::push_to_remotes(&remotes, &payload, &config, "dev", &mut sync_index).unwrap();
 
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 4);
-    assert!(calls[3].args.contains(&"edit".to_string()));
-    assert!(calls[3]
+    assert_eq!(calls.len(), 5);
+    assert_eq!(calls[3].args[2], "owned-dev-id");
+    assert!(calls[4].args.contains(&"edit".to_string()));
+    assert_eq!(calls[4].args[2], "owned-dev-id");
+    assert!(calls[4]
         .args
         .iter()
         .any(|a| a.contains("STRIPE_KEY[concealed]=sk_test_999")));
@@ -1672,9 +1684,8 @@ fn push_onepassword_version_metadata() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // op item get → not found
-    runner.push_failure(b"isn't an item in vault");
-    // op item create → success
+    runner.push_success(b"[]", b""); // tagged item lookup → not found
+                                     // op item create → success
     runner.push_success(b"", b"");
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
@@ -1700,7 +1711,9 @@ fn remote_sync_onepassword_merges_remote() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // pull: op item get → returns higher version with different value
+    let listing = onepassword_owned_listing();
+    runner.push_success(serde_json::to_vec(&listing).unwrap().as_slice(), b"");
+    // pull: op item get → returns higher version with different value
     let item_json = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "remote_val"},
@@ -1708,7 +1721,8 @@ fn remote_sync_onepassword_merges_remote() {
         ]
     });
     runner.push_success(serde_json::to_vec(&item_json).unwrap().as_slice(), b"");
-    // push-back of merged result: op item get + op item edit
+    // push-back of merged result: tagged lookup + op item get + op item edit
+    runner.push_success(serde_json::to_vec(&listing).unwrap().as_slice(), b"");
     let item_json2 = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "remote_val"},
@@ -1751,11 +1765,9 @@ fn remote_sync_onepassword_no_item() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // pull: op item get → not found
-    runner.push_failure(b"isn't an item in vault");
-    // push: get_item check → not found
-    runner.push_failure(b"isn't an item in vault");
-    // push: op item create → success
+    runner.push_success(b"[]", b""); // pull: tagged item lookup → not found
+    runner.push_success(b"[]", b""); // push: tagged item lookup → not found
+                                     // push: op item create → success
     runner.push_success(b"", b"");
 
     // Should succeed — empty remote gets seeded with local data
@@ -1793,7 +1805,9 @@ fn remote_sync_dry_run_no_mutation() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // pull: op item get → returns higher version
+    let listing = onepassword_owned_listing();
+    runner.push_success(serde_json::to_vec(&listing).unwrap().as_slice(), b"");
+    // pull: op item get → returns higher version
     let item_json = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": "remote_val"},
@@ -1825,9 +1839,9 @@ fn remote_sync_dry_run_no_mutation() {
         Some("local_val".to_string())
     );
 
-    // Only 3 calls: preflight (2) + pull (1). No push calls.
+    // Four calls: preflight (2) + tagged lookup + pull. No push calls.
     let calls = runner.take_calls();
-    assert_eq!(calls.len(), 3);
+    assert_eq!(calls.len(), 4);
 }
 
 // === mixed target integration ===
@@ -1949,7 +1963,7 @@ fn push_records_sync_index() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    runner.push_failure(b"isn't an item in vault"); // op item get
+    runner.push_success(b"[]", b""); // tagged item lookup
     runner.push_success(b"", b""); // op item create
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
@@ -1983,7 +1997,7 @@ fn push_records_env_scoped_version_when_global_is_higher() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    runner.push_failure(b"isn't an item in vault"); // op item get
+    runner.push_success(b"[]", b""); // tagged item lookup
     runner.push_success(b"", b""); // op item create
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
@@ -2062,7 +2076,7 @@ environments: [dev]
 remotes:
   1password:
     vault: Test
-    item_pattern: test
+    item_pattern: test-{environment}
 "#;
     let project = TestProject::with_store(yaml).unwrap();
     let config = project.config().unwrap();
@@ -2073,7 +2087,7 @@ remotes:
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    runner.push_failure(b"isn't an item in vault"); // op item get
+    runner.push_success(b"[]", b""); // tagged item lookup
     runner.push_failure(b"op create failed: sync-secret-sentinel"); // op item create fails
 
     let remotes = esk::remotes::build_remotes(&config, &runner);
@@ -2255,7 +2269,7 @@ fn set_auto_push_records_sync_index() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-    runner.push_failure(b"isn't an item in vault"); // op item get
+    runner.push_success(b"[]", b""); // tagged item lookup
     runner.push_success(b"", b""); // op item create
 
     // no_sync=false so auto-push runs (no targets configured, sync is a no-op)
@@ -6066,7 +6080,9 @@ fn sync_warns_about_newly_empty_values_from_remote() {
     let runner = MockCommandRunner::new();
     runner.push_success(b"", b""); // preflight: op --version
     runner.push_success(b"", b""); // preflight: op vault get
-                                   // Remote returns empty value at higher version
+    let listing = onepassword_owned_listing();
+    runner.push_success(serde_json::to_vec(&listing).unwrap().as_slice(), b"");
+    // Remote returns empty value at higher version
     let item_json = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": ""},
@@ -6075,6 +6091,7 @@ fn sync_warns_about_newly_empty_values_from_remote() {
     });
     runner.push_success(serde_json::to_vec(&item_json).unwrap().as_slice(), b"");
     // push-back
+    runner.push_success(serde_json::to_vec(&listing).unwrap().as_slice(), b"");
     let item_json2 = json!({
         "fields": [
             {"section": {"label": "Stripe"}, "label": "STRIPE_KEY", "value": ""},
