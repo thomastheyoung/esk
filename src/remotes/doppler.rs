@@ -131,8 +131,7 @@ impl SyncRemote for DopplerRemote<'_> {
             .context("failed to run doppler secrets download")?;
 
         if !output.success {
-            // Config doesn't exist or other error — treat as not found
-            return Ok(None);
+            anyhow::bail!("doppler secrets download failed");
         }
 
         let json_map: BTreeMap<String, String> = serde_json::from_slice(&output.stdout)
@@ -336,7 +335,7 @@ remotes:
     }
 
     #[test]
-    fn pull_not_found_returns_none() {
+    fn pull_not_found_failure_propagates() {
         let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
         let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
         let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
@@ -345,6 +344,50 @@ remotes:
             stderr: b"config not found".to_vec(),
         }]);
         let remote = DopplerRemote::new(remote_config, &runner);
-        assert!(remote.pull(fixture.config(), "dev").unwrap().is_none());
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        assert_eq!(err.to_string(), "doppler secrets download failed");
+    }
+
+    #[test]
+    fn pull_auth_failure_propagates_without_stderr() {
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
+        let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: false,
+            stdout: Vec::new(),
+            stderr: b"authentication failed for token secret-token".to_vec(),
+        }]);
+        let remote = DopplerRemote::new(remote_config, &runner);
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        assert_eq!(err.to_string(), "doppler secrets download failed");
+        assert!(!err.to_string().contains("secret-token"));
+    }
+
+    #[test]
+    fn pull_misleading_not_found_text_still_propagates() {
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
+        let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: false,
+            stdout: Vec::new(),
+            stderr: b"authorization path not found".to_vec(),
+        }]);
+        let remote = DopplerRemote::new(remote_config, &runner);
+        assert!(remote.pull(fixture.config(), "dev").is_err());
+    }
+
+    #[test]
+    fn pull_successful_empty_is_an_authoritative_snapshot() {
+        let fixture = ConfigFixture::new(doppler_yaml()).expect("fixture");
+        let remote_config: DopplerRemoteConfig = fixture.config().remote_config("doppler").unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: b"{}".to_vec(),
+            stderr: Vec::new(),
+        }]);
+        let remote = DopplerRemote::new(remote_config, &runner);
+        let (secrets, version) = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+        assert!(secrets.is_empty());
+        assert_eq!(version, 0);
     }
 }
