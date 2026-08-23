@@ -320,6 +320,33 @@ pub fn reconcile_multi_with_jump_limit(
         }
     }
 
+    // A version identifies one authoritative environment snapshot. If two
+    // sources claim the same highest version but carry different snapshots,
+    // there is no version-based winner. Refuse to let iteration order decide.
+    if local_version < max_version {
+        let highest: Vec<_> = remotes
+            .iter()
+            .filter(|(_, _, version)| *version == max_version)
+            .collect();
+        if let Some(first) = highest.first() {
+            let first_scope = scoped_composite_secrets(first.1, env);
+            let disagreeing: Vec<_> = highest
+                .iter()
+                .filter(|(_, secrets, _)| scoped_composite_secrets(secrets, env) != first_scope)
+                .map(|(name, _, _)| *name)
+                .collect();
+            if !disagreeing.is_empty() {
+                let mut names: Vec<_> = highest.iter().map(|(name, _, _)| *name).collect();
+                names.sort_unstable();
+                bail!(
+                    "multiple remotes disagree at highest version v{max_version}: {}. \
+                     Use --only <remote> to choose an authoritative source.",
+                    names.join(", ")
+                );
+            }
+        }
+    }
+
     // Start with local secrets as the base
     let mut merged = local.secrets.clone();
     let mut merged_tombstones = local.tombstones.clone();
@@ -515,6 +542,64 @@ mod tests {
             .iter()
             .map(|(k, v)| ((*k).to_string(), (*v).to_string()))
             .collect()
+    }
+
+    #[test]
+    fn equal_highest_remotes_disagree_while_local_is_behind() {
+        let local = make_payload(&[("KEY:dev", "old")], 1);
+        let remote_a = make_remote(&[("KEY:dev", "a")]);
+        let remote_b = make_remote(&[("KEY:dev", "b")]);
+
+        let forward = reconcile_multi(
+            &local,
+            &[("a", &remote_a, 2), ("b", &remote_b, 2)],
+            "dev",
+            ConflictPreference::Local,
+        )
+        .unwrap_err()
+        .to_string();
+        let reverse = reconcile_multi(
+            &local,
+            &[("b", &remote_b, 2), ("a", &remote_a, 2)],
+            "dev",
+            ConflictPreference::Local,
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert_eq!(forward, reverse);
+        assert!(forward.contains("multiple remotes disagree at highest version v2: a, b"));
+    }
+
+    #[test]
+    fn equal_highest_remotes_that_agree_are_order_independent() {
+        let local = make_payload(&[("KEY:dev", "old")], 1);
+        let remote_a = make_remote(&[("KEY:dev", "new")]);
+        let remote_b = remote_a.clone();
+
+        let forward = reconcile_multi(
+            &local,
+            &[("a", &remote_a, 2), ("b", &remote_b, 2)],
+            "dev",
+            ConflictPreference::Local,
+        )
+        .unwrap();
+        let reverse = reconcile_multi(
+            &local,
+            &[("b", &remote_b, 2), ("a", &remote_a, 2)],
+            "dev",
+            ConflictPreference::Local,
+        )
+        .unwrap();
+
+        assert_eq!(
+            forward.merged_payload.secrets,
+            reverse.merged_payload.secrets
+        );
+        assert_eq!(
+            forward.merged_payload.env_versions,
+            reverse.merged_payload.env_versions
+        );
     }
 
     fn generated_composite_map(
