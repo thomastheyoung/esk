@@ -19,18 +19,47 @@ pub fn run_with_runner(
     all: bool,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
+    validate_env_filter(config, env)?;
     let dashboard = Dashboard::build(config, env)?;
     dashboard.render(config, runner, all)
 }
 
 /// Emit the status dashboard as stable JSON without exposing secret values.
 pub fn run_json(config: &Config, env: Option<&str>, all: bool) -> Result<()> {
+    validate_env_filter(config, env)?;
     let dashboard = Dashboard::build(config, env)?;
     println!(
         "{}",
         serde_json::to_string_pretty(&dashboard_json(&dashboard, all))?
     );
     Ok(())
+}
+
+fn validate_env_filter(config: &Config, env: Option<&str>) -> Result<()> {
+    if let Some(env) = env {
+        config.validate_env(env)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod env_filter_tests {
+    use super::*;
+
+    #[test]
+    fn human_and_json_status_reject_unknown_env_before_store_access() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, "project: x\nenvironments: [dev]\n").unwrap();
+        let config = Config::load(&path).unwrap();
+
+        for error in [
+            run(&config, Some("prdo"), false).unwrap_err(),
+            run_json(&config, Some("prdo"), false).unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("unknown environment 'prdo'"));
+        }
+    }
 }
 
 fn dashboard_json(dashboard: &Dashboard, all: bool) -> serde_json::Value {

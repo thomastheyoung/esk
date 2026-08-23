@@ -43,6 +43,7 @@ enum CellStatus {
 }
 
 pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
+    validate_env_filter(config, env)?;
     let store = SecretStore::open(&config.root)?;
     let all_secrets = store.list()?;
     let payload = store.payload()?;
@@ -198,6 +199,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
 
 /// Emit the list report as stable JSON without exposing secret values.
 pub fn run_json(config: &Config, env: Option<&str>) -> Result<()> {
+    validate_env_filter(config, env)?;
     let store = SecretStore::open(&config.root)?;
     let all_secrets = store.list()?;
     let payload = store.payload()?;
@@ -286,6 +288,34 @@ pub fn run_json(config: &Config, env: Option<&str>) -> Result<()> {
     });
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
+}
+
+fn validate_env_filter(config: &Config, env: Option<&str>) -> Result<()> {
+    if let Some(env) = env {
+        config.validate_env(env)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod env_filter_tests {
+    use super::*;
+
+    #[test]
+    fn human_and_json_list_reject_unknown_env_before_store_access() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, "project: x\nenvironments: [dev]\n").unwrap();
+        let config = Config::load(&path).unwrap();
+
+        for error in [
+            run(&config, Some("prdo")).unwrap_err(),
+            run_json(&config, Some("prdo")).unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("unknown environment 'prdo'"));
+        }
+    }
 }
 
 fn cell_status_name(status: CellStatus) -> &'static str {

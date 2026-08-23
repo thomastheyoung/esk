@@ -28,6 +28,7 @@ pub struct DeployOptions<'a> {
 }
 
 pub fn run(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
+    validate_env_filter(config, opts.env)?;
     let version = SecretStore::open(&config.root)?.payload()?.version;
     let target_count = config.target_names().len();
     let scope = match opts.env {
@@ -76,6 +77,7 @@ pub fn run_with_runner(
     opts: &DeployOptions<'_>,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
+    validate_env_filter(config, opts.env)?;
     let report = build_report(config, opts, runner)?;
 
     // Determine rendering mode
@@ -107,6 +109,7 @@ pub fn run_with_runner(
 /// Emit a machine-readable deploy preview. JSON is deliberately limited to
 /// dry-runs so a pipeline cannot combine machine output with a live deploy.
 pub fn run_json(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
+    validate_env_filter(config, opts.env)?;
     if !opts.dry_run {
         anyhow::bail!("--json is only supported with --dry-run");
     }
@@ -152,6 +155,48 @@ pub fn run_json(config: &Config, opts: &DeployOptions<'_>) -> Result<()> {
         anyhow::bail!("{} deploy(s) failed", report.failed.len());
     }
     Ok(())
+}
+
+fn validate_env_filter(config: &Config, env: Option<&str>) -> Result<()> {
+    if let Some(env) = env {
+        config.validate_env(env)?;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+#[allow(clippy::items_after_test_module)]
+mod env_filter_tests {
+    use super::*;
+
+    fn config() -> (tempfile::TempDir, Config) {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, "project: x\nenvironments: [dev]\n").unwrap();
+        (dir, Config::load(&path).unwrap())
+    }
+
+    #[test]
+    fn human_and_json_deploy_reject_unknown_env_before_store_access() {
+        let (_dir, config) = config();
+        let opts = DeployOptions {
+            env: Some("prdo"),
+            force: false,
+            dry_run: true,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        };
+
+        for error in [
+            run(&config, &opts).unwrap_err(),
+            run_json(&config, &opts).unwrap_err(),
+        ] {
+            assert!(error.to_string().contains("unknown environment 'prdo'"));
+        }
+    }
 }
 
 fn build_report(
