@@ -643,17 +643,19 @@ impl SecretStore {
 
     /// Decrypt and return the full payload.
     pub fn payload(&self) -> Result<StorePayload> {
+        let payload = self.read_payload_unchecked()?;
+        self.check_rollback(&payload)?;
+        Ok(payload)
+    }
+
+    fn read_payload_unchecked(&self) -> Result<StorePayload> {
         let ciphertext = std::fs::read_to_string(&self.store_path)
             .with_context(|| format!("failed to read {}", self.store_path.display()))?;
         let ciphertext = ciphertext.trim();
         if ciphertext.is_empty() {
-            let payload = StorePayload::default();
-            self.check_rollback(&payload)?;
-            return Ok(payload);
+            return Ok(StorePayload::default());
         }
-        let payload = self.decrypt(ciphertext)?;
-        self.check_rollback(&payload)?;
-        Ok(payload)
+        self.decrypt(ciphertext)
     }
 
     /// Get a single secret by composite key (e.g., "MY_SECRET:dev").
@@ -736,6 +738,24 @@ impl SecretStore {
     /// Write a full payload under exclusive lock. Used by pull reconciliation.
     pub fn set_payload(&self, payload: &StorePayload) -> Result<()> {
         self.with_lock(|| self.write_payload(payload))
+    }
+
+    /// Replace the payload only when its global version still matches the
+    /// version observed by the caller. This prevents a sync/network snapshot
+    /// from overwriting a concurrent local mutation.
+    pub fn set_payload_if_version(
+        &self,
+        expected_version: u64,
+        payload: &StorePayload,
+    ) -> Result<bool> {
+        self.with_lock(|| {
+            let current = self.read_payload_unchecked()?;
+            if current.version != expected_version {
+                return Ok(false);
+            }
+            self.write_payload(payload)?;
+            Ok(true)
+        })
     }
 
     /// Generate a new encryption key and re-encrypt the current store with it.

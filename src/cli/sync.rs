@@ -470,7 +470,11 @@ pub fn run_with_runner(
                 ))?;
             }
 
-            store.set_payload(&result.merged_payload)?;
+            if !store.set_payload_if_version(payload.version, &result.merged_payload)? {
+                bail!(
+                    "store changed while syncing; no merged data was written. Retry `esk sync --env {env}`"
+                );
+            }
             let label = env_version_label(&result.merged_payload, env);
             reconcile_status = format!("{} Merged \u{2192} {}", ui::Icon::Merge, label);
         } else {
@@ -572,7 +576,11 @@ pub fn run_with_runner(
         let mut current_payload = store.payload()?;
         let pruned = current_payload.prune_tombstones(&sync_index, &remote_names);
         if pruned > 0 {
-            store.set_payload(&current_payload)?;
+            if !store.set_payload_if_version(current_payload.version, &current_payload)? {
+                bail!(
+                    "store changed while pruning tombstones; no tombstones were pruned. Retry `esk sync --env {env}`"
+                );
+            }
             let _ = cliclack::log::info(format!(
                 "Pruned {pruned} tombstone{}",
                 if pruned == 1 { "" } else { "s" }

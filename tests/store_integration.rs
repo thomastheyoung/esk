@@ -154,6 +154,24 @@ fn store_version_monotonic() {
 }
 
 #[test]
+fn stale_payload_commit_is_rejected_without_overwriting_new_value() {
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let store = project.store().unwrap();
+    let stale = store.payload().unwrap();
+    store.set("NEW", "dev", "fresh").unwrap();
+
+    let mut replacement = stale;
+    replacement
+        .secrets
+        .insert("STALE:dev".into(), "lost".into());
+    assert!(!store
+        .set_payload_if_version(replacement.version, &replacement)
+        .unwrap());
+    assert_eq!(store.get("NEW", "dev").unwrap().as_deref(), Some("fresh"));
+    assert_eq!(store.get("STALE", "dev").unwrap(), None);
+}
+
+#[test]
 fn store_concurrent_reads() {
     let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
     let store = project.store().unwrap();
