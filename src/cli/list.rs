@@ -80,11 +80,6 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
         .to_string(),
     )?;
 
-    if all_secrets.is_empty() {
-        let report = ListReport { groups: Vec::new() };
-        return report.render();
-    }
-
     let envs: Vec<&str> = match env {
         Some(e) => vec![e],
         None => config
@@ -145,7 +140,7 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
             let has_value = all_secrets.contains_key(&composite);
             let is_targeted = targeted.contains(&(key, e));
 
-            if !has_value && !is_targeted {
+            if !is_targeted {
                 CellStatus::NotTargeted
             } else if !has_value {
                 CellStatus::Unset
@@ -166,13 +161,8 @@ pub fn run(config: &Config, env: Option<&str>) -> Result<()> {
     if !uncat_keys.is_empty() {
         let keys: Vec<&str> = uncat_keys.iter().map(std::string::String::as_str).collect();
 
-        let body = render_table(&keys, &envs, global_key_width, |key, e| {
-            let composite = format!("{key}:{e}");
-            if all_secrets.contains_key(&composite) {
-                CellStatus::Deployed
-            } else {
-                CellStatus::NotTargeted
-            }
+        let body = render_table(&keys, &envs, global_key_width, |_, _| {
+            CellStatus::NotTargeted
         });
 
         groups.push(ListGroup {
@@ -209,19 +199,6 @@ pub fn run_json(config: &Config, env: Option<&str>) -> Result<()> {
         None => config.environments.iter().map(String::as_str).collect(),
     };
 
-    // Match the human command: an empty store has no secret entries to list.
-    if all_secrets.is_empty() {
-        let output = serde_json::json!({
-            "project": config.project,
-            "version": payload.version,
-            "environment_filter": env,
-            "environments": envs,
-            "entries": [],
-        });
-        println!("{}", serde_json::to_string_pretty(&output)?);
-        return Ok(());
-    }
-
     let cell_statuses = build_cell_statuses(config, &resolved, &all_secrets, store.master_key());
     let targeted: BTreeSet<(&str, &str)> = resolved
         .iter()
@@ -237,7 +214,7 @@ pub fn run_json(config: &Config, env: Option<&str>) -> Result<()> {
             for &environment in &envs {
                 let composite = format!("{key}:{environment}");
                 let has_value = all_secrets.contains_key(&composite);
-                let status = if !has_value && !targeted.contains(&(key, environment)) {
+                let status = if !targeted.contains(&(key, environment)) {
                     CellStatus::NotTargeted
                 } else if !has_value {
                     CellStatus::Unset
@@ -274,7 +251,7 @@ pub fn run_json(config: &Config, env: Option<&str>) -> Result<()> {
             "group": "Uncategorized (not in esk.yaml)",
             "key": key,
             "environment": environment,
-            "status": cell_status_name(CellStatus::Deployed),
+            "status": cell_status_name(CellStatus::NotTargeted),
             "has_value": true,
         }));
     }
