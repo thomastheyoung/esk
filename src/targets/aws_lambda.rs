@@ -18,6 +18,8 @@
 //!           `aws lambda update-function-configuration`.
 
 use anyhow::{Context, Result};
+#[cfg(windows)]
+use std::io::Write;
 use zeroize::Zeroizing;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -131,11 +133,30 @@ impl AwsLambdaTarget<'_> {
             input["KMSKeyArn"] = serde_json::json!(kms);
         }
 
+        #[cfg(windows)]
+        let (input_arg, stdin, _input_file) = {
+            let mut file = tempfile::NamedTempFile::new()
+                .context("failed to create temporary AWS Lambda input file")?;
+            file.write_all(input.to_string().as_bytes())?;
+            file.flush()?;
+            (
+                format!("file://{}", file.path().display()),
+                None,
+                Some(file),
+            )
+        };
+        #[cfg(not(windows))]
+        let (input_arg, stdin, _input_file) = (
+            "file:///dev/stdin".to_string(),
+            Some(input.to_string().into_bytes()),
+            None::<tempfile::NamedTempFile>,
+        );
+
         let mut args: Vec<&str> = vec![
             "lambda",
             "update-function-configuration",
             "--cli-input-json",
-            "file:///dev/stdin",
+            &input_arg,
         ];
         args.extend(base.iter().map(String::as_str));
         args.extend(env_flags.iter().map(String::as_str));
@@ -146,7 +167,7 @@ impl AwsLambdaTarget<'_> {
                 "aws",
                 &args,
                 CommandOpts {
-                    stdin: Some(input.to_string().into_bytes()),
+                    stdin,
                     ..Default::default()
                 },
             )

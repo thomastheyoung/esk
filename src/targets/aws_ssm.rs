@@ -9,11 +9,14 @@
 //! Commands: `aws ssm put-parameter` / `aws ssm delete-parameter`.
 //!
 //! Parameters are created via `--cli-input-json` with the JSON payload on
-//! **stdin** to avoid exposing secret values in process arguments. Supports
+//! stdin (or a private temporary file on Windows) to avoid exposing secret
+//! values in process arguments. Supports
 //! `--region` and `--profile` flags for multi-account setups. The
 //! `parameter_type` config field controls the SSM type (default: `SecureString`).
 
 use anyhow::{Context, Result};
+#[cfg(windows)]
+use std::io::Write;
 use zeroize::Zeroizing;
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -64,7 +67,8 @@ impl DeployTarget for AwsSsmTarget<'_> {
         let param_type = &self.target_config.parameter_type;
         let base = self.base_args();
 
-        // Use --cli-input-json via stdin to avoid exposing value in ps output
+        // Use --cli-input-json without putting the value in argv. Windows has
+        // no /dev/stdin, so use a private temporary file there.
         let input_json = serde_json::json!({
             "Name": param_path,
             "Value": value,
@@ -72,13 +76,27 @@ impl DeployTarget for AwsSsmTarget<'_> {
             "Overwrite": true,
         });
 
+        #[cfg(windows)]
+        let (input_arg, stdin, _input_file) = {
+            let mut file = tempfile::NamedTempFile::new()
+                .context("failed to create temporary AWS SSM input file")?;
+            file.write_all(input_json.to_string().as_bytes())?;
+            file.flush()?;
+            (
+                format!("file://{}", file.path().display()),
+                None,
+                Some(file),
+            )
+        };
+        #[cfg(not(windows))]
+        let (input_arg, stdin, _input_file) = (
+            "file:///dev/stdin".to_string(),
+            Some(input_json.to_string().into_bytes()),
+            None::<tempfile::NamedTempFile>,
+        );
+
         let flag_parts = resolve_env_flags(&self.target_config.env_flags, &target.environment);
-        let mut args: Vec<&str> = vec![
-            "ssm",
-            "put-parameter",
-            "--cli-input-json",
-            "file:///dev/stdin",
-        ];
+        let mut args: Vec<&str> = vec!["ssm", "put-parameter", "--cli-input-json", &input_arg];
         args.extend(base.iter().map(String::as_str));
         args.extend(flag_parts.iter().map(String::as_str));
 
@@ -88,7 +106,7 @@ impl DeployTarget for AwsSsmTarget<'_> {
                 "aws",
                 &args,
                 CommandOpts {
-                    stdin: Some(input_json.to_string().into_bytes()),
+                    stdin,
                     ..Default::default()
                 },
             )
