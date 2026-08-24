@@ -168,7 +168,7 @@ targets:
 # Read current env vars:
 aws lambda get-function-configuration --function-name <name> [--region ...] [--profile ...] [env_flags...]
 
-# Write merged map (JSON via stdin):
+# Write merged map (JSON via stdin on Unix; esk uses a private temporary JSON file on Windows):
 echo '{"FunctionName":"...","Environment":{"Variables":{...}},"RevisionId":"..."}' | \
   aws lambda update-function-configuration --cli-input-json file:///dev/stdin [--region ...] [--profile ...] [env_flags...]
 
@@ -193,7 +193,7 @@ secrets:
 
 ## AWS SSM
 
-Deploys secrets to AWS Systems Manager Parameter Store using `aws ssm put-parameter`. Values are sent via stdin (`--cli-input-json file:///dev/stdin`) to avoid exposing secrets in process listings.
+Deploys secrets to AWS Systems Manager Parameter Store using `aws ssm put-parameter`. Values are sent via stdin on Unix (`--cli-input-json file:///dev/stdin`); on Windows esk uses a private temporary JSON file because `/dev/stdin` is unavailable. In both cases, values are kept out of process listings.
 
 ### Prerequisites
 
@@ -236,7 +236,7 @@ The parameter name is built by replacing `{project}` and `{environment}` in `pat
 ### Command executed
 
 ```bash
-# Put parameter (value via stdin as JSON):
+# Put parameter (value via stdin as JSON on Unix; private temporary JSON file on Windows):
 echo '{"Name":"/myapp/dev/KEY","Value":"...","Type":"SecureString","Overwrite":true}' | \
   aws ssm put-parameter --cli-input-json file:///dev/stdin [--region ...] [--profile ...] [env_flags...]
 

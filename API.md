@@ -475,7 +475,7 @@ No flags — runs all checks automatically.
 - **Targets** — live preflight checks for each configured target (pass/fail).
 - **Remotes** — live preflight checks for each configured remote (pass/fail).
 - **Store consistency** — key format validation, orphaned store keys (not in config), unknown environments, tombstone version sanity.
-- **Secrets** — failed deploys, missing required secrets, validation violations, cross-field rule violations, stale remote syncs, target orphans.
+- **Secrets** — failed deploys, missing required secrets, validation violations, cross-field rule violations, stale or never-synced remote scopes, target orphans.
 - **Suggestions** — actionable commands to fix detected issues.
 
 Exits with code 1 if any failures are found.

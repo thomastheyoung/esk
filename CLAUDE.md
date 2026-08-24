@@ -140,7 +140,8 @@ pub trait DeployTarget: Send + Sync {
     fn artifact_matches(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Option<bool>;  // Default: None ("cannot tell")
     fn verify_fidelity(&self) -> Fidelity;  // Default: Fidelity::None
     fn read_back(&self, keys: &BTreeSet<String>, target: &ResolvedTarget) -> Result<Evidence>;  // Default: Evidence::Unreadable
-    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;  // Default: calls deploy_secret per item
+    fn deploy_batch(&self, secrets: &[SecretValue], target: &ResolvedTarget) -> Vec<DeployResult>;  // Compatibility API; default calls deploy_secret per item
+    fn deploy_batch_state(&self, batch: BatchDeployment<'_>, target: &ResolvedTarget) -> Result<Vec<DeployResult>>;  // State-aware batch API
 }
 ```
 
@@ -157,7 +158,7 @@ pub trait SyncRemote: Send + Sync {
     fn name(&self) -> &str;
     fn preflight(&self) -> Result<()>;  // Default: Ok(())
     fn push(&self, payload: &StorePayload, config: &Config, env: &str) -> Result<()>;
-    fn pull(&self, config: &Config, env: &str) -> Result<Option<(BTreeMap<String, String>, u64)>>;
+    fn pull(&self, config: &Config, env: &str) -> Result<Option<RemoteSnapshot>>;
     fn passes_value_as_cli_arg(&self) -> bool;  // Default: false. True for 1password, bitwarden
     fn uses_cleartext_format(&self) -> bool;  // Default: false. True for cloud_file/s3 with format: cleartext
 }
