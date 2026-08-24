@@ -34,6 +34,10 @@ fn env_version_label(payload: &StorePayload, env: &str) -> String {
     ui::format_version_label(payload.env_version(env), payload.env_last_changed_at(env))
 }
 
+fn configured_remote_names(config: &Config) -> Vec<&str> {
+    config.remotes.keys().map(String::as_str).collect()
+}
+
 /// Format a pull result line for progressive rendering.
 fn format_pull_line(name: &str, outcome: &PullOutcome) -> String {
     match outcome {
@@ -562,7 +566,9 @@ pub fn run_with_runner(
         if let Some(msg) = warning {
             let _ = cliclack::log::warning(&msg);
         }
-        let remote_names: Vec<&str> = target_remotes.iter().map(|r| r.name()).collect();
+        // GC quorum is every configured remote, not merely the selected or
+        // currently healthy subset. Missing/failed tracker records block GC.
+        let remote_names = configured_remote_names(config);
         let mut current_payload = store.payload()?;
         let pruned = current_payload.prune_tombstones(&sync_index, &remote_names);
         if pruned > 0 {
@@ -594,4 +600,28 @@ pub fn run_with_runner(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn configured_quorum_is_not_reduced_by_only_selection() {
+        let fixture = crate::test_support::ConfigFixture::new(
+            r"
+project: app
+environments: [dev]
+remotes:
+  one:
+    type: cloud_file
+    path: one
+  two:
+    type: cloud_file
+    path: two
+",
+        )
+        .unwrap();
+        assert_eq!(configured_remote_names(fixture.config()), ["one", "two"]);
+    }
 }
