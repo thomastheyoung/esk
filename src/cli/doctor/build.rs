@@ -469,6 +469,7 @@ fn build_secrets_health(config: &Config, payload: &StorePayload) -> Vec<Check> {
     let remote_names: Vec<&String> = config.remotes.keys().collect();
     let mut stale_count = 0usize;
     let mut failed_sync_count = 0usize;
+    let mut never_synced_count = 0usize;
 
     for remote_name in &remote_names {
         for &env_name in &envs {
@@ -480,6 +481,8 @@ fn build_secrets_health(config: &Config, payload: &StorePayload) -> Vec<Check> {
                 } else if record.pushed_version < local_version {
                     stale_count += 1;
                 }
+            } else {
+                never_synced_count += 1;
             }
         }
     }
@@ -496,7 +499,17 @@ fn build_secrets_health(config: &Config, payload: &StorePayload) -> Vec<Check> {
             format!("{stale_count} remote(s) behind local"),
         ));
     }
-    if failed_sync_count == 0 && stale_count == 0 && !remote_names.is_empty() {
+    if never_synced_count > 0 {
+        checks.push(Check::warn(
+            "Remote sync",
+            format!("{never_synced_count} remote/environment scope(s) never synced"),
+        ));
+    }
+    if failed_sync_count == 0
+        && stale_count == 0
+        && never_synced_count == 0
+        && !remote_names.is_empty()
+    {
         checks.push(Check::pass("Remote sync", "no unpushed local changes"));
     }
 
