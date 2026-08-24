@@ -94,7 +94,7 @@ impl SyncRemote for S3Remote<'_> {
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
         let env_payload = payload.for_env(env);
 
-        if env_payload.secrets.is_empty() {
+        if env_payload.secrets.is_empty() && env_payload.tombstones.is_empty() {
             return Ok(());
         }
 
@@ -443,6 +443,23 @@ remotes:
 
         remote.push(&payload, fixture.config(), "dev").unwrap();
         assert!(runner.calls().is_empty());
+    }
+
+    #[test]
+    fn push_publishes_empty_environment_tombstone() {
+        let yaml = "project: myapp\nenvironments: [dev]\nremotes:\n  s3:\n    bucket: my-bucket\n    format: cleartext\n";
+        let fixture = ConfigFixture::new(yaml).unwrap();
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(b"")]);
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
+        let payload = StorePayload {
+            version: 1,
+            tombstones: BTreeMap::from([("KEY:dev".to_string(), 1)]),
+            env_versions: BTreeMap::from([("dev".to_string(), 1)]),
+            ..Default::default()
+        };
+        remote.push(&payload, fixture.config(), "dev").unwrap();
+        assert_eq!(runner.calls().len(), 1);
     }
 
     #[test]

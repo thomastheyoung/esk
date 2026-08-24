@@ -73,7 +73,7 @@ impl SyncRemote for AwsSecretsManagerRemote<'_> {
     fn push(&self, payload: &StorePayload, _config: &Config, env: &str) -> Result<()> {
         let env_payload = payload.for_env(env);
 
-        if env_payload.secrets.is_empty() {
+        if env_payload.secrets.is_empty() && env_payload.tombstones.is_empty() {
             return Ok(());
         }
 
@@ -503,6 +503,31 @@ remotes:
 
         remote.push(&payload, &config, "dev").unwrap();
         assert!(runner.calls().is_empty());
+    }
+
+    #[test]
+    fn push_publishes_empty_environment_tombstone() {
+        let dir = tempfile::tempdir().unwrap();
+        let yaml = "project: myapp\nenvironments: [dev]\nremotes:\n  aws_secrets_manager:\n    secret_name: \"{project}/{environment}\"\n";
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let remote_config: AwsSecretsManagerRemoteConfig =
+            config.remote_config("aws_secrets_manager").unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        }]);
+        let remote = AwsSecretsManagerRemote::new(&config, remote_config, &runner);
+        let payload = StorePayload {
+            version: 1,
+            tombstones: BTreeMap::from([("KEY:dev".to_string(), 1)]),
+            env_versions: BTreeMap::from([("dev".to_string(), 1)]),
+            ..Default::default()
+        };
+        remote.push(&payload, &config, "dev").unwrap();
+        assert_eq!(runner.calls().len(), 1);
     }
 
     #[test]
