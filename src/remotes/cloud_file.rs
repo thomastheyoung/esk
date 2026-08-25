@@ -163,8 +163,12 @@ impl SyncRemote for CloudFileRemote {
                 }
                 let content = std::fs::read_to_string(&per_env)
                     .with_context(|| format!("failed to read {}", per_env.display()))?;
+                let content = content.trim();
+                if content.is_empty() {
+                    return Ok(None);
+                }
                 let payload: StorePayload =
-                    serde_json::from_str(&content).context("failed to parse secrets JSON")?;
+                    serde_json::from_str(content).context("failed to parse secrets JSON")?;
                 Ok(Some(super::RemoteSnapshot::from_payload(payload, env)?))
             }
         }
@@ -515,6 +519,67 @@ mod tests {
 
         let expanded = remote.expand_path().unwrap();
         assert_eq!(expanded, PathBuf::from("/cloud/esk/myapp"));
+    }
+
+    #[test]
+    fn cleartext_pull_empty_file_returns_none() {
+        let project_dir = tempfile::tempdir().unwrap();
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let config = make_config_with_store(project_dir.path());
+
+        let remote = CloudFileRemote::new(
+            "test".to_string(),
+            "testapp".to_string(),
+            CloudFileRemoteConfig {
+                path: cloud_dir.path().to_string_lossy().to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+
+        std::fs::write(cloud_dir.path().join("secrets-dev.json"), b"").unwrap();
+
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
+    }
+
+    #[test]
+    fn cleartext_pull_whitespace_only_file_returns_none() {
+        let project_dir = tempfile::tempdir().unwrap();
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let config = make_config_with_store(project_dir.path());
+
+        let remote = CloudFileRemote::new(
+            "test".to_string(),
+            "testapp".to_string(),
+            CloudFileRemoteConfig {
+                path: cloud_dir.path().to_string_lossy().to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+
+        std::fs::write(cloud_dir.path().join("secrets-dev.json"), b"   \n\t  \n").unwrap();
+
+        assert!(remote.pull(&config, "dev").unwrap().is_none());
+    }
+
+    #[test]
+    fn cleartext_pull_malformed_json_still_errors() {
+        let project_dir = tempfile::tempdir().unwrap();
+        let cloud_dir = tempfile::tempdir().unwrap();
+        let config = make_config_with_store(project_dir.path());
+
+        let remote = CloudFileRemote::new(
+            "test".to_string(),
+            "testapp".to_string(),
+            CloudFileRemoteConfig {
+                path: cloud_dir.path().to_string_lossy().to_string(),
+                format: CloudFileFormat::Cleartext,
+            },
+        );
+
+        std::fs::write(cloud_dir.path().join("secrets-dev.json"), b"{not json").unwrap();
+
+        let err = remote.pull(&config, "dev").unwrap_err();
+        assert!(err.to_string().contains("failed to parse secrets JSON"));
     }
 
     #[test]
