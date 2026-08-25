@@ -38,6 +38,20 @@ fn configured_remote_names(config: &Config) -> Vec<&str> {
     config.remotes.keys().map(String::as_str).collect()
 }
 
+/// Extract a human-readable message from a thread panic payload.
+///
+/// `Box<dyn Any + Send>` commonly carries a `&'static str` (from `panic!("literal")`)
+/// or a `String` (from `panic!("{}", ...)`); fall back to a generic message otherwise.
+fn panic_message(payload: &(dyn std::any::Any + Send)) -> String {
+    if let Some(s) = payload.downcast_ref::<&str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "remote thread panicked with a non-string payload".to_string()
+    }
+}
+
 /// Format a pull result line for progressive rendering.
 fn format_pull_line(name: &str, outcome: &PullOutcome) -> String {
     match outcome {
@@ -179,7 +193,11 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
     )?;
 
     if envs.len() == 1 {
-        run_with_runner(config, &options, &runner)?;
+        let single_env_opts = SyncOptions {
+            env: Some(envs[0]),
+            ..options
+        };
+        run_with_runner(config, &single_env_opts, &runner)?;
     } else {
         let mut failures: Vec<String> = Vec::new();
         for env in &envs {
@@ -228,7 +246,9 @@ pub fn run_with_runner(
     opts: &SyncOptions<'_>,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
-    let env = opts.env.expect("sync requires an environment");
+    let Some(env) = opts.env else {
+        bail!("sync requires an environment");
+    };
     config.validate_env(env)?;
     let only = opts.only;
     let dry_run = opts.dry_run;
@@ -286,10 +306,23 @@ pub fn run_with_runner(
             .iter()
             .map(|rem| {
                 let name = rem.name().to_string();
-                s.spawn(move || (name, rem.pull(config, env)))
+                let handle_name = name.clone();
+                (handle_name, s.spawn(move || (name, rem.pull(config, env))))
             })
             .collect();
-        handles.into_iter().map(|h| h.join().unwrap()).collect()
+        handles
+            .into_iter()
+            .map(|(name, h)| match h.join() {
+                Ok(result) => result,
+                Err(panic) => (
+                    name.clone(),
+                    Err(anyhow::anyhow!(
+                        "remote '{name}' panicked during pull: {}",
+                        panic_message(panic.as_ref())
+                    )),
+                ),
+            })
+            .collect()
     });
 
     // Process pull results
@@ -513,10 +546,26 @@ pub fn run_with_runner(
                     .iter()
                     .map(|rem| {
                         let name = rem.name().to_string();
-                        s.spawn(move || (name, rem.push(updated_payload, config, env)))
+                        let handle_name = name.clone();
+                        (
+                            handle_name,
+                            s.spawn(move || (name, rem.push(updated_payload, config, env))),
+                        )
                     })
                     .collect();
-                handles.into_iter().map(|h| h.join().unwrap()).collect()
+                handles
+                    .into_iter()
+                    .map(|(name, h)| match h.join() {
+                        Ok(result) => result,
+                        Err(panic) => (
+                            name.clone(),
+                            Err(anyhow::anyhow!(
+                                "remote '{name}' panicked during push: {}",
+                                panic_message(panic.as_ref())
+                            )),
+                        ),
+                    })
+                    .collect()
             });
 
             push_spinner.stop(format!(
@@ -631,5 +680,77 @@ remotes:
         )
         .unwrap();
         assert_eq!(configured_remote_names(fixture.config()), ["one", "two"]);
+    }
+
+    #[test]
+    fn panic_message_extracts_str_payload() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new("boom");
+        assert_eq!(panic_message(payload.as_ref()), "boom");
+    }
+
+    #[test]
+    fn panic_message_extracts_string_payload() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(String::from("kaboom"));
+        assert_eq!(panic_message(payload.as_ref()), "kaboom");
+    }
+
+    #[test]
+    fn panic_message_falls_back_for_unknown_payload() {
+        let payload: Box<dyn std::any::Any + Send> = Box::new(42_i32);
+        assert_eq!(
+            panic_message(payload.as_ref()),
+            "remote thread panicked with a non-string payload"
+        );
+    }
+
+    /// Proves the join pattern used for parallel pull/push: a panicking thread's
+    /// `join()` error is converted into a per-remote `Err` (naming the remote) that
+    /// flows through the same `Result` collection as a normal failure, instead of
+    /// propagating the panic via `.unwrap()` and unwinding the whole process.
+    #[test]
+    fn thread_scope_join_handles_panicking_remote_without_unwinding() {
+        let remote_names = ["healthy", "flaky"];
+
+        #[allow(clippy::type_complexity)]
+        let results: Vec<(String, Result<()>)> = std::thread::scope(|s| {
+            let handles: Vec<_> = remote_names
+                .iter()
+                .map(|&name| {
+                    let handle_name = name.to_string();
+                    (
+                        handle_name,
+                        s.spawn(move || {
+                            assert!(name != "flaky", "simulated remote panic");
+                            (name.to_string(), Ok(()))
+                        }),
+                    )
+                })
+                .collect();
+            handles
+                .into_iter()
+                .map(|(name, h)| match h.join() {
+                    Ok(result) => result,
+                    Err(panic) => (
+                        name.clone(),
+                        Err(anyhow::anyhow!(
+                            "remote '{name}' panicked during push: {}",
+                            panic_message(panic.as_ref())
+                        )),
+                    ),
+                })
+                .collect()
+        });
+
+        assert_eq!(results.len(), 2);
+
+        let (healthy_name, healthy_result) = &results[0];
+        assert_eq!(healthy_name, "healthy");
+        assert!(healthy_result.is_ok());
+
+        let (flaky_name, flaky_result) = &results[1];
+        assert_eq!(flaky_name, "flaky");
+        let err = flaky_result.as_ref().unwrap_err();
+        assert!(err.to_string().contains("flaky"));
+        assert!(err.to_string().contains("simulated remote panic"));
     }
 }

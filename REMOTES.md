@@ -581,6 +581,8 @@ Uses the [Infisical CLI](https://infisical.com/docs/cli/overview) to sync secret
 
 **Push**: Exports current remote state to detect orphaned keys, deletes them via `infisical secrets delete`, then uploads all secrets via a temp file with `infisical secrets set --file=<path>`. Includes `_esk_version` metadata for reconciliation.
 
+Push is fail-closed: a successful export and parse are required before esk deletes or sets anything. If either step fails, the remote remains at its last consistent version, the push is recorded as failed, and local tombstones are retained for a normal retry.
+
 **Pull**: Exports secrets as JSON via `infisical export --format json` and parses the array of objects.
 
 ### Prerequisites
@@ -627,9 +629,9 @@ Uses [Mozilla SOPS](https://github.com/getsops/sops) to store secrets as encrypt
 
 ### How it works
 
-**Push**: Serializes secrets as JSON, encrypts via `sops -e /dev/stdin`, and writes the encrypted output to the resolved path atomically.
+**Push**: Serializes secrets as JSON, writes it to a private temporary file, and encrypts it via `sops -e --input-type json --filename-override <path>` (the override selects creation rules and the on-disk output format for `<path>`), then writes the encrypted output to the resolved path atomically.
 
-**Pull**: Decrypts the file via `sops -d <path>` and parses the JSON.
+**Pull**: Decrypts the file via `sops -d --output-type json <path>` and parses the JSON. `--output-type json` forces the decrypted stream to JSON regardless of the file's on-disk encoding, so pull reads both JSON- and YAML-encoded files.
 
 Files are stored per environment using the `{environment}` placeholder in the path.
 
@@ -663,11 +665,11 @@ secrets/
 ### Command executed
 
 ```bash
-# Push (stdin → encrypt → write to file):
-echo '<json>' | sops -e /dev/stdin > secrets/dev.enc.json
+# Push (private temp file → encrypt → write to file):
+sops -e --input-type json --filename-override secrets/dev.enc.json /tmp/esk-sops-input > secrets/dev.enc.json
 
 # Pull:
-sops -d secrets/dev.enc.json
+sops -d --output-type json secrets/dev.enc.json
 ```
 
 ---

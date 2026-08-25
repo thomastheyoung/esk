@@ -174,6 +174,7 @@ pub fn reconcile_with_jump_limit(
                 version: merged_version.max(local.version),
                 tombstones: merged_tombstones,
                 env_versions: merged_env_versions,
+                legacy_env_version_floor: local.inherited_legacy_env_version_floor(),
                 env_last_changed_at: merged_env_last_changed_at,
             };
 
@@ -506,6 +507,7 @@ pub fn reconcile_multi_with_jump_limit(
             version: final_version.max(local.version),
             tombstones: merged_tombstones,
             env_versions: merged_env_versions,
+            legacy_env_version_floor: local.inherited_legacy_env_version_floor(),
             env_last_changed_at: merged_env_last_changed_at,
         },
         sources_to_update,
@@ -720,6 +722,7 @@ pub fn reconcile_multi_snapshots_with_jump_limit(
             version: local.version.max(final_version),
             tombstones: merged_tombstones,
             env_versions,
+            legacy_env_version_floor: local.inherited_legacy_env_version_floor(),
             env_last_changed_at: changed_at,
         },
         sources_to_update,
@@ -801,6 +804,25 @@ mod tests {
         .unwrap();
         assert!(!result.merged_payload.secrets.contains_key("KEY:dev"));
         assert_eq!(result.merged_payload.tombstones.get("KEY:dev"), Some(&2));
+    }
+
+    #[test]
+    fn typed_snapshot_materialization_preserves_legacy_floor() {
+        let local = make_payload(&[("PROD_KEY:prod", "local")], 10);
+        let remote = snapshot(&[("DEV_KEY:dev", "remote")], &[], 11);
+
+        let result = reconcile_multi_snapshots_with_jump_limit(
+            &local,
+            &[("remote", &remote)],
+            "dev",
+            ConflictPreference::Local,
+            true,
+        )
+        .unwrap();
+
+        assert_eq!(result.merged_payload.env_version("dev"), 11);
+        assert_eq!(result.merged_payload.env_version("prod"), 10);
+        assert_eq!(result.merged_payload.legacy_env_version_floor, Some(10));
     }
 
     #[test]
@@ -1629,6 +1651,19 @@ mod tests {
     }
 
     #[test]
+    fn reconcile_materialization_preserves_legacy_floor_for_other_environments() {
+        let local = make_payload(&[("PROD_KEY:prod", "local")], 10);
+        let remote = make_remote(&[("DEV_KEY", "remote")]);
+
+        let result = reconcile(&local, &remote, 11, "dev").unwrap();
+        let merged = result.merged_payload.unwrap();
+
+        assert_eq!(merged.env_version("dev"), 11);
+        assert_eq!(merged.env_version("prod"), 10);
+        assert_eq!(merged.legacy_env_version_floor, Some(10));
+    }
+
+    #[test]
     fn reconcile_multi_unknown_env_with_existing_env_versions_pulls_remote() {
         // Local has env_versions for dev but not prod
         let mut local = make_payload(&[], 5);
@@ -1647,6 +1682,24 @@ mod tests {
         // prod has no env version -> 0, so remote v2 is newer
         assert!(result.local_changed);
         assert!(result.merged_payload.secrets.contains_key("DB_URL:prod"));
+    }
+
+    #[test]
+    fn reconcile_multi_materialization_preserves_legacy_floor() {
+        let local = make_payload(&[("PROD_KEY:prod", "local")], 10);
+        let remote = make_composite(&[("DEV_KEY:dev", "remote")]);
+
+        let result = reconcile_multi(
+            &local,
+            &[("remote1", &remote, 11)],
+            "dev",
+            ConflictPreference::Local,
+        )
+        .unwrap();
+
+        assert_eq!(result.merged_payload.env_version("dev"), 12);
+        assert_eq!(result.merged_payload.env_version("prod"), 10);
+        assert_eq!(result.merged_payload.legacy_env_version_floor, Some(10));
     }
 
     // --- --prefer remote tests ---

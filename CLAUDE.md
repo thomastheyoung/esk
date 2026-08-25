@@ -124,7 +124,7 @@ Project-level config defines everything: environments, apps, target settings, re
 - Random 32-byte key in `.esk/store.key` (gitignored)
 - Per-encryption 12-byte nonce
 - Storage format: `nonce:ciphertext:tag` (hex-encoded)
-- JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N, "tombstones": { "KEY:env": N }, "env_versions": { "env": N }, "env_last_changed_at": { "env": "ISO-8601" } }`
+- JSON payload: `{ "secrets": { "KEY:env": "value" }, "version": N, "tombstones": { "KEY:env": N }, "env_versions": { "env": N }, "legacy_env_version_floor": N, "env_last_changed_at": { "env": "ISO-8601" } }` (`legacy_env_version_floor` is present only in legacy-derived stores after their first per-environment counter is materialized)
 - Safe to commit to git
 
 ### Deploy target trait

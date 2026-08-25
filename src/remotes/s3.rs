@@ -150,10 +150,11 @@ impl SyncRemote for S3Remote<'_> {
 
         if !output.success {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            if stderr.contains("NoSuchKey")
-                || stderr.contains("404")
-                || stderr.contains("does not exist")
-            {
+            // `aws s3 cp` reports a missing object as `(NoSuchKey)` or, for some
+            // S3-compatible providers, `(404)` — always parenthesised as the AWS
+            // error code, never a bare substring. A missing/typo'd bucket surfaces
+            // as `(NoSuchBucket)` and must bail loudly rather than read as "empty".
+            if stderr.contains("(NoSuchKey)") || stderr.contains("(404)") {
                 return Ok(None);
             }
             anyhow::bail!("aws s3 cp download failed: {stderr}");
@@ -510,10 +511,83 @@ remotes:
         let fixture = ConfigFixture::new(yaml).expect("fixture");
         let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
         let runner =
-            MockCommandRunner::from_outputs(vec![fail_output(b"An error occurred (NoSuchKey)")]);
+            MockCommandRunner::from_outputs(vec![fail_output(b"An error occurred (NoSuchKey)")])
+                .strict();
         let remote = S3Remote::new(fixture.config(), remote_config, &runner);
 
         assert!(remote.pull(fixture.config(), "dev").unwrap().is_none());
+    }
+
+    #[test]
+    fn pull_missing_bucket_bails_instead_of_returning_none() {
+        // Regression guard: a typo'd/missing bucket must surface as an error,
+        // not be conflated with "key not found, empty environment". The old
+        // matcher's bare `does not exist` substring caught this message too.
+        let yaml = r"
+project: myapp
+environments: [dev]
+remotes:
+  s3:
+    bucket: my-bucket
+    format: cleartext
+";
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![fail_output(
+            b"An error occurred (NoSuchBucket) when calling the HeadObject operation: The specified bucket does not exist",
+        )])
+        .strict();
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
+
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        assert!(err.to_string().contains("aws s3 cp download failed"));
+    }
+
+    #[test]
+    fn pull_access_denied_still_bails() {
+        let yaml = r"
+project: myapp
+environments: [dev]
+remotes:
+  s3:
+    bucket: my-bucket
+    format: cleartext
+";
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![fail_output(
+            b"An error occurred (AccessDenied) when calling the HeadObject operation: Access Denied",
+        )])
+        .strict();
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
+
+        let result = remote.pull(fixture.config(), "dev").unwrap_err();
+        assert!(result.to_string().contains("AccessDenied"));
+    }
+
+    #[test]
+    fn pull_incidental_404_substring_still_bails() {
+        // Pins the bare-substring fix: a stderr that happens to contain "404"
+        // inside unrelated text (e.g. a request id) must not be read as
+        // "not found" — only a parenthesised `(404)` error code counts.
+        let yaml = r"
+project: myapp
+environments: [dev]
+remotes:
+  s3:
+    bucket: my-bucket
+    format: cleartext
+";
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: S3RemoteConfig = fixture.config().remote_config("s3").unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![fail_output(
+            b"An error occurred (InternalError) when calling the HeadObject operation: Internal Server Error (x-amz-request-id: 40412ab3cd)",
+        )])
+        .strict();
+        let remote = S3Remote::new(fixture.config(), remote_config, &runner);
+
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        assert!(err.to_string().contains("aws s3 cp download failed"));
     }
 
     #[test]

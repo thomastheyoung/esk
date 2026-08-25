@@ -303,6 +303,15 @@ the environment variable unset so the new key can be persisted.
 - `encryption key not found`: run `esk init` to create `.esk/store.key`, or `esk init --keychain` for OS keychain
 - Target/remote CLI errors: install and authenticate required CLIs (for example `wrangler`, `op`, `aws`)
 - Unknown environment/app in target: verify names match `environments` and `apps` in `esk.yaml`
+- Sync pulls back secrets you deleted, or reverts recent local edits: see [Stores created before February 2026](#stores-created-before-february-2026)
+
+### Stores created before February 2026
+
+Per-environment version counters shipped on 2026-02-22. Earlier releases had a bug where the first write to a store predating that date restarted the environment's counter at 1 instead of continuing from the store's global version. A remote holding older data then outranks the local store, so `esk sync` pulls back secrets you deleted and reverts live values to stale ones.
+
+The write path is fixed, but a store already written under the old code keeps the low counter. There is no reliable automatic detection: a legitimately young environment looks identical to a reset one, and the totals that would distinguish them do not survive a sync.
+
+To check a store you suspect, compare each environment's counter against the store version in `esk status`, which prints them as `Store version: 14 (dev: v6, prod: v6)`. An environment that has seen a lot of history but reports a version near 1 is the symptom. Run `esk sync --env <environment> --dry-run` to fetch and display the live remote versions without changing the store or remotes. A dry run does not reveal or confirm the remote values themselves; inspect those with the provider's native read-only UI, CLI, or API, and do not paste secret values into terminal logs, CI output, or issue trackers. Once you have identified the value that should win, repeatedly run `esk set <key> --env <environment> --no-sync`, re-entering that authoritative value on every write. The `--no-sync` flag keeps each counter advance local and prevents auto-push and auto-deploy during the repair. Verify with `esk status` and continue until the local environment counter is strictly greater than every live remote version; only then run one final `esk sync --env <environment>`.
 
 ## MCP server
 

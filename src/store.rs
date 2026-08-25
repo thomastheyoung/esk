@@ -110,6 +110,15 @@ pub struct StorePayload {
     pub tombstones: BTreeMap<String, u64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env_versions: BTreeMap<String, u64>,
+    /// Global version inherited by environments that have not yet received a
+    /// per-environment counter in a pre-env-versioning store.
+    ///
+    /// This is `None` for modern stores, where an unknown environment starts
+    /// at version 0. Legacy stores persist their original global version here
+    /// when the first per-environment counter is materialized, so later
+    /// environments retain the same migration floor across store reopens.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub legacy_env_version_floor: Option<u64>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub env_last_changed_at: BTreeMap<String, String>,
 }
@@ -141,15 +150,40 @@ struct RotationStage {
 impl StorePayload {
     /// Returns the effective version for a given environment.
     ///
-    /// If the environment has a per-env version, returns that. If no per-env
-    /// versions exist at all (pre-env-versioning store), falls back to the
-    /// global version. Otherwise the environment is unknown and returns 0.
+    /// If the environment has a per-env version, returns that. A store that is
+    /// still migrating from the legacy global counter returns its persisted
+    /// migration floor for an unmaterialized environment. If no per-env
+    /// versions exist at all (an untouched pre-env-versioning store), this
+    /// falls back to the global version. Otherwise the environment is unknown
+    /// in a modern store and returns 0.
     pub fn env_version(&self, env: &str) -> u64 {
-        match self.env_versions.get(env).copied() {
-            Some(v) => v,
-            None if self.env_versions.is_empty() => self.version,
-            None => 0,
+        if let Some(version) = self.env_versions.get(env) {
+            return *version;
         }
+        if let Some(floor) = self.legacy_env_version_floor {
+            return floor;
+        }
+        if self.env_versions.is_empty() {
+            self.version
+        } else {
+            0
+        }
+    }
+
+    /// Return the legacy floor that must survive a mutation or reconciliation.
+    ///
+    /// Old payloads do not contain an explicit marker, so while their
+    /// `env_versions` map is empty the global version is the inferred floor.
+    /// A zero-version empty store is modern and needs no marker: both legacy
+    /// and modern semantics start its first environment at zero.
+    pub(crate) fn inherited_legacy_env_version_floor(&self) -> Option<u64> {
+        self.legacy_env_version_floor
+            .or_else(|| (self.env_versions.is_empty() && self.version > 0).then_some(self.version))
+    }
+
+    /// Persist legacy lineage before adding the first per-environment entry.
+    fn capture_legacy_env_version_floor(&mut self) {
+        self.legacy_env_version_floor = self.inherited_legacy_env_version_floor();
     }
 
     /// Returns the RFC3339 timestamp for when the environment's version
@@ -282,6 +316,7 @@ impl std::fmt::Debug for StorePayload {
                 &format_args!("<{} entries>", self.tombstones.len()),
             )
             .field("env_versions", &self.env_versions)
+            .field("legacy_env_version_floor", &self.legacy_env_version_floor)
             .field("env_last_changed_at", &self.env_last_changed_at)
             .finish()
     }
@@ -676,8 +711,13 @@ impl SecretStore {
             let composite = format!("{key}:{env}");
             payload.secrets.insert(composite.clone(), value.to_string());
             payload.tombstones.remove(&composite);
+            // Capture legacy lineage before materializing the first env entry,
+            // then seed from its effective version. The persisted floor keeps
+            // later environments from regressing after this map becomes nonempty.
+            payload.capture_legacy_env_version_floor();
+            let base = payload.env_version(env);
             payload.version += 1;
-            let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+            let env_v = payload.env_versions.entry(env.to_string()).or_insert(base);
             *env_v += 1;
             payload
                 .env_last_changed_at
@@ -701,8 +741,13 @@ impl SecretStore {
                 let composite = format!("{key}:{env}");
                 payload.secrets.insert(composite.clone(), value.clone());
                 payload.tombstones.remove(&composite);
+                // Capture legacy lineage before materializing the first env entry.
+                // Seed per key so subsequent entries in this transaction continue
+                // from the counter created by the previous entry.
+                payload.capture_legacy_env_version_floor();
+                let base = payload.env_version(env);
                 payload.version += 1;
-                let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+                let env_v = payload.env_versions.entry(env.to_string()).or_insert(base);
                 *env_v += 1;
                 payload
                     .env_last_changed_at
@@ -722,8 +767,13 @@ impl SecretStore {
             if payload.secrets.remove(&composite).is_none() {
                 bail!("secret '{key}' has no value for environment '{env}'");
             }
+            // Capture legacy lineage before materializing the first env entry so
+            // both this tombstone and later environments stay in the legacy
+            // version domain (see set()).
+            payload.capture_legacy_env_version_floor();
+            let base = payload.env_version(env);
             payload.version += 1;
-            let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+            let env_v = payload.env_versions.entry(env.to_string()).or_insert(base);
             *env_v += 1;
             let tombstone_version = *env_v;
             payload
@@ -1530,6 +1580,7 @@ mod tests {
                     version,
                     tombstones,
                     env_versions,
+                    legacy_env_version_floor: None,
                     env_last_changed_at: BTreeMap::from([("dev".to_string(), version.to_string())]),
                 }
             })
@@ -1549,6 +1600,7 @@ mod tests {
             prop_assert_eq!(restored.version, payload.version);
             prop_assert_eq!(restored.tombstones, payload.tombstones);
             prop_assert_eq!(restored.env_versions, payload.env_versions);
+            prop_assert_eq!(restored.legacy_env_version_floor, payload.legacy_env_version_floor);
             prop_assert_eq!(restored.env_last_changed_at, payload.env_last_changed_at);
         }
 
@@ -2229,6 +2281,119 @@ mod tests {
     }
 
     #[test]
+    fn set_on_legacy_store_continues_global_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        let payload = store.set("OTHER", "dev", "new_val").unwrap();
+        assert_eq!(payload.env_versions.get("dev"), Some(&11));
+        assert_eq!(payload.env_version("dev"), 11);
+        assert_eq!(payload.legacy_env_version_floor, Some(10));
+    }
+
+    #[test]
+    fn legacy_floor_survives_reopen_for_second_environment_set() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"dev","KEY:prod":"prod"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        let first = store.set("OTHER", "dev", "new_dev").unwrap();
+        assert_eq!(first.env_version("dev"), 11);
+        assert_eq!(first.env_version("prod"), 10);
+        assert_eq!(first.legacy_env_version_floor, Some(10));
+
+        let reopened = SecretStore::open(dir.path()).unwrap();
+        let persisted = reopened.payload().unwrap();
+        assert_eq!(persisted.legacy_env_version_floor, Some(10));
+        assert_eq!(persisted.env_version("prod"), 10);
+
+        let second = reopened.set("OTHER", "prod", "new_prod").unwrap();
+        assert_eq!(second.env_versions.get("dev"), Some(&11));
+        assert_eq!(second.env_versions.get("prod"), Some(&11));
+        assert_eq!(second.legacy_env_version_floor, Some(10));
+    }
+
+    #[test]
+    fn set_many_on_legacy_store_continues_global_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        let mut values = BTreeMap::new();
+        values.insert("A".to_string(), "1".to_string());
+        values.insert("B".to_string(), "2".to_string());
+        let payload = store.set_many("dev", &values).unwrap();
+        // Two keys from a legacy store at global v10 must land on 12, not 2 -
+        // proving the per-key base is re-read inside the loop rather than
+        // hoisted (and stale) above it.
+        assert_eq!(payload.env_versions.get("dev"), Some(&12));
+        assert_eq!(payload.env_version("dev"), 12);
+    }
+
+    #[test]
+    fn legacy_floor_seeds_second_environment_set_many_after_reopen() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"dev"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        store.set("OTHER", "dev", "new_dev").unwrap();
+        let reopened = SecretStore::open(dir.path()).unwrap();
+        let values = BTreeMap::from([
+            ("A".to_string(), "1".to_string()),
+            ("B".to_string(), "2".to_string()),
+        ]);
+        let payload = reopened.set_many("prod", &values).unwrap();
+
+        assert_eq!(payload.env_versions.get("dev"), Some(&11));
+        assert_eq!(payload.env_versions.get("prod"), Some(&12));
+        assert_eq!(payload.legacy_env_version_floor, Some(10));
+    }
+
+    #[test]
+    fn delete_on_legacy_store_continues_global_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        let payload = store.delete("KEY", "dev").unwrap();
+        assert_eq!(payload.env_versions.get("dev"), Some(&11));
+        assert_eq!(payload.env_version("dev"), 11);
+        // Second corruption channel: the tombstone must be stamped with the
+        // continued version, not a regressed 1, or reconcile's tombstone rule
+        // will lose to any remote at version >= 1 and resurrect the secret.
+        assert_eq!(payload.tombstones.get("KEY:dev"), Some(&11));
+    }
+
+    #[test]
+    fn legacy_floor_seeds_second_environment_delete_after_reopen() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"dev","KEY:prod":"prod"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        store.set("OTHER", "dev", "new_dev").unwrap();
+        let reopened = SecretStore::open(dir.path()).unwrap();
+        let payload = reopened.delete("KEY", "prod").unwrap();
+
+        assert_eq!(payload.env_versions.get("dev"), Some(&11));
+        assert_eq!(payload.env_versions.get("prod"), Some(&11));
+        assert_eq!(payload.tombstones.get("KEY:prod"), Some(&11));
+        assert_eq!(payload.legacy_env_version_floor, Some(10));
+    }
+
+    #[test]
     fn env_last_changed_at_absent_from_old_payloads() {
         let dir = tmp_root();
         let store = SecretStore::load_or_create(dir.path()).unwrap();
@@ -2526,6 +2691,37 @@ mod tests {
         };
         payload.env_versions.insert("dev".to_string(), 3);
         assert_eq!(payload.env_version("prod"), 0);
+    }
+
+    #[test]
+    fn modern_unknown_environment_still_starts_at_zero_after_reopen() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let initial = store.set("KEY", "dev", "value").unwrap();
+        assert_eq!(initial.legacy_env_version_floor, None);
+
+        let reopened = SecretStore::open(dir.path()).unwrap();
+        assert_eq!(reopened.payload().unwrap().env_version("prod"), 0);
+        let payload = reopened.set("KEY", "prod", "value").unwrap();
+
+        assert_eq!(payload.env_versions.get("prod"), Some(&1));
+        assert_eq!(payload.legacy_env_version_floor, None);
+    }
+
+    #[test]
+    fn per_env_payload_does_not_export_legacy_migration_floor() {
+        let payload = StorePayload {
+            secrets: BTreeMap::from([("KEY:dev".to_string(), "value".to_string())]),
+            version: 11,
+            env_versions: BTreeMap::from([("dev".to_string(), 11)]),
+            legacy_env_version_floor: Some(10),
+            ..Default::default()
+        };
+
+        let env_payload = payload.for_env("dev");
+        assert_eq!(env_payload.legacy_env_version_floor, None);
+        let serialized = serde_json::to_string(&env_payload).unwrap();
+        assert!(!serialized.contains("legacy_env_version_floor"));
     }
 
     #[test]

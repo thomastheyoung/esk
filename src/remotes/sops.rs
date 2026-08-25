@@ -6,7 +6,11 @@
 //! Azure Key Vault, and HashiCorp Vault Transit.
 //!
 //! CLI: `sops` (Mozilla SOPS).
-//! Commands: `sops -e <private-tempfile>` (encrypt) / `sops -d <file>` (decrypt).
+//! Commands: `sops -e --input-type json --filename-override <dest> <private-tempfile>`
+//! (encrypt) / `sops -d --output-type json <file>` (decrypt). `--output-type json` on
+//! decrypt forces the decrypted stdout stream to JSON regardless of the file's
+//! on-disk encoding (sops still infers *that* from the path's extension), so pull
+//! reads both legacy YAML-encoded files and current JSON-encoded ones.
 //!
 //! The esk store payload is serialized as JSON, encrypted from a private
 //! temporary file, and written to a file (one per environment). On pull, the
@@ -135,10 +139,19 @@ impl SyncRemote for SopsRemote<'_> {
             return Ok(None);
         }
 
-        // Decrypt via sops
+        // Decrypt via sops. `--output-type json` forces the decrypted stream
+        // written to stdout to be JSON, independent of the file's on-disk
+        // encoding (which sops still infers from the path's extension for
+        // parsing). This makes pull format-agnostic: it reads both legacy
+        // `.enc.yaml` files (written by push's --filename-override before
+        // this fix accounted for it) and current `.enc.json` files.
         let output = self
             .runner
-            .run("sops", &["-d", &file_path], CommandOpts::default())
+            .run(
+                "sops",
+                &["-d", "--output-type", "json", &file_path],
+                CommandOpts::default(),
+            )
             .context("failed to run sops decrypt")?;
 
         if !output.success {
@@ -352,6 +365,108 @@ remotes:
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
         assert_eq!(secrets.get("DB_URL:dev").unwrap(), "postgres://localhost");
         assert!(!secrets.contains_key("_esk_version:dev"));
+    }
+
+    #[test]
+    fn pull_passes_output_type_json_flag() {
+        // Pins the fix: `sops -d` alone lets sops infer the OUTPUT stream's
+        // format from the file's extension, so a YAML-on-disk file (as
+        // written by push's --filename-override to a .enc.yaml path) would
+        // emit YAML that serde_json::from_slice rejects. `--output-type json`
+        // forces the decrypted stream to JSON regardless of on-disk encoding.
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("secrets/dev.enc.json");
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, b"encrypted").unwrap();
+
+        let yaml = format!(
+            r#"
+project: myapp
+environments: [dev]
+remotes:
+  sops:
+    path: "{}/secrets/{{environment}}.enc.json"
+"#,
+            dir.path().display()
+        );
+        let fixture = ConfigFixture::new(&yaml).expect("fixture");
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
+
+        let decrypted = serde_json::json!({
+            "API_KEY": "sk_test",
+            crate::remotes::ESK_VERSION_KEY: "1"
+        });
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&decrypted).unwrap(),
+            stderr: Vec::new(),
+        }])
+        .strict();
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
+        remote.pull(fixture.config(), "dev").unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(calls[0].program, "sops");
+        assert_eq!(
+            calls[0].args,
+            vec!["-d", "--output-type", "json", &file_path.to_string_lossy()]
+        );
+    }
+
+    #[test]
+    fn pull_yaml_path_decrypts_via_forced_json_output() {
+        // Round-trip-shaped: a .enc.yaml configured path (the format push
+        // historically wrote via --filename-override) still parses correctly
+        // now that pull forces --output-type json on the decrypted stream.
+        // Proves pull is no longer format-dependent on the file's extension.
+        let dir = tempfile::tempdir().unwrap();
+        let file_path = dir.path().join("secrets/dev.enc.yaml");
+        std::fs::create_dir_all(file_path.parent().unwrap()).unwrap();
+        std::fs::write(&file_path, b"encrypted-yaml-on-disk").unwrap();
+
+        let yaml = format!(
+            r#"
+project: myapp
+environments: [dev]
+remotes:
+  sops:
+    path: "{}/secrets/{{environment}}.enc.yaml"
+"#,
+            dir.path().display()
+        );
+        let fixture = ConfigFixture::new(&yaml).expect("fixture");
+        let remote_config: SopsRemoteConfig = fixture.config().remote_config("sops").unwrap();
+
+        // Mocked stdout is JSON, as sops would emit with --output-type json
+        // even though the on-disk file at file_path is YAML-encoded.
+        let decrypted = serde_json::json!({
+            "API_KEY": "sk_test",
+            "DB_URL": "postgres://localhost",
+            crate::remotes::ESK_VERSION_KEY: "7"
+        });
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: serde_json::to_vec(&decrypted).unwrap(),
+            stderr: Vec::new(),
+        }])
+        .strict();
+        let remote = SopsRemote::new(fixture.config(), remote_config, &runner);
+        let snapshot = remote.pull(fixture.config(), "dev").unwrap().unwrap();
+
+        assert_eq!(snapshot.version, 7);
+        assert_eq!(snapshot.secrets.get("API_KEY:dev").unwrap(), "sk_test");
+        assert_eq!(
+            snapshot.secrets.get("DB_URL:dev").unwrap(),
+            "postgres://localhost"
+        );
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].args,
+            vec!["-d", "--output-type", "json", &file_path.to_string_lossy()]
+        );
     }
 
     #[test]

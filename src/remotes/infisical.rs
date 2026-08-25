@@ -95,41 +95,30 @@ impl SyncRemote for InfisicalRemote<'_> {
 
         // Build the push map: bare keys + version metadata
         // Delete orphaned keys: export current remote state, diff, delete absent keys.
-        // If the export fails (empty project, etc.), skip deletion and proceed with set.
+        // Export and parse are hard preconditions for every mutation. Infisical
+        // set is upsert-only, so a blind partial write could retain stale keys or
+        // tombstone metadata while advancing the snapshot version.
         let mut export_args = vec!["export", "--format", "json"];
         export_args.extend(base.iter().map(String::as_str));
 
-        if let Ok(output) = self
+        let export_output = self
             .runner
             .run("infisical", &export_args, CommandOpts::default())
-        {
-            if output.success {
-                if let Ok(remote_keys) = parse_export_json(&output.stdout) {
-                    let orphans: Vec<&str> = remote_keys
-                        .keys()
-                        .filter(|k| !push_map.contains_key(k.as_str()))
-                        .map(String::as_str)
-                        .collect();
-
-                    if !orphans.is_empty() {
-                        let mut delete_args = vec!["secrets", "delete"];
-                        delete_args.extend(orphans);
-                        delete_args.extend(base.iter().map(String::as_str));
-
-                        let del_output = self
-                            .runner
-                            .run("infisical", &delete_args, CommandOpts::default())
-                            .context("failed to run infisical secrets delete")?;
-                        if !del_output.success {
-                            let stderr = String::from_utf8_lossy(&del_output.stderr);
-                            anyhow::bail!("infisical secrets delete failed: {stderr}");
-                        }
-                    }
-                }
-            }
+            .context("failed to run infisical export for orphan detection")?;
+        if !export_output.success {
+            anyhow::bail!("infisical export failed; remote was not modified");
         }
+        let remote_keys = parse_export_json(&export_output.stdout)
+            .context("failed to inspect Infisical secrets for orphan deletion")?;
+        let orphans: Vec<&str> = remote_keys
+            .keys()
+            .filter(|k| !push_map.contains_key(k.as_str()))
+            .map(String::as_str)
+            .collect();
 
-        // Write secrets to a temp file in .env format and push via --file
+        // Complete every fallible local preparation step before the first
+        // remote mutation. The tempfile must stay alive until `secrets set`
+        // consumes it below.
         let mut tmpfile =
             tempfile::NamedTempFile::new().context("failed to create temp file for push")?;
         for (key, value) in &push_map {
@@ -142,13 +131,26 @@ impl SyncRemote for InfisicalRemote<'_> {
         let mut set_args = vec!["secrets", "set", &file_arg, "--silent"];
         set_args.extend(base.iter().map(String::as_str));
 
+        if !orphans.is_empty() {
+            let mut delete_args = vec!["secrets", "delete"];
+            delete_args.extend(orphans);
+            delete_args.extend(base.iter().map(String::as_str));
+
+            let del_output = self
+                .runner
+                .run("infisical", &delete_args, CommandOpts::default())
+                .context("failed to run infisical secrets delete")?;
+            if !del_output.success {
+                anyhow::bail!("infisical secrets delete failed");
+            }
+        }
+
         let output = self
             .runner
             .run("infisical", &set_args, CommandOpts::default())
             .context("failed to run infisical secrets set")?;
         if !output.success {
-            let stderr = String::from_utf8_lossy(&output.stderr);
-            anyhow::bail!("infisical secrets set failed: {stderr}");
+            anyhow::bail!("infisical secrets set failed");
         }
 
         Ok(())
@@ -225,6 +227,161 @@ remotes:
         .unwrap()
     }
 
+    /// Strict runner that records attempted calls and fails at process spawn.
+    struct SpawnErrorRunner {
+        calls: std::sync::Mutex<Vec<Vec<String>>>,
+    }
+    impl CommandRunner for SpawnErrorRunner {
+        fn run(&self, _program: &str, args: &[&str], _opts: CommandOpts) -> Result<CommandOutput> {
+            self.calls
+                .lock()
+                .expect("SpawnErrorRunner calls mutex poisoned")
+                .push(args.iter().map(|arg| (*arg).to_string()).collect());
+            Err(anyhow::anyhow!("No such file or directory"))
+        }
+    }
+
+    /// Strict stateful Infisical model used to exercise a failed push followed
+    /// by a successful repair. `secrets set` is deliberately modeled
+    /// as upsert-only, matching the provider behavior that makes this edge case
+    /// correctness-sensitive.
+    struct StatefulInfisicalRunner {
+        remote: std::sync::Mutex<BTreeMap<String, String>>,
+        export_failures_remaining: std::sync::Mutex<usize>,
+        calls: std::sync::Mutex<Vec<Vec<String>>>,
+        set_maps: std::sync::Mutex<Vec<BTreeMap<String, String>>>,
+    }
+
+    impl StatefulInfisicalRunner {
+        fn new(remote: BTreeMap<String, String>, export_failures: usize) -> Self {
+            Self {
+                remote: std::sync::Mutex::new(remote),
+                export_failures_remaining: std::sync::Mutex::new(export_failures),
+                calls: std::sync::Mutex::new(Vec::new()),
+                set_maps: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn remote(&self) -> BTreeMap<String, String> {
+            self.remote
+                .lock()
+                .expect("StatefulInfisicalRunner remote mutex poisoned")
+                .clone()
+        }
+
+        fn calls(&self) -> Vec<Vec<String>> {
+            self.calls
+                .lock()
+                .expect("StatefulInfisicalRunner calls mutex poisoned")
+                .clone()
+        }
+
+        fn set_maps(&self) -> Vec<BTreeMap<String, String>> {
+            self.set_maps
+                .lock()
+                .expect("StatefulInfisicalRunner set maps mutex poisoned")
+                .clone()
+        }
+    }
+
+    impl CommandRunner for StatefulInfisicalRunner {
+        fn run(&self, _program: &str, args: &[&str], _opts: CommandOpts) -> Result<CommandOutput> {
+            self.calls
+                .lock()
+                .expect("StatefulInfisicalRunner calls mutex poisoned")
+                .push(args.iter().map(|arg| (*arg).to_string()).collect());
+
+            if args.starts_with(&["export", "--format", "json"]) {
+                let should_fail = {
+                    let mut failures = self
+                        .export_failures_remaining
+                        .lock()
+                        .expect("StatefulInfisicalRunner export mutex poisoned");
+                    let should_fail = *failures > 0;
+                    *failures = failures.saturating_sub(1);
+                    should_fail
+                };
+                if should_fail {
+                    return Ok(CommandOutput {
+                        success: false,
+                        stdout: Vec::new(),
+                        stderr: b"transient export failure".to_vec(),
+                    });
+                }
+
+                let remote = self
+                    .remote
+                    .lock()
+                    .expect("StatefulInfisicalRunner remote mutex poisoned");
+                let entries: Vec<serde_json::Value> = remote
+                    .iter()
+                    .map(|(key, value)| {
+                        serde_json::json!({
+                            "key": key,
+                            "value": value,
+                            "type": "shared"
+                        })
+                    })
+                    .collect();
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: serde_json::to_vec(&entries)?,
+                    stderr: Vec::new(),
+                });
+            }
+
+            if args.starts_with(&["secrets", "delete"]) {
+                let base_start = args
+                    .iter()
+                    .position(|arg| *arg == "--projectId")
+                    .context("stateful test delete call missing --projectId")?;
+                let mut remote = self
+                    .remote
+                    .lock()
+                    .expect("StatefulInfisicalRunner remote mutex poisoned");
+                for key in &args[2..base_start] {
+                    remote.remove(*key);
+                }
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                });
+            }
+
+            if args.starts_with(&["secrets", "set"]) {
+                let file_arg = args
+                    .iter()
+                    .find_map(|arg| arg.strip_prefix("--file="))
+                    .context("stateful test set call missing --file")?;
+                let contents = std::fs::read_to_string(file_arg)
+                    .context("stateful test could not read Infisical set file")?;
+                let mut set_map = BTreeMap::new();
+                for line in contents.lines() {
+                    let (key, value) = line
+                        .split_once('=')
+                        .context("stateful test found malformed Infisical set file")?;
+                    set_map.insert(key.to_string(), value.to_string());
+                }
+                self.remote
+                    .lock()
+                    .expect("StatefulInfisicalRunner remote mutex poisoned")
+                    .extend(set_map.clone());
+                self.set_maps
+                    .lock()
+                    .expect("StatefulInfisicalRunner set maps mutex poisoned")
+                    .push(set_map);
+                return Ok(CommandOutput {
+                    success: true,
+                    stdout: Vec::new(),
+                    stderr: Vec::new(),
+                });
+            }
+
+            anyhow::bail!("unexpected Infisical command in stateful test")
+        }
+    }
+
     fn export_json(entries: &[(&str, &str)]) -> Vec<u8> {
         let arr: Vec<serde_json::Value> = entries
             .iter()
@@ -293,7 +450,8 @@ remotes:
                 stdout: Vec::new(),
                 stderr: Vec::new(),
             },
-        ]);
+        ])
+        .strict();
         let remote = make_remote(&runner);
         let payload = make_payload(&[("API_KEY:dev", "sk_test"), ("DB_URL:dev", "pg://")], 3);
         remote.push(&payload, fixture.config(), "dev").unwrap();
@@ -345,7 +503,8 @@ remotes:
                 stdout: Vec::new(),
                 stderr: Vec::new(),
             },
-        ]);
+        ])
+        .strict();
         let remote = make_remote(&runner);
         let payload = make_payload(&[("API_KEY:dev", "new_key"), ("DB_URL:dev", "new_pg")], 3);
         remote.push(&payload, fixture.config(), "dev").unwrap();
@@ -363,7 +522,7 @@ remotes:
     #[test]
     fn push_skips_empty_env() {
         let fixture = make_config();
-        let runner = MockCommandRunner::from_outputs(vec![]);
+        let runner = MockCommandRunner::from_outputs(vec![]).strict();
         let remote = make_remote(&runner);
         let payload = make_payload(&[("KEY:prod", "val")], 1);
         remote.push(&payload, fixture.config(), "dev").unwrap();
@@ -373,31 +532,303 @@ remotes:
     }
 
     #[test]
-    fn push_skips_delete_on_export_failure() {
+    fn push_fails_closed_on_export_nonzero() {
+        let fixture = make_config();
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: false,
+            stdout: Vec::new(),
+            stderr: b"unauthorized: token secret-token".to_vec(),
+        }])
+        .strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+        let err = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].args.contains(&"export".to_string()));
+        assert_eq!(
+            err.to_string(),
+            "infisical export failed; remote was not modified"
+        );
+        assert!(!err.to_string().contains("secret-token"));
+    }
+
+    #[test]
+    fn push_fails_closed_on_export_spawn_failure() {
+        let fixture = make_config();
+        let runner = SpawnErrorRunner {
+            calls: std::sync::Mutex::new(Vec::new()),
+        };
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+        let err = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+
+        let calls = runner
+            .calls
+            .lock()
+            .expect("SpawnErrorRunner calls mutex poisoned");
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].contains(&"export".to_string()));
+        assert!(err
+            .to_string()
+            .contains("failed to run infisical export for orphan detection"));
+        assert!(format!("{err:#}").contains("No such file or directory"));
+    }
+
+    #[test]
+    fn push_fails_closed_on_unparseable_export() {
+        let fixture = make_config();
+        let runner = MockCommandRunner::from_outputs(vec![CommandOutput {
+            success: true,
+            stdout: b"not json at all".to_vec(),
+            stderr: Vec::new(),
+        }])
+        .strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+        let err = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 1);
+        assert!(calls[0].args.contains(&"export".to_string()));
+        assert!(err
+            .to_string()
+            .contains("failed to inspect Infisical secrets for orphan deletion"));
+    }
+
+    #[test]
+    fn push_set_failure_is_primary_and_redacted() {
         let fixture = make_config();
         let runner = MockCommandRunner::from_outputs(vec![
-            // export fails
+            CommandOutput {
+                success: true,
+                stdout: export_json(&[("API_KEY", "old"), ("_esk_version", "1")]),
+                stderr: Vec::new(),
+            },
             CommandOutput {
                 success: false,
                 stdout: Vec::new(),
-                stderr: b"project not found".to_vec(),
+                stderr: b"set-secret-marker".to_vec(),
             },
-            // secrets set still runs
+        ])
+        .strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+
+        let err = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].args.contains(&"export".to_string()));
+        assert!(calls[1].args.contains(&"set".to_string()));
+        assert_eq!(err.to_string(), "infisical secrets set failed");
+        assert!(!err.to_string().contains("set-secret-marker"));
+    }
+
+    #[test]
+    fn failed_push_preserves_consistent_remote_and_successful_retry_repairs_it() {
+        let fixture = make_config();
+        let old_tombstones =
+            serde_json::to_string(&BTreeMap::from([("RESURRECT".to_string(), 1_u64)])).unwrap();
+        let initial_remote = BTreeMap::from([
+            ("DELETE_ME".to_string(), "old-delete".to_string()),
+            ("KEEP".to_string(), "old-live".to_string()),
+            (crate::remotes::ESK_VERSION_KEY.to_string(), "1".to_string()),
+            (
+                crate::remotes::ESK_TOMBSTONES_KEY.to_string(),
+                old_tombstones,
+            ),
+        ]);
+        let runner = StatefulInfisicalRunner::new(initial_remote.clone(), 1);
+        let remote = make_remote(&runner);
+        let payload = StorePayload {
+            secrets: BTreeMap::from([
+                ("KEEP:dev".to_string(), "new-live".to_string()),
+                ("RESURRECT:dev".to_string(), "restored".to_string()),
+            ]),
+            version: 2,
+            tombstones: BTreeMap::from([("DELETE_ME:dev".to_string(), 2)]),
+            env_versions: BTreeMap::from([("dev".to_string(), 2)]),
+            ..Default::default()
+        };
+
+        let first_error = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+        assert!(first_error.to_string().contains("infisical export failed"));
+        assert_eq!(runner.calls().len(), 1);
+        assert!(runner.set_maps().is_empty());
+        assert_eq!(runner.remote(), initial_remote);
+
+        // No artificial version advancement: the old, internally consistent
+        // snapshot remains parseable and lower than the local checkout.
+        let unchanged_snapshot =
+            crate::remotes::parse_flat_snapshot(runner.remote(), "dev").unwrap();
+        assert_eq!(unchanged_snapshot.version, 1);
+        assert_eq!(
+            unchanged_snapshot
+                .secrets
+                .get("DELETE_ME:dev")
+                .map(String::as_str),
+            Some("old-delete")
+        );
+        assert_eq!(unchanged_snapshot.tombstones.get("RESURRECT:dev"), Some(&1));
+
+        let behind_checkout = StorePayload::default();
+        for preference in [
+            crate::reconcile::ConflictPreference::Local,
+            crate::reconcile::ConflictPreference::Remote,
+        ] {
+            let reconciliation = crate::reconcile::reconcile_multi_snapshots_with_jump_limit(
+                &behind_checkout,
+                &[("infisical", &unchanged_snapshot)],
+                "dev",
+                preference,
+                true,
+            )
+            .unwrap();
+            assert_eq!(reconciliation.merged_payload.env_version("dev"), 1);
+            assert_eq!(
+                reconciliation
+                    .merged_payload
+                    .secrets
+                    .get("DELETE_ME:dev")
+                    .map(String::as_str),
+                Some("old-delete")
+            );
+            assert_eq!(
+                reconciliation
+                    .merged_payload
+                    .tombstones
+                    .get("RESURRECT:dev"),
+                Some(&1)
+            );
+        }
+
+        for preference in [
+            crate::reconcile::ConflictPreference::Local,
+            crate::reconcile::ConflictPreference::Remote,
+        ] {
+            let reconciliation = crate::reconcile::reconcile_multi_snapshots_with_jump_limit(
+                &payload,
+                &[("infisical", &unchanged_snapshot)],
+                "dev",
+                preference,
+                true,
+            )
+            .unwrap();
+            assert_eq!(reconciliation.merged_payload.env_version("dev"), 2);
+            assert_eq!(reconciliation.sources_to_update, vec!["infisical"]);
+        }
+
+        // The failed acknowledgement blocks deletion GC before the retry.
+        let tracker_dir = tempfile::tempdir().unwrap();
+        let mut tracker =
+            crate::sync_tracker::SyncIndex::new(&tracker_dir.path().join("sync-index.json"));
+        tracker.record_failure("infisical", "dev", 2, first_error.to_string());
+        let mut failed_gc = payload.clone();
+        assert_eq!(failed_gc.prune_tombstones(&tracker, &["infisical"]), 0);
+        assert!(failed_gc.tombstones.contains_key("DELETE_ME:dev"));
+
+        remote.push(&payload, fixture.config(), "dev").unwrap();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 4);
+        assert!(calls[0].starts_with(&["export".to_string()]));
+        assert!(calls[1].starts_with(&["export".to_string()]));
+        assert!(calls[2].starts_with(&["secrets".to_string(), "delete".to_string()]));
+        assert!(calls[3].starts_with(&["secrets".to_string(), "set".to_string()]));
+        assert!(calls[2].contains(&"DELETE_ME".to_string()));
+
+        let set_maps = runner.set_maps();
+        assert_eq!(set_maps.len(), 1);
+        assert_eq!(
+            set_maps[0].get("RESURRECT").map(String::as_str),
+            Some("restored")
+        );
+        assert_eq!(
+            set_maps[0]
+                .get(crate::remotes::ESK_VERSION_KEY)
+                .map(String::as_str),
+            Some("2")
+        );
+        assert!(set_maps[0].contains_key(crate::remotes::ESK_TOMBSTONES_KEY));
+        let repaired_snapshot =
+            crate::remotes::parse_flat_snapshot(runner.remote(), "dev").unwrap();
+        assert_eq!(repaired_snapshot.version, 2);
+        assert_eq!(
+            repaired_snapshot
+                .secrets
+                .get("RESURRECT:dev")
+                .map(String::as_str),
+            Some("restored")
+        );
+        assert!(!repaired_snapshot.secrets.contains_key("DELETE_ME:dev"));
+        assert!(!repaired_snapshot.tombstones.contains_key("RESURRECT:dev"));
+        assert_eq!(repaired_snapshot.tombstones.get("DELETE_ME:dev"), Some(&2));
+
+        tracker.record_success("infisical", "dev", 2);
+        let mut successful_gc = payload;
+        assert_eq!(successful_gc.prune_tombstones(&tracker, &["infisical"]), 1);
+        assert!(successful_gc.tombstones.is_empty());
+    }
+
+    #[test]
+    fn push_delete_failure_is_primary_and_stops_before_set() {
+        let fixture = make_config();
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: export_json(&[("API_KEY", "old"), ("OLD_KEY", "stale")]),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: false,
+                stdout: Vec::new(),
+                stderr: b"delete-secret-marker".to_vec(),
+            },
+        ])
+        .strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+
+        let err = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 2);
+        assert!(calls[0].args.contains(&"export".to_string()));
+        assert!(calls[1].args.contains(&"delete".to_string()));
+        assert!(!calls[1].args.contains(&"set".to_string()));
+        assert_eq!(err.to_string(), "infisical secrets delete failed");
+        assert!(!err.to_string().contains("delete-secret-marker"));
+    }
+
+    #[test]
+    fn push_healthy_path_with_zero_orphans_sets_after_export() {
+        let fixture = make_config();
+        let runner = MockCommandRunner::from_outputs(vec![
+            // export succeeds, remote has exactly the keys we're pushing (no orphans)
+            CommandOutput {
+                success: true,
+                stdout: export_json(&[("API_KEY", "old"), ("_esk_version", "2")]),
+                stderr: Vec::new(),
+            },
+            // secrets set
             CommandOutput {
                 success: true,
                 stdout: Vec::new(),
                 stderr: Vec::new(),
             },
-        ]);
+        ])
+        .strict();
         let remote = make_remote(&runner);
-        let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+        let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let c = runner.calls();
         assert_eq!(c.len(), 2);
-        // No delete call — just export + set
-        assert!(c[0].args.contains(&"export".to_string()));
-        assert!(c[1].args.contains(&"set".to_string()));
+        assert!(!c
+            .iter()
+            .any(|call| call.args.contains(&"delete".to_string())));
     }
 
     #[test]
