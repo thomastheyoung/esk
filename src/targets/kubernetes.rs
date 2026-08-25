@@ -36,10 +36,8 @@ fn validate_k8s_name(name: &str, field: &str) -> Result<()> {
         bail!("kubernetes {field} must not be empty");
     }
     if name.len() > 253 {
-        bail!(
-            "kubernetes {field} '{}...' exceeds 253 character limit",
-            &name[..32]
-        );
+        let truncated: String = name.chars().take(32).collect();
+        bail!("kubernetes {field} '{truncated}...' exceeds 253 character limit");
     }
     let bytes = name.as_bytes();
     // First char must be [a-z0-9]
@@ -494,6 +492,39 @@ targets:
     }
 
     #[test]
+    fn deploy_batch_too_long_namespace_errors_cleanly() {
+        // A too-long namespace from config must surface as a clean deploy
+        // error, not a panic, even when it contains a multi-byte char.
+        let dir = tempfile::tempdir().unwrap();
+        let mut long_ns = "a".repeat(31);
+        long_ns.push('é');
+        long_ns.push_str(&"a".repeat(230));
+        assert!(long_ns.len() > 253);
+        let yaml = format!(
+            "project: myapp\nenvironments: [dev]\ntargets:\n  kubernetes:\n    namespace:\n      dev: {long_ns}\n"
+        );
+        let path = dir.path().join("esk.yaml");
+        std::fs::write(&path, yaml).unwrap();
+        let config = Config::load(&path).unwrap();
+        let target_config = config.targets.kubernetes.as_ref().unwrap();
+        let runner = MockCommandRunner::from_outputs(vec![]);
+        let target = KubernetesTarget {
+            config: &config,
+            target_config,
+            runner: &runner,
+        };
+
+        let secrets = vec![make_secret("KEY", "val")];
+        let error = target
+            .deploy_batch_state(
+                BatchDeployment::without_tombstones(&secrets),
+                &make_target("dev"),
+            )
+            .unwrap_err();
+        assert!(error.to_string().contains("exceeds 253"));
+    }
+
+    #[test]
     fn default_secret_name() {
         let fixture = make_config();
         let config = fixture.config();
@@ -566,6 +597,31 @@ targets:
     fn validate_k8s_name_too_long_fails() {
         let long_name = "a".repeat(254);
         let err = validate_k8s_name(&long_name, "name").unwrap_err();
+        assert!(err.to_string().contains("exceeds 253"));
+    }
+
+    #[test]
+    fn validate_k8s_name_too_long_multibyte_straddling_boundary_does_not_panic() {
+        // 31 ASCII chars, then 'é' (2 bytes) straddles byte offset 32
+        // (bytes 31..33), then filler past the 253-byte limit. A naive
+        // `&name[..32]` byte slice panics with "not a char boundary";
+        // char-based truncation must not.
+        let mut name = "a".repeat(31);
+        name.push('é');
+        name.push_str(&"a".repeat(230));
+        assert!(name.len() > 253);
+        let err = validate_k8s_name(&name, "name").unwrap_err();
+        assert!(err.to_string().contains("exceeds 253"));
+    }
+
+    #[test]
+    fn validate_k8s_name_too_long_emoji_at_different_offset_does_not_panic() {
+        // Wider (4-byte) multi-byte char at a different straddling offset.
+        let mut name = "a".repeat(30);
+        name.push('🚀');
+        name.push_str(&"a".repeat(230));
+        assert!(name.len() > 253);
+        let err = validate_k8s_name(&name, "name").unwrap_err();
         assert!(err.to_string().contains("exceeds 253"));
     }
 
