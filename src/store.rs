@@ -676,8 +676,12 @@ impl SecretStore {
             let composite = format!("{key}:{env}");
             payload.secrets.insert(composite.clone(), value.to_string());
             payload.tombstones.remove(&composite);
+            // Seed from env_version() (read before the global bump below) so a
+            // legacy store (empty env_versions, using the global version as its
+            // fallback) continues from that fallback instead of regressing to 1.
+            let base = payload.env_version(env);
             payload.version += 1;
-            let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+            let env_v = payload.env_versions.entry(env.to_string()).or_insert(base);
             *env_v += 1;
             payload
                 .env_last_changed_at
@@ -701,8 +705,13 @@ impl SecretStore {
                 let composite = format!("{key}:{env}");
                 payload.secrets.insert(composite.clone(), value.clone());
                 payload.tombstones.remove(&composite);
+                // Seed from env_version() (read before the global bump below) per
+                // key, not hoisted above the loop: after the first key materializes
+                // the entry, subsequent keys must continue from it rather than
+                // re-reading the legacy fallback.
+                let base = payload.env_version(env);
                 payload.version += 1;
-                let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+                let env_v = payload.env_versions.entry(env.to_string()).or_insert(base);
                 *env_v += 1;
                 payload
                     .env_last_changed_at
@@ -722,8 +731,12 @@ impl SecretStore {
             if payload.secrets.remove(&composite).is_none() {
                 bail!("secret '{key}' has no value for environment '{env}'");
             }
+            // Seed from env_version() (read before the global bump below) so a
+            // legacy store's tombstone continues from the global fallback rather
+            // than regressing to 1 (see set()).
+            let base = payload.env_version(env);
             payload.version += 1;
-            let env_v = payload.env_versions.entry(env.to_string()).or_insert(0);
+            let env_v = payload.env_versions.entry(env.to_string()).or_insert(base);
             *env_v += 1;
             let tombstone_version = *env_v;
             payload
@@ -2226,6 +2239,55 @@ mod tests {
         std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
         let payload = store.payload().unwrap();
         assert!(payload.env_versions.is_empty());
+    }
+
+    #[test]
+    fn set_on_legacy_store_continues_global_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        let payload = store.set("OTHER", "dev", "new_val").unwrap();
+        assert_eq!(payload.env_versions.get("dev"), Some(&11));
+        assert_eq!(payload.env_version("dev"), 11);
+    }
+
+    #[test]
+    fn set_many_on_legacy_store_continues_global_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        let mut values = BTreeMap::new();
+        values.insert("A".to_string(), "1".to_string());
+        values.insert("B".to_string(), "2".to_string());
+        let payload = store.set_many("dev", &values).unwrap();
+        // Two keys from a legacy store at global v10 must land on 12, not 2 -
+        // proving the per-key base is re-read inside the loop rather than
+        // hoisted (and stale) above it.
+        assert_eq!(payload.env_versions.get("dev"), Some(&12));
+        assert_eq!(payload.env_version("dev"), 12);
+    }
+
+    #[test]
+    fn delete_on_legacy_store_continues_global_version() {
+        let dir = tmp_root();
+        let store = SecretStore::load_or_create(dir.path()).unwrap();
+        let json = r#"{"secrets":{"KEY:dev":"val"},"version":10}"#;
+        let encrypted = store.encrypt(json).unwrap();
+        std::fs::write(dir.path().join(".esk/store.enc"), &encrypted).unwrap();
+
+        let payload = store.delete("KEY", "dev").unwrap();
+        assert_eq!(payload.env_versions.get("dev"), Some(&11));
+        assert_eq!(payload.env_version("dev"), 11);
+        // Second corruption channel: the tombstone must be stamped with the
+        // continued version, not a regressed 1, or reconcile's tombstone rule
+        // will lose to any remote at version >= 1 and resurrect the secret.
+        assert_eq!(payload.tombstones.get("KEY:dev"), Some(&11));
     }
 
     #[test]
