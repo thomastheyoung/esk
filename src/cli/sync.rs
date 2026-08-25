@@ -179,7 +179,11 @@ pub fn run(config: &Config, options: SyncOptions<'_>) -> Result<()> {
     )?;
 
     if envs.len() == 1 {
-        run_with_runner(config, &options, &runner)?;
+        let single_env_opts = SyncOptions {
+            env: Some(envs[0]),
+            ..options
+        };
+        run_with_runner(config, &single_env_opts, &runner)?;
     } else {
         let mut failures: Vec<String> = Vec::new();
         for env in &envs {
@@ -228,7 +232,9 @@ pub fn run_with_runner(
     opts: &SyncOptions<'_>,
     runner: &dyn CommandRunner,
 ) -> Result<()> {
-    let env = opts.env.expect("sync requires an environment");
+    let Some(env) = opts.env else {
+        bail!("sync requires an environment");
+    };
     config.validate_env(env)?;
     let only = opts.only;
     let dry_run = opts.dry_run;

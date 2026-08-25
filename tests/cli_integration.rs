@@ -700,6 +700,56 @@ fn remote_sync_no_remotes() {
     assert!(err.to_string().contains("no remotes configured"));
 }
 
+#[test]
+fn remote_sync_no_env_single_environment_project_does_not_panic() {
+    // Regression test: `esk sync` with no `--env` on a single-environment
+    // project used to panic in `run_with_runner` (`opts.env.expect(...)`)
+    // because the `envs.len() == 1` branch forwarded `options` unchanged
+    // instead of resolving the implicit environment.
+    let project = TestProject::with_store(MINIMAL_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let err = cli::sync::run(
+        &config,
+        cli::sync::SyncOptions {
+            env: None,
+            only: None,
+            dry_run: false,
+            strict: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("no remotes configured"));
+}
+
+#[test]
+fn remote_sync_no_env_multi_environment_project_syncs_all() {
+    // Multi-env branch: `env: None` should still iterate every configured
+    // environment and aggregate failures rather than panicking.
+    let yaml = r#"
+project: testapp
+environments: [dev, prod]
+"#;
+    let project = TestProject::with_store(yaml).unwrap();
+    let config = project.config().unwrap();
+    let err = cli::sync::run(
+        &config,
+        cli::sync::SyncOptions {
+            env: None,
+            only: None,
+            dry_run: false,
+            strict: false,
+            force: false,
+            auto_deploy: false,
+            prefer: ConflictPreference::Local,
+        },
+    )
+    .unwrap_err();
+    assert!(err.to_string().contains("environment(s) failed to sync"));
+}
+
 // === sync ===
 
 #[test]
