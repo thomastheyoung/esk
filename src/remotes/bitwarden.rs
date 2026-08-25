@@ -79,18 +79,37 @@ impl<'a> BitwardenRemote<'a> {
     }
 
     /// Find a secret by name in the list, returning its ID.
+    ///
+    /// Bitwarden does not enforce unique key names within a project, and
+    /// `push` and `pull` each call [`Self::list_secrets`] separately with no
+    /// ordering guarantee from `bws secret list`. Silently picking the first
+    /// match (`.find`/`.find_map`) can therefore resolve `pull` and a later
+    /// `push` to *different* items sharing the same name, stranding one
+    /// item's content. When more than one item carries `name`, this refuses
+    /// to choose and returns an error instead — mirroring
+    /// [`super::onepassword::AccessError::AmbiguousOwnershipTag`], which
+    /// makes the identical call for 1Password duplicate titles.
     #[allow(clippy::unused_self)]
-    fn find_secret_id(&self, items: &[Value], name: &str) -> Option<String> {
-        items.iter().find_map(|item| {
-            let item_name = item.get("key")?.as_str()?;
-            if item_name == name {
-                item.get("id")?
-                    .as_str()
-                    .map(std::string::ToString::to_string)
-            } else {
-                None
-            }
-        })
+    fn find_secret_id(&self, items: &[Value], name: &str) -> Result<Option<String>> {
+        let matches: Vec<&Value> = items
+            .iter()
+            .filter(|item| item.get("key").and_then(Value::as_str) == Some(name))
+            .collect();
+
+        if matches.len() > 1 {
+            anyhow::bail!(
+                "refusing to use Bitwarden secret name {name:?}: {} items carry it in project {:?}; \
+                 exactly one is required. Delete the duplicate in Bitwarden Secrets Manager and retry.",
+                matches.len(),
+                self.remote_config.project_id,
+            );
+        }
+
+        Ok(matches.first().and_then(|item| {
+            item.get("id")
+                .and_then(Value::as_str)
+                .map(std::string::ToString::to_string)
+        }))
     }
 }
 
@@ -142,7 +161,7 @@ impl SyncRemote for BitwardenRemote<'_> {
 
         // Check if the secret already exists
         let items = self.list_secrets()?;
-        let existing_id = self.find_secret_id(&items, &secret_name);
+        let existing_id = self.find_secret_id(&items, &secret_name)?;
 
         // SECURITY: `bws` CLI requires `--value` as an argument for both `secret edit` and
         // `secret create`. There is no stdin/file support. Secret values are exposed in process
@@ -192,12 +211,27 @@ impl SyncRemote for BitwardenRemote<'_> {
         let secret_name = self.secret_name(env);
         let items = self.list_secrets()?;
 
-        // Find the secret by name
-        let Some(item) = items.iter().find(|item| {
-            item.get("key")
-                .and_then(|v| v.as_str())
-                .is_some_and(|s| s == secret_name)
-        }) else {
+        // Find the secret by name. See `find_secret_id` for why ambiguity
+        // must fail loudly rather than silently picking one item.
+        let matches: Vec<&Value> = items
+            .iter()
+            .filter(|item| {
+                item.get("key")
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s == secret_name)
+            })
+            .collect();
+
+        if matches.len() > 1 {
+            anyhow::bail!(
+                "refusing to use Bitwarden secret name {secret_name:?}: {} items carry it in project {:?}; \
+                 exactly one is required. Delete the duplicate in Bitwarden Secrets Manager and retry.",
+                matches.len(),
+                self.remote_config.project_id,
+            );
+        }
+
+        let Some(item) = matches.into_iter().next() else {
             return Ok(None);
         };
 
@@ -503,6 +537,100 @@ remotes:
         let remote = BitwardenRemote::new(fixture.config(), remote_config, &DummyRunner);
         assert_eq!(remote.secret_name("dev"), "myapp-dev");
         assert_eq!(remote.secret_name("prod"), "myapp-prod");
+    }
+
+    #[test]
+    fn pull_duplicate_key_name_is_ambiguous() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+remotes:
+  bitwarden:
+    project_id: "proj-123"
+    secret_name: "{project}-{environment}"
+"#;
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
+
+        let items = json!([
+            {"id": "s1", "key": "myapp-dev", "value": "{}"},
+            {"id": "s2", "key": "myapp-dev", "value": "{}"}
+        ]);
+        let runner =
+            MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())])
+                .strict();
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
+
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("myapp-dev"),
+            "message should name the key: {msg}"
+        );
+        assert!(
+            msg.contains("2 items carry it"),
+            "message should convey the ambiguity: {msg}"
+        );
+        assert!(
+            msg.contains("proj-123"),
+            "message should name the project: {msg}"
+        );
+    }
+
+    #[test]
+    fn push_duplicate_key_name_is_ambiguous_and_writes_nothing() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+remotes:
+  bitwarden:
+    project_id: "proj-123"
+    secret_name: "{project}-{environment}"
+"#;
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: BitwardenRemoteConfig =
+            fixture.config().remote_config("bitwarden").unwrap();
+
+        let items = json!([
+            {"id": "s1", "key": "myapp-dev", "value": "{}"},
+            {"id": "s2", "key": "myapp-dev", "value": "{}"}
+        ]);
+        // Only the `secret list` call is queued: if push attempted an edit or
+        // create despite the ambiguity, the strict runner panics on the
+        // unqueued call rather than silently succeeding.
+        let runner =
+            MockCommandRunner::from_outputs(vec![ok_output(&serde_json::to_vec(&items).unwrap())])
+                .strict();
+        let remote = BitwardenRemote::new(fixture.config(), remote_config, &runner);
+
+        let mut secrets = BTreeMap::new();
+        secrets.insert("API_KEY:dev".to_string(), "sk_test".to_string());
+        let payload = StorePayload {
+            secrets,
+            version: 3,
+            ..Default::default()
+        };
+
+        let err = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("myapp-dev"),
+            "message should name the key: {msg}"
+        );
+        assert!(
+            msg.contains("2 items carry it"),
+            "message should convey the ambiguity: {msg}"
+        );
+        assert!(
+            msg.contains("proj-123"),
+            "message should name the project: {msg}"
+        );
+
+        let calls = runner.calls();
+        assert_eq!(calls.len(), 1, "only the list call should have been made");
+        assert!(!calls.iter().any(|c| c.args.contains(&"edit".to_string())));
+        assert!(!calls.iter().any(|c| c.args.contains(&"create".to_string())));
     }
 
     #[test]
