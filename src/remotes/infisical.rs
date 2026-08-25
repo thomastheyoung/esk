@@ -56,6 +56,55 @@ impl<'a> InfisicalRemote<'a> {
     }
 }
 
+/// Surface a non-fatal degradation of orphan detection during `push()`.
+///
+/// `push()` runs on worker threads inside `std::thread::scope` while a
+/// `cliclack` spinner is active on the main thread (see `cli/sync.rs`).
+/// `cliclack` renders to stdout, redrawing the spinner line in place, so any
+/// concurrent write to stdout from another thread corrupts that rendering.
+/// Writing to stderr instead uses a separate stream that `cliclack` never
+/// touches, so it cannot interleave with or corrupt the spinner — this
+/// mirrors `main.rs`'s own top-level error reporting, which also writes
+/// terminal-facing diagnostics via `eprintln!`.
+///
+/// This message is deliberately best-effort and non-blocking: skipping the
+/// orphan check is not itself an error (the push still proceeds and can
+/// still succeed), so this must never be promoted to `Result` — doing so
+/// would make a transient export failure abort the `secrets set` call that
+/// follows, which is strictly worse than today's silent skip.
+fn warn_orphan_check_skipped(message: &str) {
+    #[cfg(test)]
+    {
+        test_warnings::record(message);
+    }
+    eprintln!("esk: warning: infisical: {message}");
+}
+
+/// Test-only capture of warnings emitted via [`warn_orphan_check_skipped`].
+///
+/// `eprintln!` writes to the process's real stderr, which unit tests cannot
+/// portably or safely intercept (fd redirection is process-global and races
+/// under the default parallel test runner). This thread-local sink lets
+/// tests observe *whether and what* was warned without touching fd 2 or
+/// adding a capture dependency.
+#[cfg(test)]
+mod test_warnings {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static CAPTURED: RefCell<Vec<String>> = const { RefCell::new(Vec::new()) };
+    }
+
+    pub fn record(message: &str) {
+        CAPTURED.with(|c| c.borrow_mut().push(message.to_string()));
+    }
+
+    /// Clear this thread's captured warnings and return what was captured.
+    pub fn take() -> Vec<String> {
+        CAPTURED.with(|c| std::mem::take(&mut *c.borrow_mut()))
+    }
+}
+
 /// Parse Infisical's JSON export format (array of objects) into a flat key→value map.
 ///
 /// Infisical exports: `[{"key":"K","value":"V","type":"shared",...}, ...]`
@@ -99,12 +148,28 @@ impl SyncRemote for InfisicalRemote<'_> {
         let mut export_args = vec!["export", "--format", "json"];
         export_args.extend(base.iter().map(String::as_str));
 
-        if let Ok(output) = self
+        match self
             .runner
             .run("infisical", &export_args, CommandOpts::default())
         {
-            if output.success {
-                if let Ok(remote_keys) = parse_export_json(&output.stdout) {
+            Err(e) => {
+                warn_orphan_check_skipped(&format!(
+                    "could not run `infisical export` to check for orphaned keys: {e}"
+                ));
+            }
+            Ok(output) if !output.success => {
+                let stderr = String::from_utf8_lossy(&output.stderr);
+                warn_orphan_check_skipped(&format!(
+                    "`infisical export` exited with an error, so orphaned keys were not checked: {stderr}"
+                ));
+            }
+            Ok(output) => match parse_export_json(&output.stdout) {
+                Err(e) => {
+                    warn_orphan_check_skipped(&format!(
+                        "could not parse `infisical export` output, so orphaned keys were not checked: {e}"
+                    ));
+                }
+                Ok(remote_keys) => {
                     let orphans: Vec<&str> = remote_keys
                         .keys()
                         .filter(|k| !push_map.contains_key(k.as_str()))
@@ -126,7 +191,7 @@ impl SyncRemote for InfisicalRemote<'_> {
                         }
                     }
                 }
-            }
+            },
         }
 
         // Write secrets to a temp file in .env format and push via --file
@@ -223,6 +288,30 @@ remotes:
 ",
         )
         .unwrap()
+    }
+
+    /// Runner whose first call errors at the spawn level (e.g. missing CLI),
+    /// then delegates every subsequent call to `inner`.
+    ///
+    /// `MockCommandRunner` cannot make only its first call error, and
+    /// `ErrorCommandRunner` fails every call — neither can express "the
+    /// export call fails to spawn, but `secrets set` still runs normally".
+    struct FirstCallErrorsRunner {
+        inner: MockCommandRunner,
+        calls: std::sync::Mutex<u32>,
+    }
+    impl CommandRunner for FirstCallErrorsRunner {
+        fn run(&self, program: &str, args: &[&str], opts: CommandOpts) -> Result<CommandOutput> {
+            let mut n = self
+                .calls
+                .lock()
+                .expect("FirstCallErrorsRunner calls mutex poisoned");
+            *n += 1;
+            if *n == 1 {
+                return Err(anyhow::anyhow!("No such file or directory"));
+            }
+            self.inner.run(program, args, opts)
+        }
     }
 
     fn export_json(entries: &[(&str, &str)]) -> Vec<u8> {
@@ -376,7 +465,7 @@ remotes:
     fn push_skips_delete_on_export_failure() {
         let fixture = make_config();
         let runner = MockCommandRunner::from_outputs(vec![
-            // export fails
+            // export fails (non-zero exit — e.g. auth failure)
             CommandOutput {
                 success: false,
                 stdout: Vec::new(),
@@ -391,6 +480,7 @@ remotes:
         ]);
         let remote = make_remote(&runner);
         let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+        test_warnings::take();
         remote.push(&payload, fixture.config(), "dev").unwrap();
 
         let c = runner.calls();
@@ -398,6 +488,113 @@ remotes:
         // No delete call — just export + set
         assert!(c[0].args.contains(&"export".to_string()));
         assert!(c[1].args.contains(&"set".to_string()));
+
+        // The skip is silent no longer: the failure must be surfaced.
+        let warnings = test_warnings::take();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("project not found"));
+    }
+
+    #[test]
+    fn push_warns_and_still_sets_on_export_spawn_failure() {
+        let fixture = make_config();
+        let runner = MockCommandRunner::new().strict();
+        // First call (export) errors at the runner level (e.g. CLI missing/spawn failure).
+        // MockCommandRunner has no built-in way to make only the first call error while
+        // later calls succeed, so we use ErrorCommandRunner instead — but ErrorCommandRunner
+        // fails *every* call, which would also fail `secrets set`. To express "first call
+        // errors, second succeeds" we fall back to `FirstCallErrorsRunner` for this test.
+        runner.push_success(b"", b"");
+        let wrapped = FirstCallErrorsRunner {
+            inner: runner,
+            calls: std::sync::Mutex::new(0),
+        };
+        let remote = make_remote(&wrapped);
+        let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+        test_warnings::take();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
+
+        let c = wrapped.inner.calls();
+        // Only `secrets set` was recorded by the inner mock (the export call went
+        // through the error branch and was never delegated).
+        assert_eq!(c.len(), 1);
+        assert!(c[0].args.contains(&"set".to_string()));
+        assert!(!c[0].args.contains(&"delete".to_string()));
+
+        let warnings = test_warnings::take();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("No such file or directory"));
+    }
+
+    #[test]
+    fn push_warns_and_still_sets_on_unparseable_export() {
+        let fixture = make_config();
+        let runner = MockCommandRunner::from_outputs(vec![
+            // export succeeds but returns garbage, not JSON
+            CommandOutput {
+                success: true,
+                stdout: b"not json at all".to_vec(),
+                stderr: Vec::new(),
+            },
+            // secrets set still runs
+            CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        ])
+        .strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "val")], 1);
+        test_warnings::take();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
+
+        let c = runner.calls();
+        assert_eq!(c.len(), 2);
+        assert!(c[0].args.contains(&"export".to_string()));
+        assert!(c[1].args.contains(&"set".to_string()));
+        assert!(!c[1].args.contains(&"delete".to_string()));
+
+        let warnings = test_warnings::take();
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("could not parse"));
+    }
+
+    #[test]
+    fn push_healthy_path_with_zero_orphans_stays_silent() {
+        let fixture = make_config();
+        let runner = MockCommandRunner::from_outputs(vec![
+            // export succeeds, remote has exactly the keys we're pushing (no orphans)
+            CommandOutput {
+                success: true,
+                stdout: export_json(&[("API_KEY", "old"), ("_esk_version", "2")]),
+                stderr: Vec::new(),
+            },
+            // secrets set
+            CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        ])
+        .strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "sk_test")], 3);
+        test_warnings::take();
+        remote.push(&payload, fixture.config(), "dev").unwrap();
+
+        let c = runner.calls();
+        assert_eq!(c.len(), 2);
+        assert!(!c
+            .iter()
+            .any(|call| call.args.contains(&"delete".to_string())));
+
+        // Healthy path: export succeeded, zero orphans — nothing should be surfaced.
+        let warnings = test_warnings::take();
+        assert!(
+            warnings.is_empty(),
+            "expected no warnings on healthy path, got: {warnings:?}"
+        );
     }
 
     #[test]
