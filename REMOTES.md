@@ -581,6 +581,8 @@ Uses the [Infisical CLI](https://infisical.com/docs/cli/overview) to sync secret
 
 **Push**: Exports current remote state to detect orphaned keys, deletes them via `infisical secrets delete`, then uploads all secrets via a temp file with `infisical secrets set --file=<path>`. Includes `_esk_version` metadata for reconciliation.
 
+Push is fail-closed: a successful export and parse are required before esk deletes or sets anything. If either step fails, the remote remains at its last consistent version, the push is recorded as failed, and local tombstones are retained for a normal retry.
+
 **Pull**: Exports secrets as JSON via `infisical export --format json` and parses the array of objects.
 
 ### Prerequisites
