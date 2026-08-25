@@ -358,7 +358,7 @@ esk generate [<FORMAT>] [--output <PATH>] [--preview]
 1. Collects unique secret keys from the `secrets` section in `esk.yaml`.
 2. If a format is given, generates that single output.
 3. If no format is given and the config has a `generate:` section, generates all configured outputs.
-4. If no format and no `generate:` config, defaults to `dts`.
+4. If no format and no `generate:` config, errors and lists the available formats instead of defaulting to one.
 5. Creates parent directories for the output path if needed.
 6. Warns when no secrets are defined. Suggests adding the output to `.gitignore` for `dts`, `ts`, `ts-lazy`, and `zod` formats (not `env-example`).
 
