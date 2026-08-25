@@ -141,14 +141,70 @@ impl SyncRemote for HashicorpVaultRemote<'_> {
         let json: Value =
             serde_json::from_slice(&output.stdout).context("failed to parse vault output")?;
 
-        // KV v2: data is at .data.data, KV v1: data is at .data
+        // KV v2: data is at .data.data, KV v1: data is at .data.
+        //
+        // KV v2 soft-delete keeps the version in storage but stops returning its
+        // payload: the CLI still exits 0 with an HTTP 200 body shaped like
+        // `{"data":{"data":null,"metadata":{"deletion_time":"...","destroyed":false}}}`.
+        // That is `Some(Value::Null)`, not absent, so it must be distinguished from
+        // both a malformed response (key missing) and a genuinely non-object value.
+        //
+        // We deliberately do NOT map this to `Ok(None)` ("not found"): sync.rs turns
+        // a `None` pull into a version-0 empty snapshot, which reconcile.rs treats as
+        // behind local and queues for push — silently writing secrets back into a
+        // path the user just soft-deleted. Failing loudly with a specific message
+        // keeps today's fail-safe behavior while fixing the misleading error text.
         let data = if self.remote_config.kv_version == 2 {
-            json.get("data")
-                .and_then(|d| d.get("data"))
-                .context("missing .data.data in vault KV v2 response")?
+            let inner = json
+                .get("data")
+                .context("missing .data.data in vault KV v2 response")?;
+            let data_data = inner.get("data");
+            match data_data {
+                None => anyhow::bail!("missing .data.data in vault KV v2 response"),
+                Some(Value::Null) => {
+                    let deletion_time = inner
+                        .get("metadata")
+                        .and_then(|m| m.get("deletion_time"))
+                        .and_then(Value::as_str)
+                        .filter(|s| !s.is_empty());
+                    let destroyed = inner
+                        .get("metadata")
+                        .and_then(|m| m.get("destroyed"))
+                        .and_then(Value::as_bool)
+                        .unwrap_or(false);
+                    if destroyed {
+                        anyhow::bail!(
+                            "vault secret at '{path}' has been permanently destroyed; \
+                             restore it from backup or `vault kv put` a new version"
+                        );
+                    }
+                    match deletion_time {
+                        Some(time) => anyhow::bail!(
+                            "vault secret at '{path}' was soft-deleted at {time}; \
+                             run `vault kv undelete` to restore it or `vault kv destroy` \
+                             to permanently remove it before syncing"
+                        ),
+                        None => anyhow::bail!(
+                            "vault secret at '{path}' has no data (soft-deleted or never \
+                             written); run `vault kv undelete` to restore it if it was \
+                             soft-deleted"
+                        ),
+                    }
+                }
+                Some(other) => other,
+            }
         } else {
-            json.get("data")
-                .context("missing .data in vault KV v1 response")?
+            let data = json
+                .get("data")
+                .context("missing .data in vault KV v1 response")?;
+            match data {
+                Value::Null => {
+                    anyhow::bail!(
+                        "vault secret at '{path}' has no data (deleted or never written)"
+                    );
+                }
+                other => other,
+            }
         };
 
         let obj = data
@@ -423,6 +479,205 @@ remotes:
         let version = snapshot.version;
         assert_eq!(version, 3);
         assert_eq!(secrets.get("API_KEY:dev").unwrap(), "sk_test");
+    }
+
+    // Note: the "normal populated response" success path is already covered by
+    // `pull_kv_v2_parses_data_data` (KV v2) and `pull_kv_v1_parses_data` (KV v1) above.
+
+    #[test]
+    fn pull_kv_v2_soft_deleted_errors_with_deletion_time() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+remotes:
+  vault:
+    path: "secret/data/{project}/{environment}"
+    kv_version: 2
+"#;
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: HashicorpVaultRemoteConfig =
+            fixture.config().remote_config("vault").unwrap();
+
+        let response = json!({
+            "data": {
+                "data": null,
+                "metadata": {
+                    "deletion_time": "2026-08-20T12:34:56.789Z",
+                    "destroyed": false
+                }
+            }
+        });
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(
+            &serde_json::to_vec(&response).unwrap(),
+        )])
+        .strict();
+        let remote = HashicorpVaultRemote::new(fixture.config(), remote_config, &runner);
+
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("soft-deleted"),
+            "expected message to mention soft-deletion, got: {msg}"
+        );
+        assert!(
+            msg.contains("2026-08-20T12:34:56.789Z"),
+            "expected message to include deletion_time, got: {msg}"
+        );
+        assert!(
+            msg.contains("secret/data/myapp/dev"),
+            "expected message to include the path, got: {msg}"
+        );
+        assert!(
+            !msg.contains("not a JSON object"),
+            "message should not fall through to the generic non-object error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn pull_kv_v2_destroyed_errors_distinctly() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+remotes:
+  vault:
+    path: "secret/data/{project}/{environment}"
+    kv_version: 2
+"#;
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: HashicorpVaultRemoteConfig =
+            fixture.config().remote_config("vault").unwrap();
+
+        let response = json!({
+            "data": {
+                "data": null,
+                "metadata": {
+                    "deletion_time": "2026-08-20T12:34:56.789Z",
+                    "destroyed": true
+                }
+            }
+        });
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(
+            &serde_json::to_vec(&response).unwrap(),
+        )])
+        .strict();
+        let remote = HashicorpVaultRemote::new(fixture.config(), remote_config, &runner);
+
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("destroyed"),
+            "expected message to mention destruction, got: {msg}"
+        );
+        assert!(
+            !msg.contains("not a JSON object"),
+            "message should not fall through to the generic non-object error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn pull_kv_v1_null_data_errors_distinctly() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+remotes:
+  vault:
+    path: "secret/{project}/{environment}"
+    kv_version: 1
+"#;
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: HashicorpVaultRemoteConfig =
+            fixture.config().remote_config("vault").unwrap();
+
+        let response = json!({ "data": null });
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(
+            &serde_json::to_vec(&response).unwrap(),
+        )])
+        .strict();
+        let remote = HashicorpVaultRemote::new(fixture.config(), remote_config, &runner);
+
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("no data"),
+            "expected message to mention missing data, got: {msg}"
+        );
+        assert!(
+            msg.contains("secret/myapp/dev"),
+            "expected message to include the path, got: {msg}"
+        );
+        assert!(
+            !msg.contains("not a JSON object"),
+            "message should not fall through to the generic non-object error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn pull_kv_v2_missing_data_data_key_errors_unchanged() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+remotes:
+  vault:
+    path: "secret/data/{project}/{environment}"
+    kv_version: 2
+"#;
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: HashicorpVaultRemoteConfig =
+            fixture.config().remote_config("vault").unwrap();
+
+        // `.data` present, but `.data.data` key entirely absent (malformed response).
+        let response = json!({
+            "data": {
+                "metadata": {
+                    "deletion_time": "",
+                    "destroyed": false
+                }
+            }
+        });
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(
+            &serde_json::to_vec(&response).unwrap(),
+        )])
+        .strict();
+        let remote = HashicorpVaultRemote::new(fixture.config(), remote_config, &runner);
+
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("missing .data.data in vault KV v2 response"));
+    }
+
+    #[test]
+    fn pull_kv_v2_non_object_data_data_errors_unchanged() {
+        let yaml = r#"
+project: myapp
+environments: [dev]
+remotes:
+  vault:
+    path: "secret/data/{project}/{environment}"
+    kv_version: 2
+"#;
+        let fixture = ConfigFixture::new(yaml).expect("fixture");
+        let remote_config: HashicorpVaultRemoteConfig =
+            fixture.config().remote_config("vault").unwrap();
+
+        // `.data.data` present but a non-object, non-null value.
+        let response = json!({
+            "data": {
+                "data": "unexpected-string",
+                "metadata": {
+                    "deletion_time": "",
+                    "destroyed": false
+                }
+            }
+        });
+        let runner = MockCommandRunner::from_outputs(vec![ok_output(
+            &serde_json::to_vec(&response).unwrap(),
+        )])
+        .strict();
+        let remote = HashicorpVaultRemote::new(fixture.config(), remote_config, &runner);
+
+        let err = remote.pull(fixture.config(), "dev").unwrap_err();
+        assert!(err.to_string().contains("vault data is not a JSON object"));
     }
 
     #[test]
