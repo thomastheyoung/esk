@@ -347,7 +347,7 @@ remotes:                           # Sync remotes (esk sync)
       prod: production
     path: "/"
   sops:                            # Mozilla SOPS
-    path: secrets/{environment}.enc.yaml
+    path: secrets/{environment}.enc.json
   aws_secrets_manager:
     secret_name: "{project}/{environment}"
     region: us-east-1
