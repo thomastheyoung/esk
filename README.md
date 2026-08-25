@@ -303,6 +303,15 @@ the environment variable unset so the new key can be persisted.
 - `encryption key not found`: run `esk init` to create `.esk/store.key`, or `esk init --keychain` for OS keychain
 - Target/remote CLI errors: install and authenticate required CLIs (for example `wrangler`, `op`, `aws`)
 - Unknown environment/app in target: verify names match `environments` and `apps` in `esk.yaml`
+- Sync pulls back secrets you deleted, or reverts recent local edits: see [Stores created before February 2026](#stores-created-before-february-2026)
+
+### Stores created before February 2026
+
+Per-environment version counters shipped on 2026-02-22. Earlier releases had a bug where the first write to a store predating that date restarted the environment's counter at 1 instead of continuing from the store's global version. A remote holding older data then outranks the local store, so `esk sync` pulls back secrets you deleted and reverts live values to stale ones.
+
+The write path is fixed, but a store already written under the old code keeps the low counter. There is no reliable automatic detection: a legitimately young environment looks identical to a reset one, and the totals that would distinguish them do not survive a sync.
+
+To check a store you suspect, compare each environment's counter against the store version in `esk status`, which prints them as `Store version: 14 (dev: v6, prod: v6)`. An environment that has seen a lot of history but reports a version near 1 is the symptom. To correct it, set any secret in that environment repeatedly until its counter exceeds the highest version any remote holds for it, then sync. Confirm which value the remote holds with `esk diff` before doing this, so you advance past stale data rather than over data you still want.
 
 ## MCP server
 
