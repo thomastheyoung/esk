@@ -8566,3 +8566,91 @@ fn verify_surfaces_declared_but_unset_keys() {
     assert_eq!(report.tally().value_clean, 0);
     assert_eq!(report.tally().skipped, 1);
 }
+
+/// Sequential deploy path: a failed batch replacement must not prune.
+///
+/// The animated path's equivalent guard is covered by
+/// `cli::deploy::execute::tests::animated_prune_waits_for_delayed_batch_failure`,
+/// which exercises the `thread::scope` barrier. This test covers the
+/// sequential path — the one every non-TTY run (CI included) takes — where
+/// the same `failed_batch_groups` gate is enforced inline.
+///
+/// The harm being guarded against is not the failed deploy itself but the
+/// index bookkeeping: pruning drops the orphan's record, so a secret that is
+/// still live at the target would become invisible to `status` and would
+/// never be re-deployed. The record must survive a failed regeneration.
+#[test]
+fn deploy_prune_skipped_when_batch_deploy_fails() {
+    let project = TestProject::with_store(ENV_ONLY_CONFIG).unwrap();
+    let config = project.config().unwrap();
+    let store = project.store().unwrap();
+    store.set("MY_SECRET", "dev", "val1").unwrap();
+    store.set("OTHER_SECRET", "dev", "val2").unwrap();
+
+    // Establish a good deploy so the .env file and index records exist.
+    cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: false,
+        },
+        &MockCommandRunner::new(),
+    )
+    .unwrap();
+
+    // Poison one secret. The store accepts newlines, but the .env target
+    // refuses to write them, so the whole batch regeneration fails.
+    store.set("MY_SECRET", "dev", "line1\nline2").unwrap();
+
+    // Inject an orphan the prune pass would otherwise remove.
+    let (mut index, _) = DeployIndex::load(&project.deploy_index_path());
+    index.record_success(
+        "REMOVED_KEY:.env:web:dev".to_string(),
+        ".env:web:dev".to_string(),
+        "oldhash".to_string(),
+    );
+    index.save().unwrap();
+
+    let result = cli::deploy::run_with_runner(
+        &config,
+        &cli::deploy::DeployOptions {
+            env: Some("dev"),
+            force: false,
+            dry_run: false,
+            verbose: false,
+            skip_validation: false,
+            strict: false,
+            allow_empty: false,
+            prune: true,
+        },
+        &MockCommandRunner::new(),
+    );
+
+    // The deploy reports failure rather than succeeding silently.
+    assert!(
+        result.is_err(),
+        "deploy must surface the failed batch regeneration"
+    );
+
+    // The orphan record must survive: the batch was never regenerated, so the
+    // orphan may still be live at the target and must stay tracked.
+    let (index, _) = DeployIndex::load(&project.deploy_index_path());
+    assert!(
+        index.records.contains_key("REMOVED_KEY:.env:web:dev"),
+        "orphan record must not be pruned when the batch deploy failed"
+    );
+
+    // The pre-existing .env file must still hold the last good values — a
+    // failed regeneration writes nothing rather than truncating the file.
+    let env_content = std::fs::read_to_string(project.root().join("apps/web/.env.local")).unwrap();
+    assert!(
+        env_content.contains("MY_SECRET"),
+        "failed regeneration must leave the previous file intact"
+    );
+}
