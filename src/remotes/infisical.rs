@@ -74,6 +74,23 @@ fn parse_export_json(stdout: &[u8]) -> Result<BTreeMap<String, String>> {
     Ok(map)
 }
 
+/// Reject a value that cannot survive the `.env` push transport.
+///
+/// A carriage return is rejected alongside a newline: the CLI reads a bare CR
+/// as a line terminator on some platforms, so allowing it would leave the same
+/// injection open on exactly the systems least likely to be tested. The error
+/// names the key but never the value, matching the redaction the other push
+/// failures in this module apply.
+fn reject_multiline_value(key: &str, value: &str) -> Result<()> {
+    if value.contains('\n') || value.contains('\r') {
+        anyhow::bail!(
+            "infisical: secret '{key}' contains a newline, which the .env push format cannot \
+             represent; remove the newline or use a remote that preserves multiline values"
+        );
+    }
+    Ok(())
+}
+
 impl SyncRemote for InfisicalRemote<'_> {
     fn name(&self) -> &'static str {
         "infisical"
@@ -89,6 +106,17 @@ impl SyncRemote for InfisicalRemote<'_> {
         let Some(push_map) = super::flat_snapshot_map(payload, env)? else {
             return Ok(());
         };
+
+        // The transport is a `.env` file consumed by `infisical secrets set
+        // --file`, so a value carrying CR/LF would continue onto a line the
+        // CLI reads as a further assignment — inventing a remote key, or
+        // overwriting the `_esk_version` metadata that reconciliation trusts.
+        // Refuse before contacting the remote: esk does not own that parser,
+        // and quoting the value would gamble a silently wrong secret against a
+        // refused push.
+        for (key, value) in &push_map {
+            reject_multiline_value(key, value)?;
+        }
 
         let slug = self.env_slug(env);
         let base = self.base_args(&slug);
@@ -432,6 +460,65 @@ remotes:
         let remote = make_remote(&runner);
         let err = remote.preflight().unwrap_err();
         assert!(err.to_string().contains("Install from:"));
+    }
+
+    #[test]
+    fn push_rejects_newline_value_before_contacting_remote() {
+        let fixture = make_config();
+        // Strict with no queued outputs: any CLI call at all fails the test.
+        let runner = MockCommandRunner::from_outputs(Vec::new()).strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "line1\nDB_URL=injected")], 3);
+
+        let err = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("API_KEY"), "error should name the key: {msg}");
+        assert!(msg.contains("newline"), "error should explain why: {msg}");
+        assert!(
+            !msg.contains("injected"),
+            "error must not echo the secret value: {msg}"
+        );
+        assert!(
+            runner.calls().is_empty(),
+            "no infisical call may be made when a value is rejected"
+        );
+    }
+
+    #[test]
+    fn push_rejects_carriage_return_value() {
+        let fixture = make_config();
+        let runner = MockCommandRunner::from_outputs(Vec::new()).strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "line1\r_esk_version=999")], 3);
+
+        let err = remote.push(&payload, fixture.config(), "dev").unwrap_err();
+        assert!(err.to_string().contains("API_KEY"));
+        assert!(runner.calls().is_empty());
+    }
+
+    #[test]
+    fn push_accepts_values_without_line_breaks() {
+        // Guards the rejection from over-reaching: spaces, quotes, `#`, and
+        // `=` inside a value are all legal and must still push.
+        let fixture = make_config();
+        let runner = MockCommandRunner::from_outputs(vec![
+            CommandOutput {
+                success: true,
+                stdout: export_json(&[]),
+                stderr: Vec::new(),
+            },
+            CommandOutput {
+                success: true,
+                stdout: Vec::new(),
+                stderr: Vec::new(),
+            },
+        ])
+        .strict();
+        let remote = make_remote(&runner);
+        let payload = make_payload(&[("API_KEY:dev", "a b \"c\" #d =e")], 3);
+
+        remote.push(&payload, fixture.config(), "dev").unwrap();
+        assert_eq!(runner.calls().len(), 2);
     }
 
     #[test]

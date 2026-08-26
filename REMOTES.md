@@ -583,6 +583,8 @@ Uses the [Infisical CLI](https://infisical.com/docs/cli/overview) to sync secret
 
 Push is fail-closed: a successful export and parse are required before esk deletes or sets anything. If either step fails, the remote remains at its last consistent version, the push is recorded as failed, and local tombstones are retained for a normal retry.
 
+Values containing a newline or carriage return are refused before the CLI is invoked. The `.env` transport cannot represent them: a line break would continue onto a line Infisical reads as another assignment, inventing a key or overwriting the `_esk_version` metadata. Store multiline values (PEM keys, certificates) in a remote that preserves them, or encode them single-line — base64, or `\n` escapes your application decodes.
+
 **Pull**: Exports secrets as JSON via `infisical export --format json` and parses the array of objects.
 
 ### Prerequisites
